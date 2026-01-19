@@ -8,7 +8,7 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info, Download, 
+  Cookie, ShieldCheck, FileText, Info,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -57,7 +57,7 @@ const IconByName = ({ name, size=24, className }) => {
     
     // 默认
     Package: <Package size={size} className={className}/>,
-    
+
   };
   return icons[name] || <Package size={size} className={className}/>;
 };
