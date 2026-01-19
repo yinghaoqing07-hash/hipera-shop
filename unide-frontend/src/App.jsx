@@ -8,7 +8,10 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info // <--- 新增了这4个
+  Cookie, ShieldCheck, FileText, Info, Download, 
+  // --- 新增的超市分类图标 ---
+  Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
+  Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import toast, { Toaster } from 'react-hot-toast';
@@ -27,13 +30,34 @@ const ProductSkeleton = () => (
   </div>
 );
 
+// --- 组件：图标映射 (已扩充全品类) ---
 const IconByName = ({ name, size=24, className }) => {
   const icons = {
-    Apple: <Apple size={size} className={className}/>,
-    Coffee: <Coffee size={size} className={className}/>,
-    Utensils: <Utensils size={size} className={className}/>,
+    // 现有图标
+    Apple: <Apple size={size} className={className}/>,       // Frutas (水果)
+    Coffee: <Coffee size={size} className={className}/>,     // Café (咖啡)
+    Baby: <Baby size={size} className={className}/>,         // Infantil (婴儿)
+    
+    // 新增图标 (请在数据库对应填入 key)
+    Meat: <Beef size={size} className={className}/>,         // Carne (肉)
+    Fish: <Fish size={size} className={className}/>,         // Pescado (鱼)
+    Dairy: <Milk size={size} className={className}/>,        // Lácteos (乳制品)
+    Bakery: <Croissant size={size} className={className}/>,  // Panadería (面包)
+    Cereals: <Wheat size={size} className={className}/>,     // Cereales (谷物)
+    Prepared: <Sandwich size={size} className={className}/>, // Comida Prep (熟食)
+    Oil: <Droplet size={size} className={className}/>,       // Aceites (油)
+    Snacks: <Candy size={size} className={className}/>,      // Snacks (零食)
+    Drinks: <Utensils size={size} className={className}/>,   // Bebidas (饮料 - 通用)
+    Alcohol: <Wine size={size} className={className}/>,      // Alcohol (酒)
+    Beer: <Beer size={size} className={className}/>,         // Cerveza (啤酒)
+    Healthy: <Salad size={size} className={className}/>,     // Saludable (健康)
+    International: <Globe size={size} className={className}/>, // Internacional (国际)
+    Pets: <Bone size={size} className={className}/>,         // Mascotas (宠物)
+    Pharmacy: <BriefcaseMedical size={size} className={className}/>, // Farmacia (药房)
+    
+    // 默认
     Package: <Package size={size} className={className}/>,
-    Baby: <Baby size={size} className={className}/>,
+    
   };
   return icons[name] || <Package size={size} className={className}/>;
 };
@@ -580,7 +604,18 @@ export default function App() {
              <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
              <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide">
                {categories.map(c => (
-                 <button key={c.id} onClick={() => {setMainCat(c); navTo("sub");}} className="min-w-[72px] flex flex-col items-center gap-2 group"><div className="w-16 h-16 bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-90 transition-transform"><IconByName name={c.icon} size={28}/></div><span className="text-xs font-medium text-gray-600 truncate w-full text-center">{c.name}</span></button>
+                 <button 
+                   key={c.id} 
+                   onClick={() => {setMainCat(c); navTo("sub");}} 
+                   className="flex flex-col items-center gap-2 group w-24 flex-shrink-0"
+                 >
+                   <div className="w-20 h-20 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-95 transition-transform">
+                     <IconByName name={c.icon} size={32}/>
+                   </div>
+                   <span className="text-xs font-bold text-gray-800 text-center leading-tight line-clamp-2 h-8 flex items-start justify-center">
+                     {c.name}
+                   </span>
+                 </button>
                ))}
              </div>
           </div>
@@ -730,7 +765,17 @@ export default function App() {
           <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center text-white font-bold mx-auto mb-4 shadow-lg">H</div>
           <h3 className="font-bold text-gray-900 mb-1">HIPERA</h3>
           <p className="text-gray-400 text-xs mb-6">Tu mercado de confianza desde 2024</p>
-          
+          <div className="mb-8 space-y-2 border-b border-gray-50 pb-6 mx-auto max-w-xs">
+             <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-600">
+                <MapPin size={14} className="text-red-600"/>
+                <span>Paseo del Sol 1, 28880 Meco</span>
+             </div>
+             <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-600">
+                <Clock size={14} className="text-red-600"/>
+                <span>Lunes a Domingo: 9:00 - 22:00</span>
+             </div>
+          </div>
+
           {/* 新增的法律链接区 */}
           <div className="flex justify-center gap-6 text-xs font-bold text-gray-400">
              <button onClick={() => {setLegalType("aviso"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Aviso Legal</button>
