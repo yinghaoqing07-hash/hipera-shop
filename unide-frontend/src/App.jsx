@@ -5,6 +5,7 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock
+  Cookie, ShieldCheck, FileText, Info
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import toast, { Toaster } from 'react-hot-toast';
@@ -103,6 +104,58 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing }) => {
   );
 };
 
+// --- 新增组件：Cookie 弹窗 (GDPR 合规) ---
+const CookieConsent = () => {
+  const [accepted, setAccepted] = useState(() => localStorage.getItem('cookieConsent'));
+
+  if (accepted) return null;
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur text-white p-4 z-50 animate-slide-up border-t border-gray-700 shadow-2xl">
+      <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center gap-4 text-sm">
+        <div className="flex items-start gap-3">
+           <Cookie className="text-yellow-500 flex-shrink-0" size={24}/>
+           <p className="text-gray-300">
+             Usamos cookies propias y de terceros para mejorar tu experiencia y gestionar tus pedidos. 
+             Si continúas navegando, aceptas su uso.
+           </p>
+        </div>
+        <div className="flex gap-2 w-full md:w-auto">
+           <button onClick={() => {localStorage.setItem('cookieConsent', 'true'); setAccepted(true);}} className="flex-1 md:flex-none bg-white text-gray-900 px-6 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors">Aceptar</button>
+           <button onClick={() => {localStorage.setItem('cookieConsent', 'false'); setAccepted(true);}} className="flex-1 md:flex-none border border-gray-600 text-gray-400 px-6 py-2 rounded-lg font-medium hover:text-white hover:border-gray-400 transition-colors">Rechazar</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- 新增组件：法律条款页面内容 ---
+const LegalPage = ({ type, onBack }) => {
+  const content = {
+    aviso: { title: "Aviso Legal", icon: <Info/>, text: "Este sitio web es propiedad de HIPERA S.L. (Simulada). CIF: B-12345678. Domicilio: Calle Gran Vía 1, Madrid. Email: contacto@hipera.es. Todos los derechos reservados." },
+    privacidad: { title: "Política de Privacidad", icon: <ShieldCheck/>, text: "En HIPERA nos tomamos muy en serio tus datos. Cumplimos con el RGPD. Tus datos solo se usan para procesar pedidos y no se ceden a terceros salvo obligación legal." },
+    cookies: { title: "Política de Cookies", icon: <Cookie/>, text: "Utilizamos cookies técnicas necesarias para el funcionamiento del carrito y la sesión de usuario. No utilizamos cookies publicitarias invasivas." }
+  };
+  const data = content[type] || content.aviso;
+
+  return (
+    <div className="min-h-screen bg-white p-6 animate-fade-in">
+       <button onClick={onBack} className="flex items-center gap-2 text-gray-500 mb-6 hover:text-gray-900"><ArrowLeft size={18}/> Volver</button>
+       <div className="max-w-2xl mx-auto">
+          <div className="flex items-center gap-3 mb-6 text-red-600">
+             {data.icon}
+             <h1 className="text-2xl font-bold text-gray-900">{data.title}</h1>
+          </div>
+          <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-6 rounded-2xl border border-gray-100">
+             <p>{data.text}</p>
+             <p className="mt-4">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.</p>
+             <p className="mt-4 font-bold text-xs text-gray-400 uppercase tracking-widest">Última actualización: Enero 2026</p>
+          </div>
+       </div>
+    </div>
+  );
+};
+
 export default function App() {
   // --- Core Data ---
   const [products, setProducts] = useState([]);
@@ -138,6 +191,7 @@ export default function App() {
   // New Payment States
   const [showPayment, setShowPayment] = useState(false); // 控制弹窗
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // 控制支付Loading
+  const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
 
   const navigate = useNavigate(); 
 
@@ -352,6 +406,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans selection:bg-red-100">
       <Toaster position="top-center" toastOptions={{style:{borderRadius:'12px', background:'#333', color:'#fff'}}}/>
+      <CookieConsent /> {/* 🍪 新增：Cookie 弹窗 */}
 
       {/* Payment Modal */}
       {showPayment && (
@@ -393,6 +448,9 @@ export default function App() {
           )}
         </div>
       </header>
+
+      {/* ⚖️ 法律页面 */}
+      {page === "legal" && <LegalPage type={legalType} onBack={() => goBack()}/>}
 
       {/* --- HOME PAGE --- */}
       {page === "home" && (
@@ -564,7 +622,18 @@ export default function App() {
       {/* --- FOOTER --- */}
       {page === "home" && (
         <footer className="bg-white mt-10 p-8 border-t border-gray-100 text-center">
-          <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center text-white font-bold mx-auto mb-4">H</div><h3 className="font-bold text-gray-900">HIPERA</h3><p className="text-gray-400 text-sm mb-6">Tu mercado de confianza</p>
+          <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center text-white font-bold mx-auto mb-4 shadow-lg">H</div>
+          <h3 className="font-bold text-gray-900 mb-1">HIPERA</h3>
+          <p className="text-gray-400 text-xs mb-6">Tu mercado de confianza desde 2024</p>
+          
+          {/* 新增的法律链接区 */}
+          <div className="flex justify-center gap-6 text-xs font-bold text-gray-400">
+             <button onClick={() => {setLegalType("aviso"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Aviso Legal</button>
+             <button onClick={() => {setLegalType("privacidad"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Privacidad</button>
+             <button onClick={() => {setLegalType("cookies"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Cookies</button>
+          </div>
+          
+          <p className="text-[10px] text-gray-300 mt-6">© {new Date().getFullYear()} HIPERA S.L. Todos los derechos reservados.</p>
         </footer>
       )}
     </div>
