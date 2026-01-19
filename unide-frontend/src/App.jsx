@@ -4,8 +4,8 @@ import {
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
-  LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock
-  Cookie, ShieldCheck, FileText, Info
+  LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
+  Cookie, ShieldCheck, FileText, Info // <--- 新增了这4个
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import toast, { Toaster } from 'react-hot-toast';
