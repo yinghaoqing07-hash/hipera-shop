@@ -1,3 +1,6 @@
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
 import { supabase } from './supabaseClient';
 import React, { useEffect, useState } from "react";
 import { 
@@ -154,6 +157,86 @@ const LegalPage = ({ type, onBack }) => {
        </div>
     </div>
   );
+};
+
+// --- 工具：生成 PDF 发票 (自动拆分商品和服务) ---
+const generateInvoice = (order) => {
+  // 1. 拆分商品和服务
+  const products = order.items.filter(item => !item.isService);
+  const services = order.items.filter(item => item.isService);
+
+  // 内部函数：生成单个 PDF
+  const createPDF = (items, type) => {
+    const doc = new jsPDF();
+    const isService = type === 'SERVICE';
+    const title = isService ? "HIPERA REPARACIONES" : "HIPERA MARKET";
+    const prefix = isService ? "REP" : "FCT";
+    const color = isService ? [31, 41, 55] : [220, 38, 38]; // 服务用黑色，商品用红色
+
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(...color);
+    doc.text(title, 14, 22);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text("Calle Gran Vía 1, Madrid, 28013", 14, 28);
+    doc.text("NIF: B-12345678 | Tel: 912 345 678", 14, 33);
+
+    // Info
+    doc.setFontSize(14);
+    doc.setTextColor(0);
+    doc.text(isService ? "COMPROBANTE DE SERVICIO" : "FACTURA SIMPLIFICADA", 140, 22, { align: 'right' });
+    doc.setFontSize(10);
+    doc.text(`Ref: ${prefix}-${order.id.slice(0, 6).toUpperCase()}`, 140, 30, { align: 'right' });
+    doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 35, { align: 'right' });
+
+    // Table
+    const tableRows = items.map(item => [
+      item.name,
+      item.quantity,
+      `€${item.price.toFixed(2)}`,
+      `€${(item.price * item.quantity).toFixed(2)}`
+    ]);
+
+    autoTable(doc, {
+      startY: 45,
+      head: [["Concepto", "Cant.", "Precio", "Total"]],
+      body: tableRows,
+      theme: 'grid',
+      headStyles: { fillColor: color },
+    });
+
+    // Calculations
+    const subTotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+    const iva = subTotal * 0.21;
+    const finalY = doc.lastAutoTable.finalY + 10;
+
+    doc.text(`Base Imponible:  €${(subTotal - iva).toFixed(2)}`, 190, finalY, { align: 'right' });
+    doc.text(`IVA (21%):  €${iva.toFixed(2)}`, 190, finalY + 6, { align: 'right' });
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text(`TOTAL:  €${subTotal.toFixed(2)}`, 190, finalY + 14, { align: 'right' });
+
+    // Footer & Warranty
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(150);
+    const footerText = isService 
+      ? "GARANTÍA: 6 meses sobre la reparación realizada. Imprescindible presentar este documento."
+      : "DEVOLUCIONES: Tiene 14 días naturales para devolver productos perecederos en mal estado.";
+    doc.text(footerText, 14, 280);
+
+    doc.save(`${prefix}_${order.id.slice(0, 6)}.pdf`);
+  };
+
+  // 执行生成 (如果存在对应类型的商品，就生成对应的单据)
+  if (products.length > 0) createPDF(products, 'PRODUCT');
+  if (services.length > 0) {
+    // 如果两个都有，稍微延迟一下，防止浏览器拦截连续下载
+    if (products.length > 0) setTimeout(() => createPDF(services, 'SERVICE'), 500);
+    else createPDF(services, 'SERVICE');
+  }
 };
 
 export default function App() {
@@ -350,6 +433,22 @@ export default function App() {
       if (error) throw error;
 
       toast.success("¡Pago Exitoso! Pedido Enviado.");
+      
+      // --- 新增代码开始 ---
+      // 询问用户是否下载票据
+      if(window.confirm("Pago completado. ¿Quieres descargar los recibos?")) {
+         // 注意：这里我们传入的是刚刚生成并从数据库返回的 data，或者直接用当前的 cart 和 total 构造一个临时对象
+         // 为了简单，我们直接用内存里的数据构造一个临时对象传给生成器
+         const tempOrder = {
+            id: Math.random().toString(36).substr(2, 9), // 临时ID，或者用数据库返回的 data.id
+            created_at: new Date().toISOString(),
+            items: cart, // 直接用购物车的商品
+            total: total
+         };
+         generateInvoice(tempOrder);
+      }
+      // --- 新增代码结束 ---
+      
       setCart([]);
       setCheckoutForm(prev => ({ ...prev, note: "" }));
       setShowPayment(false); // 关闭弹窗
@@ -534,6 +633,12 @@ export default function App() {
                   <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                     <div className="flex justify-between items-start mb-3"><div><span className="font-bold text-gray-800 block text-xs font-mono bg-gray-100 px-2 py-1 rounded w-fit mb-1">#{order.id.slice(0,8)}</span><span className="text-xs text-gray-400">{new Date(order.created_at).toLocaleDateString()}</span></div><span className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg font-bold ${order.status==='Entregado'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{order.status}</span></div>
                     <div className="flex justify-between items-end border-t pt-3 border-gray-50"><span className="text-sm text-gray-500">{order.items?.length || 0} productos</span><span className="font-extrabold text-lg text-gray-900">€{order.total?.toFixed(2)}</span></div>
+                    <button 
+                      onClick={() => generateInvoice(order)} 
+                      className="mt-4 w-full border border-gray-200 py-2 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
+                    >
+                      <Download size={16}/> Descargar Factura / Ticket
+                    </button>
                   </div>
                 ))}
               </div>
