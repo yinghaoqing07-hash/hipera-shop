@@ -157,33 +157,60 @@ const CookieConsent = () => {
 };
 
 // --- 新增组件：法律条款页面内容 ---
+// --- 组件：法律页面 (已更新真实地址) ---
 const LegalPage = ({ type, onBack }) => {
   const content = {
-    aviso: { title: "Aviso Legal", icon: <Info/>, text: "Este sitio web es propiedad de HIPERA S.L. (Simulada). CIF: B-12345678. Domicilio: Calle Gran Vía 1, Madrid. Email: contacto@hipera.es. Todos los derechos reservados." },
-    privacidad: { title: "Política de Privacidad", icon: <ShieldCheck/>, text: "En HIPERA nos tomamos muy en serio tus datos. Cumplimos con el RGPD. Tus datos solo se usan para procesar pedidos y no se ceden a terceros salvo obligación legal." },
-    cookies: { title: "Política de Cookies", icon: <Cookie/>, text: "Utilizamos cookies técnicas necesarias para el funcionamiento del carrito y la sesión de usuario. No utilizamos cookies publicitarias invasivas." }
+    aviso: { 
+      title: "Aviso Legal", 
+      icon: <Info/>, 
+      // 👇 更新了这里的地址
+      text: "Este sitio web es propiedad de QIANG GUO SL © con NIF ESB86126638 y domicilio fiscal en Paseo del Sol 1, 28880 Meco (Madrid). Inscrita en el Registro Mercantil de Madrid. Para cualquier consulta, contáctenos en el local o al teléfono de atención al cliente." 
+    },
+    privacidad: { 
+      title: "Política de Privacidad", 
+      icon: <ShieldCheck/>, 
+      text: "En HIPERA respetamos su privacidad. Los datos personales recogidos (nombre, dirección, teléfono) se utilizan exclusivamente para la gestión de pedidos, envíos y garantías de reparación. Cumplimos con el Reglamento General de Protección de Datos (RGPD). Usted tiene derecho a acceder, rectificar o suprimir sus datos solicitándolo en tienda." 
+    },
+    cookies: { 
+      title: "Política de Cookies", 
+      icon: <Cookie/>, 
+      text: "Utilizamos cookies técnicas imprescindibles para el funcionamiento de la cesta de la compra y el inicio de sesión. No utilizamos cookies publicitarias de terceros ni vendemos sus datos de navegación." 
+    }
   };
   const data = content[type] || content.aviso;
 
   return (
     <div className="min-h-screen bg-white p-6 animate-fade-in">
-       <button onClick={onBack} className="flex items-center gap-2 text-gray-500 mb-6 hover:text-gray-900"><ArrowLeft size={18}/> Volver</button>
-       <div className="max-w-2xl mx-auto">
-          <div className="flex items-center gap-3 mb-6 text-red-600">
-             {data.icon}
+       <button onClick={onBack} className="flex items-center gap-2 text-gray-500 mb-6 hover:text-gray-900 font-medium px-2 py-1 rounded-lg hover:bg-gray-100 w-fit transition-colors">
+         <ArrowLeft size={18}/> Volver a la tienda
+       </button>
+       
+       <div className="max-w-2xl mx-auto mt-4">
+          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+             <div className="text-red-600 p-2 bg-red-50 rounded-xl">{data.icon}</div>
              <h1 className="text-2xl font-bold text-gray-900">{data.title}</h1>
           </div>
-          <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-6 rounded-2xl border border-gray-100">
-             <p>{data.text}</p>
-             <p className="mt-4">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.</p>
-             <p className="mt-4 font-bold text-xs text-gray-400 uppercase tracking-widest">Última actualización: Enero 2026</p>
+          
+          <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-8 rounded-2xl border border-gray-100 shadow-sm text-sm md:text-base">
+             <p className="font-medium text-gray-800 mb-4">{data.text}</p>
+             
+             {/* 通用的填充文本，增加篇幅感 */}
+             <div className="space-y-4 text-gray-500">
+               <p>El acceso y/o uso de este portal atribuye la condición de USUARIO, que acepta, desde dicho acceso y/o uso, las Condiciones Generales de Uso aquí reflejadas.</p>
+               <p>HIPERA se reserva el derecho de efectuar sin previo aviso las modificaciones que considere oportunas en su portal, pudiendo cambiar, suprimir o añadir tanto los contenidos y servicios que se presten a través de la misma como la forma en la que éstos aparezcan presentados.</p>
+             </div>
+
+             <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
+               <span>QIANG GUO SL © {new Date().getFullYear()}</span>
+               <span>Actualizado: Enero 2026</span>
+             </div>
           </div>
        </div>
     </div>
   );
 };
 
-// --- 工具：生成 PDF 发票 (自动拆分商品和服务) ---
+// --- 工具：生成 PDF 发票 (已升级：维修单包含详细条款) ---
 const generateInvoice = (order) => {
   // 1. 拆分商品和服务
   const products = order.items.filter(item => !item.isService);
@@ -197,17 +224,17 @@ const generateInvoice = (order) => {
     const prefix = isService ? "REP" : "FCT";
     const color = isService ? [31, 41, 55] : [220, 38, 38]; // 服务用黑色，商品用红色
 
-    // Header
+    // 1. Header
     doc.setFontSize(20);
     doc.setTextColor(...color);
     doc.text(title, 14, 22);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text("Calle Gran Vía 1, Madrid, 28013", 14, 28);
-    doc.text("NIF: B-12345678 | Tel: 912 345 678", 14, 33);
+    doc.text("Paseo del Sol 1, 28880 Meco (Madrid)", 14, 28);
+    doc.text("NIF: ESB86126638 | Tel: 918782602", 14, 33);
 
-    // Info
+    // 2. Info
     doc.setFontSize(14);
     doc.setTextColor(0);
     doc.text(isService ? "COMPROBANTE DE SERVICIO" : "FACTURA SIMPLIFICADA", 140, 22, { align: 'right' });
@@ -215,7 +242,7 @@ const generateInvoice = (order) => {
     doc.text(`Ref: ${prefix}-${order.id.slice(0, 6).toUpperCase()}`, 140, 30, { align: 'right' });
     doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 35, { align: 'right' });
 
-    // Table
+    // 3. Table
     const tableRows = items.map(item => [
       item.name,
       item.quantity,
@@ -231,10 +258,10 @@ const generateInvoice = (order) => {
       headStyles: { fillColor: color },
     });
 
-    // Calculations
+    // 4. Totals
     const subTotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
     const iva = subTotal * 0.21;
-    const finalY = doc.lastAutoTable.finalY + 10;
+    let finalY = doc.lastAutoTable.finalY + 10;
 
     doc.text(`Base Imponible:  €${(subTotal - iva).toFixed(2)}`, 190, finalY, { align: 'right' });
     doc.text(`IVA (21%):  €${iva.toFixed(2)}`, 190, finalY + 6, { align: 'right' });
@@ -242,14 +269,46 @@ const generateInvoice = (order) => {
     doc.setFont(undefined, 'bold');
     doc.text(`TOTAL:  €${subTotal.toFixed(2)}`, 190, finalY + 14, { align: 'right' });
 
-    // Footer & Warranty
+    // 5. 特殊条款区域 (仅维修单显示)
+    if (isService) {
+        finalY += 30; // 下移一点
+
+        // 画一个灰色背景框
+        doc.setFillColor(245, 245, 245);
+        doc.rect(14, finalY, 182, 60, 'F');
+
+        doc.setFontSize(11);
+        doc.setTextColor(...color);
+        doc.text("CONDICIONES DEL SERVICIO Y GARANTÍA", 18, finalY + 10);
+        
+        doc.setFontSize(9);
+        doc.setTextColor(80);
+        doc.setFont(undefined, 'normal');
+        
+        const lines = [
+            "• VALIDEZ: Este comprobante es válido durante 180 días desde la fecha de compra.",
+            "• USO: Presente este documento en el mostrador. No es necesaria cita previa.",
+            "• GARANTÍA: 6 meses (180 días) sobre las piezas sustituidas y la mano de obra.",
+            "• EXCLUSIONES: La garantía quedará anulada si el dispositivo presenta daños por humedad,",
+            "  líquidos, manipulación por terceros o golpes posteriores a la reparación.",
+            "• PROTECCIÓN DE DATOS: Hipera no se hace responsable de la pérdida de datos.",
+            "  Se recomienda realizar una copia de seguridad antes de entregar el equipo."
+        ];
+        
+        let lineY = finalY + 20;
+        lines.forEach(line => {
+            doc.text(line, 18, lineY);
+            lineY += 6;
+        });
+    }
+
+    // 6. Footer通用
     doc.setFontSize(8);
-    doc.setFont(undefined, 'normal');
     doc.setTextColor(150);
     const footerText = isService 
-      ? "GARANTÍA: 6 meses sobre la reparación realizada. Imprescindible presentar este documento."
+      ? "Gracias por confiar en HIPERA REPARACIONES. Este documento acredita la titularidad del servicio."
       : "DEVOLUCIONES: Tiene 14 días naturales para devolver productos perecederos en mal estado.";
-    doc.text(footerText, 14, 280);
+    doc.text(footerText, 14, 285);
 
     doc.save(`${prefix}_${order.id.slice(0, 6)}.pdf`);
   };
@@ -847,7 +906,7 @@ export default function App() {
           )}
         </div>
       )}
-      
+
       {/* --- CHECKOUT --- */}
       {page === "checkout" && (
         <div className="p-4 bg-gray-50 min-h-screen animate-slide-up">
