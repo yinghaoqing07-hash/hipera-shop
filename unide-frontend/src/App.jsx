@@ -8,7 +8,7 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info,
+  Cookie, ShieldCheck, FileText, Info, Calendar, Users,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -626,20 +626,89 @@ export default function App() {
         </div>
       )}
 
-      {/* --- REPAIR PAGE --- */}
+{/* --- REPAIR PAGE (维修页面) --- */}
       {page === "repair" && (
         <div className="min-h-screen bg-gray-900 text-white animate-fade-in pb-20">
-           <div className="px-4 py-4 flex items-center gap-3 sticky top-0 bg-gray-900/95 backdrop-blur z-20 border-b border-gray-800"><button onClick={() => goBack()} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button><h2 className="text-xl font-bold">Centro de Reparación</h2></div>
+           {/* Header */}
+           <div className="px-4 py-4 flex items-center gap-3 sticky top-0 bg-gray-900/95 backdrop-blur z-20 border-b border-gray-800">
+             <button onClick={() => goBack()} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button>
+             <h2 className="text-xl font-bold">Centro de Reparación</h2>
+           </div>
+           
            <div className="p-4 space-y-6">
+              {/* 1. 顶部红色 Banner */}
               <div className="bg-gradient-to-br from-gray-800 to-gray-800 p-6 rounded-3xl border border-gray-700 text-center relative overflow-hidden">
-                 <div className="absolute top-0 right-0 w-20 h-20 bg-red-600 blur-[50px] opacity-20"></div><Wrench size={40} className="mx-auto text-red-500 mb-4"/><h3 className="text-xl font-bold mb-2">Reserva tu reparación</h3><p className="text-gray-400 text-sm leading-relaxed">Elige tu modelo y paga online para asegurar el <span className="text-white font-bold">precio de oferta</span>. Acércate a tienda y te lo arreglamos en 1 hora.</p>
+                 <div className="absolute top-0 right-0 w-20 h-20 bg-red-600 blur-[50px] opacity-20"></div>
+                 <Wrench size={40} className="mx-auto text-red-500 mb-4"/>
+                 <h3 className="text-xl font-bold mb-2">Reserva tu reparación</h3>
+                 <p className="text-gray-400 text-sm leading-relaxed">Elige tu modelo y paga online para asegurar el <span className="text-white font-bold">precio de oferta</span>. Acércate a tienda y te lo arreglamos en 1 hora.</p>
               </div>
+
+              {/* 2. 新增：购买须知 (Instrucciones de Compra) */}
+              <div className="bg-gray-800/80 p-5 rounded-3xl border border-gray-700 backdrop-blur-sm">
+                 <h3 className="font-bold text-white mb-4 text-base border-b border-gray-700 pb-2">Instrucciones de Compra</h3>
+                 
+                 <div className="space-y-4">
+                    {/* 如何使用 */}
+                    <div className="flex gap-3">
+                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-blue-400"><FileText size={16}/></div>
+                       <div>
+                          <p className="text-sm font-bold text-gray-200">Cómo utilizar</p>
+                          <p className="text-xs text-gray-400">Muestra la factura o ticket de compra al personal del mostrador.</p>
+                       </div>
+                    </div>
+
+                    {/* 有效日期 */}
+                    <div className="flex gap-3">
+                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-green-400"><Calendar size={16}/></div>
+                       <div>
+                          <p className="text-sm font-bold text-gray-200">Validez</p>
+                          <p className="text-xs text-gray-400">Válido durante <strong>180 días</strong> a partir de la fecha de compra.</p>
+                       </div>
+                    </div>
+
+                    {/* 可用时间 */}
+                    <div className="flex gap-3">
+                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-yellow-400"><Clock size={16}/></div>
+                       <div>
+                          <p className="text-sm font-bold text-gray-200">Horario Disponible</p>
+                          <p className="text-xs text-gray-400">Canjeable durante todo el horario comercial de la tienda.</p>
+                       </div>
+                    </div>
+
+                    {/* 预约规则 */}
+                    <div className="flex gap-3">
+                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-purple-400"><Users size={16}/></div>
+                       <div>
+                          <p className="text-sm font-bold text-gray-200">Sin Cita Previa</p>
+                          <p className="text-xs text-gray-400">No es necesario reservar hora. Se atiende por orden de llegada (posible cola).</p>
+                       </div>
+                    </div>
+
+                    {/* 保修时长 */}
+                    <div className="flex gap-3">
+                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-red-400"><ShieldCheck size={16}/></div>
+                       <div>
+                          <p className="text-sm font-bold text-gray-200">Garantía Extendida</p>
+                          <p className="text-xs text-gray-400">Todas las reparaciones incluyen <strong>180 días de garantía</strong>.</p>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+
+              {/* 3. 价格列表 */}
               <div>
                  <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-red-500"><Tag size={18}/> Tarifas Online</h3>
                  <div className="grid grid-cols-1 gap-3">
                     {repairs.length === 0 ? <div className="text-center py-10 text-gray-500 bg-gray-800/50 rounded-2xl"><p>No hay servicios disponibles.</p></div> : repairs.map(item => (
                        <div key={item.id} className="bg-gray-800 p-4 rounded-2xl flex justify-between items-center shadow-lg border border-gray-700 group active:scale-95 transition-transform">
-                          <div><h4 className="font-bold text-gray-100">{item.title}</h4><div className="flex items-center gap-2 mt-1"><span className="text-xl font-extrabold text-red-500">€{item.price}</span>{item.original_price && <span className="text-sm text-gray-500 line-through">€{item.original_price}</span>}</div></div>
+                          <div>
+                             <h4 className="font-bold text-gray-100">{item.title}</h4>
+                             <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xl font-extrabold text-red-500">€{item.price}</span>
+                                {item.original_price && <span className="text-sm text-gray-500 line-through">€{item.original_price}</span>}
+                             </div>
+                          </div>
                           <button onClick={() => addToCart(item)} className="bg-white text-gray-900 px-4 py-2 rounded-xl font-bold text-sm shadow hover:bg-gray-200 transition-colors flex items-center gap-2">Reservar</button>
                        </div>
                     ))}
@@ -648,7 +717,7 @@ export default function App() {
            </div>
         </div>
       )}
-
+      
       {/* --- FAVORITES / ORDERS --- */}
       {(page === "orders" || page === "favorites") && (
         <div className="p-4 min-h-screen bg-gray-50">
