@@ -943,21 +943,66 @@ export default function App() {
         </div>
       )}
 
-      {/* --- DETAIL PAGE --- */}
+{/* --- DETAIL PAGE (已修正：显示真实描述) --- */}
       {page === "detail" && selectedProduct && (
         <div className="bg-white min-h-screen pb-24">
-          <div className="relative h-[45vh]"><img src={selectedProduct.image} className="w-full h-full object-cover" /><div className="absolute inset-0 bg-gradient-to-b from-black/30 to-transparent h-24"></div><button onClick={() => goBack()} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/40"><ArrowLeft size={24}/></button></div>
+          {/* 顶部大图 */}
+          <div className="relative h-[45vh]">
+            <img src={selectedProduct.image} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/30 to-transparent h-24"></div>
+            <button onClick={() => goBack()} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/40"><ArrowLeft size={24}/></button>
+          </div>
+          
+          {/* 内容卡片 */}
           <div className="p-6 -mt-10 bg-white rounded-t-[2.5rem] relative z-10 min-h-[50vh] shadow-[0_-10px_40px_rgba(0,0,0,0.1)]">
              <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-8"></div>
-             <div className="flex justify-between items-start mb-2"><h2 className="text-2xl font-extrabold text-gray-900 w-3/4 leading-tight">{selectedProduct.name}</h2><div className="text-right"><p className="text-3xl font-extrabold text-red-600">€{selectedProduct.price.toFixed(2)}</p></div></div>
-             <div className="flex gap-2 mb-6">{selectedProduct.stock > 0 ? <span className="text-[10px] uppercase bg-green-100 text-green-700 px-2 py-1 rounded-lg font-bold">En Stock: {selectedProduct.stock}</span> : <span className="text-[10px] uppercase bg-red-100 text-red-700 px-2 py-1 rounded-lg font-bold">Agotado</span>}{selectedProduct.oferta && <span className="text-[10px] uppercase bg-red-100 text-red-600 px-2 py-1 rounded-lg font-bold">Oferta</span>}</div>
-             <div className="bg-gray-50 p-5 rounded-2xl mb-6"><h4 className="font-bold text-gray-800 text-sm mb-2">Descripción</h4><p className="text-gray-500 text-sm leading-relaxed">Producto seleccionado por su calidad y frescura. Ideal para el consumo diario de toda la familia.</p></div>
-             <div className="mb-8"><h4 className="font-bold text-gray-800 text-sm mb-3">Quizás te interese</h4><div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">{products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (<div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[140px] bg-gray-50 p-2 rounded-xl border border-gray-100 flex-shrink-0 cursor-pointer active:scale-95 transition-transform"><img src={p.image} className="w-full aspect-square object-cover rounded-lg mb-2"/><p className="text-xs font-bold text-gray-700 truncate">{p.name}</p><p className="text-xs font-bold text-red-600">€{p.price}</p></div>))}</div></div>
+             
+             {/* 标题和价格 */}
+             <div className="flex justify-between items-start mb-2">
+               <h2 className="text-2xl font-extrabold text-gray-900 w-3/4 leading-tight">{selectedProduct.name}</h2>
+               <div className="text-right"><p className="text-3xl font-extrabold text-red-600">€{selectedProduct.price.toFixed(2)}</p></div>
+             </div>
+             
+             {/* 标签 */}
+             <div className="flex gap-2 mb-6">
+               {selectedProduct.stock > 0 ? <span className="text-[10px] uppercase bg-green-100 text-green-700 px-2 py-1 rounded-lg font-bold">En Stock: {selectedProduct.stock}</span> : <span className="text-[10px] uppercase bg-red-100 text-red-700 px-2 py-1 rounded-lg font-bold">Agotado</span>}
+               {selectedProduct.oferta && <span className="text-[10px] uppercase bg-red-100 text-red-600 px-2 py-1 rounded-lg font-bold">Oferta</span>}
+             </div>
+             
+             {/* 👇👇👇 这里是关键修改：描述区域 👇👇👇 */}
+             <div className="bg-gray-50 p-5 rounded-2xl mb-6">
+               <h4 className="font-bold text-gray-800 text-sm mb-2">Descripción</h4>
+               <p className="text-gray-500 text-sm leading-relaxed whitespace-pre-line">
+                 {/* 如果数据库有描述，显示数据库的；如果没有，显示默认的废话 */}
+                 {selectedProduct.description || "Producto seleccionado por su calidad y frescura. Ideal para el consumo diario de toda la familia."}
+               </p>
+             </div>
+             {/* 👆👆👆 修改结束 👆👆👆 */}
+
+             {/* 推荐商品 */}
+             <div className="mb-8">
+               <h4 className="font-bold text-gray-800 text-sm mb-3">Quizás te interese</h4>
+               <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
+                 {products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (
+                   <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[140px] bg-gray-50 p-2 rounded-xl border border-gray-100 flex-shrink-0 cursor-pointer active:scale-95 transition-transform">
+                     <img src={p.image} className="w-full aspect-square object-cover rounded-lg mb-2"/>
+                     <p className="text-xs font-bold text-gray-700 truncate">{p.name}</p>
+                     <p className="text-xs font-bold text-red-600">€{p.price}</p>
+                   </div>
+                 ))}
+               </div>
+             </div>
           </div>
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 z-20"><button onClick={() => {addToCart(selectedProduct); goBack();}} disabled={selectedProduct.stock <= 0} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-300 disabled:bg-gray-300 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">{selectedProduct.stock > 0 ? <><Plus size={20}/> Añadir a la cesta</> : "Agotado"}</button></div>
+          
+          {/* 底部加购栏 */}
+          <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 z-20">
+            <button onClick={() => {addToCart(selectedProduct); goBack();}} disabled={selectedProduct.stock <= 0} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-300 disabled:bg-gray-300 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
+              {selectedProduct.stock > 0 ? <><Plus size={20}/> Añadir a la cesta</> : "Agotado"}
+            </button>
+          </div>
         </div>
       )}
-
+      
       {/* --- FOOTER --- */}
       {page === "home" && (
         <footer className="bg-white mt-10 p-8 border-t border-gray-100 text-center">
