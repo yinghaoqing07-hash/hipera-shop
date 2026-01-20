@@ -359,6 +359,10 @@ export default function App() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // 控制支付Loading
   const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
 
+  // 新增这两个状态用于筛选
+  const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
+  const [selectedModel, setSelectedModel] = useState("");
+
   const navigate = useNavigate(); 
 
   // --- Init ---
@@ -685,7 +689,7 @@ export default function App() {
         </div>
       )}
 
-{/* --- REPAIR PAGE (维修页面) --- */}
+{/* --- REPAIR PAGE (已升级：智能筛选器) --- */}
       {page === "repair" && (
         <div className="min-h-screen bg-gray-900 text-white animate-fade-in pb-20">
            {/* Header */}
@@ -695,88 +699,95 @@ export default function App() {
            </div>
            
            <div className="p-4 space-y-6">
-              {/* 1. 顶部红色 Banner */}
+              {/* Banner */}
               <div className="bg-gradient-to-br from-gray-800 to-gray-800 p-6 rounded-3xl border border-gray-700 text-center relative overflow-hidden">
                  <div className="absolute top-0 right-0 w-20 h-20 bg-red-600 blur-[50px] opacity-20"></div>
                  <Wrench size={40} className="mx-auto text-red-500 mb-4"/>
-                 <h3 className="text-xl font-bold mb-2">Reserva tu reparación</h3>
-                 <p className="text-gray-400 text-sm leading-relaxed">Elige tu modelo y paga online para asegurar el <span className="text-white font-bold">precio de oferta</span>. Acércate a tienda y te lo arreglamos en 1 hora.</p>
+                 <h3 className="text-xl font-bold mb-2">Repara tu Móvil</h3>
+                 <p className="text-gray-400 text-sm leading-relaxed">Selecciona tu modelo para ver las tarifas oficiales.</p>
               </div>
 
-              {/* 2. 新增：购买须知 (Instrucciones de Compra) */}
-              <div className="bg-gray-800/80 p-5 rounded-3xl border border-gray-700 backdrop-blur-sm">
-                 <h3 className="font-bold text-white mb-4 text-base border-b border-gray-700 pb-2">Instrucciones de Compra</h3>
-                 
-                 <div className="space-y-4">
-                    {/* 如何使用 */}
-                    <div className="flex gap-3">
-                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-blue-400"><FileText size={16}/></div>
-                       <div>
-                          <p className="text-sm font-bold text-gray-200">Cómo utilizar</p>
-                          <p className="text-xs text-gray-400">Muestra la factura o ticket de compra al personal del mostrador.</p>
-                       </div>
+              {/* --- 🧠 核心：智能筛选器 --- */}
+              <div className="bg-white rounded-3xl p-1 shadow-lg">
+                 {/* 1. 品牌选择 Tabs */}
+                 <div className="flex p-1 bg-gray-100 rounded-2xl mb-4 overflow-x-auto">
+                    {['Apple', 'Samsung', 'Xiaomi', 'Oppo'].map(brand => (
+                      <button 
+                        key={brand}
+                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); }} // 换品牌时清空型号
+                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${selectedBrand === brand ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                      >
+                        {brand}
+                      </button>
+                    ))}
+                 </div>
+
+                 <div className="px-4 pb-4">
+                    {/* 2. 型号选择 (从数据库动态获取该品牌下的型号) */}
+                    <div className="mb-6">
+                       <label className="text-xs font-bold text-gray-400 uppercase ml-2 mb-2 block">Selecciona Modelo</label>
+                       <select 
+                         value={selectedModel} 
+                         onChange={e => setSelectedModel(e.target.value)}
+                         className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-bold outline-none focus:ring-2 ring-red-500 appearance-none"
+                         style={{backgroundImage: 'none'}} // 简单的去除默认箭头
+                       >
+                         <option value="">-- Elige tu dispositivo --</option>
+                         {/* 这里的逻辑：找出所有属于当前品牌的型号，去重 */}
+                         {[...new Set(repairs.filter(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase()).map(r => r.model))].sort().map(model => (
+                            <option key={model} value={model}>{model}</option>
+                         ))}
+                       </select>
                     </div>
 
-                    {/* 有效日期 */}
-                    <div className="flex gap-3">
-                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-green-400"><Calendar size={16}/></div>
-                       <div>
-                          <p className="text-sm font-bold text-gray-200">Validez</p>
-                          <p className="text-xs text-gray-400">Válido durante <strong>180 días</strong> a partir de la fecha de compra.</p>
-                       </div>
-                    </div>
-
-                    {/* 可用时间 */}
-                    <div className="flex gap-3">
-                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-yellow-400"><Clock size={16}/></div>
-                       <div>
-                          <p className="text-sm font-bold text-gray-200">Horario Disponible</p>
-                          <p className="text-xs text-gray-400">Canjeable durante todo el horario comercial de la tienda.</p>
-                       </div>
-                    </div>
-
-                    {/* 预约规则 */}
-                    <div className="flex gap-3">
-                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-purple-400"><Users size={16}/></div>
-                       <div>
-                          <p className="text-sm font-bold text-gray-200">Sin Cita Previa</p>
-                          <p className="text-xs text-gray-400">No es necesario reservar hora. Se atiende por orden de llegada (posible cola).</p>
-                       </div>
-                    </div>
-
-                    {/* 保修时长 */}
-                    <div className="flex gap-3">
-                       <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-red-400"><ShieldCheck size={16}/></div>
-                       <div>
-                          <p className="text-sm font-bold text-gray-200">Garantía Extendida</p>
-                          <p className="text-xs text-gray-400">Todas las reparaciones incluyen <strong>180 días de garantía</strong>.</p>
-                       </div>
+                    {/* 3. 维修项目列表 (只显示选定型号的项目) */}
+                    <div className="space-y-3">
+                       {!selectedModel ? (
+                         <div className="text-center py-8 text-gray-400">
+                            <Smartphone size={48} className="mx-auto mb-2 opacity-20"/>
+                            <p className="text-sm">👆 Elige un modelo arriba</p>
+                         </div>
+                       ) : (
+                         repairs
+                           .filter(r => r.model === selectedModel)
+                           .map(item => (
+                             <div key={item.id} className="bg-white border border-gray-100 p-4 rounded-2xl flex justify-between items-center shadow-sm hover:border-red-500 transition-colors cursor-pointer group" onClick={() => addToCart(item)}>
+                                <div className="flex items-center gap-3">
+                                   <div className="w-10 h-10 bg-red-50 text-red-600 rounded-full flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
+                                      {item.repair_type?.toLowerCase().includes('pantalla') ? <Smartphone size={20}/> : <Wrench size={20}/>}
+                                   </div>
+                                   <div>
+                                      <h4 className="font-bold text-gray-800">{item.repair_type || item.title}</h4>
+                                      <p className="text-[10px] text-gray-400">Reparación en 1 hora</p>
+                                   </div>
+                                </div>
+                                <div className="text-right">
+                                   <span className="block font-extrabold text-lg text-gray-900">€{item.price}</span>
+                                   <button className="text-[10px] font-bold text-red-600 uppercase bg-red-50 px-2 py-1 rounded-lg mt-1 group-hover:bg-red-600 group-hover:text-white transition-colors">Reservar</button>
+                                </div>
+                             </div>
+                           ))
+                       )}
+                       {/* 如果选了型号但没有项目 */}
+                       {selectedModel && repairs.filter(r => r.model === selectedModel).length === 0 && (
+                          <p className="text-center text-gray-400 text-sm py-4">No hay reparaciones disponibles para este modelo.</p>
+                       )}
                     </div>
                  </div>
               </div>
 
-              {/* 3. 价格列表 */}
-              <div>
-                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-red-500"><Tag size={18}/> Tarifas Online</h3>
-                 <div className="grid grid-cols-1 gap-3">
-                    {repairs.length === 0 ? <div className="text-center py-10 text-gray-500 bg-gray-800/50 rounded-2xl"><p>No hay servicios disponibles.</p></div> : repairs.map(item => (
-                       <div key={item.id} className="bg-gray-800 p-4 rounded-2xl flex justify-between items-center shadow-lg border border-gray-700 group active:scale-95 transition-transform">
-                          <div>
-                             <h4 className="font-bold text-gray-100">{item.title}</h4>
-                             <div className="flex items-center gap-2 mt-1">
-                                <span className="text-xl font-extrabold text-red-500">€{item.price}</span>
-                                {item.original_price && <span className="text-sm text-gray-500 line-through">€{item.original_price}</span>}
-                             </div>
-                          </div>
-                          <button onClick={() => addToCart(item)} className="bg-white text-gray-900 px-4 py-2 rounded-xl font-bold text-sm shadow hover:bg-gray-200 transition-colors flex items-center gap-2">Reservar</button>
-                       </div>
-                    ))}
+              {/* 购买须知 (复用之前的) */}
+              <div className="bg-gray-800/80 p-5 rounded-3xl border border-gray-700 backdrop-blur-sm mt-8">
+                 <h3 className="font-bold text-white mb-4 text-base border-b border-gray-700 pb-2">Garantía y Condiciones</h3>
+                 <div className="space-y-4">
+                    <div className="flex gap-3"><div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-blue-400"><FileText size={16}/></div><div><p className="text-sm font-bold text-gray-200">Sin Cita Previa</p><p className="text-xs text-gray-400">Acude directamente a tienda.</p></div></div>
+                    <div className="flex gap-3"><div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-green-400"><ShieldCheck size={16}/></div><div><p className="text-sm font-bold text-gray-200">6 Meses de Garantía</p><p className="text-xs text-gray-400">Cobertura total en piezas y mano de obra.</p></div></div>
                  </div>
               </div>
            </div>
         </div>
       )}
-
+      
       {/* --- FAVORITES / ORDERS --- */}
       {(page === "orders" || page === "favorites") && (
         <div className="p-4 min-h-screen bg-gray-50">

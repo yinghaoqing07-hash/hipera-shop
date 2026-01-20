@@ -201,25 +201,46 @@ export default function AdminApp() {
     </div>
   );
 
-  const renderRepairs = () => (
+const renderRepairs = () => (
     <div className="space-y-6">
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex gap-2 items-end flex-wrap">
-        <div className="flex-1"><label className="text-xs font-bold text-gray-500 block mb-1">Título</label><input value={newRepair.title} onChange={e => setNewRepair({...newRepair, title: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
-        <div className="w-24"><label className="text-xs font-bold text-gray-500 block mb-1">Precio</label><input type="number" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
-        <div className="w-24"><label className="text-xs font-bold text-gray-500 block mb-1">Original</label><input type="number" value={newRepair.original_price} onChange={e => setNewRepair({...newRepair, original_price: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
-        <button onClick={handleAddRepair} className="bg-gray-900 text-white px-4 py-2.5 rounded-lg font-bold">Añadir</button>
+      {/* 新增维修表单 */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+        <h3 className="font-bold text-gray-800 text-sm">Añadir Nuevo Servicio</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+           <input placeholder="Marca (ej: Apple)" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input placeholder="Modelo (ej: iPhone 13)" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input type="number" placeholder="Precio (€)" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <button onClick={async () => {
+              if (!newRepair.model || !newRepair.price) return;
+              // 自动生成一个标题，比如 "iPhone 13 - Pantalla"
+              const title = `${newRepair.model} - ${newRepair.repair_type}`;
+              await supabase.from('repair_services').insert([{...newRepair, title}]); 
+              setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: ""}); 
+              fetchData();
+           }} className="bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-sm">Añadir</button>
+        </div>
       </div>
+
+      {/* 列表显示 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {repairs.map(r => (
-          <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center">
-             <div><h3 className="font-bold text-gray-800">{r.title}</h3><span className="text-red-600 font-bold">€{r.price}</span></div>
-             <button onClick={() => handleDeleteRepair(r.id)} className="text-red-600"><Trash2/></button>
+          <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center group">
+             <div>
+                <div className="flex gap-2 mb-1">
+                   <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.brand}</span>
+                   <span className="bg-blue-50 text-blue-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.model}</span>
+                </div>
+                <h3 className="font-bold text-gray-800 text-sm">{r.repair_type || r.title}</h3>
+                <span className="text-red-600 font-bold">€{r.price}</span>
+             </div>
+             <button onClick={() => handleDeleteRepair(r.id)} className="text-gray-300 hover:text-red-600 p-2"><Trash2 size={18}/></button>
           </div>
         ))}
       </div>
     </div>
   );
-
+  
   const renderOrders = () => (
      <div className="space-y-4">
         <h2 className="text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
