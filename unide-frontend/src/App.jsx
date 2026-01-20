@@ -717,7 +717,7 @@ export default function App() {
            </div>
         </div>
       )}
-      
+
       {/* --- FAVORITES / ORDERS --- */}
       {(page === "orders" || page === "favorites") && (
         <div className="p-4 min-h-screen bg-gray-50">
@@ -751,15 +751,86 @@ export default function App() {
         </div>
       )}
 
-      {/* --- CART PAGE --- */}
+{/* --- CART PAGE (已修改：商品与服务分组显示) --- */}
       {page === "cart" && (
         <div className="flex flex-col h-[calc(100vh-80px)]">
-          <div className="p-4 bg-white shadow-sm flex items-center gap-2"><button onClick={() => goBack()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="text-gray-600"/></button><h2 className="font-bold text-lg">Mi Cesta ({cart.reduce((a,b)=>a+b.quantity,0)})</h2>{cart.length > 0 && <button onClick={() => setCart([])} className="ml-auto text-xs text-red-500 font-bold bg-red-50 px-2 py-1 rounded">Vaciar</button>}</div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {cart.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><ShoppingCart size={64} className="mb-4 text-gray-200"/><p className="font-medium">Tu cesta está vacía</p><button onClick={() => navTo("home")} className="mt-6 bg-red-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-red-200">Empezar a comprar</button></div> : cart.map(item => (
-                <div key={`${item.id}-${item.name}`} className="flex gap-3 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">{item.image ? <img src={item.image} className="w-20 h-20 object-cover rounded-xl bg-gray-50"/> : <div className="w-20 h-20 bg-gray-100 rounded-xl flex items-center justify-center text-gray-400"><Wrench size={24}/></div>}<div className="flex-1 flex flex-col justify-between py-1"><div><p className="font-bold text-gray-800 line-clamp-1">{item.name}</p><p className="text-red-600 font-extrabold">€{item.price}</p></div><div className="flex items-center justify-between"><div className="flex items-center gap-3 bg-gray-50 rounded-lg p-1"><button onClick={() => updateQty(item.id, item.name, -1)} className="w-7 h-7 bg-white rounded shadow-sm flex items-center justify-center text-gray-600 active:scale-90 transition-transform"><Minus size={14}/></button><span className="text-sm font-bold w-4 text-center">{item.quantity}</span><button onClick={() => updateQty(item.id, item.name, 1)} className="w-7 h-7 bg-gray-900 text-white rounded shadow-sm flex items-center justify-center active:scale-90 transition-transform"><Plus size={14}/></button></div><button onClick={() => removeFromCart(item.id, item.name)} className="text-gray-300 hover:text-red-500 p-2"><Trash2 size={18}/></button></div></div></div>
-            ))}
+          {/* Header */}
+          <div className="p-4 bg-white shadow-sm flex items-center gap-2">
+            <button onClick={() => goBack()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="text-gray-600"/></button>
+            <h2 className="font-bold text-lg">Mi Cesta ({cart.reduce((a,b)=>a+b.quantity,0)})</h2>
+            {cart.length > 0 && <button onClick={() => setCart([])} className="ml-auto text-xs text-red-500 font-bold bg-red-50 px-2 py-1 rounded">Vaciar</button>}
           </div>
+
+          {/* Body: 分组显示逻辑 */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {cart.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                <ShoppingCart size={64} className="mb-4 text-gray-200"/>
+                <p className="font-medium">Tu cesta está vacía</p>
+                <button onClick={() => navTo("home")} className="mt-6 bg-red-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-red-200">Empezar a comprar</button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* 1. 普通商品部分 */}
+                {cart.filter(i => !i.isService).length > 0 && (
+                   <div className="space-y-3">
+                      {/* 如果同时有服务，加个小标题区分，否则不加 */}
+                      {cart.some(i => i.isService) && <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2"><Package size={16}/> Productos para envío</h3>}
+                      
+                      {cart.filter(i => !i.isService).map(item => (
+                        <div key={`${item.id}-${item.name}`} className="flex gap-3 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+                           <img src={item.image} className="w-20 h-20 object-cover rounded-xl bg-gray-50"/>
+                           <div className="flex-1 flex flex-col justify-between py-1">
+                              <div><p className="font-bold text-gray-800 line-clamp-1">{item.name}</p><p className="text-red-600 font-extrabold">€{item.price}</p></div>
+                              <div className="flex items-center justify-between">
+                                 <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-1">
+                                    <button onClick={() => updateQty(item.id, item.name, -1)} className="w-7 h-7 bg-white rounded shadow-sm flex items-center justify-center text-gray-600 active:scale-90 transition-transform"><Minus size={14}/></button>
+                                    <span className="text-sm font-bold w-4 text-center">{item.quantity}</span>
+                                    <button onClick={() => updateQty(item.id, item.name, 1)} className="w-7 h-7 bg-gray-900 text-white rounded shadow-sm flex items-center justify-center active:scale-90 transition-transform"><Plus size={14}/></button>
+                                 </div>
+                                 <button onClick={() => removeFromCart(item.id, item.name)} className="text-gray-300 hover:text-red-500 p-2"><Trash2 size={18}/></button>
+                              </div>
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                )}
+
+                {/* 分隔线 (只有当两种都有时才显示) */}
+                {cart.some(i => !i.isService) && cart.some(i => i.isService) && (
+                  <div className="border-t-2 border-dashed border-gray-200 my-4 relative">
+                     <div className="absolute left-1/2 -translate-x-1/2 -top-3 bg-gray-50 px-2 text-xs text-gray-400 font-bold uppercase">Y</div>
+                  </div>
+                )}
+
+                {/* 2. 维修服务部分 (强制在最下面) */}
+                {cart.filter(i => i.isService).length > 0 && (
+                   <div className="space-y-3">
+                      <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2"><Wrench size={16}/> Servicios de Taller</h3>
+                      {cart.filter(i => i.isService).map(item => (
+                        <div key={`${item.id}-${item.name}`} className="flex gap-3 bg-gray-800 p-3 rounded-2xl shadow-lg border border-gray-700 text-white relative overflow-hidden">
+                           <div className="absolute right-0 top-0 w-20 h-20 bg-blue-500 blur-[40px] opacity-20"></div>
+                           <div className="w-20 h-20 bg-gray-700 rounded-xl flex items-center justify-center text-gray-400 flex-shrink-0"><Wrench size={24}/></div>
+                           <div className="flex-1 flex flex-col justify-between py-1 relative z-10">
+                              <div><p className="font-bold text-gray-100 line-clamp-1">{item.name}</p><p className="text-blue-400 font-extrabold">€{item.price}</p></div>
+                              <div className="flex items-center justify-between">
+                                 <div className="flex items-center gap-3 bg-gray-700 rounded-lg p-1">
+                                    <button onClick={() => updateQty(item.id, item.name, -1)} className="w-7 h-7 bg-gray-600 rounded shadow-sm flex items-center justify-center text-gray-300 active:scale-90 transition-transform"><Minus size={14}/></button>
+                                    <span className="text-sm font-bold w-4 text-center">{item.quantity}</span>
+                                    <button onClick={() => updateQty(item.id, item.name, 1)} className="w-7 h-7 bg-white text-gray-900 rounded shadow-sm flex items-center justify-center active:scale-90 transition-transform"><Plus size={14}/></button>
+                                 </div>
+                                 <button onClick={() => removeFromCart(item.id, item.name)} className="text-gray-500 hover:text-red-400 p-2"><Trash2 size={18}/></button>
+                              </div>
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Footer 结算区域 */}
           {cart.length > 0 && (
             <div className="bg-white p-5 shadow-[0_-4px_30px_rgba(0,0,0,0.05)] rounded-t-3xl z-20">
                <div className="space-y-2 mb-6">
@@ -776,7 +847,7 @@ export default function App() {
           )}
         </div>
       )}
-
+      
       {/* --- CHECKOUT --- */}
       {page === "checkout" && (
         <div className="p-4 bg-gray-50 min-h-screen animate-slide-up">
