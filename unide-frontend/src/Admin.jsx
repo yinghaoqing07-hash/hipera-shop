@@ -36,6 +36,12 @@ export default function AdminApp() {
   const [selectedParentForSub, setSelectedParentForSub] = useState(null);
   const [newRepair, setNewRepair] = useState({ title: "", price: "", original_price: "" });
 
+  // 修改：增加了 description, oferta, oferta_type, oferta_value
+  const [formData, setFormData] = useState({
+    name: "", price: "", category: "", image: "", stock: "", 
+    description: "", oferta: false, oferta_type: "percent", oferta_value: 0
+  });
+
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
@@ -75,10 +81,26 @@ export default function AdminApp() {
   
   const handleSaveProduct = async (e) => {
     e.preventDefault();
-    const dbPayload = { name: currentProduct.name, price: currentProduct.price, stock: currentProduct.stock, image: currentProduct.image, category: currentProduct.category, sub_category_id: currentProduct.subCategoryId, oferta: currentProduct.oferta, oferta_type: currentProduct.ofertaType, oferta_value: currentProduct.ofertaValue };
+    const dbPayload = { 
+      name: currentProduct.name, 
+      price: currentProduct.price, 
+      stock: currentProduct.stock, 
+      image: currentProduct.image, 
+      category: currentProduct.category, 
+      sub_category_id: currentProduct.subCategoryId, 
+      // 👇 新增这 4 个字段
+      description: currentProduct.description,
+      oferta: currentProduct.oferta, 
+      oferta_type: currentProduct.oferta_type || 'percent', 
+      oferta_value: currentProduct.oferta_value || 0
+    };
+    
     if (currentProduct.id) await supabase.from('products').update(dbPayload).eq('id', currentProduct.id);
     else await supabase.from('products').insert([dbPayload]);
-    setIsEditing(false); setCurrentProduct(null); fetchData();
+    
+    setIsEditing(false); 
+    setCurrentProduct(null); 
+    fetchData();
   };
 
   const handleImageUpload = async (event) => {
@@ -126,7 +148,14 @@ export default function AdminApp() {
     <div className="space-y-4">
       <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
         <input placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-4 pr-4 py-2 border rounded-lg w-64 text-sm outline-none focus:ring-2 ring-blue-100"/>
-        <button onClick={() => { setCurrentProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", oferta: false }); setIsEditing(true); }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold hover:bg-blue-700"><Plus size={18}/> Nuevo</button>
+        <button onClick={() => { 
+          setCurrentProduct({ 
+            name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", 
+            // 👇 初始化新字段
+            description: "", oferta: false, oferta_type: "percent", oferta_value: 0 
+          }); 
+          setIsEditing(true); 
+        }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold hover:bg-blue-700"><Plus size={18}/> Nuevo</button>
       </div>
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table className="w-full text-left text-sm">
@@ -239,23 +268,80 @@ export default function AdminApp() {
             <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="text-gray-500" size={20}/></button>
           </div>
           <form onSubmit={handleSaveProduct} className="space-y-4">
+            
+            {/* 基本信息 */}
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><input required value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
+            
             <div className="grid grid-cols-2 gap-4">
               <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
               <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
             </div>
+
+            {/* 👇 新增：商品描述 */}
+            <div>
+               <label className="text-xs font-bold text-gray-500 mb-1 block">Descripción</label>
+               <textarea 
+                 value={currentProduct.description || ""} 
+                 onChange={e => setCurrentProduct({...currentProduct, description: e.target.value})} 
+                 className="w-full border p-2 rounded-lg h-24 text-sm"
+                 placeholder="Escribe detalles del producto..."
+               />
+            </div>
+
+            {/* 👇 新增：促销设置 */}
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                <div className="flex items-center gap-2 mb-3">
+                   <input 
+                     type="checkbox" 
+                     id="isOferta" 
+                     checked={currentProduct.oferta || false} 
+                     onChange={e => setCurrentProduct({...currentProduct, oferta: e.target.checked})} 
+                     className="w-4 h-4 text-blue-600 rounded"
+                   />
+                   <label htmlFor="isOferta" className="font-bold text-sm text-blue-800">¿Activar Oferta?</label>
+                </div>
+                
+                {/* 只有勾选了才显示详细设置 */}
+                {currentProduct.oferta && (
+                  <div className="grid grid-cols-2 gap-3 animate-fade-in">
+                     <div>
+                       <label className="text-xs font-bold text-gray-500 mb-1 block">Tipo</label>
+                       <select value={currentProduct.oferta_type || "percent"} onChange={e => setCurrentProduct({...currentProduct, oferta_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
+                         <option value="percent">Descuento %</option>
+                         <option value="second">2ª unidad -50%</option>
+                         <option value="gift">2x1 (Regalo)</option>
+                       </select>
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-gray-500 mb-1 block">Valor</label>
+                       <input 
+                         type="number" 
+                         placeholder={currentProduct.oferta_type === "percent" ? "% (ej: 20)" : "Valor"} 
+                         value={currentProduct.oferta_value || 0} 
+                         onChange={e => setCurrentProduct({...currentProduct, oferta_value: parseFloat(e.target.value)})} 
+                         className="w-full p-2 border rounded-lg text-sm"
+                       />
+                     </div>
+                  </div>
+                )}
+            </div>
+
+            {/* 图片上传 */}
             <div>
               <label className="text-xs font-bold text-gray-500 mb-1 block">Imagen</label>
               <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 cursor-pointer relative">
-                 {uploading ? "Subiendo..." : (currentProduct.image ? <img src={currentProduct.image} className="h-20 mx-auto object-contain"/> : "Click para subir")}
-                 <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
+                  {uploading ? "Subiendo..." : (currentProduct.image ? <img src={currentProduct.image} className="h-20 mx-auto object-contain"/> : "Click para subir")}
+                  <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
               </div>
             </div>
+
+            {/* 分类选择 */}
             <div className="grid grid-cols-2 gap-4">
                 <select required value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"><option value="">Categoría</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
                 <select value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
-            <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">Guardar</button>
+
+            <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
           </form>
         </div>
       </div>
