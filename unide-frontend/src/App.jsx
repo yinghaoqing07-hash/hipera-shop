@@ -689,9 +689,9 @@ export default function App() {
         </div>
       )}
 
-{/* --- REPAIR PAGE (已升级：智能筛选器) --- */}
+{/* --- REPAIR PAGE (已修正：深色风格 + 完整购买须知) --- */}
       {page === "repair" && (
-        <div className="min-h-screen bg-gray-900 text-white animate-fade-in pb-20">
+        <div className="min-h-screen bg-gray-900 text-white animate-fade-in pb-24">
            {/* Header */}
            <div className="px-4 py-4 flex items-center gap-3 sticky top-0 bg-gray-900/95 backdrop-blur z-20 border-b border-gray-800">
              <button onClick={() => goBack()} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button>
@@ -699,89 +699,117 @@ export default function App() {
            </div>
            
            <div className="p-4 space-y-6">
-              {/* Banner */}
-              <div className="bg-gradient-to-br from-gray-800 to-gray-800 p-6 rounded-3xl border border-gray-700 text-center relative overflow-hidden">
-                 <div className="absolute top-0 right-0 w-20 h-20 bg-red-600 blur-[50px] opacity-20"></div>
+              {/* 1. 顶部 Banner */}
+              <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 rounded-3xl border border-gray-700 text-center relative overflow-hidden shadow-2xl">
+                 <div className="absolute top-0 right-0 w-24 h-24 bg-red-600 blur-[60px] opacity-20"></div>
                  <Wrench size={40} className="mx-auto text-red-500 mb-4"/>
-                 <h3 className="text-xl font-bold mb-2">Repara tu Móvil</h3>
-                 <p className="text-gray-400 text-sm leading-relaxed">Selecciona tu modelo para ver las tarifas oficiales.</p>
+                 <h3 className="text-xl font-bold mb-2">Reserva tu reparación</h3>
+                 <p className="text-gray-400 text-sm leading-relaxed">Selecciona tu modelo y asegura el precio online.</p>
               </div>
 
-              {/* --- 🧠 核心：智能筛选器 --- */}
-              <div className="bg-white rounded-3xl p-1 shadow-lg">
-                 {/* 1. 品牌选择 Tabs */}
-                 <div className="flex p-1 bg-gray-100 rounded-2xl mb-4 overflow-x-auto">
+              {/* 2. 核心：智能筛选器 (改为深色风格) */}
+              <div className="bg-gray-800/40 p-2 rounded-3xl border border-gray-700 backdrop-blur-sm">
+                 
+                 {/* 品牌 Tabs (黑底) */}
+                 <div className="flex p-1 bg-gray-900 rounded-2xl mb-4 overflow-x-auto border border-gray-800">
                     {['Apple', 'Samsung', 'Xiaomi', 'Oppo'].map(brand => (
                       <button 
                         key={brand}
-                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); }} // 换品牌时清空型号
-                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${selectedBrand === brand ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); }} 
+                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap px-4 ${selectedBrand === brand ? 'bg-gray-800 text-white shadow-lg border border-gray-700' : 'text-gray-500 hover:text-gray-300'}`}
                       >
                         {brand}
                       </button>
                     ))}
                  </div>
 
-                 <div className="px-4 pb-4">
-                    {/* 2. 型号选择 (从数据库动态获取该品牌下的型号) */}
+                 <div className="px-2 pb-2">
+                    {/* 型号选择 (深色下拉框) */}
                     <div className="mb-6">
-                       <label className="text-xs font-bold text-gray-400 uppercase ml-2 mb-2 block">Selecciona Modelo</label>
-                       <select 
-                         value={selectedModel} 
-                         onChange={e => setSelectedModel(e.target.value)}
-                         className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-bold outline-none focus:ring-2 ring-red-500 appearance-none"
-                         style={{backgroundImage: 'none'}} // 简单的去除默认箭头
-                       >
-                         <option value="">-- Elige tu dispositivo --</option>
-                         {/* 这里的逻辑：找出所有属于当前品牌的型号，去重 */}
-                         {[...new Set(repairs.filter(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase()).map(r => r.model))].sort().map(model => (
-                            <option key={model} value={model}>{model}</option>
-                         ))}
-                       </select>
+                       <label className="text-xs font-bold text-gray-500 uppercase ml-2 mb-2 block">Selecciona Modelo</label>
+                       <div className="relative">
+                         <select 
+                           value={selectedModel} 
+                           onChange={e => setSelectedModel(e.target.value)}
+                           className="w-full p-4 bg-gray-900 border border-gray-700 rounded-xl text-white font-bold outline-none focus:ring-2 focus:ring-red-900/50 appearance-none transition-all"
+                         >
+                           <option value="" className="text-gray-500">-- Elige tu dispositivo --</option>
+                           {[...new Set(repairs.filter(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase()).map(r => r.model))].sort().map(model => (
+                              <option key={model} value={model}>{model}</option>
+                           ))}
+                         </select>
+                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 rotate-90 pointer-events-none" size={16}/>
+                       </div>
                     </div>
 
-                    {/* 3. 维修项目列表 (只显示选定型号的项目) */}
+                    {/* 维修列表 (深色卡片) */}
                     <div className="space-y-3">
                        {!selectedModel ? (
-                         <div className="text-center py-8 text-gray-400">
-                            <Smartphone size={48} className="mx-auto mb-2 opacity-20"/>
-                            <p className="text-sm">👆 Elige un modelo arriba</p>
+                         <div className="text-center py-10 border-2 border-dashed border-gray-800 rounded-2xl">
+                            <Smartphone size={32} className="mx-auto mb-3 text-gray-700"/>
+                            <p className="text-sm text-gray-500">👆 Selecciona un modelo arriba</p>
                          </div>
                        ) : (
                          repairs
                            .filter(r => r.model === selectedModel)
                            .map(item => (
-                             <div key={item.id} className="bg-white border border-gray-100 p-4 rounded-2xl flex justify-between items-center shadow-sm hover:border-red-500 transition-colors cursor-pointer group" onClick={() => addToCart(item)}>
-                                <div className="flex items-center gap-3">
-                                   <div className="w-10 h-10 bg-red-50 text-red-600 rounded-full flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
-                                      {item.repair_type?.toLowerCase().includes('pantalla') ? <Smartphone size={20}/> : <Wrench size={20}/>}
+                             <div key={item.id} className="bg-gray-800 p-4 rounded-2xl flex justify-between items-center shadow-lg border border-gray-700 group active:scale-95 transition-all cursor-pointer" onClick={() => addToCart(item)}>
+                                <div className="flex items-center gap-4">
+                                   <div className="w-10 h-10 bg-gray-900 text-gray-400 rounded-full flex items-center justify-center border border-gray-700 group-hover:border-red-500/50 group-hover:text-red-500 transition-colors">
+                                      {item.repair_type?.toLowerCase().includes('pantalla') ? <Smartphone size={18}/> : <Wrench size={18}/>}
                                    </div>
                                    <div>
-                                      <h4 className="font-bold text-gray-800">{item.repair_type || item.title}</h4>
-                                      <p className="text-[10px] text-gray-400">Reparación en 1 hora</p>
+                                      <h4 className="font-bold text-gray-100 text-sm">{item.repair_type || item.title}</h4>
+                                      <p className="text-[10px] text-gray-500">Reparación en 1 hora</p>
                                    </div>
                                 </div>
                                 <div className="text-right">
-                                   <span className="block font-extrabold text-lg text-gray-900">€{item.price}</span>
-                                   <button className="text-[10px] font-bold text-red-600 uppercase bg-red-50 px-2 py-1 rounded-lg mt-1 group-hover:bg-red-600 group-hover:text-white transition-colors">Reservar</button>
+                                   <span className="block font-extrabold text-lg text-white">€{item.price}</span>
+                                   <button className="text-[10px] font-bold text-gray-900 bg-white px-3 py-1 rounded-full mt-1 group-hover:bg-red-600 group-hover:text-white transition-colors">Reservar</button>
                                 </div>
                              </div>
                            ))
                        )}
                        {/* 如果选了型号但没有项目 */}
                        {selectedModel && repairs.filter(r => r.model === selectedModel).length === 0 && (
-                          <p className="text-center text-gray-400 text-sm py-4">No hay reparaciones disponibles para este modelo.</p>
+                          <p className="text-center text-gray-500 text-sm py-4">No hay servicios disponibles.</p>
                        )}
                     </div>
                  </div>
               </div>
 
-              {/* 购买须知 (复用之前的) */}
-              <div className="bg-gray-800/80 p-5 rounded-3xl border border-gray-700 backdrop-blur-sm mt-8">
-                 <h3 className="font-bold text-white mb-4 text-base border-b border-gray-700 pb-2">Garantía y Condiciones</h3>
-                 <div className="space-y-4">
-                    <div className="flex gap-3"><div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-blue-400"><FileText size={16}/></div><div><p className="text-sm font-bold text-gray-200">Sin Cita Previa</p><p className="text-xs text-gray-400">Acude directamente a tienda.</p></div></div>
-                    <div className="flex gap-3"><div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0 text-green-400"><ShieldCheck size={16}/></div><div><p className="text-sm font-bold text-gray-200">6 Meses de Garantía</p><p className="text-xs text-gray-400">Cobertura total en piezas y mano de obra.</p></div></div>
+              {/* 3. 购买须知 (完整版 - 5条) */}
+              <div className="bg-gray-900/50 p-5 rounded-3xl border border-gray-800 mt-4">
+                 <h3 className="font-bold text-gray-200 mb-5 text-sm flex items-center gap-2">
+                    <Info size={16} className="text-red-500"/> Información Importante
+                 </h3>
+                 
+                 <div className="space-y-5">
+                    {/* 使用方法 */}
+                    <div className="flex gap-4">
+                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-blue-400"><FileText size={14}/></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Cómo utilizar</p><p className="text-xs text-gray-500 mt-0.5">Muestra la factura o ticket al personal.</p></div>
+                    </div>
+                    {/* 有效期 */}
+                    <div className="flex gap-4">
+                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-green-400"><Calendar size={14}/></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Validez</p><p className="text-xs text-gray-500 mt-0.5">Válido <strong>180 días</strong> desde la compra.</p></div>
+                    </div>
+                    {/* 时间 */}
+                    <div className="flex gap-4">
+                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-yellow-400"><Clock size={14}/></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Horario</p><p className="text-xs text-gray-500 mt-0.5">Lunes a Domingo, de 9:00 a 22:00.</p></div>
+                    </div>
+                    {/* 免预约 */}
+                    <div className="flex gap-4">
+                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-purple-400"><Users size={14}/></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Sin Cita Previa</p><p className="text-xs text-gray-500 mt-0.5">Se atiende por orden de llegada.</p></div>
+                    </div>
+                    {/* 保修 */}
+                    <div className="flex gap-4">
+                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-red-400"><ShieldCheck size={14}/></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Garantía Extendida</p><p className="text-xs text-gray-500 mt-0.5">Cobertura total de <strong>6 meses</strong>.</p></div>
+                    </div>
                  </div>
               </div>
            </div>

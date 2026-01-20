@@ -212,13 +212,41 @@ const renderRepairs = () => (
            <input placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <input type="number" placeholder="Precio (€)" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <button onClick={async () => {
-              if (!newRepair.model || !newRepair.price) return;
-              // 自动生成一个标题，比如 "iPhone 13 - Pantalla"
-              const title = `${newRepair.model} - ${newRepair.repair_type}`;
-              await supabase.from('repair_services').insert([{...newRepair, title}]); 
-              setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: ""}); 
-              fetchData();
-           }} className="bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-sm">Añadir</button>
+    // 1. 检查必填项 (如果有空的，弹窗提示)
+    if (!newRepair.brand) { toast.error("Falta la Marca (品牌)"); return; }
+    if (!newRepair.model) { toast.error("Falta el Modelo (型号)"); return; }
+    if (!newRepair.price) { toast.error("Falta el Precio (价格)"); return; }
+
+    const toastId = toast.loading("Guardando...");
+
+    try {
+        // 2. 构造标题
+        const title = `${newRepair.model} - ${newRepair.repair_type || 'Reparación'}`;
+        
+        // 3. 发送给数据库
+        const { error } = await supabase.from('repair_services').insert([{
+            brand: newRepair.brand,
+            model: newRepair.model,
+            repair_type: newRepair.repair_type,
+            price: parseFloat(newRepair.price),
+            title: title
+        }]);
+
+        if (error) throw error; // 如果数据库报错，抛出异常
+
+        // 4. 成功
+        toast.success("Servicio añadido", { id: toastId });
+        setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: ""}); 
+        fetchData();
+
+    } catch (err) {
+        // 5. 捕获并显示错误
+        console.error(err);
+        toast.error("Error: " + err.message, { id: toastId });
+    }
+}} className="bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-sm">
+    Añadir
+</button>
         </div>
       </div>
 
