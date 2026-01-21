@@ -596,9 +596,6 @@ export default function App() {
   // --- Step 2: Simulate Payment & Save Order ---
   const handleConfirmPayment = async () => {
     setIsProcessingPayment(true);
-    
-    // 1. 模拟网络延迟 (2秒)
-    await new Promise(resolve => setTimeout(resolve, 2000));
 
     try {
       localStorage.setItem('lastAddress', JSON.stringify({ address: checkoutForm.address, phone: checkoutForm.phone }));
@@ -612,7 +609,7 @@ export default function App() {
       }
 
       // 3. 创建订单
-      const { error } = await supabase.from('orders').insert([{
+      const { data: orderData, error } = await supabase.from('orders').insert([{
         user_id: user?.id || null, 
         address: checkoutForm.address,
         phone: checkoutForm.phone,
@@ -621,26 +618,26 @@ export default function App() {
         status: "Procesando", // 付款成功后状态
         items: cart, 
         created_at: new Date().toISOString()
-      }]);
+      }]).select().single();
 
       if (error) throw error;
 
       toast.success("¡Pago Exitoso! Pedido Enviado.");
       
-      // --- 新增代码开始 ---
       // 询问用户是否下载票据
       if(window.confirm("Pago completado. ¿Quieres descargar los recibos?")) {
-         // 注意：这里我们传入的是刚刚生成并从数据库返回的 data，或者直接用当前的 cart 和 total 构造一个临时对象
-         // 为了简单，我们直接用内存里的数据构造一个临时对象传给生成器
-         const tempOrder = {
-            id: Math.random().toString(36).substr(2, 9), // 临时ID，或者用数据库返回的 data.id
-            created_at: new Date().toISOString(),
-            items: cart, // 直接用购物车的商品
-            total: total
+         // 使用数据库返回的订单数据
+         const orderForDocuments = {
+            id: orderData?.id || Math.random().toString(36).substr(2, 9),
+            created_at: orderData?.created_at || new Date().toISOString(),
+            items: cart,
+            total: total,
+            address: checkoutForm.address,
+            phone: checkoutForm.phone,
+            payment_method: 'Tarjeta'
          };
-         generateInvoice(tempOrder);
+         await generateDocuments(orderForDocuments, 'both');
       }
-      // --- 新增代码结束 ---
       
       setCart([]);
       setCheckoutForm(prev => ({ ...prev, note: "" }));
