@@ -1,3 +1,6 @@
+import QRCode from 'qrcode';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import React, { useEffect, useState } from "react";
 import { supabase } from './supabaseClient';
 import { useNavigate } from "react-router-dom"; 

@@ -221,6 +221,7 @@ const generateDocuments = async (order, type = 'both') => {
     phone: "+34 918782602",
     web: "hipera.vercel.app"
   };
+  const generateInvoice = (order) => generateDocuments(order, 'invoice');
 
   // 生成二维码 Data URL
   const qrCodeUrl = await QRCode.toDataURL(order.id);
