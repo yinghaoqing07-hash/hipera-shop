@@ -1,3 +1,4 @@
+import QRCode from 'qrcode'; // <--- 新增这个
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
@@ -210,115 +211,219 @@ const LegalPage = ({ type, onBack }) => {
   );
 };
 
-// --- 工具：生成 PDF 发票 (已升级：维修单包含详细条款) ---
-const generateInvoice = (order) => {
-  // 1. 拆分商品和服务
-  const products = order.items.filter(item => !item.isService);
-  const services = order.items.filter(item => item.isService);
+// --- 工具：高级票据生成系统 (Factura A4 + Ticket 80mm) ---
+const generateDocuments = async (order, type = 'both') => {
+  const isService = order.items.some(i => i.isService);
+  const companyData = {
+    name: "HIPERA S.L.",
+    address: "Paseo del Sol 1, 28880 Meco",
+    nif: "B86126638",
+    phone: "+34 918782602",
+    web: "hipera.vercel.app"
+  };
 
-  // 内部函数：生成单个 PDF
-  const createPDF = (items, type) => {
+  // 生成二维码 Data URL
+  const qrCodeUrl = await QRCode.toDataURL(order.id);
+
+  // --- 模版 A: A4 正式发票 (Factura) ---
+  const createA4Invoice = () => {
     const doc = new jsPDF();
-    const isService = type === 'SERVICE';
-    const title = isService ? "HIPERA REPARACIONES" : "HIPERA MARKET";
-    const prefix = isService ? "REP" : "FCT";
-    const color = isService ? [31, 41, 55] : [220, 38, 38]; // 服务用黑色，商品用红色
-
-    // 1. Header
-    doc.setFontSize(20);
-    doc.setTextColor(...color);
-    doc.text(title, 14, 22);
     
+    // 1. Header
+    doc.setFillColor(220, 38, 38); // Red Brand Color
+    doc.rect(0, 0, 210, 40, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("HIPERA", 14, 20);
     doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text("Paseo del Sol 1, 28880 Meco (Madrid)", 14, 28);
-    doc.text("NIF: ESB86126638 | Tel: 918782602", 14, 33);
+    doc.setFont("helvetica", "normal");
+    doc.text("Mercado & Reparaciones", 14, 26);
 
-    // 2. Info
-    doc.setFontSize(14);
-    doc.setTextColor(0);
-    doc.text(isService ? "COMPROBANTE DE SERVICIO" : "FACTURA SIMPLIFICADA", 140, 22, { align: 'right' });
     doc.setFontSize(10);
-    doc.text(`Ref: ${prefix}-${order.id.slice(0, 6).toUpperCase()}`, 140, 30, { align: 'right' });
-    doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 35, { align: 'right' });
+    doc.text(companyData.address, 196, 15, { align: 'right' });
+    doc.text(`NIF: ${companyData.nif}`, 196, 20, { align: 'right' });
+    doc.text(`Tel: ${companyData.phone}`, 196, 25, { align: 'right' });
+
+    // 2. Client & Order Info
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(11);
+    doc.text(`CLIENTE:`, 14, 55);
+    doc.setFont("helvetica", "normal");
+    doc.text(order.address || "Cliente General", 14, 62);
+    doc.text(order.phone || "", 14, 67);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(isService ? "FACTURA DE SERVICIO" : "FACTURA SIMPLIFICADA", 140, 55);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Núm: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
+    doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 67);
+    doc.text(`Forma de Pago: ${order.payment_method?.toUpperCase() || 'CONTADO'}`, 140, 72);
 
     // 3. Table
-    const tableRows = items.map(item => [
+    const tableRows = order.items.map(item => [
       item.name,
       item.quantity,
-      `€${item.price.toFixed(2)}`,
+      `${(item.price / 1.21).toFixed(2)}`, // Base price
+      `21%`,
       `€${(item.price * item.quantity).toFixed(2)}`
     ]);
 
     autoTable(doc, {
-      startY: 45,
-      head: [["Concepto", "Cant.", "Precio", "Total"]],
+      startY: 80,
+      head: [["Descripción", "Cant.", "Precio Base", "IVA", "TOTAL"]],
       body: tableRows,
       theme: 'grid',
-      headStyles: { fillColor: color },
+      headStyles: { fillColor: [31, 41, 55] }, // Dark gray
+      styles: { fontSize: 9 },
     });
 
     // 4. Totals
-    const subTotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
-    const iva = subTotal * 0.21;
-    let finalY = doc.lastAutoTable.finalY + 10;
+    const finalY = doc.lastAutoTable.finalY + 10;
+    const subTotal = order.total / 1.21;
+    const iva = order.total - subTotal;
 
-    doc.text(`Base Imponible:  €${(subTotal - iva).toFixed(2)}`, 190, finalY, { align: 'right' });
-    doc.text(`IVA (21%):  €${iva.toFixed(2)}`, 190, finalY + 6, { align: 'right' });
+    doc.setFontSize(10);
+    doc.text(`Base Imponible:`, 160, finalY, { align: 'right' });
+    doc.text(`€${subTotal.toFixed(2)}`, 190, finalY, { align: 'right' });
+    
+    doc.text(`IVA (21%):`, 160, finalY + 5, { align: 'right' });
+    doc.text(`€${iva.toFixed(2)}`, 190, finalY + 5, { align: 'right' });
+
     doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
-    doc.text(`TOTAL:  €${subTotal.toFixed(2)}`, 190, finalY + 14, { align: 'right' });
+    doc.setFont("helvetica", "bold");
+    doc.text(`TOTAL A PAGAR:`, 160, finalY + 14, { align: 'right' });
+    doc.text(`€${order.total.toFixed(2)}`, 190, finalY + 14, { align: 'right' });
 
-    // 5. 特殊条款区域 (仅维修单显示)
+    // 5. Warranty Box (维修专用)
     if (isService) {
-        finalY += 30; // 下移一点
-
-        // 画一个灰色背景框
-        doc.setFillColor(245, 245, 245);
-        doc.rect(14, finalY, 182, 60, 'F');
-
-        doc.setFontSize(11);
-        doc.setTextColor(...color);
-        doc.text("CONDICIONES DEL SERVICIO Y GARANTÍA", 18, finalY + 10);
-        
-        doc.setFontSize(9);
-        doc.setTextColor(80);
-        doc.setFont(undefined, 'normal');
-        
-        const lines = [
-            "• VALIDEZ: Este comprobante es válido durante 180 días desde la fecha de compra.",
-            "• USO: Presente este documento en el mostrador. No es necesaria cita previa.",
-            "• GARANTÍA: 6 meses (180 días) sobre las piezas sustituidas y la mano de obra.",
-            "• EXCLUSIONES: La garantía quedará anulada si el dispositivo presenta daños por humedad,",
-            "  líquidos, manipulación por terceros o golpes posteriores a la reparación.",
-            "• PROTECCIÓN DE DATOS: Hipera no se hace responsable de la pérdida de datos.",
-            "  Se recomienda realizar una copia de seguridad antes de entregar el equipo."
-        ];
-        
-        let lineY = finalY + 20;
-        lines.forEach(line => {
-            doc.text(line, 18, lineY);
-            lineY += 6;
-        });
+      const boxY = finalY + 25;
+      doc.setDrawColor(200);
+      doc.setFillColor(248, 248, 248);
+      doc.rect(14, boxY, 182, 50, 'FD');
+      
+      doc.setFontSize(10);
+      doc.setTextColor(220, 38, 38);
+      doc.text("GARANTÍA Y CONDICIONES", 18, boxY + 8);
+      
+      doc.setFontSize(8);
+      doc.setTextColor(80);
+      const terms = [
+        "1. Validez: 180 días de garantía sobre la reparación efectuada.",
+        "2. Exclusiones: No cubre daños por humedad, golpes posteriores o manipulación externa.",
+        "3. Recogida: Dispone de 3 meses para recoger su dispositivo. Pasado este tiempo,",
+        "   será enviado a reciclaje según normativa vigente.",
+        "4. Datos: La empresa no se hace responsable de la pérdida de software o datos."
+      ];
+      terms.forEach((line, i) => doc.text(line, 18, boxY + 16 + (i*5)));
     }
 
-    // 6. Footer通用
+    // 6. Footer QR
+    doc.addImage(qrCodeUrl, 'PNG', 14, 250, 25, 25);
     doc.setFontSize(8);
     doc.setTextColor(150);
-    const footerText = isService 
-      ? "Gracias por confiar en HIPERA REPARACIONES. Este documento acredita la titularidad del servicio."
-      : "DEVOLUCIONES: Tiene 14 días naturales para devolver productos perecederos en mal estado.";
-    doc.text(footerText, 14, 285);
+    doc.text("Escanea para ver tu pedido online", 42, 260);
+    doc.text("Gracias por su visita.", 42, 265);
 
-    doc.save(`${prefix}_${order.id.slice(0, 6)}.pdf`);
+    doc.save(`Factura_${order.id.slice(0, 8)}.pdf`);
   };
 
-  // 执行生成 (如果存在对应类型的商品，就生成对应的单据)
-  if (products.length > 0) createPDF(products, 'PRODUCT');
-  if (services.length > 0) {
-    // 如果两个都有，稍微延迟一下，防止浏览器拦截连续下载
-    if (products.length > 0) setTimeout(() => createPDF(services, 'SERVICE'), 500);
-    else createPDF(services, 'SERVICE');
+  // --- 模版 B: 80mm 热敏小票 (Ticket) ---
+  const createThermalTicket = () => {
+    // 80mm 宽, 高度根据内容大概估算，这里设长一点 250mm
+    const doc = new jsPDF({
+      orientation: 'p',
+      unit: 'mm',
+      format: [80, 260] 
+    });
+
+    let y = 10;
+    const centerX = 40; // 80 / 2
+
+    // Header
+    doc.setFont("courier", "bold");
+    doc.setFontSize(16);
+    doc.text("HIPERA", centerX, y, { align: 'center' });
+    y += 5;
+    doc.setFontSize(8);
+    doc.setFont("courier", "normal");
+    doc.text("Mercado & Servicios", centerX, y, { align: 'center' });
+    y += 5;
+    doc.text(companyData.address, centerX, y, { align: 'center' });
+    y += 4;
+    doc.text(`NIF: ${companyData.nif}`, centerX, y, { align: 'center' });
+    y += 4;
+    doc.text(new Date().toLocaleString(), centerX, y, { align: 'center' });
+    y += 8;
+
+    // Ticket Info
+    doc.text("--------------------------------", centerX, y, { align: 'center' });
+    y += 4;
+    doc.setFont("courier", "bold");
+    doc.text(isService ? "RESGUARDO REPARACION" : "TICKET DE CAJA", centerX, y, { align: 'center' });
+    y += 4;
+    doc.setFont("courier", "normal");
+    doc.text(`Ref: ${order.id.slice(0, 8)}`, centerX, y, { align: 'center' });
+    y += 4;
+    doc.text("--------------------------------", centerX, y, { align: 'center' });
+    y += 6;
+
+    // Items
+    doc.setFontSize(8);
+    order.items.forEach(item => {
+      // 第一行：名字
+      doc.text(item.name.substring(0, 25), 5, y);
+      y += 4;
+      // 第二行：数量 x 价格 = 总价
+      const line = `${item.quantity} x ${item.price.toFixed(2)}`.padEnd(20) + `€${(item.price * item.quantity).toFixed(2)}`;
+      doc.text(line, 5, y);
+      y += 5;
+    });
+
+    y += 2;
+    doc.text("--------------------------------", centerX, y, { align: 'center' });
+    y += 6;
+
+    // Totals
+    doc.setFont("courier", "bold");
+    doc.setFontSize(12);
+    doc.text(`TOTAL:     EUR ${order.total.toFixed(2)}`, 5, y);
+    y += 6;
+    doc.setFontSize(8);
+    doc.setFont("courier", "normal");
+    doc.text(`(IVA Incluido)`, 5, y);
+    y += 8;
+
+    // Payment Method
+    doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'Efectivo/Bizum'}`, 5, y);
+    y += 10;
+
+    // Warranty Note (Short version)
+    if (isService) {
+      doc.setFontSize(7);
+      doc.text("GARANTIA DE REPARACION: 6 MESES", centerX, y, { align: 'center' });
+      y += 3;
+      doc.text("Imprescindible presentar este ticket", centerX, y, { align: 'center' });
+      y += 6;
+    }
+
+    // QR Code
+    doc.addImage(qrCodeUrl, 'PNG', 20, y, 40, 40);
+    y += 45;
+
+    // Footer
+    doc.setFontSize(8);
+    doc.text("¡Gracias por su visita!", centerX, y, { align: 'center' });
+
+    doc.save(`Ticket_${order.id.slice(0, 8)}.pdf`);
+  };
+
+  // 执行下载
+  if (type === 'invoice' || type === 'both') createA4Invoice();
+  if (type === 'ticket' || type === 'both') {
+     // 稍微延迟一下，防止浏览器拦截
+     setTimeout(() => createThermalTicket(), 500);
   }
 };
 
@@ -724,7 +829,7 @@ export default function App() {
                  </div>
 
                  <div className="px-2 pb-2">
-                    {/* 型号选择 (深色下拉框) */}
+                    {/* 型号选择 (已修改：增加"找不到型号"选项) */}
                     <div className="mb-6">
                        <label className="text-xs font-bold text-gray-500 uppercase ml-2 mb-2 block">Selecciona Modelo</label>
                        <div className="relative">
@@ -734,25 +839,57 @@ export default function App() {
                            className="w-full p-4 bg-gray-900 border border-gray-700 rounded-xl text-white font-bold outline-none focus:ring-2 focus:ring-red-900/50 appearance-none transition-all"
                          >
                            <option value="" className="text-gray-500">-- Elige tu dispositivo --</option>
+                           
+                           {/* 1. 正常的数据库型号 */}
                            {[...new Set(repairs.filter(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase()).map(r => r.model))].sort().map(model => (
                               <option key={model} value={model}>{model}</option>
                            ))}
+
+                           {/* 2. 👇 新增：兜底选项 (手动加上去的) */}
+                           <option value="others" className="text-red-400 font-bold">❓ No encuentro mi modelo</option>
                          </select>
                          <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 rotate-90 pointer-events-none" size={16}/>
                        </div>
                     </div>
 
-                    {/* 维修列表 (深色卡片) */}
+                    {/* 维修列表 (已修改：处理"其他型号"逻辑) */}
                     <div className="space-y-3">
-                       {!selectedModel ? (
+                       {/* 情况 A: 没选型号 */}
+                       {!selectedModel && (
                          <div className="text-center py-10 border-2 border-dashed border-gray-800 rounded-2xl">
                             <Smartphone size={32} className="mx-auto mb-3 text-gray-700"/>
                             <p className="text-sm text-gray-500">👆 Selecciona un modelo arriba</p>
                          </div>
-                       ) : (
-                         repairs
-                           .filter(r => r.model === selectedModel)
-                           .map(item => (
+                       )}
+
+                       {/* 情况 B: 选了"找不到型号" -> 显示联系卡片 */}
+                       {selectedModel === 'others' && (
+                         <div className="bg-gray-800 p-6 rounded-2xl text-center border border-gray-700 animate-fade-in">
+                            <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-400">
+                               <Info size={32} />
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">¿Tu modelo no está en la lista?</h3>
+                            <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+                               No te preocupes. Trabajamos con casi todas las marcas. <br/>
+                               Contáctanos por WhatsApp para recibir un presupuesto personalizado al instante.
+                            </p>
+                            
+                            {/* WhatsApp 按钮 */}
+                            <a 
+                              href="https://wa.me/34666123456?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web." 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full md:w-auto"
+                            >
+                               <Smartphone size={20}/> Consultar por WhatsApp
+                            </a>
+                         </div>
+                       )}
+
+                       {/* 情况 C: 选了正常型号 -> 显示价格列表 */}
+                       {selectedModel && selectedModel !== 'others' && (
+                         <>
+                           {repairs.filter(r => r.model === selectedModel).map(item => (
                              <div key={item.id} className="bg-gray-800 p-4 rounded-2xl flex justify-between items-center shadow-lg border border-gray-700 group active:scale-95 transition-all cursor-pointer" onClick={() => addToCart(item)}>
                                 <div className="flex items-center gap-4">
                                    <div className="w-10 h-10 bg-gray-900 text-gray-400 rounded-full flex items-center justify-center border border-gray-700 group-hover:border-red-500/50 group-hover:text-red-500 transition-colors">
@@ -768,11 +905,13 @@ export default function App() {
                                    <button className="text-[10px] font-bold text-gray-900 bg-white px-3 py-1 rounded-full mt-1 group-hover:bg-red-600 group-hover:text-white transition-colors">Reservar</button>
                                 </div>
                              </div>
-                           ))
-                       )}
-                       {/* 如果选了型号但没有项目 */}
-                       {selectedModel && repairs.filter(r => r.model === selectedModel).length === 0 && (
-                          <p className="text-center text-gray-500 text-sm py-4">No hay servicios disponibles.</p>
+                           ))}
+                           
+                           {/* 防呆：如果选了型号但后台忘记录入维修项目 */}
+                           {repairs.filter(r => r.model === selectedModel).length === 0 && (
+                              <p className="text-center text-gray-500 text-sm py-4">No hay precios disponibles. Contáctanos.</p>
+                           )}
+                         </>
                        )}
                     </div>
                  </div>
