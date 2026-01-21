@@ -9,7 +9,7 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info, Calendar, Users,
+  Cookie, ShieldCheck, FileText, Info, Calendar, Users, Wallet, CheckCircle2,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -63,16 +63,16 @@ const IconByName = ({ name, size=24, className }) => {
   return icons[name] || <Package size={size} className={className}/>;
 };
 
-// --- 新增：模拟支付弹窗组件 ---
-const PaymentModal = ({ total, onClose, onConfirm, isProcessing }) => {
+// --- 新增：支付方式选择弹窗组件 ---
+const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment, setSelectedPayment }) => {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="bg-gray-50 p-4 border-b flex justify-between items-center">
            <div className="flex items-center gap-2">
-             <div className="bg-blue-600 text-white p-1 rounded"><CreditCard size={18}/></div>
-             <span className="font-bold text-gray-800">Pasarela de Pago Segura</span>
+             <div className="bg-blue-600 text-white p-1 rounded"><Wallet size={18}/></div>
+             <span className="font-bold text-gray-800">Método de Pago</span>
            </div>
            <button onClick={onClose} disabled={isProcessing} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
         </div>
@@ -84,47 +84,85 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing }) => {
               <p className="text-4xl font-extrabold text-gray-900">€{total.toFixed(2)}</p>
            </div>
 
-           {/* Mock Inputs */}
+           {/* 支付方式选择 */}
            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase ml-1">Número de Tarjeta</label>
-                <div className="relative">
-                   <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18}/>
-                   <input type="text" placeholder="0000 0000 0000 0000" className="w-full pl-10 p-3 bg-gray-50 border rounded-xl font-mono text-gray-700 outline-none focus:ring-2 ring-blue-500 transition-all"/>
-                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-                      <div className="w-8 h-5 bg-gray-200 rounded"></div>
-                      <div className="w-8 h-5 bg-gray-200 rounded"></div>
-                   </div>
+              {/* 货到付款 */}
+              <button
+                onClick={() => setSelectedPayment('contra_reembolso')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
+                  selectedPayment === 'contra_reembolso'
+                    ? 'border-blue-600 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${selectedPayment === 'contra_reembolso' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                    <Wallet size={20}/>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-gray-900">Pago Contra Reembolso</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Paga cuando recibas tu pedido</p>
+                  </div>
+                  {selectedPayment === 'contra_reembolso' && (
+                    <CheckCircle2 size={20} className="text-blue-600"/>
+                  )}
                 </div>
-              </div>
-              <div className="flex gap-3">
-                 <div className="flex-1">
-                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Caducidad</label>
-                    <input type="text" placeholder="MM/YY" className="w-full p-3 bg-gray-50 border rounded-xl font-mono text-gray-700 outline-none focus:ring-2 ring-blue-500 transition-all"/>
-                 </div>
-                 <div className="w-1/3">
-                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">CVC</label>
-                    <div className="relative">
-                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14}/>
-                       <input type="text" placeholder="123" className="w-full pl-8 p-3 bg-gray-50 border rounded-xl font-mono text-gray-700 outline-none focus:ring-2 ring-blue-500 transition-all"/>
-                    </div>
-                 </div>
-              </div>
+              </button>
+
+              {/* Bizum */}
+              <button
+                onClick={() => setSelectedPayment('bizum')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
+                  selectedPayment === 'bizum'
+                    ? 'border-green-600 bg-green-50'
+                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${selectedPayment === 'bizum' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                    <Smartphone size={20}/>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-gray-900">Bizum</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Pago instantáneo desde tu móvil</p>
+                  </div>
+                  {selectedPayment === 'bizum' && (
+                    <CheckCircle2 size={20} className="text-green-600"/>
+                  )}
+                </div>
+              </button>
            </div>
            
-           <div className="flex items-center gap-2 text-[10px] text-gray-400 justify-center mt-2">
-              <Lock size={10}/> Pagos encriptados con seguridad SSL de 256-bit.
-           </div>
+           {selectedPayment === 'bizum' && (
+             <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs text-green-700">
+               <p className="font-bold mb-1">📱 Instrucciones Bizum:</p>
+               <p>Envía el pago al número: <strong>+34 918 782 602</strong></p>
+               <p className="mt-1">Concepto: Pedido HIPERA</p>
+             </div>
+           )}
+
+           {selectedPayment === 'contra_reembolso' && (
+             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+               <p className="font-bold mb-1">💵 Pago contra reembolso:</p>
+               <p>Pagarás el importe total cuando recibas tu pedido en casa.</p>
+             </div>
+           )}
         </div>
 
         {/* Footer */}
         <div className="p-4 border-t bg-gray-50">
            <button 
              onClick={onConfirm} 
-             disabled={isProcessing}
-             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-200 disabled:opacity-70 disabled:shadow-none transition-all flex items-center justify-center gap-2"
+             disabled={isProcessing || !selectedPayment}
+             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all flex items-center justify-center gap-2"
            >
-             {isProcessing ? <><Loader2 className="animate-spin"/> Procesando pago...</> : `Pagar €${total.toFixed(2)}`}
+             {isProcessing ? (
+               <><Loader2 className="animate-spin"/> Procesando pedido...</>
+             ) : selectedPayment === 'contra_reembolso' ? (
+               <>Confirmar Pedido €{total.toFixed(2)}</>
+             ) : (
+               <>Confirmar con Bizum €{total.toFixed(2)}</>
+             )}
            </button>
         </div>
       </div>
@@ -463,6 +501,7 @@ export default function App() {
   // New Payment States
   const [showPayment, setShowPayment] = useState(false); // 控制弹窗
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // 控制支付Loading
+  const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
   const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
 
   // 新增这两个状态用于筛选
@@ -590,6 +629,7 @@ export default function App() {
       toast.error("Faltan datos de envío");
       return;
     }
+    setSelectedPayment(""); // 重置支付方式选择
     setShowPayment(true); // 打开支付弹窗
   };
 
@@ -609,38 +649,78 @@ export default function App() {
       }
 
       // 3. 创建订单
+      const paymentMethodName = selectedPayment === 'contra_reembolso' ? 'Contra Reembolso' : selectedPayment === 'bizum' ? 'Bizum' : 'Pendiente';
       const { data: orderData, error } = await supabase.from('orders').insert([{
         user_id: user?.id || null, 
         address: checkoutForm.address,
         phone: checkoutForm.phone,
         note: checkoutForm.note,
         total: total,
-        status: "Procesando", // 付款成功后状态
+        status: selectedPayment === 'contra_reembolso' ? "Pendiente de Pago" : "Procesando",
+        payment_method: paymentMethodName,
         items: cart, 
         created_at: new Date().toISOString()
       }]).select().single();
 
       if (error) throw error;
 
-      toast.success("¡Pago Exitoso! Pedido Enviado.");
+      toast.success(selectedPayment === 'contra_reembolso' ? "¡Pedido Confirmado! Paga al recibir." : "¡Pedido Confirmado! Revisa tu Bizum.");
       
       // 询问用户是否下载票据
       if(window.confirm("Pago completado. ¿Quieres descargar los recibos?")) {
-         // 使用数据库返回的订单数据
-         const orderForDocuments = {
-            id: orderData?.id || Math.random().toString(36).substr(2, 9),
-            created_at: orderData?.created_at || new Date().toISOString(),
-            items: cart,
-            total: total,
-            address: checkoutForm.address,
-            phone: checkoutForm.phone,
-            payment_method: 'Tarjeta'
-         };
-         await generateDocuments(orderForDocuments, 'both');
+         // 分离商品和服务
+         const productItems = cart.filter(item => !item.isService);
+         const serviceItems = cart.filter(item => item.isService);
+         
+         const productTotal = productItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+         const serviceTotal = serviceItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+         
+         // 如果同时有商品和服务，生成两张发票
+         if (productItems.length > 0 && serviceItems.length > 0) {
+            // 商品发票
+            const productOrder = {
+               id: orderData?.id || Math.random().toString(36).substr(2, 9),
+               created_at: orderData?.created_at || new Date().toISOString(),
+               items: productItems,
+               total: productTotal,
+               address: checkoutForm.address,
+               phone: checkoutForm.phone,
+               payment_method: paymentMethodName
+            };
+            await generateDocuments(productOrder, 'both');
+            
+            // 稍等片刻，避免浏览器阻止多个下载
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 维修服务发票
+            const serviceOrder = {
+               id: (orderData?.id || Math.random().toString(36).substr(2, 9)) + '-SERV',
+               created_at: orderData?.created_at || new Date().toISOString(),
+               items: serviceItems,
+               total: serviceTotal,
+               address: checkoutForm.address,
+               phone: checkoutForm.phone,
+               payment_method: paymentMethodName
+            };
+            await generateDocuments(serviceOrder, 'both');
+         } else {
+            // 只有一种类型，生成一张发票
+            const orderForDocuments = {
+               id: orderData?.id || Math.random().toString(36).substr(2, 9),
+               created_at: orderData?.created_at || new Date().toISOString(),
+               items: cart,
+               total: total,
+               address: checkoutForm.address,
+               phone: checkoutForm.phone,
+               payment_method: paymentMethodName
+            };
+            await generateDocuments(orderForDocuments, 'both');
+         }
       }
       
       setCart([]);
       setCheckoutForm(prev => ({ ...prev, note: "" }));
+      setSelectedPayment(""); // 重置支付方式
       setShowPayment(false); // 关闭弹窗
       
       const { data: pData } = await supabase.from('products').select('*');
@@ -701,9 +781,14 @@ export default function App() {
       {showPayment && (
         <PaymentModal 
            total={total} 
-           onClose={() => setShowPayment(false)} 
+           onClose={() => {
+             setShowPayment(false);
+             setSelectedPayment("");
+           }} 
            onConfirm={handleConfirmPayment}
            isProcessing={isProcessingPayment}
+           selectedPayment={selectedPayment}
+           setSelectedPayment={setSelectedPayment}
         />
       )}
 
@@ -1096,7 +1181,7 @@ export default function App() {
              </div>
              {/* 按钮修改：现在是打开支付弹窗 */}
              <button disabled={!checkoutForm.address || !checkoutForm.phone} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
-               Continuar al Pago <CreditCard size={20}/>
+               Continuar al Pago <Wallet size={20}/>
              </button>
           </div>
         </div>
