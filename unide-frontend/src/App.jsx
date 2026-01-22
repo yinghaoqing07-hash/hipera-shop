@@ -2,14 +2,15 @@ import QRCode from 'qrcode'; // <--- 新增这个
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
-import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient'; // 保留用于用户认证
+import { apiClient } from './api/client'; // 新增：API客户端
 import React, { useEffect, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info, Calendar, Users, Wallet, CheckCircle2,
+  Cookie, ShieldCheck, FileText, Info, Calendar, Users, Wallet, CheckCircle2, RotateCcw,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -203,7 +204,7 @@ const LegalPage = ({ type, onBack }) => {
       title: "Aviso Legal", 
       icon: <Info/>, 
       // 👇 更新了这里的地址
-      text: "Este sitio web es propiedad de QIANG GUO SL © con NIF ESB86126638 y domicilio fiscal en Paseo del Sol 1, 28880 Meco (Madrid). Inscrita en el Registro Mercantil de Madrid. Para cualquier consulta, contáctenos en el local o al teléfono de atención al cliente." 
+      text: "Este sitio web es propiedad de QIANG GUO SL © con NIF B86126638 y domicilio fiscal en Paseo del Sol 1, 28880 Meco (Madrid). Inscrita en el Registro Mercantil de Madrid. Para cualquier consulta, contáctenos en el local o al teléfono +34 918 782 602." 
     },
     privacidad: { 
       title: "Política de Privacidad", 
@@ -214,9 +215,132 @@ const LegalPage = ({ type, onBack }) => {
       title: "Política de Cookies", 
       icon: <Cookie/>, 
       text: "Utilizamos cookies técnicas imprescindibles para el funcionamiento de la cesta de la compra y el inicio de sesión. No utilizamos cookies publicitarias de terceros ni vendemos sus datos de navegación." 
+    },
+    devoluciones: {
+      title: "Política de Devoluciones y Reembolsos",
+      icon: <RotateCcw/>,
+      text: null // 使用自定义内容
     }
   };
   const data = content[type] || content.aviso;
+
+  // 退货政策特殊内容
+  const renderDevolucionesContent = () => (
+    <div className="space-y-6">
+      {/* 14天退货权 */}
+      <div className="bg-blue-50 border-l-4 border-blue-600 p-5 rounded-r-xl">
+        <h3 className="font-bold text-blue-900 text-lg mb-3 flex items-center gap-2">
+          <Calendar size={20}/> Derecho de Desistimiento - 14 Días
+        </h3>
+        <p className="text-blue-800 text-sm leading-relaxed mb-3">
+          De acuerdo con la <strong>Directiva Europea 2011/83/EU</strong> y la legislación española de consumo, 
+          usted tiene derecho a desistir del contrato de compra en un plazo de <strong>14 días naturales</strong> 
+          desde la recepción del producto, sin necesidad de indicar el motivo.
+        </p>
+        <div className="bg-white p-4 rounded-lg mt-3">
+          <p className="text-xs text-blue-700 font-bold mb-2">📅 Plazo de desistimiento:</p>
+          <p className="text-sm text-blue-800">14 días naturales contados desde la fecha de recepción del pedido.</p>
+        </div>
+      </div>
+
+      {/* 退货条件 */}
+      <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+        <h3 className="font-bold text-gray-900 text-lg mb-4">Condiciones para la Devolución</h3>
+        <ul className="space-y-3 text-sm text-gray-700">
+          <li className="flex items-start gap-3">
+            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
+            <span>El producto debe estar <strong>sin usar</strong> y en su estado original.</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
+            <span>Debe conservar el <strong>embalaje original</strong> y todas las etiquetas.</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
+            <span>Debe incluir todos los <strong>accesorios y documentación</strong> que venían con el producto.</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
+            <span>Los productos perecederos o personalizados <strong>no son elegibles</strong> para devolución.</span>
+          </li>
+        </ul>
+      </div>
+
+      {/* 退货流程 */}
+      <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+        <h3 className="font-bold text-gray-900 text-lg mb-4">Proceso de Devolución</h3>
+        <ol className="space-y-3 text-sm text-gray-700 list-decimal list-inside">
+          <li className="pl-2">
+            <strong>Contacte con nosotros:</strong> Llame al <strong>+34 918 782 602</strong> o visite nuestra tienda física 
+            en Paseo del Sol 1, 28880 Meco (Madrid) dentro del plazo de 14 días.
+          </li>
+          <li className="pl-2">
+            <strong>Prepare el paquete:</strong> Empaque el producto en su embalaje original con todos los accesorios.
+          </li>
+          <li className="pl-2">
+            <strong>Devolución:</strong> Puede traer el producto a nuestra tienda o acordaremos la recogida (según disponibilidad).
+          </li>
+          <li className="pl-2">
+            <strong>Inspección:</strong> Revisaremos el producto para verificar que cumple las condiciones de devolución.
+          </li>
+          <li className="pl-2">
+            <strong>Reembolso:</strong> Una vez aprobada la devolución, procesaremos el reembolso en un plazo máximo de 14 días.
+          </li>
+        </ol>
+      </div>
+
+      {/* 退款信息 */}
+      <div className="bg-green-50 border-l-4 border-green-600 p-5 rounded-r-xl">
+        <h3 className="font-bold text-green-900 text-lg mb-3">Reembolso</h3>
+        <div className="space-y-2 text-sm text-green-800">
+          <p><strong>Método de reembolso:</strong> El reembolso se realizará mediante el mismo método de pago utilizado en la compra original.</p>
+          <p><strong>Plazo:</strong> Máximo 14 días hábiles desde la aprobación de la devolución.</p>
+          <p><strong>Gastos de envío:</strong> Si el cliente devuelve el producto, los gastos de envío iniciales no serán reembolsados, salvo que el producto esté defectuoso o no corresponda con el pedido.</p>
+        </div>
+      </div>
+
+      {/* 维修服务例外条款 */}
+      <div className="bg-red-50 border-l-4 border-red-600 p-5 rounded-r-xl">
+        <h3 className="font-bold text-red-900 text-lg mb-3 flex items-center gap-2">
+          <Wrench size={20}/> Excepción: Servicios de Reparación
+        </h3>
+        <p className="text-red-800 text-sm leading-relaxed mb-3">
+          <strong>IMPORTANTE:</strong> Los servicios de reparación de dispositivos móviles <strong>NO están sujetos</strong> 
+          al derecho de desistimiento de 14 días, según el artículo 103.m) de la Ley General para la Defensa de los 
+          Consumidores y Usuarios.
+        </p>
+        <div className="bg-white p-4 rounded-lg mt-3">
+          <p className="text-xs text-red-700 font-bold mb-2">⚠️ Excepciones aplicables:</p>
+          <ul className="text-sm text-red-800 space-y-1 list-disc list-inside">
+            <li>Servicios de reparación de móviles y dispositivos electrónicos</li>
+            <li>Servicios que han comenzado con el consentimiento del consumidor antes del fin del plazo de desistimiento</li>
+            <li>Servicios completamente ejecutados antes del fin del plazo de desistimiento</li>
+          </ul>
+        </div>
+        <div className="bg-yellow-50 border border-yellow-300 p-4 rounded-lg mt-4">
+          <p className="text-xs text-yellow-800 font-bold mb-1">📋 Garantía de Reparación:</p>
+          <p className="text-sm text-yellow-900">
+            Aunque no aplica el derecho de desistimiento, todos nuestros servicios de reparación incluyen una 
+            <strong> garantía de 180 días (6 meses)</strong> sobre la reparación efectuada. Si la reparación presenta 
+            defectos dentro de este período, la repararemos nuevamente sin coste adicional.
+          </p>
+        </div>
+      </div>
+
+      {/* 联系信息 */}
+      <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+        <h3 className="font-bold text-gray-900 text-lg mb-3">Contacto para Devoluciones</h3>
+        <div className="space-y-2 text-sm text-gray-700">
+          <p><strong>Dirección:</strong> Paseo del Sol 1, 28880 Meco (Madrid)</p>
+          <p><strong>Teléfono:</strong> +34 918 782 602</p>
+          <p><strong>Horario:</strong> Lunes a Domingo, de 9:00 a 22:00</p>
+          <p className="text-xs text-gray-500 mt-3">
+            Para cualquier consulta sobre devoluciones, puede visitarnos en tienda o contactarnos por teléfono.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-white p-6 animate-fade-in">
@@ -231,13 +355,19 @@ const LegalPage = ({ type, onBack }) => {
           </div>
           
           <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-8 rounded-2xl border border-gray-100 shadow-sm text-sm md:text-base">
-             <p className="font-medium text-gray-800 mb-4">{data.text}</p>
-             
-             {/* 通用的填充文本，增加篇幅感 */}
-             <div className="space-y-4 text-gray-500">
-               <p>El acceso y/o uso de este portal atribuye la condición de USUARIO, que acepta, desde dicho acceso y/o uso, las Condiciones Generales de Uso aquí reflejadas.</p>
-               <p>HIPERA se reserva el derecho de efectuar sin previo aviso las modificaciones que considere oportunas en su portal, pudiendo cambiar, suprimir o añadir tanto los contenidos y servicios que se presten a través de la misma como la forma en la que éstos aparezcan presentados.</p>
-             </div>
+             {type === 'devoluciones' ? (
+               renderDevolucionesContent()
+             ) : (
+               <>
+                 <p className="font-medium text-gray-800 mb-4">{data.text}</p>
+                 
+                 {/* 通用的填充文本，增加篇幅感 */}
+                 <div className="space-y-4 text-gray-500">
+                   <p>El acceso y/o uso de este portal atribuye la condición de USUARIO, que acepta, desde dicho acceso y/o uso, las Condiciones Generales de Uso aquí reflejadas.</p>
+                   <p>HIPERA se reserva el derecho de efectuar sin previo aviso las modificaciones que considere oportunas en su portal, pudiendo cambiar, suprimir o añadir tanto los contenidos y servicios que se presten a través de la misma como la forma en la que éstos aparezcan presentados.</p>
+                 </div>
+               </>
+             )}
 
              <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
                <span>QIANG GUO SL © {new Date().getFullYear()}</span>
@@ -253,10 +383,10 @@ const LegalPage = ({ type, onBack }) => {
 const generateDocuments = async (order, type = 'both') => {
   const isService = order.items.some(i => i.isService);
   const companyData = {
-    name: "HIPERA S.L.",
+    name: "QIANG GUO SL",
     address: "Paseo del Sol 1, 28880 Meco",
     nif: "B86126638",
-    phone: "+34 918782602",
+    phone: "+34 918 782 602",
     web: "hipera.vercel.app"
   };
   const generateInvoice = (order) => generateDocuments(order, 'invoice');
@@ -275,7 +405,7 @@ const generateDocuments = async (order, type = 'both') => {
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
     doc.setFont("helvetica", "bold");
-    doc.text("HIPERA", 14, 20);
+    doc.text(companyData.name, 14, 20);
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text("Mercado & Reparaciones", 14, 26);
@@ -383,7 +513,7 @@ const generateDocuments = async (order, type = 'both') => {
     // Header
     doc.setFont("courier", "bold");
     doc.setFontSize(16);
-    doc.text("HIPERA", centerX, y, { align: 'center' });
+    doc.text(companyData.name, centerX, y, { align: 'center' });
     y += 5;
     doc.setFontSize(8);
     doc.setFont("courier", "normal");
@@ -525,26 +655,28 @@ export default function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [pRes, cRes, sRes, rRes] = await Promise.all([
-        supabase.from('products').select('*').order('id', { ascending: true }),
-        supabase.from('categories').select('*').order('id', { ascending: true }),
-        supabase.from('sub_categories').select('*').order('id', { ascending: true }),
-        supabase.from('repair_services').select('*').order('id', { ascending: true }) 
+      // 使用API客户端获取数据
+      const [productsData, categoriesData, subCategoriesData, repairsData] = await Promise.all([
+        apiClient.getProducts(),
+        apiClient.getCategories(),
+        apiClient.getSubCategories(),
+        apiClient.getRepairServices()
       ]);
 
-      if (pRes.data) {
-        setProducts(pRes.data.map(p => ({
+      if (productsData) {
+        setProducts(productsData.map(p => ({
           ...p,
           ofertaType: p.oferta_type, 
           ofertaValue: p.oferta_value,
           subCategoryId: p.sub_category_id
         })));
       }
-      if (cRes.data) setCategories(cRes.data);
-      if (sRes.data) setSubCategories(sRes.data);
-      if (rRes.data) setRepairs(rRes.data);
+      if (categoriesData) setCategories(categoriesData);
+      if (subCategoriesData) setSubCategories(subCategoriesData);
+      if (repairsData) setRepairs(repairsData);
     } catch (error) {
       console.error("Data load warning:", error);
+      toast.error("Error al cargar datos. Verifique que el servidor backend esté ejecutándose.");
     } finally {
       setLoading(false);
     }
@@ -560,8 +692,12 @@ export default function App() {
   useEffect(() => {
     if (page === "orders" && user) {
       const fetchOrders = async () => {
-        const { data } = await supabase.from('orders').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-        if (data) setMyOrders(data);
+        try {
+          const data = await apiClient.getUserOrders(user.id);
+          if (data) setMyOrders(data);
+        } catch (error) {
+          console.error("Error fetching orders:", error);
+        }
       };
       fetchOrders();
     }
@@ -640,17 +776,10 @@ export default function App() {
     try {
       localStorage.setItem('lastAddress', JSON.stringify({ address: checkoutForm.address, phone: checkoutForm.phone }));
 
-      // 2. 扣减库存
-      for (const item of cart) {
-        if (item.isService) continue; 
-        const { data: productNow } = await supabase.from('products').select('stock').eq('id', item.id).single();
-        if (productNow && productNow.stock < item.quantity) throw new Error(`Sin stock suficiente: ${item.name}`);
-        if (productNow) await supabase.from('products').update({ stock: productNow.stock - item.quantity }).eq('id', item.id);
-      }
-
-      // 3. 创建订单
+      // 创建订单（通过API，后端会处理库存检查和扣减）
       const paymentMethodName = selectedPayment === 'contra_reembolso' ? 'Contra Reembolso' : selectedPayment === 'bizum' ? 'Bizum' : 'Pendiente';
-      const { data: orderData, error } = await supabase.from('orders').insert([{
+      
+      const orderData = await apiClient.createOrder({
         user_id: user?.id || null, 
         address: checkoutForm.address,
         phone: checkoutForm.phone,
@@ -658,11 +787,8 @@ export default function App() {
         total: total,
         status: selectedPayment === 'contra_reembolso' ? "Pendiente de Pago" : "Procesando",
         payment_method: paymentMethodName,
-        items: cart, 
-        created_at: new Date().toISOString()
-      }]).select().single();
-
-      if (error) throw error;
+        items: cart
+      });
 
       toast.success(selectedPayment === 'contra_reembolso' ? "¡Pedido Confirmado! Paga al recibir." : "¡Pedido Confirmado! Revisa tu Bizum.");
       
@@ -723,7 +849,8 @@ export default function App() {
       setSelectedPayment(""); // 重置支付方式
       setShowPayment(false); // 关闭弹窗
       
-      const { data: pData } = await supabase.from('products').select('*');
+      // 刷新产品列表（通过API）
+      const pData = await apiClient.getProducts();
       if(pData) setProducts(pData.map(p => ({...p, ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id})));
       
       navTo("home"); 
@@ -980,7 +1107,10 @@ export default function App() {
                                    </div>
                                    <div>
                                       <h4 className="font-bold text-gray-100 text-sm">{item.repair_type || item.title}</h4>
-                                      <p className="text-[10px] text-gray-500">Reparación en 1 hora</p>
+                                      <p className="text-[10px] text-gray-500">{item.description || "Reparación rápida*"}</p>
+                                      {!item.description && (
+                                        <p className="text-[9px] text-gray-600 mt-0.5">*Piezas disponibles: 1h | Sin stock: 2-3 días</p>
+                                      )}
                                    </div>
                                 </div>
                                 <div className="text-right">
@@ -1026,6 +1156,11 @@ export default function App() {
                     <div className="flex gap-4">
                        <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-purple-400"><Users size={14}/></div>
                        <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Sin Cita Previa</p><p className="text-xs text-gray-500 mt-0.5">Se atiende por orden de llegada.</p></div>
+                    </div>
+                    {/* 库存等待时间 */}
+                    <div className="flex gap-4">
+                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-orange-400"><Package size={14}/></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Disponibilidad de Piezas</p><p className="text-xs text-gray-500 mt-0.5">Algunos modelos pueden requerir <strong>2-3 días</strong> para disponibilidad de piezas. Le notificaremos cuando esté listo.</p></div>
                     </div>
                     {/* 保修 */}
                     <div className="flex gap-4">
@@ -1282,13 +1417,14 @@ export default function App() {
           </div>
 
           {/* 新增的法律链接区 */}
-          <div className="flex justify-center gap-6 text-xs font-bold text-gray-400">
+          <div className="flex flex-wrap justify-center gap-4 text-xs font-bold text-gray-400">
              <button onClick={() => {setLegalType("aviso"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Aviso Legal</button>
              <button onClick={() => {setLegalType("privacidad"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Privacidad</button>
              <button onClick={() => {setLegalType("cookies"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Cookies</button>
+             <button onClick={() => {setLegalType("devoluciones"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Devoluciones</button>
           </div>
           
-          <p className="text-[10px] text-gray-300 mt-6">© {new Date().getFullYear()} HIPERA S.L. Todos los derechos reservados.</p>
+          <p className="text-[10px] text-gray-300 mt-6">© {new Date().getFullYear()} QIANG GUO SL. Todos los derechos reservados.</p>
         </footer>
       )}
     </div>

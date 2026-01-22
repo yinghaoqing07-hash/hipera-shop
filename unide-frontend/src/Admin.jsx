@@ -2,7 +2,8 @@ import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import React, { useEffect, useState } from "react";
-import { supabase } from './supabaseClient';
+import { supabase } from './supabaseClient'; // 保留用于用户认证
+import { apiClient } from './api/client'; // 新增：API客户端
 import { useNavigate } from "react-router-dom"; 
 import { 
   LayoutDashboard, Package, List, ShoppingBag, 
@@ -37,7 +38,7 @@ export default function AdminApp() {
   const [newCatIcon, setNewCatIcon] = useState("Package");
   const [newSubName, setNewSubName] = useState("");
   const [selectedParentForSub, setSelectedParentForSub] = useState(null);
-  const [newRepair, setNewRepair] = useState({ title: "", price: "", original_price: "" });
+  const [newRepair, setNewRepair] = useState({ title: "", price: "", original_price: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO." });
 
   // 修改：增加了 description, oferta, oferta_type, oferta_value
   const [formData, setFormData] = useState({
@@ -50,18 +51,14 @@ export default function AdminApp() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. 获取产品
-      const { data: pData } = await supabase.from('products').select('*').order('id', { ascending: true });
-      
-      // 2. 获取订单 (⚠️ 关键修改：只查 *，不查关联 user，防止报错)
-      const { data: oData, error: oError } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
-      
-      // 3. 获取其他数据
-      const { data: cData } = await supabase.from('categories').select('*').order('id', { ascending: true });
-      const { data: sData } = await supabase.from('sub_categories').select('*').order('id', { ascending: true });
-      const { data: rData } = await supabase.from('repair_services').select('*').order('id', { ascending: true });
-
-      if (oError) console.error("Order Error:", oError); // 在控制台打印错误
+      // 使用API客户端获取所有数据
+      const [pData, oData, cData, sData, rData] = await Promise.all([
+        apiClient.getProducts().catch(e => { console.error("Products error:", e); return null; }),
+        apiClient.getAdminOrders().catch(e => { console.error("Orders error:", e); return null; }),
+        apiClient.getCategories().catch(e => { console.error("Categories error:", e); return null; }),
+        apiClient.getSubCategories().catch(e => { console.error("SubCategories error:", e); return null; }),
+        apiClient.getRepairServices().catch(e => { console.error("Repairs error:", e); return null; })
+      ]);
 
       if (pData) setProducts(pData.map(p => ({...p, ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id })));
       if (oData) setOrders(oData);
@@ -70,7 +67,7 @@ export default function AdminApp() {
       if (rData) setRepairs(rData);
 
     } catch (error) {
-      toast.error("Error cargando datos");
+      toast.error("Error cargando datos. Verifique que el servidor backend esté ejecutándose.");
       console.error(error);
     } finally {
       setLoading(false);
@@ -80,7 +77,16 @@ export default function AdminApp() {
   const handleLogout = async () => { await supabase.auth.signOut(); navigate("/login"); };
 
   // --- Actions ---
-  const handleDeleteProduct = async (id) => { if(!window.confirm("¿Eliminar?")) return; await supabase.from('products').delete().eq('id', id); fetchData(); };
+  const handleDeleteProduct = async (id) => { 
+    if(!window.confirm("¿Eliminar?")) return; 
+    try {
+      await apiClient.deleteProduct(id);
+      toast.success("Producto eliminado");
+      fetchData();
+    } catch (error) {
+      toast.error("Error al eliminar: " + error.message);
+    }
+  };
   
   const handleSaveProduct = async (e) => {
     e.preventDefault();
@@ -98,12 +104,20 @@ export default function AdminApp() {
       oferta_value: currentProduct.oferta_value || 0
     };
     
-    if (currentProduct.id) await supabase.from('products').update(dbPayload).eq('id', currentProduct.id);
-    else await supabase.from('products').insert([dbPayload]);
-    
-    setIsEditing(false); 
-    setCurrentProduct(null); 
-    fetchData();
+    try {
+      if (currentProduct.id) {
+        await apiClient.updateProduct(currentProduct.id, dbPayload);
+        toast.success("Producto actualizado");
+      } else {
+        await apiClient.createProduct(dbPayload);
+        toast.success("Producto creado");
+      }
+      setIsEditing(false); 
+      setCurrentProduct(null); 
+      fetchData();
+    } catch (error) {
+      toast.error("Error al guardar: " + error.message);
+    }
   };
 
   const handleImageUpload = async (event) => {
@@ -120,14 +134,66 @@ export default function AdminApp() {
     } catch(e) { toast.error("Upload error"); } finally { setUploading(false); }
   };
 
-  const handleAddCategory = async () => { if (!newCatName) return; await supabase.from('categories').insert([{ name: newCatName, icon: newCatIcon }]); setNewCatName(""); fetchData(); };
-  const handleAddSubCategory = async (pid) => { if (!newSubName) return; await supabase.from('sub_categories').insert([{ parent_id: pid, name: newSubName }]); setNewSubName(""); setSelectedParentForSub(null); fetchData(); };
-  const handleDeleteCategory = async (id, isSub) => { if(!window.confirm("¿Borrar?")) return; await supabase.from(isSub?'sub_categories':'categories').delete().eq('id', id); fetchData(); };
+  const handleAddCategory = async () => { 
+    if (!newCatName) return; 
+    try {
+      await apiClient.createCategory({ name: newCatName, icon: newCatIcon });
+      toast.success("Categoría creada");
+      setNewCatName(""); 
+      fetchData();
+    } catch (error) {
+      toast.error("Error: " + error.message);
+    }
+  };
   
-  const handleAddRepair = async () => { if (!newRepair.title) return; await supabase.from('repair_services').insert([newRepair]); setNewRepair({title:"", price:"", original_price:""}); fetchData(); };
-  const handleDeleteRepair = async (id) => { if(!window.confirm("¿Borrar?")) return; await supabase.from('repair_services').delete().eq('id', id); fetchData(); };
+  const handleAddSubCategory = async (pid) => { 
+    if (!newSubName) return; 
+    try {
+      await apiClient.createSubCategory({ parent_id: pid, name: newSubName });
+      toast.success("Subcategoría creada");
+      setNewSubName(""); 
+      setSelectedParentForSub(null); 
+      fetchData();
+    } catch (error) {
+      toast.error("Error: " + error.message);
+    }
+  };
+  
+  const handleDeleteCategory = async (id, isSub) => { 
+    if(!window.confirm("¿Borrar?")) return; 
+    try {
+      if (isSub) {
+        await apiClient.deleteSubCategory(id);
+      } else {
+        await apiClient.deleteCategory(id);
+      }
+      toast.success("Eliminado");
+      fetchData();
+    } catch (error) {
+      toast.error("Error: " + error.message);
+    }
+  };
+  
+  const handleDeleteRepair = async (id) => { 
+    if(!window.confirm("¿Borrar?")) return; 
+    try {
+      await apiClient.deleteRepairService(id);
+      toast.success("Servicio eliminado");
+      fetchData();
+    } catch (error) {
+      toast.error("Error: " + error.message);
+    }
+  };
 
-  const updateOrderStatus = async (oid, st) => { await supabase.from('orders').update({ status: st }).eq('id', oid); fetchData(); };
+  const updateOrderStatus = async (oid, st) => { 
+    try {
+      await apiClient.updateOrderStatus(oid, st);
+      toast.success("Estado actualizado");
+      fetchData();
+    } catch (error) {
+      toast.error("Error: " + error.message);
+    }
+  };
 
   // --- Renders ---
   const renderDashboard = () => (
@@ -209,12 +275,17 @@ const renderRepairs = () => (
       {/* 新增维修表单 */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
         <h3 className="font-bold text-gray-800 text-sm">Añadir Nuevo Servicio</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
            <input placeholder="Marca (ej: Apple)" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <input placeholder="Modelo (ej: iPhone 13)" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <input placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <input type="number" placeholder="Precio (€)" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <button onClick={async () => {
+        </div>
+        <div className="mb-2">
+           <input placeholder="Descripción" value={newRepair.description || ""} onChange={e => setNewRepair({...newRepair, description: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
+           <p className="text-xs text-gray-500 mt-1">Esta descripción se mostrará en la página de reparación (por defecto: Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.)</p>
+        </div>
+        <button onClick={async () => {
     // 1. 检查必填项 (如果有空的，弹窗提示)
     if (!newRepair.brand) { toast.error("Falta la Marca (品牌)"); return; }
     if (!newRepair.model) { toast.error("Falta el Modelo (型号)"); return; }
@@ -226,20 +297,19 @@ const renderRepairs = () => (
         // 2. 构造标题
         const title = `${newRepair.model} - ${newRepair.repair_type || 'Reparación'}`;
         
-        // 3. 发送给数据库
-        const { error } = await supabase.from('repair_services').insert([{
+        // 3. 发送给数据库（通过API）
+        await apiClient.createRepairService({
             brand: newRepair.brand,
             model: newRepair.model,
             repair_type: newRepair.repair_type,
             price: parseFloat(newRepair.price),
-            title: title
-        }]);
-
-        if (error) throw error; // 如果数据库报错，抛出异常
+            title: title,
+            description: newRepair.description || "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO."
+        });
 
         // 4. 成功
         toast.success("Servicio añadido", { id: toastId });
-        setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: ""}); 
+        setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO."}); 
         fetchData();
 
     } catch (err) {
@@ -250,22 +320,41 @@ const renderRepairs = () => (
 }} className="bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-sm">
     Añadir
 </button>
-        </div>
       </div>
 
       {/* 列表显示 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {repairs.map(r => (
-          <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center group">
-             <div>
-                <div className="flex gap-2 mb-1">
-                   <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.brand}</span>
-                   <span className="bg-blue-50 text-blue-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.model}</span>
+          <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+             <div className="flex justify-between items-start mb-2">
+                <div className="flex-1">
+                   <div className="flex gap-2 mb-1">
+                      <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.brand}</span>
+                      <span className="bg-blue-50 text-blue-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.model}</span>
+                   </div>
+                   <h3 className="font-bold text-gray-800 text-sm mb-1">{r.repair_type || r.title}</h3>
+                   <p className="text-xs text-gray-500 mb-2">{r.description || "Reparación rápida*"}</p>
+                   <span className="text-red-600 font-bold">€{r.price}</span>
                 </div>
-                <h3 className="font-bold text-gray-800 text-sm">{r.repair_type || r.title}</h3>
-                <span className="text-red-600 font-bold">€{r.price}</span>
+                <button onClick={() => handleDeleteRepair(r.id)} className="text-gray-300 hover:text-red-600 p-2 flex-shrink-0"><Trash2 size={18}/></button>
              </div>
-             <button onClick={() => handleDeleteRepair(r.id)} className="text-gray-300 hover:text-red-600 p-2"><Trash2 size={18}/></button>
+             <button 
+               onClick={async () => {
+                 const newDesc = prompt("Editar descripción:", r.description || "Reparación rápida*");
+                 if (newDesc !== null) {
+                   try {
+                     await apiClient.updateRepairService(r.id, { description: newDesc });
+                     toast.success("Descripción actualizada");
+                     fetchData();
+                   } catch (error) {
+                     toast.error("Error: " + error.message);
+                   }
+                 }
+               }}
+               className="w-full mt-2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg font-medium transition-colors"
+             >
+               <Edit2 size={12} className="inline mr-1"/> Editar Descripción
+             </button>
           </div>
         ))}
       </div>
@@ -277,9 +366,25 @@ const renderRepairs = () => (
         <h2 className="text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-left text-sm">
-             <thead className="bg-gray-50 font-bold text-gray-500"><tr><th className="p-4">Info</th><th className="p-4">Items</th><th className="p-4">Total</th><th className="p-4">Estado</th></tr></thead>
+             <thead className="bg-gray-50 font-bold text-gray-500">
+               <tr>
+                 <th className="p-4">Info</th>
+                 <th className="p-4">Items</th>
+                 <th className="p-4">Total</th>
+                 <th className="p-4">Pago</th>
+                 <th className="p-4">Estado</th>
+               </tr>
+             </thead>
              <tbody>
-               {orders.map(o => (
+               {orders.map(o => {
+                 const paymentMethod = o.payment_method || 'No especificado';
+                 const paymentColor = paymentMethod === 'Contra Reembolso' 
+                   ? 'bg-orange-100 text-orange-700' 
+                   : paymentMethod === 'Bizum' 
+                   ? 'bg-green-100 text-green-700' 
+                   : 'bg-gray-100 text-gray-600';
+                 
+                 return (
                  <tr key={o.id} className="border-b hover:bg-gray-50">
                    <td className="p-4 align-top">
                       <div className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</div>
@@ -297,12 +402,21 @@ const renderRepairs = () => (
                    </td>
                    <td className="p-4 align-top font-bold">€{o.total?.toFixed(2)}</td>
                    <td className="p-4 align-top">
-                      <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-2 py-1 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                        <option>Procesando</option><option>Enviado</option><option>Entregado</option><option>Cancelado</option>
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${paymentColor}`}>
+                        {paymentMethod}
+                      </span>
+                   </td>
+                   <td className="p-4 align-top">
+                      <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-2 py-1 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                        <option>Procesando</option>
+                        <option>Pendiente de Pago</option>
+                        <option>Enviado</option>
+                        <option>Entregado</option>
+                        <option>Cancelado</option>
                       </select>
                    </td>
                  </tr>
-               ))}
+               )})}
              </tbody>
           </table>
         </div>

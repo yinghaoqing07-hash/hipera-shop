@@ -1,0 +1,18 @@
+{
+  "name": "hipera-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "HIPERA Backend API Server",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.90.1",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express-rate-limit": "^7.1.5"
+  }
+}
