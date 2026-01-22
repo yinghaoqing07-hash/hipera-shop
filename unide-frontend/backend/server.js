@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
-import FormData from 'form-data';
 import { createClient } from '@supabase/supabase-js';
+import { Blob } from 'buffer';
 
 dotenv.config();
 
@@ -431,15 +431,15 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
     if (!key) return res.status(503).json({ error: 'REMOVEBG_API_KEY not configured' });
 
     // 先尝试直接使用 image_url（Supabase 公开 URL 应该可以直接访问）
-    let form = new FormData();
-    form.append('image_url', image_url);
-    form.append('size', 'auto');
-    form.append('format', 'png');
+    let formData = new FormData();
+    formData.append('image_url', image_url);
+    formData.append('size', 'auto');
+    formData.append('format', 'png');
 
     let rb = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
-      headers: { 'X-Api-Key': key, ...form.getHeaders() },
-      body: form
+      headers: { 'X-Api-Key': key },
+      body: formData
     });
 
     // 如果 URL 方式失败，尝试下载后上传文件
@@ -452,9 +452,9 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
         err = { errors: [{ detail: errText }] };
       }
       
-      // 如果是 URL 访问问题，尝试下载后上传（使用 base64）
+      // 如果是 URL 访问问题，尝试下载后上传文件
       if (err?.errors?.[0]?.detail?.includes('image_url') || err?.errors?.[0]?.detail?.includes('Please provide') || rb.status === 400) {
-        console.log('Trying base64 upload method instead of URL...');
+        console.log('Trying file upload method instead of URL...');
         
         const imgResponse = await fetch(image_url);
         if (!imgResponse.ok) {
@@ -462,18 +462,19 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
         }
         const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
         
-        // 使用 base64 编码方式（remove.bg 支持 image_file_b64）
-        const imageBase64 = imageBuffer.toString('base64');
+        // 使用原生 FormData 和 Blob（Node.js 18+ 支持）
+        const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+        const blob = new Blob([imageBuffer], { type: contentType });
         
-        form = new FormData();
-        form.append('image_file_b64', imageBase64);
-        form.append('size', 'auto');
-        form.append('format', 'png');
+        formData = new FormData();
+        formData.append('image_file', blob, 'image.jpg');
+        formData.append('size', 'auto');
+        formData.append('format', 'png');
 
         rb = await fetch('https://api.remove.bg/v1.0/removebg', {
           method: 'POST',
-          headers: { 'X-Api-Key': key, ...form.getHeaders() },
-          body: form
+          headers: { 'X-Api-Key': key },
+          body: formData
         });
       }
     }
