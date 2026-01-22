@@ -776,6 +776,11 @@ export default function App() {
     }));
   };
 
+  // 生成发票/票据的函数（供订单页面使用）
+  const generateInvoice = (order) => {
+    generateDocuments(order, 'both');
+  };
+
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const shippingFee = subtotal >= 50 ? 0 : 4.50; 
   const total = subtotal + shippingFee;

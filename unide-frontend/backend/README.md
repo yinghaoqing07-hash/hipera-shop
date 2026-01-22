@@ -30,12 +30,22 @@ FRONTEND_URL=http://localhost:5173
 # AI features (optional)
 REMOVEBG_API_KEY=your_remove_bg_api_key
 OPENAI_API_KEY=your_openai_api_key
+
+# Auto-print (optional)
+AUTO_PRINT_ENABLED=true
+PRINTER_NAME=your_printer_name  # Optional: specify printer name, leave empty for default printer
 ```
 
 **Important:** 
 - Get your `SUPABASE_SERVICE_KEY` from Supabase Dashboard → Settings → API
 - Use the **service_role** key (not the anon key) for server-side operations
 - Never commit the `.env` file to git
+
+**Auto-Print Configuration:**
+- Set `AUTO_PRINT_ENABLED=true` to enable automatic ticket printing when orders are created
+- `PRINTER_NAME` is optional - leave empty to use default printer, or specify exact printer name
+- **Note:** Auto-print works best on Windows. On Linux/Mac, you may need to configure CUPS or use a different printing solution
+- If printer is unavailable, PDF will be saved to temp directory for manual printing
 
 ### 3. Run the Server
 
