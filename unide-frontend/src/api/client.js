@@ -1,5 +1,5 @@
-// API Client for backend communication
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// ✅ 强制指定正确的后端地址 (注意后面加上了 /api)
+const API_BASE_URL = 'https://hipera-shop-production.up.railway.app/api';
 
 // 调试：输出API配置
 console.log('🔧 API Client configured:', {
