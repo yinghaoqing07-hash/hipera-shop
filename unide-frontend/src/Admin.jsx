@@ -119,7 +119,7 @@ export default function AdminApp() {
       price: currentProduct.price, 
       stock: currentProduct.stock, 
       image: images[0] || currentProduct.image || '', // 主图（第一张）
-      images: images.length > 1 ? JSON.stringify(images) : null, // 多图存储为 JSON（如果数据库支持）
+      // 注意：images 字段不在数据库 schema 中，只保存主图 image
       category: currentProduct.category, 
       sub_category_id: currentProduct.subCategoryId, 
       // 👇 新增这 4 个字段
