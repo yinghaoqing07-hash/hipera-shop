@@ -631,16 +631,58 @@ app.post('/api/admin/center-product', authenticateAdmin, async (req, res) => {
     }
     const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
 
-    // 使用 sharp 处理图片
-    const image = sharp(imageBuffer);
-    const metadata = await image.metadata();
-    const { width, height, channels } = metadata;
+    // 使用 sharp 处理图片，先验证格式
+    let image;
+    try {
+      // 先尝试直接创建 sharp 实例
+      image = sharp(imageBuffer);
+      // 验证图片格式 - 尝试获取 metadata
+      const testMetadata = await image.metadata();
+      if (!testMetadata.width || !testMetadata.height) {
+        throw new Error('Invalid image dimensions');
+      }
+    } catch (formatError) {
+      console.error('Image format error:', formatError.message, 'Image URL:', image_url);
+      // 尝试强制转换为 PNG
+      try {
+        console.log('Attempting to convert image to PNG format...');
+        image = sharp(imageBuffer, { failOnError: false }).png();
+        const testMetadata = await image.metadata();
+        if (!testMetadata.width || !testMetadata.height) {
+          throw new Error('Conversion failed - invalid dimensions');
+        }
+        console.log('Successfully converted to PNG');
+      } catch (convertError) {
+        console.error('Conversion also failed:', convertError.message);
+        return res.status(400).json({ 
+          error: 'Unsupported image format or corrupted image. Please use JPEG, PNG, WebP, or GIF.',
+          details: formatError.message,
+          conversionError: convertError.message
+        });
+      }
+    }
 
+    const metadata = await image.metadata();
+    const { width, height } = metadata;
+    
+    if (!width || !height) {
+      return res.status(400).json({ error: 'Invalid image dimensions' });
+    }
+
+    // 确保图片有 alpha 通道并转换为 RGBA 格式
+    const processedImage = image.ensureAlpha();
+    
     // 获取图片的原始像素数据（RGBA）
-    const { data, info } = await image
-      .ensureAlpha()
+    const { data, info } = await processedImage
       .raw()
       .toBuffer({ resolveWithObject: true });
+    
+    // 确保 channels 是正确的（应该是 4 for RGBA）
+    const actualChannels = info.channels || 4;
+    
+    if (!data || data.length === 0) {
+      return res.status(400).json({ error: 'Failed to extract image pixel data' });
+    }
 
     // 检测非透明区域的边界框
     let minX = width, minY = height, maxX = 0, maxY = 0;
@@ -648,8 +690,8 @@ app.post('/api/admin/center-product', authenticateAdmin, async (req, res) => {
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * channels;
-        const alpha = data[idx + 3] || 255; // Alpha 通道（如果存在）
+        const idx = (y * width + x) * actualChannels;
+        const alpha = actualChannels >= 4 ? data[idx + 3] : 255; // Alpha 通道（如果存在）
         
         // 如果像素不透明（alpha > 10），认为是内容
         if (alpha > 10) {
@@ -664,15 +706,11 @@ app.post('/api/admin/center-product', authenticateAdmin, async (req, res) => {
 
     // 如果没有检测到内容，返回原图
     if (!hasContent || minX >= maxX || minY >= maxY) {
-      // 尝试另一种方法：检测非白色/非背景色区域
-      // 重新处理，检测非纯色背景
-      const stats = await image.stats();
-      const dominantColor = stats.dominant;
-      
-      // 如果检测失败，返回原图
-      const fileName = `centered-${Date.now()}.${metadata.format || 'png'}`;
-      const { error: upErr } = await supabase.storage.from('products').upload(fileName, imageBuffer, { 
-        contentType: `image/${metadata.format || 'png'}`, 
+      // 如果检测失败，返回原图（转换为 PNG 以确保兼容性）
+      const pngBuffer = await image.png().toBuffer();
+      const fileName = `centered-${Date.now()}.png`;
+      const { error: upErr } = await supabase.storage.from('products').upload(fileName, pngBuffer, { 
+        contentType: 'image/png', 
         upsert: false 
       });
       if (upErr) return res.status(500).json({ error: 'Upload failed: ' + upErr.message });
@@ -691,9 +729,10 @@ app.post('/api/admin/center-product', authenticateAdmin, async (req, res) => {
     const cropWidth = Math.min(width - cropX, maxX - cropX + padding * 2);
     const cropHeight = Math.min(height - cropY, maxY - cropY + padding * 2);
 
-    // 裁剪商品区域
-    const cropped = await image
+    // 裁剪商品区域（确保使用处理过的图片）
+    const cropped = await processedImage
       .extract({ left: Math.floor(cropX), top: Math.floor(cropY), width: Math.floor(cropWidth), height: Math.floor(cropHeight) })
+      .png()
       .toBuffer();
 
     // 创建新画布，将商品居中
