@@ -78,11 +78,13 @@ The server will run on `http://localhost:3001`
 - `DELETE /api/admin/repair-services/:id` - Delete repair service
 - `POST /api/admin/remove-bg` - Remove image background (remove.bg), body: `{ image_url }`
 - `POST /api/admin/generate-description` - Extract product information (weight, quantity, ingredients, etc.) from images (OpenAI), body: `{ image_urls: [url1, url2, ...] }` or `{ image_url: url }` (legacy), returns: `{ description, productInfo: { weight, quantity, ingredients, specifications } }`
+- `POST /api/admin/center-product` - Center product in image (detects content area and centers it), body: `{ image_url }`, returns: `{ image_url }`
 
 ## 🤖 AI Features
 
 When `REMOVEBG_API_KEY` and `OPENAI_API_KEY` are set, the admin panel can:
 - **Quitar fondo (AI)**: Remove background from product image via remove.bg, then upload result to Supabase.
+- **Centrar producto (AI)**: Automatically detect product content area and center it in the image. Works best with transparent backgrounds (after removing background).
 - **Extraer información (AI)**: Extract structured product information (weight, quantity, ingredients, specifications) from images using OpenAI GPT-4o. **Supports multiple images** - upload front, back, and label photos to extract complete information.
 
 ### OpenAI Vision 能力说明

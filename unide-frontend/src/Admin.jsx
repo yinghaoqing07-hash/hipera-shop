@@ -33,6 +33,7 @@ export default function AdminApp() {
   const [uploading, setUploading] = useState(false);
   const [removingBg, setRemovingBg] = useState(false);
   const [generatingDesc, setGeneratingDesc] = useState(false);
+  const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -246,6 +247,26 @@ export default function AdminApp() {
     } catch (e) {
       toast.error("Extraer información: " + (e.message || "Error"));
     } finally { setGeneratingDesc(false); }
+  };
+
+  const handleCenterProduct = async () => {
+    const images = currentProduct?.images || (currentProduct?.image ? [currentProduct.image] : []);
+    if (images.length === 0) return;
+    
+    try {
+      setCenteringProduct(true);
+      // 对第一张图（主图）进行居中处理
+      const { image_url } = await apiClient.centerProduct(images[0]);
+      const newImages = [image_url, ...images.slice(1)];
+      setCurrentProduct({ 
+        ...currentProduct, 
+        images: newImages,
+        image: image_url 
+      });
+      toast.success("Producto centrado");
+    } catch (e) {
+      toast.error("Centrar producto: " + (e.message || "Error"));
+    } finally { setCenteringProduct(false); }
   };
 
   const handleAddCategory = async () => { 
@@ -718,10 +739,13 @@ const renderRepairs = () => (
               
               {(currentProduct?.images?.length > 0 || currentProduct?.image) && (
                 <div className="mt-2 flex gap-2 flex-wrap">
-                  <button type="button" onClick={handleRemoveBg} disabled={removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">
+                  <button type="button" onClick={handleRemoveBg} disabled={removingBg || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">
                     {removingBg ? "..." : "Quitar fondo (AI)"}
                   </button>
-                  <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
+                  <button type="button" onClick={handleCenterProduct} disabled={centeringProduct || removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 disabled:opacity-50">
+                    {centeringProduct ? "..." : "Centrar producto (AI)"}
+                  </button>
+                  <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
                     {generatingDesc ? "..." : `Extraer información (AI) ${currentProduct?.images?.length > 1 ? `(${currentProduct.images.length} imágenes)` : ''}`}
                   </button>
                 </div>
@@ -734,7 +758,7 @@ const renderRepairs = () => (
                 <select id="product-subcategory" name="product-subcategory" value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
 
-            <button type="submit" disabled={uploading || removingBg || generatingDesc} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
+            <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
           </form>
         </div>
       </div>

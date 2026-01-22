@@ -196,6 +196,14 @@ class ApiClient {
       body: JSON.stringify({ image_urls: urls }),
     });
   }
+
+  /** AI: 将商品居中到图片中心，传入图片 URL，返回 { image_url } */
+  async centerProduct(imageUrl) {
+    return this.request('/admin/center-product', {
+      method: 'POST',
+      body: JSON.stringify({ image_url: imageUrl }),
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

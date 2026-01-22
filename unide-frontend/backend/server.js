@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import { createClient } from '@supabase/supabase-js';
 import { Blob } from 'buffer';
+import sharp from 'sharp';
 
 dotenv.config();
 
@@ -615,6 +616,123 @@ REGLAS IMPORTANTES:
   }
 });
 
+// AI: 将商品居中到图片中心
+app.post('/api/admin/center-product', authenticateAdmin, async (req, res) => {
+  try {
+    const { image_url } = req.body;
+    if (!image_url || typeof image_url !== 'string') {
+      return res.status(400).json({ error: 'image_url required' });
+    }
+
+    // 下载图片
+    const imgResponse = await fetch(image_url);
+    if (!imgResponse.ok) {
+      return res.status(400).json({ error: 'Failed to download image from URL: ' + image_url });
+    }
+    const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
+
+    // 使用 sharp 处理图片
+    const image = sharp(imageBuffer);
+    const metadata = await image.metadata();
+    const { width, height, channels } = metadata;
+
+    // 获取图片的原始像素数据（RGBA）
+    const { data, info } = await image
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // 检测非透明区域的边界框
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+    let hasContent = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * channels;
+        const alpha = data[idx + 3] || 255; // Alpha 通道（如果存在）
+        
+        // 如果像素不透明（alpha > 10），认为是内容
+        if (alpha > 10) {
+          hasContent = true;
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+
+    // 如果没有检测到内容，返回原图
+    if (!hasContent || minX >= maxX || minY >= maxY) {
+      // 尝试另一种方法：检测非白色/非背景色区域
+      // 重新处理，检测非纯色背景
+      const stats = await image.stats();
+      const dominantColor = stats.dominant;
+      
+      // 如果检测失败，返回原图
+      const fileName = `centered-${Date.now()}.${metadata.format || 'png'}`;
+      const { error: upErr } = await supabase.storage.from('products').upload(fileName, imageBuffer, { 
+        contentType: `image/${metadata.format || 'png'}`, 
+        upsert: false 
+      });
+      if (upErr) return res.status(500).json({ error: 'Upload failed: ' + upErr.message });
+      const { data: urlData } = supabase.storage.from('products').getPublicUrl(fileName);
+      return res.json({ image_url: urlData.publicUrl, message: 'No content detected, original image returned' });
+    }
+
+    // 计算商品区域
+    const contentWidth = maxX - minX + 1;
+    const contentHeight = maxY - minY + 1;
+    
+    // 添加一些边距（10%）
+    const padding = Math.max(contentWidth, contentHeight) * 0.1;
+    const cropX = Math.max(0, minX - padding);
+    const cropY = Math.max(0, minY - padding);
+    const cropWidth = Math.min(width - cropX, maxX - cropX + padding * 2);
+    const cropHeight = Math.min(height - cropY, maxY - cropY + padding * 2);
+
+    // 裁剪商品区域
+    const cropped = await image
+      .extract({ left: Math.floor(cropX), top: Math.floor(cropY), width: Math.floor(cropWidth), height: Math.floor(cropHeight) })
+      .toBuffer();
+
+    // 创建新画布，将商品居中
+    const canvasWidth = width; // 保持原图宽度
+    const canvasHeight = height; // 保持原图高度
+    
+    const centered = await sharp({
+      create: {
+        width: canvasWidth,
+        height: canvasHeight,
+        channels: 4,
+        background: { r: 255, g: 255, b: 255, alpha: 0 } // 透明背景
+      }
+    })
+      .composite([{
+        input: cropped,
+        left: Math.floor((canvasWidth - Math.floor(cropWidth)) / 2),
+        top: Math.floor((canvasHeight - Math.floor(cropHeight)) / 2)
+      }])
+      .png()
+      .toBuffer();
+
+    // 上传到 Supabase
+    const fileName = `centered-${Date.now()}.png`;
+    const { error: upErr } = await supabase.storage.from('products').upload(fileName, centered, { 
+      contentType: 'image/png', 
+      upsert: false 
+    });
+    
+    if (upErr) return res.status(500).json({ error: 'Upload failed: ' + upErr.message });
+
+    const { data: urlData } = supabase.storage.from('products').getPublicUrl(fileName);
+    res.json({ image_url: urlData.publicUrl });
+  } catch (e) {
+    console.error('center-product error:', e);
+    res.status(500).json({ error: e.message || 'center-product error' });
+  }
+});
+
 // Root route - API information
 app.get('/', (req, res) => {
   res.json({
@@ -636,7 +754,8 @@ app.get('/', (req, res) => {
         categories: 'POST /api/admin/categories, DELETE /api/admin/categories/:id',
         repairServices: 'POST /api/admin/repair-services, PUT /api/admin/repair-services/:id, DELETE /api/admin/repair-services/:id',
         removeBg: 'POST /api/admin/remove-bg',
-        generateDescription: 'POST /api/admin/generate-description'
+        generateDescription: 'POST /api/admin/generate-description',
+        centerProduct: 'POST /api/admin/center-product'
       }
     },
     note: 'All admin endpoints require authentication (Bearer token)'
