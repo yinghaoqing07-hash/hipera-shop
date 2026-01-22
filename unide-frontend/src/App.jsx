@@ -1009,6 +1009,10 @@ export default function App() {
              </div>
           </div>
           <div>
+            <h3 className="font-bold text-xl text-gray-800 mb-3">Ofertas Flash</h3>
+            <div className="grid grid-cols-2 gap-3">{loading ? [1,2].map(i => <ProductSkeleton key={i}/>) : products.filter(p => p.oferta).slice(0, 4).map(p => renderProductCard(p))}</div>
+          </div>
+          <div>
              <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
              <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide">
                {categories.map(c => (
@@ -1026,10 +1030,6 @@ export default function App() {
                  </button>
                ))}
              </div>
-          </div>
-          <div>
-            <h3 className="font-bold text-xl text-gray-800 mb-3">Ofertas Flash</h3>
-            <div className="grid grid-cols-2 gap-3">{loading ? [1,2].map(i => <ProductSkeleton key={i}/>) : products.filter(p => p.oferta).slice(0, 4).map(p => renderProductCard(p))}</div>
           </div>
         </div>
       )}
