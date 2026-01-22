@@ -1009,8 +1009,24 @@ export default function App() {
              </div>
           </div>
           <div>
-            <h3 className="font-bold text-xl text-gray-800 mb-3">Ofertas Flash</h3>
-            <div className="grid grid-cols-2 gap-3">{loading ? [1,2].map(i => <ProductSkeleton key={i}/>) : products.filter(p => p.oferta).slice(0, 4).map(p => renderProductCard(p))}</div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-xl text-gray-800">Ofertas Flash</h3>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {loading ? (
+                [1,2,3,4,5,6].map(i => <ProductSkeleton key={i}/>)
+              ) : (
+                products.filter(p => p.oferta).slice(0, 6).map(p => renderProductCard(p))
+              )}
+            </div>
+            {!loading && products.filter(p => p.oferta).length > 6 && (
+              <button 
+                onClick={() => navTo("offers")} 
+                className="w-full mt-4 bg-red-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                Ver más ofertas <ChevronRight size={18}/>
+              </button>
+            )}
           </div>
           <div>
              <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
