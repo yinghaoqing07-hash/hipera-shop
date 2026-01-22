@@ -34,6 +34,7 @@ export default function AdminApp() {
   const [removingBg, setRemovingBg] = useState(false);
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // States for forms
   const [newCatName, setNewCatName] = useState("");
@@ -328,8 +329,8 @@ export default function AdminApp() {
 
   const renderProducts = () => (
     <div className="space-y-4">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
-        <input id="search-products" name="search-products" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-4 pr-4 py-2 border rounded-lg w-64 text-sm outline-none focus:ring-2 ring-blue-100"/>
+      <div className="flex flex-col sm:flex-row gap-3 bg-white p-4 rounded-xl shadow-sm">
+        <input id="search-products" name="search-products" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-100"/>
         <button onClick={() => { 
           setCurrentProduct({ 
             name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
@@ -337,9 +338,10 @@ export default function AdminApp() {
             description: "", oferta: false, oferta_type: "percent", oferta_value: 0 
           }); 
           setIsEditing(true); 
-        }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-bold hover:bg-blue-700"><Plus size={18}/> Nuevo</button>
+        }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 font-bold hover:bg-blue-700 whitespace-nowrap"><Plus size={18}/> Nuevo</button>
       </div>
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      {/* Desktop table */}
+      <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
         <table className="w-full text-left text-sm">
           <thead className="bg-gray-50 text-gray-500 font-bold"><tr><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead>
           <tbody className="divide-y">
@@ -357,15 +359,37 @@ export default function AdminApp() {
           </tbody>
         </table>
       </div>
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+          <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="flex items-start gap-3 mb-3">
+              <img src={p.image || "https://via.placeholder.com/40"} className="w-12 h-12 rounded object-cover bg-gray-100 flex-shrink-0"/>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-gray-800 truncate">{p.name}</div>
+                {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
+                <div className="flex items-center gap-4 mt-2 text-sm">
+                  <span className="font-bold text-gray-800">€{p.price}</span>
+                  <span className="text-gray-500">Stock: {p.stock}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => {setCurrentProduct(p); setIsEditing(true);}} className="text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 flex items-center gap-1"><Edit2 size={16}/><span className="text-xs">Editar</span></button>
+              <button onClick={() => handleDeleteProduct(p.id)} className="text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 flex items-center gap-1"><Trash2 size={16}/><span className="text-xs">Eliminar</span></button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 
   const renderCategoryManager = () => (
     <div className="space-y-6">
-      <div className="flex gap-2 mb-6 bg-white p-4 rounded-xl border border-gray-100 shadow-sm items-end">
+      <div className="flex flex-col sm:flex-row gap-3 mb-6 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
         <div className="flex-1"><label className="text-xs font-bold text-gray-500 block mb-1">Nombre</label><input id="category-name" name="category-name" value={newCatName} onChange={e => setNewCatName(e.target.value)} className="border p-2 rounded-lg w-full"/></div>
-        <div><label className="text-xs font-bold text-gray-500 block mb-1">Icono</label><select id="category-icon" name="category-icon" value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} className="border p-2 rounded-lg">{AVAILABLE_ICONS.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
-        <button onClick={handleAddCategory} className="bg-gray-900 text-white px-4 py-2.5 rounded-lg font-bold">Crear</button>
+        <div className="sm:w-40"><label className="text-xs font-bold text-gray-500 block mb-1">Icono</label><select id="category-icon" name="category-icon" value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} className="border p-2 rounded-lg w-full">{AVAILABLE_ICONS.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
+        <button onClick={handleAddCategory} className="bg-gray-900 text-white px-4 py-2.5 rounded-lg font-bold whitespace-nowrap sm:self-end">Crear</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {categories.map(c => (
@@ -388,7 +412,7 @@ const renderRepairs = () => (
       {/* 新增维修表单 */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
         <h3 className="font-bold text-gray-800 text-sm">Añadir Nuevo Servicio</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mb-2">
            <input id="repair-brand" name="repair-brand" placeholder="Marca (ej: Apple)" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <input id="repair-model" name="repair-model" placeholder="Modelo (ej: iPhone 13)" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm"/>
            <input id="repair-type" name="repair-type" placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
@@ -476,8 +500,9 @@ const renderRepairs = () => (
   
   const renderOrders = () => (
      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
+        {/* Desktop table */}
+        <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-left text-sm">
              <thead className="bg-gray-50 font-bold text-gray-500">
                <tr>
@@ -533,6 +558,54 @@ const renderRepairs = () => (
              </tbody>
           </table>
         </div>
+        {/* Mobile cards */}
+        <div className="md:hidden space-y-4">
+          {orders.map(o => {
+            const paymentMethod = o.payment_method || 'No especificado';
+            const paymentColor = paymentMethod === 'Contra Reembolso' 
+              ? 'bg-orange-100 text-orange-700' 
+              : paymentMethod === 'Bizum' 
+              ? 'bg-green-100 text-green-700' 
+              : 'bg-gray-100 text-gray-600';
+            
+            return (
+              <div key={o.id} className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</div>
+                    <div className="text-xs text-gray-400">{new Date(o.created_at).toLocaleString()}</div>
+                  </div>
+                  <span className={`px-2 py-1 rounded text-xs font-bold ${paymentColor}`}>
+                    {paymentMethod}
+                  </span>
+                </div>
+                <div>
+                  <div className="font-bold text-gray-800">{o.phone}</div>
+                  <div className="text-xs text-gray-500 mt-1">{o.address}</div>
+                  {o.note && <div className="text-xs bg-yellow-50 p-2 mt-2 rounded text-yellow-700">Nota: {o.note}</div>}
+                </div>
+                <div className="border-t pt-3">
+                  <div className="text-xs text-gray-600 mb-2 font-bold">Items:</div>
+                  {Array.isArray(o.items) && o.items.map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-xs mb-1 pb-1 border-b border-dashed border-gray-100">
+                      <span>{item.quantity}x {item.name}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t">
+                  <span className="font-bold text-lg text-gray-800">€{o.total?.toFixed(2)}</span>
+                  <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                    <option>Procesando</option>
+                    <option>Pendiente de Pago</option>
+                    <option>Enviado</option>
+                    <option>Entregado</option>
+                    <option>Cancelado</option>
+                  </select>
+                </div>
+              </div>
+            );
+          })}
+        </div>
      </div>
   );
 
@@ -540,8 +613,8 @@ const renderRepairs = () => (
   const renderProductModal = () => {
     const filteredSubs = subCategories.filter(s => s.parent_id === parseInt(currentProduct.category));
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-fade-in">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 backdrop-blur-sm animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-4 sm:p-6 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-bold text-gray-800">{currentProduct.id ? 'Editar' : 'Nuevo'} Producto</h3>
             <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="text-gray-500" size={20}/></button>
@@ -551,7 +624,7 @@ const renderRepairs = () => (
             {/* 基本信息 */}
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><input id="product-name" name="product-name" required value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
               <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
             </div>
@@ -584,7 +657,7 @@ const renderRepairs = () => (
                 
                 {/* 只有勾选了才显示详细设置 */}
                 {currentProduct.oferta && (
-                  <div className="grid grid-cols-2 gap-3 animate-fade-in">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
                      <div>
                        <label className="text-xs font-bold text-gray-500 mb-1 block">Tipo</label>
                        <select id="oferta-type" name="oferta-type" value={currentProduct.oferta_type || "percent"} onChange={e => setCurrentProduct({...currentProduct, oferta_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
@@ -656,7 +729,7 @@ const renderRepairs = () => (
             </div>
 
             {/* 分类选择 */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <select id="product-category" name="product-category" required value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"><option value="">Categoría</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
                 <select id="product-subcategory" name="product-subcategory" value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
@@ -671,20 +744,43 @@ const renderRepairs = () => (
   return (
     <div className="min-h-screen bg-gray-100 flex font-sans text-gray-800">
       <Toaster position="top-right" />
-      <aside className="w-20 md:w-64 bg-gray-900 text-white flex-shrink-0 flex flex-col py-6 space-y-2 shadow-xl z-20">
-        <div className="md:px-6 mb-8 font-bold text-xl text-center md:text-left flex items-center justify-center md:justify-start gap-2">
-            <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center font-extrabold">H</div><span className="hidden md:inline">HIPERA</span>
+      {/* Mobile menu overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <aside className={`fixed md:static inset-y-0 left-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} w-64 bg-gray-900 text-white flex-shrink-0 flex flex-col py-6 space-y-2 shadow-xl z-40 transition-transform duration-300`}>
+        <div className="px-6 mb-8 font-bold text-xl flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center font-extrabold">H</div>
+            <span>HIPERA</span>
+          </div>
+          <button 
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden text-gray-400 hover:text-white"
+          >
+            <X size={20} />
+          </button>
         </div>
         <nav className="flex-1 space-y-1 px-2">
-            <button onClick={() => setActiveTab("dashboard")} className={`w-full p-3 md:px-4 flex items-center gap-3 rounded-xl ${activeTab==='dashboard'?'bg-red-600':'hover:bg-gray-800'}`}><LayoutDashboard size={20}/><span className="hidden md:inline">Dashboard</span></button>
-            <button onClick={() => setActiveTab("products")} className={`w-full p-3 md:px-4 flex items-center gap-3 rounded-xl ${activeTab==='products'?'bg-red-600':'hover:bg-gray-800'}`}><Package size={20}/><span className="hidden md:inline">Productos</span></button>
-            <button onClick={() => setActiveTab("categories")} className={`w-full p-3 md:px-4 flex items-center gap-3 rounded-xl ${activeTab==='categories'?'bg-red-600':'hover:bg-gray-800'}`}><List size={20}/><span className="hidden md:inline">Categorías</span></button>
-            <button onClick={() => setActiveTab("repairs")} className={`w-full p-3 md:px-4 flex items-center gap-3 rounded-xl ${activeTab==='repairs'?'bg-red-600':'hover:bg-gray-800'}`}><Wrench size={20}/><span className="hidden md:inline">Reparaciones</span></button>
-            <button onClick={() => setActiveTab("orders")} className={`w-full p-3 md:px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span className="hidden md:inline">Pedidos</span></button>
+            <button onClick={() => { setActiveTab("dashboard"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='dashboard'?'bg-red-600':'hover:bg-gray-800'}`}><LayoutDashboard size={20}/><span>Dashboard</span></button>
+            <button onClick={() => { setActiveTab("products"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='products'?'bg-red-600':'hover:bg-gray-800'}`}><Package size={20}/><span>Productos</span></button>
+            <button onClick={() => { setActiveTab("categories"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='categories'?'bg-red-600':'hover:bg-gray-800'}`}><List size={20}/><span>Categorías</span></button>
+            <button onClick={() => { setActiveTab("repairs"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='repairs'?'bg-red-600':'hover:bg-gray-800'}`}><Wrench size={20}/><span>Reparaciones</span></button>
+            <button onClick={() => { setActiveTab("orders"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
         </nav>
-        <div className="px-4 pt-4 border-t border-gray-800"><button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span className="hidden md:inline">Salir</span></button></div>
+        <div className="px-4 pt-4 border-t border-gray-800"><button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span>Salir</span></button></div>
       </aside>
       <main className="flex-1 p-4 md:p-8 overflow-y-auto h-screen">
+        {/* Mobile menu button */}
+        <button 
+          onClick={() => setSidebarOpen(true)}
+          className="md:hidden fixed top-4 left-4 z-30 bg-gray-900 text-white p-2 rounded-lg shadow-lg"
+        >
+          <LayoutDashboard size={20} />
+        </button>
         {loading ? <div className="flex h-full items-center justify-center"><RefreshCw className="animate-spin text-gray-400" size={32}/></div> : (
           <>
             {activeTab === 'dashboard' && renderDashboard()} 
