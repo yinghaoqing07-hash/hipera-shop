@@ -137,7 +137,7 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
            {selectedPayment === 'bizum' && (
              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs text-green-700">
                <p className="font-bold mb-1">📱 Instrucciones Bizum:</p>
-               <p>Envía el pago al número: <strong>+34 918 782 602</strong></p>
+               <p>Envía el pago al número: <strong>640517893</strong></p>
                <p className="mt-1">Concepto: Pedido HIPERA</p>
              </div>
            )}
@@ -1109,7 +1109,7 @@ export default function App() {
                             
                             {/* WhatsApp 按钮 */}
                             <a 
-                              href="https://wa.me/34666123456?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web." 
+                              href="https://wa.me/34646569480?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web." 
                               target="_blank" 
                               rel="noreferrer"
                               className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full md:w-auto"
