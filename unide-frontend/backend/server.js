@@ -421,8 +421,16 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
     const key = process.env.REMOVEBG_API_KEY;
     if (!key) return res.status(503).json({ error: 'REMOVEBG_API_KEY not configured' });
 
+    // 先下载图片
+    const imgResponse = await fetch(image_url);
+    if (!imgResponse.ok) {
+      return res.status(400).json({ error: 'Failed to download image from URL' });
+    }
+    const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
+
+    // 使用 image_file 参数（文件）而不是 image_url
     const form = new FormData();
-    form.append('image_url', image_url);
+    form.append('image_file', imageBuffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
     form.append('size', 'auto');
     form.append('format', 'png');
 
