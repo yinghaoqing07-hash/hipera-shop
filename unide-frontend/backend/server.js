@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import FormData from 'form-data';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
@@ -400,6 +401,148 @@ app.delete('/api/admin/repair-services/:id', authenticateAdmin, async (req, res)
   }
 });
 
+// AI: remove.bg 去背 → 上传 Supabase，返回新图 URL
+app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
+  try {
+    const { image_url } = req.body;
+    if (!image_url || typeof image_url !== 'string') {
+      return res.status(400).json({ error: 'image_url required' });
+    }
+    const key = process.env.REMOVEBG_API_KEY;
+    if (!key) return res.status(503).json({ error: 'REMOVEBG_API_KEY not configured' });
+
+    const form = new FormData();
+    form.append('image_url', image_url);
+    form.append('size', 'auto');
+    form.append('format', 'png');
+
+    const rb = await fetch('https://api.remove.bg/v1.0/removebg', {
+      method: 'POST',
+      headers: { 'X-Api-Key': key, ...form.getHeaders() },
+      body: form
+    });
+
+    if (!rb.ok) {
+      const err = await rb.json().catch(() => ({}));
+      const msg = err?.errors?.[0]?.detail || err?.errors?.[0]?.title || rb.statusText;
+      return res.status(rb.status >= 400 && rb.status < 500 ? 400 : 502).json({ error: msg || 'remove.bg failed' });
+    }
+
+    const buf = Buffer.from(await rb.arrayBuffer());
+    const fileName = `removebg-${Date.now()}.png`;
+    const { error: upErr } = await supabase.storage.from('products').upload(fileName, buf, { contentType: 'image/png', upsert: false });
+    if (upErr) return res.status(500).json({ error: 'Upload failed: ' + upErr.message });
+
+    const { data } = supabase.storage.from('products').getPublicUrl(fileName);
+    res.json({ image_url: data.publicUrl });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'remove-bg error' });
+  }
+});
+
+// AI: OpenAI Vision 提取商品信息（重量、数量、配料等）- 支持多张图片
+app.post('/api/admin/generate-description', authenticateAdmin, async (req, res) => {
+  try {
+    const { image_urls, image_url } = req.body; // 支持新格式 image_urls 或旧格式 image_url
+    const urls = image_urls || (image_url ? [image_url] : []);
+    
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({ error: 'image_urls (array) required' });
+    }
+    
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+
+    // 构建 content 数组：包含所有图片 + 文本提示
+    const content = [
+      ...urls.map(url => ({ type: 'image_url', image_url: { url } })),
+      {
+        type: 'text',
+        text: `Analiza ${urls.length > 1 ? 'estas imágenes' : 'esta imagen'} de producto y extrae la siguiente información en formato JSON. Si hay múltiples imágenes, combina la información de todas ellas:
+
+{
+  "weight": "peso en g o ml (ej: '500g', '250ml', '1kg') o null si no se ve en ninguna imagen",
+  "quantity": "cantidad de unidades/piezas (ej: '2 unidades', '10 piezas', '1 unidad') o null si no se ve",
+  "ingredients": "lista completa de ingredientes o composición si es visible en alguna etiqueta, o null",
+  "description": "descripción breve del producto en español (1-2 frases)",
+  "specifications": "otras especificaciones visibles (tamaño, capacidad, etc.) o null"
+}
+
+REGLAS IMPORTANTES:
+- Analiza TODAS las imágenes proporcionadas y combina la información
+- Si una imagen muestra el frente y otra el dorso/etiqueta, extrae información de ambas
+- Solo extrae información que REALMENTE puedas ver en las imágenes/etiquetas
+- Si no ves peso, cantidad o ingredientes en ninguna imagen, usa null (no inventes)
+- description siempre debe tener un valor (breve descripción del producto)
+- Responde SOLO con el JSON, sin texto adicional`
+      }
+    ];
+
+    const payload = {
+      model: 'gpt-4o',
+      max_tokens: 500,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: 'Eres un asistente que extrae información de productos desde imágenes. Responde SOLO en formato JSON válido.'
+        },
+        {
+          role: 'user',
+          content
+        }
+      ]
+    };
+
+    const oa = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!oa.ok) {
+      const err = await oa.json().catch(() => ({}));
+      const msg = err?.error?.message || oa.statusText;
+      return res.status(oa.status >= 400 && oa.status < 500 ? 400 : 502).json({ error: msg || 'OpenAI failed' });
+    }
+
+    const data = await oa.json();
+    const content = data?.choices?.[0]?.message?.content?.trim() || '{}';
+    
+    try {
+      const productInfo = JSON.parse(content);
+      
+      // 格式化信息为易读的文本描述
+      let formattedDesc = productInfo.description || '';
+      const parts = [];
+      
+      if (productInfo.weight) parts.push(`Peso: ${productInfo.weight}`);
+      if (productInfo.quantity) parts.push(`Cantidad: ${productInfo.quantity}`);
+      if (productInfo.specifications) parts.push(productInfo.specifications);
+      if (productInfo.ingredients) parts.push(`Ingredientes: ${productInfo.ingredients}`);
+      
+      if (parts.length > 0) {
+        formattedDesc += '\n\n' + parts.join('\n');
+      }
+      
+      res.json({ 
+        description: formattedDesc,
+        productInfo: {
+          weight: productInfo.weight || null,
+          quantity: productInfo.quantity || null,
+          ingredients: productInfo.ingredients || null,
+          specifications: productInfo.specifications || null
+        }
+      });
+    } catch (parseErr) {
+      // 如果JSON解析失败，返回原始内容作为description
+      res.json({ description: content, productInfo: null });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'generate-description error' });
+  }
+});
+
 // Root route - API information
 app.get('/', (req, res) => {
   res.json({
@@ -419,7 +562,9 @@ app.get('/', (req, res) => {
         updateOrder: 'PATCH /api/admin/orders/:id',
         products: 'POST /api/admin/products, PUT /api/admin/products/:id, DELETE /api/admin/products/:id',
         categories: 'POST /api/admin/categories, DELETE /api/admin/categories/:id',
-        repairServices: 'POST /api/admin/repair-services, PUT /api/admin/repair-services/:id, DELETE /api/admin/repair-services/:id'
+        repairServices: 'POST /api/admin/repair-services, PUT /api/admin/repair-services/:id, DELETE /api/admin/repair-services/:id',
+        removeBg: 'POST /api/admin/remove-bg',
+        generateDescription: 'POST /api/admin/generate-description'
       }
     },
     note: 'All admin endpoints require authentication (Bearer token)'

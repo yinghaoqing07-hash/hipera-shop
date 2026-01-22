@@ -178,6 +178,24 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  /** AI: remove.bg 去背，传入图片 URL，返回 { image_url } */
+  async removeBg(imageUrl) {
+    return this.request('/admin/remove-bg', {
+      method: 'POST',
+      body: JSON.stringify({ image_url: imageUrl }),
+    });
+  }
+
+  /** AI: OpenAI 根据图片提取商品信息（重量、数量、配料等），支持多张图片，返回 { description, productInfo } */
+  async generateDescription(imageUrls) {
+    // 支持单个 URL 或数组
+    const urls = Array.isArray(imageUrls) ? imageUrls : [imageUrls];
+    return this.request('/admin/generate-description', {
+      method: 'POST',
+      body: JSON.stringify({ image_urls: urls }),
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

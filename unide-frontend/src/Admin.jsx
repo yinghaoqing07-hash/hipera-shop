@@ -31,6 +31,8 @@ export default function AdminApp() {
   const [isEditing, setIsEditing] = useState(false);
   const [currentProduct, setCurrentProduct] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [removingBg, setRemovingBg] = useState(false);
+  const [generatingDesc, setGeneratingDesc] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   // States for forms
@@ -60,7 +62,28 @@ export default function AdminApp() {
         apiClient.getRepairServices().catch(e => { console.error("Repairs error:", e); return null; })
       ]);
 
-      if (pData) setProducts(pData.map(p => ({...p, ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id })));
+      if (pData) setProducts(pData.map(p => {
+        // 解析 images（如果是 JSON 字符串）
+        let images = [];
+        if (p.images) {
+          try {
+            images = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
+          } catch (e) {
+            images = p.image ? [p.image] : [];
+          }
+        } else if (p.image) {
+          images = [p.image];
+        }
+        
+        return {
+          ...p, 
+          ofertaType: p.oferta_type, 
+          ofertaValue: p.oferta_value, 
+          subCategoryId: p.sub_category_id,
+          images: images,
+          image: images[0] || p.image || ''
+        };
+      }));
       if (oData) setOrders(oData);
       if (cData) setCategories(cData);
       if (sData) setSubCategories(sData);
@@ -90,11 +113,13 @@ export default function AdminApp() {
   
   const handleSaveProduct = async (e) => {
     e.preventDefault();
+    const images = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
     const dbPayload = { 
       name: currentProduct.name, 
       price: currentProduct.price, 
       stock: currentProduct.stock, 
-      image: currentProduct.image, 
+      image: images[0] || currentProduct.image || '', // 主图（第一张）
+      images: images.length > 1 ? JSON.stringify(images) : null, // 多图存储为 JSON（如果数据库支持）
       category: currentProduct.category, 
       sub_category_id: currentProduct.subCategoryId, 
       // 👇 新增这 4 个字段
@@ -123,15 +148,103 @@ export default function AdminApp() {
   const handleImageUpload = async (event) => {
     try {
       setUploading(true);
-      const file = event.target.files[0];
-      if (!file) return;
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      const { error } = await supabase.storage.from('products').upload(fileName, file);
-      if(error) throw error;
-      const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-      setCurrentProduct({ ...currentProduct, image: data.publicUrl });
-    } catch(e) { toast.error("Upload error"); } finally { setUploading(false); }
+      const files = Array.from(event.target.files || []);
+      if (files.length === 0) return;
+      
+      const uploadedUrls = [];
+      for (const file of files) {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+        const { error } = await supabase.storage.from('products').upload(fileName, file);
+        if (error) throw error;
+        const { data } = supabase.storage.from('products').getPublicUrl(fileName);
+        uploadedUrls.push(data.publicUrl);
+      }
+      
+      const existingImages = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
+      const allImages = [...existingImages, ...uploadedUrls];
+      
+      setCurrentProduct({ 
+        ...currentProduct, 
+        images: allImages,
+        image: allImages[0] // 主图（第一张）
+      });
+      
+      if (files.length > 1) {
+        toast.success(`${files.length} imágenes subidas`);
+      }
+    } catch(e) { 
+      toast.error("Error al subir: " + (e.message || "Error desconocido")); 
+    } finally { 
+      setUploading(false);
+      // 重置 input 以便可以再次选择相同文件
+      event.target.value = '';
+    }
+  };
+  
+  const handleRemoveImage = (indexToRemove) => {
+    const images = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
+    const newImages = images.filter((_, idx) => idx !== indexToRemove);
+    setCurrentProduct({
+      ...currentProduct,
+      images: newImages,
+      image: newImages[0] || '' // 更新主图
+    });
+  };
+
+  const handleRemoveBg = async () => {
+    const images = currentProduct?.images || (currentProduct?.image ? [currentProduct.image] : []);
+    if (images.length === 0) return;
+    
+    try {
+      setRemovingBg(true);
+      // 只对第一张图（主图）去背
+      const { image_url } = await apiClient.removeBg(images[0]);
+      const newImages = [image_url, ...images.slice(1)];
+      setCurrentProduct({ 
+        ...currentProduct, 
+        images: newImages,
+        image: image_url 
+      });
+      toast.success("Fondo eliminado");
+    } catch (e) {
+      toast.error("Quitar fondo: " + (e.message || "Error"));
+    } finally { setRemovingBg(false); }
+  };
+
+  const handleGenerateDescription = async () => {
+    const images = currentProduct?.images || (currentProduct?.image ? [currentProduct.image] : []);
+    if (images.length === 0) return;
+    
+    try {
+      setGeneratingDesc(true);
+      // 发送所有图片到后端
+      const result = await apiClient.generateDescription(images);
+      
+      // 更新描述
+      const updatedProduct = { ...currentProduct, description: result.description || "" };
+      
+      // 如果有数量信息，尝试提取数字并更新stock（如果stock为空或默认值）
+      if (result.productInfo?.quantity) {
+        const qtyMatch = result.productInfo.quantity.match(/(\d+)/);
+        if (qtyMatch && (!currentProduct.stock || currentProduct.stock === 10)) {
+          updatedProduct.stock = parseInt(qtyMatch[1]);
+        }
+      }
+      
+      setCurrentProduct(updatedProduct);
+      
+      const infoParts = [];
+      if (result.productInfo?.weight) infoParts.push(`Peso: ${result.productInfo.weight}`);
+      if (result.productInfo?.quantity) infoParts.push(`Cantidad: ${result.productInfo.quantity}`);
+      if (infoParts.length > 0) {
+        toast.success(`Información extraída (${images.length} imagen${images.length > 1 ? 'es' : ''}): ${infoParts.join(', ')}`);
+      } else {
+        toast.success(`Información extraída de ${images.length} imagen${images.length > 1 ? 'es' : ''}`);
+      }
+    } catch (e) {
+      toast.error("Extraer información: " + (e.message || "Error"));
+    } finally { setGeneratingDesc(false); }
   };
 
   const handleAddCategory = async () => { 
@@ -219,7 +332,7 @@ export default function AdminApp() {
         <input id="search-products" name="search-products" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-4 pr-4 py-2 border rounded-lg w-64 text-sm outline-none focus:ring-2 ring-blue-100"/>
         <button onClick={() => { 
           setCurrentProduct({ 
-            name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", 
+            name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
             // 👇 初始化新字段
             description: "", oferta: false, oferta_type: "percent", oferta_value: 0 
           }); 
@@ -496,13 +609,50 @@ const renderRepairs = () => (
                 )}
             </div>
 
-            {/* 图片上传 */}
+            {/* 图片上传 - 支持多图 */}
             <div>
-              <label className="text-xs font-bold text-gray-500 mb-1 block">Imagen</label>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">Imágenes (puedes subir varias)</label>
               <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 cursor-pointer relative">
-                  {uploading ? "Subiendo..." : (currentProduct.image ? <img src={currentProduct.image} className="h-20 mx-auto object-contain"/> : "Click para subir")}
-                  <input id="product-image" name="product-image" type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
+                  {uploading ? (
+                    <div className="text-gray-500">Subiendo...</div>
+                  ) : (
+                    <div className="text-gray-400 text-sm">Click para subir (puedes seleccionar múltiples imágenes)</div>
+                  )}
+                  <input id="product-image" name="product-image" type="file" accept="image/*" multiple onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
               </div>
+              
+              {/* 显示已上传的图片 */}
+              {(currentProduct?.images?.length > 0 || currentProduct?.image) && (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {(currentProduct.images || (currentProduct.image ? [currentProduct.image] : [])).map((img, idx) => (
+                    <div key={idx} className="relative group">
+                      <img src={img} alt={`Producto ${idx + 1}`} className="w-full h-20 object-contain rounded-lg border border-gray-200 bg-gray-50"/>
+                      {idx === 0 && (
+                        <span className="absolute top-1 left-1 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded font-bold">Principal</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(idx)}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+                        title="Eliminar"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {(currentProduct?.images?.length > 0 || currentProduct?.image) && (
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  <button type="button" onClick={handleRemoveBg} disabled={removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">
+                    {removingBg ? "..." : "Quitar fondo (AI)"}
+                  </button>
+                  <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
+                    {generatingDesc ? "..." : `Extraer información (AI) ${currentProduct?.images?.length > 1 ? `(${currentProduct.images.length} imágenes)` : ''}`}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* 分类选择 */}
@@ -511,7 +661,7 @@ const renderRepairs = () => (
                 <select id="product-subcategory" name="product-subcategory" value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
 
-            <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
+            <button type="submit" disabled={uploading || removingBg || generatingDesc} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
           </form>
         </div>
       </div>
