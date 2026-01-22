@@ -11,6 +11,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy (needed for Railway/reverse proxy setups)
+app.set('trust proxy', true);
+
 // Initialize Supabase with service role key (server-side only)
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -422,36 +425,59 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
     const key = process.env.REMOVEBG_API_KEY;
     if (!key) return res.status(503).json({ error: 'REMOVEBG_API_KEY not configured' });
 
-    // 先下载图片
-    const imgResponse = await fetch(image_url);
-    if (!imgResponse.ok) {
-      return res.status(400).json({ error: 'Failed to download image from URL: ' + image_url });
-    }
-    const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
-    
-    // 检测图片类型
-    const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
-    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
-    const filename = `image.${ext}`;
-
-    // 将 Buffer 转换为 Stream（remove.bg 推荐使用 Stream）
-    const imageStream = Readable.from(imageBuffer);
-
-    // 使用 image_file 参数（文件）
-    const form = new FormData();
-    form.append('image_file', imageStream, {
-      filename: filename,
-      contentType: contentType,
-      knownLength: imageBuffer.length
-    });
+    // 先尝试直接使用 image_url（Supabase 公开 URL 应该可以直接访问）
+    let form = new FormData();
+    form.append('image_url', image_url);
     form.append('size', 'auto');
     form.append('format', 'png');
 
-    const rb = await fetch('https://api.remove.bg/v1.0/removebg', {
+    let rb = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
       headers: { 'X-Api-Key': key, ...form.getHeaders() },
       body: form
     });
+
+    // 如果 URL 方式失败，尝试下载后上传文件
+    if (!rb.ok) {
+      const errText = await rb.text();
+      let err;
+      try {
+        err = JSON.parse(errText);
+      } catch {
+        err = { errors: [{ detail: errText }] };
+      }
+      
+      // 如果是 URL 访问问题，尝试下载后上传
+      if (err?.errors?.[0]?.detail?.includes('image_url') || err?.errors?.[0]?.detail?.includes('Please provide') || rb.status === 400) {
+        console.log('Trying file upload method instead of URL...');
+        
+        const imgResponse = await fetch(image_url);
+        if (!imgResponse.ok) {
+          return res.status(400).json({ error: 'Failed to download image from URL: ' + image_url });
+        }
+        const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
+        
+        const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+        const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+        const filename = `image.${ext}`;
+        const imageStream = Readable.from(imageBuffer);
+
+        form = new FormData();
+        form.append('image_file', imageStream, {
+          filename: filename,
+          contentType: contentType,
+          knownLength: imageBuffer.length
+        });
+        form.append('size', 'auto');
+        form.append('format', 'png');
+
+        rb = await fetch('https://api.remove.bg/v1.0/removebg', {
+          method: 'POST',
+          headers: { 'X-Api-Key': key, ...form.getHeaders() },
+          body: form
+        });
+      }
+    }
 
     if (!rb.ok) {
       const errText = await rb.text();
@@ -462,8 +488,16 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
         err = { errors: [{ detail: errText || rb.statusText }] };
       }
       const msg = err?.errors?.[0]?.detail || err?.errors?.[0]?.title || err?.error || rb.statusText;
-      console.error('remove.bg error:', { status: rb.status, error: err, imageUrl: image_url });
-      return res.status(rb.status >= 400 && rb.status < 500 ? 400 : 502).json({ error: msg || 'remove.bg failed' });
+      console.error('remove.bg error:', { 
+        status: rb.status, 
+        error: err, 
+        errorDetails: JSON.stringify(err, null, 2),
+        imageUrl: image_url 
+      });
+      return res.status(rb.status >= 400 && rb.status < 500 ? 400 : 502).json({ 
+        error: msg || 'remove.bg failed',
+        details: err?.errors?.[0] 
+      });
     }
 
     const buf = Buffer.from(await rb.arrayBuffer());
