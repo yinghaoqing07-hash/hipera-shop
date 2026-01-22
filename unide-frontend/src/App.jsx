@@ -906,11 +906,18 @@ export default function App() {
   );
 
   const renderDiscountTag = (p) => {
-    if (!p.ofertaType) return null;
+    // 只有当 oferta 为 true 时才显示标签
+    if (!p.oferta || !p.ofertaType) return null;
     let text = "";
-    if (p.ofertaType === "percent") text = `-${p.ofertaValue}%`;
+    if (p.ofertaType === "percent") {
+      // 只有当 ofertaValue 大于 0 时才显示百分比
+      if (!p.ofertaValue || p.ofertaValue <= 0) return null;
+      text = `-${p.ofertaValue}%`;
+    }
     if (p.ofertaType === "second") text = "2ª -50%";
     if (p.ofertaType === "gift") text = "2x1";
+    // 如果 text 为空，不显示标签
+    if (!text) return null;
     return <span className="absolute top-2 left-2 bg-red-600 text-white text-[10px] px-2 py-1 rounded-full font-bold shadow-sm z-10">{text}</span>;
   };
 
@@ -1355,7 +1362,53 @@ export default function App() {
           {page === "main" ? (
              <div className="grid grid-cols-2 gap-3">{categories.map(c => <button key={c.id} className="bg-white p-4 rounded-xl shadow-sm text-left flex flex-col justify-between h-24 border-l-4 border-red-500 active:scale-95 transition-transform" onClick={() => {setMainCat(c); navTo("sub");}}><span className="font-bold text-lg text-gray-800">{c.name}</span><ChevronRight size={18} className="text-gray-300 self-end"/></button>)}</div>
           ) : page === "sub" ? (
-             <div className="grid grid-cols-1 gap-3">{subCategories.filter(s => s.parent_id === mainCat?.id).map(s => <button key={s.id} className="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center active:scale-95 transition-transform" onClick={() => {setSubCat(s); navTo("products");}}><span className="font-medium text-gray-700">{s.name}</span><div className="bg-gray-50 p-1 rounded-full"><ChevronRight size={16} className="text-gray-400"/></div></button>)}</div>
+             <div className="space-y-6">
+               {/* 子类别选项 - 固定在顶部 */}
+               <div className="sticky top-20 z-20 bg-gray-50/95 backdrop-blur-sm -mx-4 px-4 pt-2 pb-4 border-b border-gray-200">
+                 <h3 className="text-sm font-bold text-gray-500 mb-3 uppercase">Subcategorías</h3>
+                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide snap-x snap-mandatory -mx-1 px-1">
+                   {subCategories.filter(s => s.parent_id === mainCat?.id).map(s => (
+                     <button 
+                       key={s.id} 
+                       className={`px-4 py-2 rounded-xl font-medium text-sm whitespace-nowrap snap-start flex-shrink-0 transition-all ${
+                         subCat?.id === s.id 
+                           ? 'bg-red-600 text-white shadow-md' 
+                           : 'bg-white text-gray-700 hover:bg-gray-100'
+                       }`}
+                       onClick={() => {
+                         if (subCat?.id === s.id) {
+                           setSubCat(null); // 取消选择
+                         } else {
+                           setSubCat(s); // 选择子类别
+                         }
+                       }}
+                     >
+                       {s.name}
+                     </button>
+                   ))}
+                 </div>
+               </div>
+               {/* 商品列表 - 显示这个大类别下的所有商品 */}
+               <div>
+                 <h3 className="text-sm font-bold text-gray-500 mb-3 uppercase">
+                   {subCat ? `Productos: ${subCat.name}` : 'Todos los productos'}
+                 </h3>
+                 <div className="grid grid-cols-2 gap-3">
+                   {loading ? (
+                     <div className="col-span-2 text-center py-20">
+                       <Loader2 className="animate-spin mx-auto mb-2 text-red-500"/>Cargando...
+                     </div>
+                   ) : (
+                     products.filter(p => {
+                       const mainMatch = mainCat ? p.category === mainCat.id : true;
+                       const subMatch = subCat ? p.subCategoryId === subCat.id : true;
+                       const searchMatch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
+                       return mainMatch && subMatch && searchMatch;
+                     }).map(p => renderProductCard(p))
+                   )}
+                 </div>
+               </div>
+             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">{loading ? <div className="col-span-2 text-center py-20"><Loader2 className="animate-spin mx-auto mb-2 text-red-500"/>Cargando...</div> : products.filter(p => { const mainMatch = mainCat ? p.category === mainCat.id : true; const subMatch = subCat ? p.subCategoryId === subCat.id : true; const searchMatch = p.name?.toLowerCase().includes(searchQuery.toLowerCase()); return mainMatch && subMatch && searchMatch && (page === "offers" ? p.oferta : true); }).map(p => renderProductCard(p))}</div>
           )}
