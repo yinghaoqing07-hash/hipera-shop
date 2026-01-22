@@ -27,3 +27,6 @@ dist-ssr
 backend/.env
 backend/node_modules/
 backend/*.log
+
+# Environment variables
+.env

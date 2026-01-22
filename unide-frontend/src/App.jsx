@@ -657,10 +657,10 @@ export default function App() {
     try {
       // 使用API客户端获取数据
       const [productsData, categoriesData, subCategoriesData, repairsData] = await Promise.all([
-        apiClient.getProducts(),
-        apiClient.getCategories(),
-        apiClient.getSubCategories(),
-        apiClient.getRepairServices()
+        apiClient.getProducts().catch(e => { console.error("Products API error:", e); return null; }),
+        apiClient.getCategories().catch(e => { console.error("Categories API error:", e); return null; }),
+        apiClient.getSubCategories().catch(e => { console.error("SubCategories API error:", e); return null; }),
+        apiClient.getRepairServices().catch(e => { console.error("Repairs API error:", e); return null; })
       ]);
 
       if (productsData) {
@@ -670,13 +670,17 @@ export default function App() {
           ofertaValue: p.oferta_value,
           subCategoryId: p.sub_category_id
         })));
+      } else {
+        toast.error("No se pudieron cargar los productos. Verifique la conexión con el servidor.");
       }
+
       if (categoriesData) setCategories(categoriesData);
       if (subCategoriesData) setSubCategories(subCategoriesData);
       if (repairsData) setRepairs(repairsData);
+
     } catch (error) {
-      console.error("Data load warning:", error);
-      toast.error("Error al cargar datos. Verifique que el servidor backend esté ejecutándose.");
+      console.error("Data load error:", error);
+      toast.error(`Error al cargar datos: ${error.message}. Verifique que el servidor backend esté ejecutándose en http://localhost:3001`);
     } finally {
       setLoading(false);
     }
@@ -944,7 +948,7 @@ export default function App() {
           {page !== 'checkout' && page !== 'repair' && (
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-red-500 transition-colors" size={16} />
-              <input placeholder="Buscar productos..." value={searchQuery} onChange={e => {setSearchQuery(e.target.value); if(e.target.value && page==='home') navTo("products");}} className="w-full pl-10 pr-4 py-2.5 bg-gray-100 border-none rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-red-100 outline-none transition-all shadow-inner" />
+              <input id="search" name="search" placeholder="Buscar productos..." value={searchQuery} onChange={e => {setSearchQuery(e.target.value); if(e.target.value && page==='home') navTo("products");}} className="w-full pl-10 pr-4 py-2.5 bg-gray-100 border-none rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-red-100 outline-none transition-all shadow-inner" />
             </div>
           )}
         </div>
@@ -1310,9 +1314,9 @@ export default function App() {
           <div className="space-y-6">
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
                 <h3 className="font-bold flex items-center gap-2 text-gray-800"><MapPin size={18} className="text-red-600"/> Datos de entrega</h3>
-                <input value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
-                <input type="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
-                <textarea value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder="Nota para repartidor (Opcional)" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
+                <input id="address" name="address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                <input id="phone" name="phone" type="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder="Nota para repartidor (Opcional)" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
              </div>
              {/* 按钮修改：现在是打开支付弹窗 */}
              <button disabled={!checkoutForm.address || !checkoutForm.phone} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">

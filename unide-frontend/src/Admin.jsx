@@ -216,7 +216,7 @@ export default function AdminApp() {
   const renderProducts = () => (
     <div className="space-y-4">
       <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
-        <input placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-4 pr-4 py-2 border rounded-lg w-64 text-sm outline-none focus:ring-2 ring-blue-100"/>
+        <input id="search-products" name="search-products" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-4 pr-4 py-2 border rounded-lg w-64 text-sm outline-none focus:ring-2 ring-blue-100"/>
         <button onClick={() => { 
           setCurrentProduct({ 
             name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", 
@@ -250,8 +250,8 @@ export default function AdminApp() {
   const renderCategoryManager = () => (
     <div className="space-y-6">
       <div className="flex gap-2 mb-6 bg-white p-4 rounded-xl border border-gray-100 shadow-sm items-end">
-        <div className="flex-1"><label className="text-xs font-bold text-gray-500 block mb-1">Nombre</label><input value={newCatName} onChange={e => setNewCatName(e.target.value)} className="border p-2 rounded-lg w-full"/></div>
-        <div><label className="text-xs font-bold text-gray-500 block mb-1">Icono</label><select value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} className="border p-2 rounded-lg">{AVAILABLE_ICONS.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
+        <div className="flex-1"><label className="text-xs font-bold text-gray-500 block mb-1">Nombre</label><input id="category-name" name="category-name" value={newCatName} onChange={e => setNewCatName(e.target.value)} className="border p-2 rounded-lg w-full"/></div>
+        <div><label className="text-xs font-bold text-gray-500 block mb-1">Icono</label><select id="category-icon" name="category-icon" value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} className="border p-2 rounded-lg">{AVAILABLE_ICONS.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
         <button onClick={handleAddCategory} className="bg-gray-900 text-white px-4 py-2.5 rounded-lg font-bold">Crear</button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -261,7 +261,7 @@ export default function AdminApp() {
             <div className="p-3">
                <ul className="space-y-2 mb-2">{subCategories.filter(s => s.parent_id === c.id).map(s => <li key={s.id} className="flex justify-between text-sm text-gray-600"><span>- {s.name}</span><button onClick={() => handleDeleteCategory(s.id, true)} className="text-gray-300 hover:text-red-600"><Trash2 size={14}/></button></li>)}</ul>
                {selectedParentForSub === c.id ? (
-                 <div className="flex gap-1"><input autoFocus placeholder="Sub..." value={newSubName} onChange={e => setNewSubName(e.target.value)} className="border p-1 text-sm rounded w-full"/><button onClick={() => handleAddSubCategory(c.id)} className="bg-blue-600 text-white px-2 rounded text-xs">OK</button></div>
+                 <div className="flex gap-1"><input id="sub-category-name" name="sub-category-name" autoFocus placeholder="Sub..." value={newSubName} onChange={e => setNewSubName(e.target.value)} className="border p-1 text-sm rounded w-full"/><button onClick={() => handleAddSubCategory(c.id)} className="bg-blue-600 text-white px-2 rounded text-xs">OK</button></div>
                ) : <button onClick={() => setSelectedParentForSub(c.id)} className="w-full py-1 text-xs text-blue-600 border border-dashed border-blue-200 rounded">+ Añadir Sub</button>}
             </div>
           </div>
@@ -276,13 +276,13 @@ const renderRepairs = () => (
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
         <h3 className="font-bold text-gray-800 text-sm">Añadir Nuevo Servicio</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
-           <input placeholder="Marca (ej: Apple)" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <input placeholder="Modelo (ej: iPhone 13)" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <input placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <input type="number" placeholder="Precio (€)" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input id="repair-brand" name="repair-brand" placeholder="Marca (ej: Apple)" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input id="repair-model" name="repair-model" placeholder="Modelo (ej: iPhone 13)" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input id="repair-type" name="repair-type" placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+           <input id="repair-price" name="repair-price" type="number" placeholder="Precio (€)" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="border p-2 rounded-lg text-sm"/>
         </div>
         <div className="mb-2">
-           <input placeholder="Descripción" value={newRepair.description || ""} onChange={e => setNewRepair({...newRepair, description: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
+           <input id="repair-description" name="repair-description" placeholder="Descripción" value={newRepair.description || ""} onChange={e => setNewRepair({...newRepair, description: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
            <p className="text-xs text-gray-500 mt-1">Esta descripción se mostrará en la página de reparación (por defecto: Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.)</p>
         </div>
         <button onClick={async () => {
@@ -436,17 +436,19 @@ const renderRepairs = () => (
           <form onSubmit={handleSaveProduct} className="space-y-4">
             
             {/* 基本信息 */}
-            <div><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><input required value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
+            <div><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><input id="product-name" name="product-name" required value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg"/></div>
             
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
-              <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
+              <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
+              <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
             </div>
 
             {/* 👇 新增：商品描述 */}
             <div>
                <label className="text-xs font-bold text-gray-500 mb-1 block">Descripción</label>
                <textarea 
+                 id="product-description"
+                 name="product-description"
                  value={currentProduct.description || ""} 
                  onChange={e => setCurrentProduct({...currentProduct, description: e.target.value})} 
                  className="w-full border p-2 rounded-lg h-24 text-sm"
@@ -472,7 +474,7 @@ const renderRepairs = () => (
                   <div className="grid grid-cols-2 gap-3 animate-fade-in">
                      <div>
                        <label className="text-xs font-bold text-gray-500 mb-1 block">Tipo</label>
-                       <select value={currentProduct.oferta_type || "percent"} onChange={e => setCurrentProduct({...currentProduct, oferta_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
+                       <select id="oferta-type" name="oferta-type" value={currentProduct.oferta_type || "percent"} onChange={e => setCurrentProduct({...currentProduct, oferta_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
                          <option value="percent">Descuento %</option>
                          <option value="second">2ª unidad -50%</option>
                          <option value="gift">2x1 (Regalo)</option>
@@ -481,6 +483,8 @@ const renderRepairs = () => (
                      <div>
                        <label className="text-xs font-bold text-gray-500 mb-1 block">Valor</label>
                        <input 
+                         id="oferta-value"
+                         name="oferta-value"
                          type="number" 
                          placeholder={currentProduct.oferta_type === "percent" ? "% (ej: 20)" : "Valor"} 
                          value={currentProduct.oferta_value || 0} 
@@ -497,14 +501,14 @@ const renderRepairs = () => (
               <label className="text-xs font-bold text-gray-500 mb-1 block">Imagen</label>
               <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 cursor-pointer relative">
                   {uploading ? "Subiendo..." : (currentProduct.image ? <img src={currentProduct.image} className="h-20 mx-auto object-contain"/> : "Click para subir")}
-                  <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
+                  <input id="product-image" name="product-image" type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
               </div>
             </div>
 
             {/* 分类选择 */}
             <div className="grid grid-cols-2 gap-4">
-                <select required value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"><option value="">Categoría</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                <select value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+                <select id="product-category" name="product-category" required value={currentProduct.category} onChange={e => setCurrentProduct({...currentProduct, category: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"><option value="">Categoría</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                <select id="product-subcategory" name="product-subcategory" value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
 
             <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>

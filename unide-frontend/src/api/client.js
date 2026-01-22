@@ -1,6 +1,13 @@
 // API Client for backend communication
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+// 调试：输出API配置
+console.log('🔧 API Client configured:', {
+  apiUrl: API_BASE_URL,
+  envVar: import.meta.env.VITE_API_URL,
+  fallback: 'http://localhost:3001/api'
+});
+
 class ApiClient {
   constructor() {
     this.baseURL = API_BASE_URL;
@@ -21,15 +28,23 @@ class ApiClient {
 
     try {
       const response = await fetch(url, config);
+      
+      // 检查响应类型
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error(`Unexpected response type: ${contentType}`);
+      }
+
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Request failed');
+        throw new Error(data.error || `Request failed with status ${response.status}`);
       }
 
       return data;
     } catch (error) {
       console.error('API Error:', error);
+      console.error('Failed URL:', url);
       throw error;
     }
   }
