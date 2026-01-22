@@ -118,32 +118,46 @@ VITE_API_URL=https://your-backend-domain.com/api
 
 ## 🚀 部署
 
-### 后端部署
+### ⚠️ 重要：Vercel 前端不能请求 localhost
 
-推荐使用以下平台之一：
+前端部署在 **https://hipera-shop.vercel.app** 时，**不要** 使用 `http://localhost:3001` 作为 API 地址。浏览器会拦截公网页面对本机地址的请求（Private Network Access / loopback 限制），导致：
 
-1. **Vercel** (推荐)
-   ```bash
-   cd backend
-   vercel
-   ```
+- `Access to fetch at 'http://localhost:3001/api/...' has been blocked by CORS policy: Permission was denied for this request to access the loopback address space`
+- `Failed to load resource: net::ERR_FAILED`
 
-2. **Railway**
-   - 连接GitHub仓库
-   - 选择backend目录
-   - 设置环境变量
+**正确做法**：先把后端部署到公网，再让 Vercel 前端请求该公网 API。
 
-3. **Render**
-   - 创建Web Service
-   - 指向backend目录
-   - 设置环境变量
+### 1. 先部署后端
 
-### 前端部署
+推荐使用 **Railway** 或 **Render**（Vercel 适合前端，Node 后端更推荐上述平台）：
 
-前端可以继续部署到 Vercel，只需：
+**Railway**
+1. [railway.app](https://railway.app) 注册并连接 GitHub
+2. New Project → Deploy from GitHub → 选本仓库，**Root Directory** 设为 `backend`
+3. 在 Project → Variables 添加：`SUPABASE_URL`、`SUPABASE_SERVICE_KEY`、`FRONTEND_URL=https://hipera-shop.vercel.app`
+4. 部署完成后记下 **公网 URL**，如 `https://xxx.up.railway.app`
+5. API 基地址为：`https://xxx.up.railway.app`（若未挂子路径）或 `https://xxx.up.railway.app/api`（若挂在 `/api`，依你配置为准）
 
-1. 设置环境变量 `VITE_API_URL` 为后端API地址
-2. 正常部署即可
+**Render**
+1. [render.com](https://render.com) 创建 Web Service，连接 GitHub，选择 **backend** 目录
+2. Build: `npm install`，Start: `npm start`
+3. 环境变量同上；记下生成的 **HTTPS 地址**
+
+后端已配置 CORS，允许 `https://hipera-shop.vercel.app` 和 `http://localhost:5173`。
+
+### 2. 再部署前端（Vercel）
+
+1. 在 Vercel 项目 **Settings → Environment Variables** 添加：
+   - `VITE_API_URL` = **后端公网 API 地址**，例如 `https://xxx.up.railway.app/api`（与 `client.js` 中使用的路径一致，通常为 `/api`）
+2. **重新构建并部署**（环境变量修改后需触发新部署）
+3. 确保前端构建时能读到 `VITE_API_URL`，否则会回退到 `http://localhost:3001/api`，线上会报错
+
+### 3. 小结
+
+| 环境 | 前端地址 | VITE_API_URL | 后端 CORS |
+|------|----------|--------------|-----------|
+| 本地开发 | http://localhost:5173 | http://localhost:3001/api | ✅ 已允许 |
+| 生产 (Vercel) | https://hipera-shop.vercel.app | **必须是** 已部署后端的 HTTPS 地址，如 `https://xxx.up.railway.app/api` | ✅ 已允许 |
 
 ## 🔍 测试
 
@@ -184,9 +198,13 @@ curl -X POST http://localhost:3001/api/orders \
 - 检查依赖是否安装完整
 
 ### 前端无法连接后端
-- 检查 `VITE_API_URL` 环境变量
+- 检查 `VITE_API_URL` 环境变量（**生产环境必须是后端公网地址**，不能用 localhost）
 - 确认后端服务器正在运行
 - 检查CORS配置
+
+### Vercel 上出现 "blocked by CORS / loopback address space"
+- 前端在请求 `localhost` → 必须改为已部署后端的 HTTPS 地址
+- 在 Vercel 配置 `VITE_API_URL` 后需 **重新部署** 前端，否则构建仍用旧值
 
 ### 认证失败
 - 确认JWT token有效
