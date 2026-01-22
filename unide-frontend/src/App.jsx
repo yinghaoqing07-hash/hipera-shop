@@ -391,8 +391,13 @@ const generateDocuments = async (order, type = 'both') => {
   };
   const generateInvoice = (order) => generateDocuments(order, 'invoice');
 
-  // 生成二维码 Data URL
-  const qrCodeUrl = await QRCode.toDataURL(order.id);
+  // 生成二维码 Data URL - 包含可访问的URL链接
+  const orderQueryUrl = `${window.location.origin}/?order=${order.id}`;
+  const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, {
+    errorCorrectionLevel: 'H',
+    width: 300,
+    margin: 2
+  });
 
   // --- 模版 A: A4 正式发票 (Factura) ---
   const createA4Invoice = () => {
@@ -638,9 +643,50 @@ export default function App() {
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
   const [selectedModel, setSelectedModel] = useState("");
 
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
+  const [queryOrderId, setQueryOrderId] = useState(null);
+  const [queryOrder, setQueryOrder] = useState(null);
+  const [queryLoading, setQueryLoading] = useState(false);
 
   // --- Init ---
+  useEffect(() => {
+    // 检查URL中是否有订单ID（从二维码扫描）
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderId = urlParams.get('order');
+    if (orderId && !queryOrderId) {
+      setQueryOrderId(orderId);
+      fetchOrderById(orderId);
+    }
+  }, []);
+
+  const fetchOrderById = async (orderId) => {
+    setQueryLoading(true);
+    try {
+      const order = await apiClient.getOrderById(orderId);
+      setQueryOrder(order);
+    } catch (error) {
+      console.error('Error fetching order:', error);
+      toast.error('Pedido no encontrado');
+      setQueryOrder(null);
+    } finally {
+      setQueryLoading(false);
+    }
+  };
+
+  const fetchOrderById = async (orderId) => {
+    setQueryLoading(true);
+    try {
+      const order = await apiClient.getOrderById(orderId);
+      setQueryOrder(order);
+    } catch (error) {
+      console.error('Error fetching order:', error);
+      toast.error('Pedido no encontrado');
+      setQueryOrder(null);
+    } finally {
+      setQueryLoading(false);
+    }
+  };
+
   useEffect(() => {
     const savedAddress = JSON.parse(localStorage.getItem('lastAddress') || '{}');
     if (savedAddress.address) setCheckoutForm(prev => ({...prev, ...savedAddress}));
@@ -1221,6 +1267,108 @@ export default function App() {
                  </div>
               </div>
            </div>
+        </div>
+      )}
+
+      {/* --- ORDER QUERY PAGE (从二维码扫描) --- */}
+      {queryOrderId && (
+        <div className="p-4 min-h-screen bg-gray-50">
+          <div className="flex items-center gap-2 mb-6 sticky top-0 bg-gray-50 z-10 py-2">
+            <button onClick={() => { setQueryOrderId(null); setQueryOrder(null); navTo("home"); }} className="p-2 bg-white rounded-full shadow-sm text-gray-700">
+              <ArrowLeft size={20}/>
+            </button>
+            <h2 className="font-bold text-xl text-gray-800">Consulta de Pedido</h2>
+          </div>
+          
+          {queryLoading ? (
+            <div className="text-center py-20">
+              <Loader2 className="animate-spin mx-auto mb-4 text-red-500" size={32}/>
+              <p className="text-gray-500">Cargando pedido...</p>
+            </div>
+          ) : queryOrder ? (
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <span className="font-bold text-gray-800 block text-sm font-mono bg-gray-100 px-3 py-1.5 rounded-lg mb-2">
+                    #{queryOrder.id.slice(0, 8).toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {new Date(queryOrder.created_at).toLocaleString('es-ES')}
+                  </span>
+                </div>
+                <span className={`text-xs uppercase tracking-wider px-3 py-1.5 rounded-lg font-bold ${
+                  queryOrder.status === 'Entregado' ? 'bg-green-100 text-green-700' :
+                  queryOrder.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' :
+                  'bg-blue-100 text-blue-700'
+                }`}>
+                  {queryOrder.status}
+                </span>
+              </div>
+
+              <div className="border-t pt-4 space-y-3">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase mb-1">Cliente</p>
+                  <p className="text-sm text-gray-800">{queryOrder.address || 'Cliente General'}</p>
+                  <p className="text-sm text-gray-600">{queryOrder.phone || ''}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase mb-2">Productos</p>
+                  <div className="space-y-2">
+                    {queryOrder.items?.map((item, idx) => (
+                      <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-800">{item.name}</p>
+                          <p className="text-xs text-gray-500">€{item.price.toFixed(2)} x {item.quantity}</p>
+                        </div>
+                        <p className="text-sm font-bold text-gray-900">€{(item.price * item.quantity).toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-3 border-t">
+                  <span className="text-sm font-bold text-gray-700">Total</span>
+                  <span className="text-xl font-extrabold text-gray-900">€{queryOrder.total?.toFixed(2)}</span>
+                </div>
+
+                {queryOrder.payment_method && (
+                  <div className="pt-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase mb-1">Forma de Pago</p>
+                    <p className="text-sm text-gray-800">{queryOrder.payment_method}</p>
+                  </div>
+                )}
+
+                {queryOrder.note && (
+                  <div className="pt-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase mb-1">Nota</p>
+                    <p className="text-sm text-gray-600 bg-yellow-50 p-2 rounded-lg">{queryOrder.note}</p>
+                  </div>
+                )}
+
+                <button 
+                  onClick={() => generateInvoice(queryOrder)} 
+                  className="mt-4 w-full border-2 border-red-600 text-red-600 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 hover:bg-red-50 transition-colors"
+                >
+                  <Download size={18}/> Descargar Factura / Ticket
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-20 bg-white rounded-2xl shadow-sm">
+              <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full mx-auto mb-4 flex items-center justify-center">
+                <X size={32}/>
+              </div>
+              <p className="text-gray-600 font-medium mb-2">Pedido no encontrado</p>
+              <p className="text-sm text-gray-400 mb-6">Verifica que el número de pedido sea correcto</p>
+              <button 
+                onClick={() => { setQueryOrderId(null); navTo("home"); }} 
+                className="bg-red-600 text-white px-6 py-2 rounded-xl font-bold"
+              >
+                Volver al inicio
+              </button>
+            </div>
+          )}
         </div>
       )}
       

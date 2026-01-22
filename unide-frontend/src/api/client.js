@@ -101,6 +101,11 @@ class ApiClient {
     return this.request(`/orders/user/${userId}`);
   }
 
+  // Public: Get order by ID (for QR code lookup)
+  async getOrderById(orderId) {
+    return this.request(`/orders/${orderId}`);
+  }
+
   // Admin endpoints
   async getAdminOrders() {
     return this.request('/admin/orders');

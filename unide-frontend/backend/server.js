@@ -29,10 +29,11 @@ const generateTicketPDF = async (order) => {
     phone: "+34 918 782 602"
   };
 
-  // 生成二维码 - 使用完整的订单ID（与前端保持一致）
-  // 确保使用完整的UUID，不要截取
-  const qrData = order.id; // 使用完整的订单ID
-  const qrCodeUrl = await QRCode.toDataURL(qrData, {
+  // 生成二维码 - 包含可访问的URL链接
+  // 构建订单查询URL（前端地址 + 订单ID）
+  const frontendUrl = process.env.FRONTEND_URL || 'https://hipera-shop.vercel.app';
+  const orderQueryUrl = `${frontendUrl}/?order=${order.id}`;
+  const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, {
     errorCorrectionLevel: 'H', // 高纠错级别，确保打印后仍可扫描
     type: 'image/png',
     quality: 1.0,
@@ -411,6 +412,34 @@ app.post('/api/orders', async (req, res) => {
       });
     }
 
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get order by ID (public - for QR code lookup)
+app.get('/api/orders/:orderId', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Pedido no encontrado' });
+      }
+      throw error;
+    }
+    
+    if (!data) {
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+    
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -997,6 +1026,7 @@ app.get('/', (req, res) => {
       },
       admin: {
         orders: 'GET /api/admin/orders',
+        getOrderById: 'GET /api/orders/:orderId (public)',
         updateOrder: 'PATCH /api/admin/orders/:id',
         products: 'POST /api/admin/products, PUT /api/admin/products/:id, DELETE /api/admin/products/:id',
         categories: 'POST /api/admin/categories, DELETE /api/admin/categories/:id',
