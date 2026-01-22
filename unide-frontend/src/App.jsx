@@ -4,7 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
 import { supabase } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
@@ -652,6 +652,18 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // 同步应用内导航与浏览器历史：右划返回上一个应用内页面，而不是跳到 /login 或 /admin
+  useEffect(() => {
+    const url = window.location.pathname + window.location.search;
+    window.history.replaceState({ app: true }, '', url);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => { goBack(); };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [goBack]);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -707,18 +719,25 @@ export default function App() {
     }
   }, [page, user]);
 
-  const navTo = (newPage) => {
-    setHistory([...history, newPage]);
-    setPage(newPage);
-    window.scrollTo(0,0);
+  const goBack = useCallback(() => {
+    if (history.length <= 1) return;
+    const next = [...history];
+    next.pop();
+    setHistory(next);
+    setPage(next[next.length - 1]);
+    window.scrollTo(0, 0);
+  }, [history]);
+
+  const handleBack = () => {
+    if (history.length > 1) window.history.back();
   };
 
-  const goBack = () => {
-    if (history.length <= 1) return;
-    const newHistory = [...history];
-    newHistory.pop();
-    setHistory(newHistory);
-    setPage(newHistory[newHistory.length - 1]);
+  const navTo = (newPage) => {
+    const nextStack = [...history, newPage];
+    setHistory(nextStack);
+    setPage(newPage);
+    window.scrollTo(0, 0);
+    window.history.pushState({ app: true }, '', window.location.pathname + window.location.search);
   };
 
   // --- Logic ---
@@ -955,7 +974,7 @@ export default function App() {
       </header>
 
       {/* ⚖️ 法律页面 */}
-      {page === "legal" && <LegalPage type={legalType} onBack={() => goBack()}/>}
+      {page === "legal" && <LegalPage type={legalType} onBack={handleBack}/>}
 
       {/* --- HOME PAGE --- */}
       {page === "home" && (
@@ -1013,7 +1032,7 @@ export default function App() {
         <div className="min-h-screen bg-gray-900 text-white animate-fade-in pb-24">
            {/* Header */}
            <div className="px-4 py-4 flex items-center gap-3 sticky top-0 bg-gray-900/95 backdrop-blur z-20 border-b border-gray-800">
-             <button onClick={() => goBack()} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button>
+             <button onClick={handleBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button>
              <h2 className="text-xl font-bold">Centro de Reparación</h2>
            </div>
            
@@ -1180,7 +1199,7 @@ export default function App() {
       {/* --- FAVORITES / ORDERS --- */}
       {(page === "orders" || page === "favorites") && (
         <div className="p-4 min-h-screen bg-gray-50">
-          <div className="flex items-center gap-2 mb-6 sticky top-0 bg-gray-50 z-10 py-2"><button onClick={() => goBack()} className="p-2 bg-white rounded-full shadow-sm text-gray-700"><ArrowLeft size={20}/></button><h2 className="font-bold text-xl text-gray-800">{page === "orders" ? "Mis Pedidos" : "Mis Favoritos"}</h2></div>
+          <div className="flex items-center gap-2 mb-6 sticky top-0 bg-gray-50 z-10 py-2"><button onClick={handleBack} className="p-2 bg-white rounded-full shadow-sm text-gray-700"><ArrowLeft size={20}/></button><h2 className="font-bold text-xl text-gray-800">{page === "orders" ? "Mis Pedidos" : "Mis Favoritos"}</h2></div>
           {page === "favorites" ? (
              <div className="grid grid-cols-2 gap-3">{filteredProducts.length === 0 ? <div className="col-span-2 text-center py-20 text-gray-400">No tienes favoritos aún 💔</div> : filteredProducts.map(p => renderProductCard(p))}</div>
           ) : (
@@ -1215,7 +1234,7 @@ export default function App() {
         <div className="flex flex-col h-[calc(100vh-80px)]">
           {/* Header */}
           <div className="p-4 bg-white shadow-sm flex items-center gap-2">
-            <button onClick={() => goBack()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="text-gray-600"/></button>
+            <button onClick={handleBack} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="text-gray-600"/></button>
             <h2 className="font-bold text-lg">Mi Cesta ({cart.reduce((a,b)=>a+b.quantity,0)})</h2>
             {cart.length > 0 && <button onClick={() => setCart([])} className="ml-auto text-xs text-red-500 font-bold bg-red-50 px-2 py-1 rounded">Vaciar</button>}
           </div>
@@ -1310,7 +1329,7 @@ export default function App() {
       {/* --- CHECKOUT --- */}
       {page === "checkout" && (
         <div className="p-4 bg-gray-50 min-h-screen animate-slide-up">
-          <div className="flex items-center gap-2 mb-6"><button onClick={() => goBack()} className="p-2 bg-white rounded-full shadow-sm"><ArrowLeft size={20}/></button><h2 className="font-bold text-xl">Finalizar Compra</h2></div>
+          <div className="flex items-center gap-2 mb-6"><button onClick={handleBack} className="p-2 bg-white rounded-full shadow-sm"><ArrowLeft size={20}/></button><h2 className="font-bold text-xl">Finalizar Compra</h2></div>
           <div className="space-y-6">
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
                 <h3 className="font-bold flex items-center gap-2 text-gray-800"><MapPin size={18} className="text-red-600"/> Datos de entrega</h3>
@@ -1330,7 +1349,7 @@ export default function App() {
       {(page === "offers" || page === "products" || page === "sub" || page === "main") && (
         <div className="p-4 min-h-screen">
           <div className="flex items-center gap-2 mb-4 sticky top-20 z-30 bg-gray-50/90 backdrop-blur-sm py-2">
-            <button onClick={() => goBack()} className="w-8 h-8 bg-white rounded-full shadow-sm flex items-center justify-center text-gray-700 active:scale-90 transition-transform"><ArrowLeft size={18}/></button>
+            <button onClick={handleBack} className="w-8 h-8 bg-white rounded-full shadow-sm flex items-center justify-center text-gray-700 active:scale-90 transition-transform"><ArrowLeft size={18}/></button>
             <h2 className="font-bold text-lg text-gray-800">{page === "offers" && "Todas las Ofertas"}{page === "main" && "Categorías"}{page === "sub" && mainCat?.name}{page === "products" && subCat?.name}</h2>
           </div>
           {page === "main" ? (
@@ -1350,7 +1369,7 @@ export default function App() {
           <div className="relative h-[45vh]">
             <img src={selectedProduct.image} className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-gradient-to-b from-black/30 to-transparent h-24"></div>
-            <button onClick={() => goBack()} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/40"><ArrowLeft size={24}/></button>
+            <button onClick={handleBack} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/40"><ArrowLeft size={24}/></button>
           </div>
           
           {/* 内容卡片 */}
@@ -1379,15 +1398,15 @@ export default function App() {
              </div>
              {/* 👆👆👆 修改结束 👆👆👆 */}
 
-             {/* 推荐商品 */}
+             {/* 推荐商品 - 手机端缩小卡片 */}
              <div className="mb-8">
                <h4 className="font-bold text-gray-800 text-sm mb-3">Quizás te interese</h4>
-               <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
+               <div className="flex gap-2 md:gap-3 overflow-x-auto pb-4 -mx-1 px-1 scrollbar-hide snap-x snap-mandatory">
                  {products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (
-                   <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[140px] bg-gray-50 p-2 rounded-xl border border-gray-100 flex-shrink-0 cursor-pointer active:scale-95 transition-transform">
-                     <img src={p.image} className="w-full aspect-square object-cover rounded-lg mb-2"/>
-                     <p className="text-xs font-bold text-gray-700 truncate">{p.name}</p>
-                     <p className="text-xs font-bold text-red-600">€{p.price}</p>
+                   <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[100px] sm:min-w-[120px] md:min-w-[140px] w-[100px] sm:w-[120px] md:w-[140px] flex-shrink-0 snap-start bg-gray-50 p-1.5 md:p-2 rounded-xl border border-gray-100 cursor-pointer active:scale-95 transition-transform">
+                     <img src={p.image} alt={p.name} className="w-full aspect-square object-cover rounded-lg mb-1.5 md:mb-2"/>
+                     <p className="text-[11px] md:text-xs font-bold text-gray-700 truncate">{p.name}</p>
+                     <p className="text-[11px] md:text-xs font-bold text-red-600">€{p.price}</p>
                    </div>
                  ))}
                </div>
@@ -1396,7 +1415,7 @@ export default function App() {
           
           {/* 底部加购栏 */}
           <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 z-20">
-            <button onClick={() => {addToCart(selectedProduct); goBack();}} disabled={selectedProduct.stock <= 0} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-300 disabled:bg-gray-300 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
+            <button onClick={() => { addToCart(selectedProduct); handleBack(); }} disabled={selectedProduct.stock <= 0} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-300 disabled:bg-gray-300 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
               {selectedProduct.stock > 0 ? <><Plus size={20}/> Añadir a la cesta</> : "Agotado"}
             </button>
           </div>
@@ -1422,10 +1441,10 @@ export default function App() {
 
           {/* 新增的法律链接区 */}
           <div className="flex flex-wrap justify-center gap-4 text-xs font-bold text-gray-400">
-             <button onClick={() => {setLegalType("aviso"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Aviso Legal</button>
-             <button onClick={() => {setLegalType("privacidad"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Privacidad</button>
-             <button onClick={() => {setLegalType("cookies"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Cookies</button>
-             <button onClick={() => {setLegalType("devoluciones"); setPage("legal"); window.scrollTo(0,0);}} className="hover:text-gray-900 transition-colors">Devoluciones</button>
+             <button onClick={() => { setLegalType("aviso"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Aviso Legal</button>
+             <button onClick={() => { setLegalType("privacidad"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Privacidad</button>
+             <button onClick={() => { setLegalType("cookies"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Cookies</button>
+             <button onClick={() => { setLegalType("devoluciones"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Devoluciones</button>
           </div>
           
           <p className="text-[10px] text-gray-300 mt-6">© {new Date().getFullYear()} QIANG GUO SL. Todos los derechos reservados.</p>
