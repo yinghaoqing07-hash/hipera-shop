@@ -507,10 +507,10 @@ REGLAS IMPORTANTES:
     }
 
     const data = await oa.json();
-    const content = data?.choices?.[0]?.message?.content?.trim() || '{}';
+    const responseContent = data?.choices?.[0]?.message?.content?.trim() || '{}';
     
     try {
-      const productInfo = JSON.parse(content);
+      const productInfo = JSON.parse(responseContent);
       
       // 格式化信息为易读的文本描述
       let formattedDesc = productInfo.description || '';
@@ -536,7 +536,7 @@ REGLAS IMPORTANTES:
       });
     } catch (parseErr) {
       // 如果JSON解析失败，返回原始内容作为description
-      res.json({ description: content, productInfo: null });
+      res.json({ description: responseContent, productInfo: null });
     }
   } catch (e) {
     res.status(500).json({ error: e.message || 'generate-description error' });
