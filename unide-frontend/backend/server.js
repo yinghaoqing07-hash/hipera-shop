@@ -424,13 +424,18 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
     // 先下载图片
     const imgResponse = await fetch(image_url);
     if (!imgResponse.ok) {
-      return res.status(400).json({ error: 'Failed to download image from URL' });
+      return res.status(400).json({ error: 'Failed to download image from URL: ' + image_url });
     }
     const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
+    
+    // 检测图片类型
+    const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+    const filename = `image.${ext}`;
 
-    // 使用 image_file 参数（文件）而不是 image_url
+    // 使用 image_file 参数（文件）
     const form = new FormData();
-    form.append('image_file', imageBuffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
+    form.append('image_file', imageBuffer, filename);
     form.append('size', 'auto');
     form.append('format', 'png');
 
@@ -441,8 +446,15 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
     });
 
     if (!rb.ok) {
-      const err = await rb.json().catch(() => ({}));
-      const msg = err?.errors?.[0]?.detail || err?.errors?.[0]?.title || rb.statusText;
+      const errText = await rb.text();
+      let err;
+      try {
+        err = JSON.parse(errText);
+      } catch {
+        err = { errors: [{ detail: errText || rb.statusText }] };
+      }
+      const msg = err?.errors?.[0]?.detail || err?.errors?.[0]?.title || err?.error || rb.statusText;
+      console.error('remove.bg error:', { status: rb.status, error: err, imageUrl: image_url });
       return res.status(rb.status >= 400 && rb.status < 500 ? 400 : 502).json({ error: msg || 'remove.bg failed' });
     }
 
