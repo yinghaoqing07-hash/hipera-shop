@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import FormData from 'form-data';
+import { Readable } from 'stream';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
@@ -433,9 +434,16 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
     const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
     const filename = `image.${ext}`;
 
+    // 将 Buffer 转换为 Stream（remove.bg 推荐使用 Stream）
+    const imageStream = Readable.from(imageBuffer);
+
     // 使用 image_file 参数（文件）
     const form = new FormData();
-    form.append('image_file', imageBuffer, filename);
+    form.append('image_file', imageStream, {
+      filename: filename,
+      contentType: contentType,
+      knownLength: imageBuffer.length
+    });
     form.append('size', 'auto');
     form.append('format', 'png');
 
