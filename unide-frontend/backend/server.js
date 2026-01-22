@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import FormData from 'form-data';
-import { Readable } from 'stream';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
@@ -59,7 +58,13 @@ app.use(express.json());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  // 禁用 trust proxy 警告（在 Railway 等反向代理环境中，trust proxy 是必要的）
+  validate: {
+    trustProxy: false
+  }
 });
 app.use('/api/', limiter);
 
@@ -447,9 +452,9 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
         err = { errors: [{ detail: errText }] };
       }
       
-      // 如果是 URL 访问问题，尝试下载后上传
+      // 如果是 URL 访问问题，尝试下载后上传（使用 base64）
       if (err?.errors?.[0]?.detail?.includes('image_url') || err?.errors?.[0]?.detail?.includes('Please provide') || rb.status === 400) {
-        console.log('Trying file upload method instead of URL...');
+        console.log('Trying base64 upload method instead of URL...');
         
         const imgResponse = await fetch(image_url);
         if (!imgResponse.ok) {
@@ -457,17 +462,11 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
         }
         const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
         
-        const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
-        const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
-        const filename = `image.${ext}`;
-        const imageStream = Readable.from(imageBuffer);
-
+        // 使用 base64 编码方式（remove.bg 支持 image_file_b64）
+        const imageBase64 = imageBuffer.toString('base64');
+        
         form = new FormData();
-        form.append('image_file', imageStream, {
-          filename: filename,
-          contentType: contentType,
-          knownLength: imageBuffer.length
-        });
+        form.append('image_file_b64', imageBase64);
         form.append('size', 'auto');
         form.append('format', 'png');
 
