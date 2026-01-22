@@ -658,12 +658,6 @@ export default function App() {
     window.history.replaceState({ app: true }, '', url);
   }, []);
 
-  useEffect(() => {
-    const onPopState = () => { goBack(); };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [goBack]);
-
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -739,6 +733,12 @@ export default function App() {
     window.scrollTo(0, 0);
     window.history.pushState({ app: true }, '', window.location.pathname + window.location.search);
   };
+
+  useEffect(() => {
+    const onPopState = () => { goBack(); };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [goBack]);
 
   // --- Logic ---
   const addToCart = (item) => {
