@@ -648,6 +648,20 @@ export default function App() {
   const [queryOrder, setQueryOrder] = useState(null);
   const [queryLoading, setQueryLoading] = useState(false);
 
+  const fetchOrderById = async (orderId) => {
+    setQueryLoading(true);
+    try {
+      const order = await apiClient.getOrderById(orderId);
+      setQueryOrder(order);
+    } catch (error) {
+      console.error('Error fetching order:', error);
+      toast.error('Pedido no encontrado');
+      setQueryOrder(null);
+    } finally {
+      setQueryLoading(false);
+    }
+  };
+
   // --- Init ---
   useEffect(() => {
     // 检查URL中是否有订单ID（从二维码扫描）
@@ -658,34 +672,6 @@ export default function App() {
       fetchOrderById(orderId);
     }
   }, []);
-
-  const fetchOrderById = async (orderId) => {
-    setQueryLoading(true);
-    try {
-      const order = await apiClient.getOrderById(orderId);
-      setQueryOrder(order);
-    } catch (error) {
-      console.error('Error fetching order:', error);
-      toast.error('Pedido no encontrado');
-      setQueryOrder(null);
-    } finally {
-      setQueryLoading(false);
-    }
-  };
-
-  const fetchOrderById = async (orderId) => {
-    setQueryLoading(true);
-    try {
-      const order = await apiClient.getOrderById(orderId);
-      setQueryOrder(order);
-    } catch (error) {
-      console.error('Error fetching order:', error);
-      toast.error('Pedido no encontrado');
-      setQueryOrder(null);
-    } finally {
-      setQueryLoading(false);
-    }
-  };
 
   useEffect(() => {
     const savedAddress = JSON.parse(localStorage.getItem('lastAddress') || '{}');
