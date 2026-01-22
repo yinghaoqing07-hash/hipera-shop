@@ -23,6 +23,17 @@ const allowedOrigins = [
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
+// 处理 OPTIONS 预检请求
+app.options('*', cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
@@ -35,7 +46,6 @@ app.use(cors({
 
 // 添加响应头防止CORB
 app.use((req, res, next) => {
-  res.header('Content-Type', 'application/json');
   res.header('X-Content-Type-Options', 'nosniff');
   next();
 });
