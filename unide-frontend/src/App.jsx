@@ -638,6 +638,7 @@ export default function App() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // 控制支付Loading
   const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
   const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
+  const [selectedGift, setSelectedGift] = useState(null); // 选中的免费商品
 
   // 新增这两个状态用于筛选
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
@@ -839,24 +840,38 @@ export default function App() {
       // 创建订单（通过API，后端会处理库存检查和扣减）
       const paymentMethodName = selectedPayment === 'contra_reembolso' ? 'Contra Reembolso' : selectedPayment === 'bizum' ? 'Bizum' : 'Pendiente';
       
+      // 如果有选中的免费商品，添加到订单中（价格为0）
+      const finalCart = [...cart];
+      if (selectedGift) {
+        finalCart.push({
+          ...selectedGift,
+          quantity: 1,
+          price: 0, // 免费商品价格为0
+          isGift: true // 标记为免费商品
+        });
+      }
+
       const orderData = await apiClient.createOrder({
         user_id: user?.id || null, 
         address: checkoutForm.address,
         phone: checkoutForm.phone,
         note: checkoutForm.note,
-        total: total,
+        total: total, // 总价不变（免费商品不计入总价）
         status: selectedPayment === 'contra_reembolso' ? "Pendiente de Pago" : "Procesando",
         payment_method: paymentMethodName,
-        items: cart
+        items: finalCart
       });
 
       toast.success(selectedPayment === 'contra_reembolso' ? "¡Pedido Confirmado! Paga al recibir." : "¡Pedido Confirmado! Revisa tu Bizum.");
       
+      // 重置免费商品选择
+      setSelectedGift(null);
+      
       // 询问用户是否下载票据
       if(window.confirm("Pago completado. ¿Quieres descargar los recibos?")) {
-         // 分离商品和服务
-         const productItems = cart.filter(item => !item.isService);
-         const serviceItems = cart.filter(item => item.isService);
+         // 分离商品和服务（包括免费商品）
+         const productItems = finalCart.filter(item => !item.isService);
+         const serviceItems = finalCart.filter(item => item.isService);
          
          const productTotal = productItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
          const serviceTotal = serviceItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -911,7 +926,7 @@ export default function App() {
       
       // 刷新产品列表（通过API）
       const pData = await apiClient.getProducts();
-      if(pData) setProducts(pData.map(p => ({...p, ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id})));
+      if(pData) setProducts(pData.map(p => ({...p, ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id, giftProduct: p.gift_product || false})));
       
       navTo("home"); 
     } catch (e) {
@@ -1418,10 +1433,17 @@ export default function App() {
                       {cart.some(i => i.isService) && <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2"><Package size={16}/> Productos para envío</h3>}
                       
                       {cart.filter(i => !i.isService).map(item => (
-                        <div key={`${item.id}-${item.name}`} className="flex gap-3 bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+                        <div key={`${item.id}-${item.name}`} className={`flex gap-3 p-3 rounded-2xl shadow-sm border ${item.isGift ? 'bg-pink-50 border-pink-200' : 'bg-white border-gray-100'}`}>
                            <img src={item.image} className="w-20 h-20 object-cover rounded-xl bg-gray-50"/>
                            <div className="flex-1 flex flex-col justify-between py-1">
-                              <div><p className="font-bold text-gray-800 line-clamp-1">{item.name}</p><p className="text-red-600 font-extrabold">€{item.price}</p></div>
+                              <div>
+                                <p className="font-bold text-gray-800 line-clamp-1">{item.name}</p>
+                                {item.isGift ? (
+                                  <p className="text-pink-600 font-extrabold text-sm">🎁 GRATIS</p>
+                                ) : (
+                                  <p className="text-red-600 font-extrabold">€{item.price}</p>
+                                )}
+                              </div>
                               <div className="flex items-center justify-between">
                                  <div className="flex items-center gap-3 bg-gray-50 rounded-lg p-1">
                                     <button onClick={() => updateQty(item.id, item.name, -1)} className="w-7 h-7 bg-white rounded shadow-sm flex items-center justify-center text-gray-600 active:scale-90 transition-transform"><Minus size={14}/></button>
@@ -1493,6 +1515,54 @@ export default function App() {
         <div className="p-4 bg-gray-50 min-h-screen animate-slide-up">
           <div className="flex items-center gap-2 mb-6"><button onClick={handleBack} className="p-2 bg-white rounded-full shadow-sm"><ArrowLeft size={20}/></button><h2 className="font-bold text-xl">Finalizar Compra</h2></div>
           <div className="space-y-6">
+             {/* 免费商品选择 - 当订单 >= 65 欧元时显示 */}
+             {subtotal >= 65 && (
+               <div className="bg-gradient-to-br from-red-50 to-pink-50 p-5 rounded-2xl shadow-sm border-2 border-red-200">
+                 <div className="flex items-center gap-2 mb-3">
+                   <Gift size={20} className="text-red-600"/>
+                   <h3 className="font-bold text-gray-800">¡Elige un regalo gratis!</h3>
+                 </div>
+                 <p className="text-sm text-gray-600 mb-4">Tu pedido supera €65. Puedes elegir un producto gratis:</p>
+                 {selectedGift ? (
+                   <div className="bg-white p-4 rounded-xl border-2 border-red-500 flex items-center justify-between">
+                     <div className="flex items-center gap-3 flex-1">
+                       <img src={selectedGift.image} alt={selectedGift.name} className="w-16 h-16 object-cover rounded-lg"/>
+                       <div className="flex-1">
+                         <p className="font-bold text-gray-800 text-sm">{selectedGift.name}</p>
+                         <p className="text-xs text-red-600 font-bold">GRATIS</p>
+                       </div>
+                     </div>
+                     <button 
+                       onClick={() => setSelectedGift(null)}
+                       className="text-gray-400 hover:text-red-600 p-2"
+                       title="Cambiar regalo"
+                     >
+                       <X size={18}/>
+                     </button>
+                   </div>
+                 ) : (
+                   <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                     {products.filter(p => p.giftProduct && p.stock > 0).map(p => (
+                       <button
+                         key={p.id}
+                         onClick={() => setSelectedGift(p)}
+                         className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
+                       >
+                         <img src={p.image} alt={p.name} className="w-full h-20 object-cover rounded-lg mb-2"/>
+                         <p className="text-xs font-bold text-gray-800 line-clamp-2 mb-1">{p.name}</p>
+                         <p className="text-xs text-red-600 font-bold">GRATIS</p>
+                       </button>
+                     ))}
+                     {products.filter(p => p.giftProduct && p.stock > 0).length === 0 && (
+                       <div className="col-span-2 text-center py-4 text-gray-400 text-sm">
+                         No hay productos de regalo disponibles
+                       </div>
+                     )}
+                   </div>
+                 )}
+               </div>
+             )}
+
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
                 <h3 className="font-bold flex items-center gap-2 text-gray-800"><MapPin size={18} className="text-red-600"/> Datos de entrega</h3>
                 <input id="address" name="address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>

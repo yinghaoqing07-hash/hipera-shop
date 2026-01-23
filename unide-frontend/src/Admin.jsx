@@ -83,7 +83,8 @@ export default function AdminApp() {
           ofertaValue: p.oferta_value, 
           subCategoryId: p.sub_category_id,
           images: images,
-          image: images[0] || p.image || ''
+          image: images[0] || p.image || '',
+          giftProduct: p.gift_product || false
         };
       }));
       if (oData) setOrders(oData);
@@ -124,11 +125,12 @@ export default function AdminApp() {
       // 注意：images 字段不在数据库 schema 中，只保存主图 image
       category: currentProduct.category, 
       sub_category_id: currentProduct.subCategoryId, 
-      // 👇 新增这 4 个字段
+      // 👇 新增这 5 个字段
       description: currentProduct.description,
       oferta: currentProduct.oferta, 
       oferta_type: currentProduct.oferta_type || 'percent', 
-      oferta_value: currentProduct.oferta_value || 0
+      oferta_value: currentProduct.oferta_value || 0,
+      gift_product: currentProduct.giftProduct || false
     };
     
     try {
@@ -356,7 +358,7 @@ export default function AdminApp() {
           setCurrentProduct({ 
             name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
             // 👇 初始化新字段
-            description: "", oferta: false, oferta_type: "percent", oferta_value: 0 
+            description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false
           }); 
           setIsEditing(true); 
         }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 font-bold hover:bg-blue-700 whitespace-nowrap"><Plus size={18}/> Nuevo</button>
@@ -661,6 +663,20 @@ const renderRepairs = () => (
                  className="w-full border p-2 rounded-lg h-24 text-sm"
                  placeholder="Escribe detalles del producto..."
                />
+            </div>
+
+            {/* 👇 新增：免费商品标记 */}
+            <div className="bg-pink-50 p-4 rounded-xl border border-pink-100">
+                <div className="flex items-center gap-2">
+                   <input 
+                     type="checkbox" 
+                     id="isGiftProduct" 
+                     checked={currentProduct.giftProduct || false} 
+                     onChange={e => setCurrentProduct({...currentProduct, giftProduct: e.target.checked})} 
+                     className="w-4 h-4 text-pink-600 rounded"
+                   />
+                   <label htmlFor="isGiftProduct" className="font-bold text-sm text-pink-800">Producto de Regalo (订单满€65可选)</label>
+                </div>
             </div>
 
             {/* 👇 新增：促销设置 */}
