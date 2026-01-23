@@ -1,15 +1,37 @@
-// 本地开发优先用 .env 的 VITE_API_URL（如 http://localhost:3001/api），否则用 Railway
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://hipera-shop-production.up.railway.app/api';
+// 生产环境唯一 API 基地址（Railway）
+const PROD_BASE = 'https://hipera-shop-production.up.railway.app/api';
 
-console.log('🔧 API Client:', API_BASE_URL);
+function getBase() {
+  if (import.meta.env.PROD) return PROD_BASE;
+  const v = import.meta.env.VITE_API_URL;
+  if (v && typeof v === 'string' && v.startsWith('http')) {
+    const u = v.replace(/\/$/, '');
+    return u.endsWith('/api') ? u : u + '/api';
+  }
+  return PROD_BASE;
+}
+
+const base = getBase();
+if (!import.meta.env.PROD) console.log('🔧 API base:', base);
 
 class ApiClient {
   constructor() {
-    this.baseURL = API_BASE_URL;
+    this.baseURL = base;
+  }
+
+  /** 用 URL 构造函数生成绝对 https 地址，避免相对路径请求到前端 */
+  _url(endpoint) {
+    const path = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    const b = (import.meta.env.PROD ? PROD_BASE : this.baseURL).replace(/\/$/, '') + '/';
+    try {
+      return new URL(path, b).href;
+    } catch {
+      return PROD_BASE.replace(/\/$/, '') + (path.startsWith('/') ? path : '/' + path);
+    }
   }
 
   async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
+    const url = this._url(endpoint);
     const token = this.getToken();
 
     const config = {
@@ -23,11 +45,13 @@ class ApiClient {
 
     try {
       const response = await fetch(url, config);
-      
-      // 检查响应类型
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        throw new Error(`Unexpected response type: ${contentType}`);
+      const contentType = response.headers.get('content-type') || '';
+
+      if (!contentType.includes('application/json')) {
+        const hint = contentType.includes('text/html')
+          ? ' (suele ser 404 o página de error; compruebe que la URL base incluya /api)'
+          : '';
+        throw new Error(`Unexpected response type: ${contentType}${hint}`);
       }
 
       const data = await response.json();
