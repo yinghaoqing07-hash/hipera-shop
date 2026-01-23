@@ -435,26 +435,59 @@ const generateDocuments = async (order, type = 'both') => {
     doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 67);
     doc.text(`Forma de Pago: ${order.payment_method?.toUpperCase() || 'CONTADO'}`, 140, 72);
 
-    // 3. Table
-    const tableRows = order.items.map(item => [
-      item.name,
-      item.quantity,
-      `${(item.price / 1.21).toFixed(2)}`, // Base price
-      `21%`,
-      `€${(item.price * item.quantity).toFixed(2)}`
-    ]);
+    // 3. Tablas: productos y regalos por separado
+    const regularItems = order.items.filter(item => !(item.isGift || item.price === 0));
+    const giftItems = order.items.filter(item => item.isGift || item.price === 0);
 
-    autoTable(doc, {
-      startY: 80,
-      head: [["Descripción", "Cant.", "Precio Base", "IVA", "TOTAL"]],
-      body: tableRows,
-      theme: 'grid',
-      headStyles: { fillColor: [31, 41, 55] }, // Dark gray
-      styles: { fontSize: 9 },
-    });
+    let startY = 80;
+
+    if (regularItems.length > 0) {
+      const tableRows = regularItems.map(item => [
+        item.name,
+        item.quantity,
+        `${(item.price / 1.21).toFixed(2)}`,
+        '21%',
+        `€${(item.price * item.quantity).toFixed(2)}`
+      ]);
+      autoTable(doc, {
+        startY,
+        head: [["Descripción", "Cant.", "Precio Base", "IVA", "TOTAL"]],
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { fillColor: [31, 41, 55] },
+        styles: { fontSize: 9 },
+      });
+      startY = doc.lastAutoTable.finalY + 8;
+    }
+
+    if (giftItems.length > 0) {
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(180, 80, 120);
+      doc.text("Regalo(s) — GRATIS", 14, startY);
+      startY += 6;
+      doc.setTextColor(0, 0, 0);
+      doc.setFont("helvetica", "normal");
+      const giftRows = giftItems.map(item => [
+        `${item.name} [REGALO]`,
+        item.quantity,
+        '0.00',
+        '—',
+        '€0.00'
+      ]);
+      autoTable(doc, {
+        startY,
+        head: [["Descripción", "Cant.", "Precio Base", "IVA", "TOTAL"]],
+        body: giftRows,
+        theme: 'grid',
+        headStyles: { fillColor: [180, 80, 120] },
+        styles: { fontSize: 9 },
+      });
+      startY = doc.lastAutoTable.finalY + 8;
+    }
 
     // 4. Totals
-    const finalY = doc.lastAutoTable.finalY + 10;
+    const finalY = startY + 2;
     const subTotal = order.total / 1.21;
     const iva = order.total - subTotal;
 
@@ -543,17 +576,34 @@ const generateDocuments = async (order, type = 'both') => {
     doc.text("--------------------------------", centerX, y, { align: 'center' });
     y += 6;
 
-    // Items
+    // Items: productos y regalos por separado
     doc.setFontSize(8);
-    order.items.forEach(item => {
-      // 第一行：名字
+    const regularForTicket = order.items.filter(item => !(item.isGift || item.price === 0));
+    const giftsForTicket = order.items.filter(item => item.isGift || item.price === 0);
+
+    regularForTicket.forEach(item => {
       doc.text(item.name.substring(0, 25), 5, y);
       y += 4;
-      // 第二行：数量 x 价格 = 总价
       const line = `${item.quantity} x ${item.price.toFixed(2)}`.padEnd(20) + `€${(item.price * item.quantity).toFixed(2)}`;
       doc.text(line, 5, y);
       y += 5;
     });
+
+    if (giftsForTicket.length > 0) {
+      y += 2;
+      doc.text("--------------------------------", centerX, y, { align: 'center' });
+      y += 4;
+      doc.setFont("courier", "bold");
+      doc.text("REGALO(S) — GRATIS", centerX, y, { align: 'center' });
+      y += 5;
+      doc.setFont("courier", "normal");
+      giftsForTicket.forEach(item => {
+        doc.text(`${item.name.substring(0, 22)} [REGALO]`, 5, y);
+        y += 4;
+        doc.text(`${item.quantity} x 0.00`.padEnd(20) + `GRATIS`, 5, y);
+        y += 5;
+      });
+    }
 
     y += 2;
     doc.text("--------------------------------", centerX, y, { align: 'center' });
@@ -705,12 +755,13 @@ export default function App() {
       if (productsData) {
         setProducts(productsData.map(p => ({
           ...p,
-          ofertaType: p.oferta_type, 
+          ofertaType: p.oferta_type,
           ofertaValue: p.oferta_value,
-          subCategoryId: p.sub_category_id
+          subCategoryId: p.sub_category_id,
+          giftProduct: p.gift_product || false
         })));
       } else {
-        toast.error("No se pudieron cargar los productos. Verifique la conexión con el servidor.");
+        toast.error("No se pudieron cargar los productos. ¿Está el backend en marcha? (npm run dev en /backend)");
       }
 
       if (categoriesData) setCategories(categoriesData);
@@ -719,7 +770,7 @@ export default function App() {
 
     } catch (error) {
       console.error("Data load error:", error);
-      toast.error(`Error al cargar datos: ${error.message}. Verifique que el servidor backend esté ejecutándose en http://localhost:3001`);
+      toast.error("Error al cargar datos. Compruebe que el backend esté en ejecución (npm run dev en /backend).");
     } finally {
       setLoading(false);
     }
@@ -776,14 +827,16 @@ export default function App() {
   // --- Logic ---
   const addToCart = (item) => {
     const isService = !item.stock && item.title; 
-    if (!isService && item.stock <= 0) {
+    const stock = Number(item.stock);
+    if (!isService && (isNaN(stock) || stock <= 0)) {
       toast.error("Producto agotado");
       return;
     }
-    const newItem = { ...item, name: item.name || item.title, id: item.id, isService: isService };
+    const newItem = { ...item, name: item.name || item.title, id: item.id, isService: isService, stock: isService ? undefined : stock };
     const ex = cart.find(i => i.id === newItem.id && i.name === newItem.name);
     if (ex) {
-      if (!isService && ex.quantity >= item.stock) { toast.error("Max stock alcanzado"); return; }
+      const exStock = Number(ex.stock);
+      if (!isService && !isNaN(exStock) && ex.quantity >= exStock) { toast.error("Max stock alcanzado"); return; }
       setCart(cart.map(i => (i.id === newItem.id && i.name === newItem.name) ? { ...i, quantity: i.quantity + 1 } : i));
     } else {
       setCart([...cart, { ...newItem, quantity: 1 }]);
@@ -802,7 +855,8 @@ export default function App() {
     setCart(cart.map(i => {
       if (i.id === id && i.name === name) {
         const newQty = Math.max(1, i.quantity + delta);
-        if (!i.isService && newQty > i.stock) { toast.error("No hay más stock"); return i; }
+        const stock = Number(i.stock);
+        if (!i.isService && !isNaN(stock) && newQty > stock) { toast.error("No hay más stock"); return i; }
         return { ...i, quantity: newQty };
       }
       return i;
@@ -819,6 +873,7 @@ export default function App() {
   const total = subtotal + shippingFee;
   const minOrderMet = subtotal >= 20;
   const isFreeShipping = subtotal >= 50;
+  const isGiftEligible = subtotal >= 65;
 
   // --- Step 1: Open Payment Modal ---
   const handleInitiateCheckout = () => {
@@ -905,11 +960,11 @@ export default function App() {
             };
             await generateDocuments(serviceOrder, 'both');
          } else {
-            // 只有一种类型，生成一张发票
+            // 只有一种类型，生成一张发票（必须用 finalCart 才能包含礼品）
             const orderForDocuments = {
                id: orderData?.id || Math.random().toString(36).substr(2, 9),
                created_at: orderData?.created_at || new Date().toISOString(),
-               items: cart,
+               items: finalCart,
                total: total,
                address: checkoutForm.address,
                phone: checkoutForm.phone,
@@ -1496,8 +1551,49 @@ export default function App() {
           {cart.length > 0 && (
             <div className="bg-white p-5 shadow-[0_-4px_30px_rgba(0,0,0,0.05)] rounded-t-3xl z-20">
                <div className="space-y-2 mb-6">
-                  {!isFreeShipping && <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded-lg flex items-center gap-2"><div className="flex-1">Faltan <span className="font-bold text-blue-600">€{(50 - subtotal).toFixed(2)}</span> para envío GRATIS<div className="h-1.5 w-full bg-blue-100 rounded-full mt-1 overflow-hidden"><div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{width: `${(subtotal/50)*100}%`}}></div></div></div><Truck size={16} className="text-blue-400"/></div>}
-                  {isFreeShipping && <div className="text-xs bg-green-50 text-green-700 p-2 rounded-lg font-bold flex items-center gap-2"><Truck size={14}/> ¡Envío GRATIS activado!</div>}
+                  {!isFreeShipping && (
+                    <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded-lg flex items-center gap-2">
+                      <div className="flex-1">
+                        Faltan <span className="font-bold text-blue-600">€{(50 - subtotal).toFixed(2)}</span> para envío GRATIS
+                        <div className="h-1.5 w-full bg-blue-100 rounded-full mt-1 overflow-hidden">
+                          <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{width: `${Math.min((subtotal/50)*100, 100)}%`}}></div>
+                        </div>
+                      </div>
+                      <Truck size={16} className="text-blue-400"/>
+                    </div>
+                  )}
+                  
+                  {/* 达到免运费后，显示免费商品进度条 */}
+                  {isFreeShipping && !isGiftEligible && (
+                    <>
+                      <div className="text-xs bg-green-50 text-green-700 p-2 rounded-lg font-bold flex items-center gap-2">
+                        <Truck size={14}/> ¡Envío GRATIS activado!
+                      </div>
+                      <div className="text-xs text-gray-600 bg-pink-50 p-2 rounded-lg flex items-center gap-2 border border-pink-200">
+                        <div className="flex-1">
+                          Faltan <span className="font-bold text-pink-600">€{(65 - subtotal).toFixed(2)}</span> para elegir un regalo GRATIS
+                          <div className="h-1.5 w-full bg-pink-100 rounded-full mt-1 overflow-hidden">
+                            <div 
+                              className="h-full bg-pink-500 rounded-full transition-all duration-500" 
+                              style={{width: `${Math.min(((subtotal - 50) / 15) * 100, 100)}%`}}
+                            ></div>
+                          </div>
+                        </div>
+                        <Gift size={16} className="text-pink-400 flex-shrink-0"/>
+                      </div>
+                    </>
+                  )}
+                  
+                  {isFreeShipping && isGiftEligible && (
+                    <>
+                      <div className="text-xs bg-green-50 text-green-700 p-2 rounded-lg font-bold flex items-center gap-2">
+                        <Truck size={14}/> ¡Envío GRATIS activado!
+                      </div>
+                      <div className="text-xs bg-pink-50 text-pink-700 p-2 rounded-lg font-bold flex items-center gap-2 border border-pink-300">
+                        <Gift size={14}/> ¡Puedes elegir un regalo GRATIS en el checkout!
+                      </div>
+                    </>
+                  )}
                </div>
                <div className="space-y-1 text-sm text-gray-500 mb-6"><div className="flex justify-between"><span>Subtotal</span><span>€{subtotal.toFixed(2)}</span></div><div className="flex justify-between"><span>Envío</span><span className={shippingFee === 0 ? "text-green-600 font-bold" : ""}>{shippingFee === 0 ? "GRATIS" : `€${shippingFee.toFixed(2)}`}</span></div><div className="flex justify-between font-extrabold text-xl text-gray-900 pt-3 border-t border-dashed"><span>Total</span><span>€{total.toFixed(2)}</span></div></div>
                {minOrderMet ? (
@@ -1542,22 +1638,31 @@ export default function App() {
                    </div>
                  ) : (
                    <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                     {products.filter(p => p.giftProduct && p.stock > 0).map(p => (
-                       <button
-                         key={p.id}
-                         onClick={() => setSelectedGift(p)}
-                         className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
-                       >
-                         <img src={p.image} alt={p.name} className="w-full h-20 object-cover rounded-lg mb-2"/>
-                         <p className="text-xs font-bold text-gray-800 line-clamp-2 mb-1">{p.name}</p>
-                         <p className="text-xs text-red-600 font-bold">GRATIS</p>
-                       </button>
-                     ))}
-                     {products.filter(p => p.giftProduct && p.stock > 0).length === 0 && (
-                       <div className="col-span-2 text-center py-4 text-gray-400 text-sm">
-                         No hay productos de regalo disponibles
-                       </div>
-                     )}
+                     {(() => {
+                       const giftProducts = products.filter(p => p.giftProduct && p.stock > 0);
+                       console.log('免费商品列表:', giftProducts.length, '个产品');
+                       console.log('所有产品数量:', products.length);
+                       console.log('标记为免费商品的产品:', products.filter(p => p.giftProduct));
+                       
+                       return giftProducts.length > 0 ? (
+                         giftProducts.map(p => (
+                           <button
+                             key={p.id}
+                             onClick={() => setSelectedGift(p)}
+                             className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
+                           >
+                             <img src={p.image} alt={p.name} className="w-full h-20 object-cover rounded-lg mb-2"/>
+                             <p className="text-xs font-bold text-gray-800 line-clamp-2 mb-1">{p.name}</p>
+                             <p className="text-xs text-red-600 font-bold">GRATIS</p>
+                           </button>
+                         ))
+                       ) : (
+                         <div className="col-span-2 text-center py-4 text-gray-400 text-sm space-y-2">
+                           <p>No hay productos de regalo disponibles</p>
+                           <p className="text-xs text-gray-500">提示：需要在后台将产品标记为"Producto de Regalo"</p>
+                         </div>
+                       );
+                     })()}
                    </div>
                  )}
                </div>

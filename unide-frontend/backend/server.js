@@ -364,26 +364,35 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Deduct stock for products
+    // Deduct stock for products (skip services and gift items)
     for (const item of items) {
       if (item.isService) continue;
+      if (item.isGift) continue; // 礼品不扣库存，由后台单独管理
       
-      const { data: product } = await supabase
+      const qty = Number(item.quantity) || 0;
+      if (qty <= 0) continue;
+
+      const { data: product, error: fetchErr } = await supabase
         .from('products')
         .select('stock')
         .eq('id', item.id)
         .single();
       
-      if (product && product.stock < item.quantity) {
-        return res.status(400).json({ error: `Insufficient stock for ${item.name}` });
+      if (fetchErr || !product) {
+        console.warn(`[Orders] Product not found: id=${item.id}, name=${item.name}`);
+        continue; // 找不到商品时跳过，不阻塞下单
       }
       
-      if (product) {
-        await supabase
-          .from('products')
-          .update({ stock: product.stock - item.quantity })
-          .eq('id', item.id);
+      const stock = Number(product.stock);
+      if (stock < qty) {
+        console.warn(`[Orders] Insufficient stock: id=${item.id}, name=${item.name}, stock=${stock}, requested=${qty}`);
+        return res.status(400).json({ error: `Stock insuficiente para "${item.name}". Disponible: ${stock}, solicitado: ${qty}.` });
       }
+      
+      await supabase
+        .from('products')
+        .update({ stock: stock - qty })
+        .eq('id', item.id);
     }
 
     // Create order

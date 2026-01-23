@@ -1,12 +1,7 @@
-// ✅ 强制指定正确的后端地址 (注意后面加上了 /api)
-const API_BASE_URL = 'https://hipera-shop-production.up.railway.app/api';
+// 本地开发优先用 .env 的 VITE_API_URL（如 http://localhost:3001/api），否则用 Railway
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://hipera-shop-production.up.railway.app/api';
 
-// 调试：输出API配置
-console.log('🔧 API Client configured:', {
-  apiUrl: API_BASE_URL,
-  envVar: import.meta.env.VITE_API_URL,
-  fallback: 'http://localhost:3001/api'
-});
+console.log('🔧 API Client:', API_BASE_URL);
 
 class ApiClient {
   constructor() {

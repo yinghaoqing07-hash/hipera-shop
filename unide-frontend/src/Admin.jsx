@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Package, List, ShoppingBag, 
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
   ChevronRight, FolderPlus, ImageIcon, LogOut, Upload, Wrench, Search,
-  CheckCircle, Clock
+  CheckCircle, Clock, Gift
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -55,46 +55,81 @@ export default function AdminApp() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 使用API客户端获取所有数据
-      const [pData, oData, cData, sData, rData] = await Promise.all([
-        apiClient.getProducts().catch(e => { console.error("Products error:", e); return null; }),
-        apiClient.getAdminOrders().catch(e => { console.error("Orders error:", e); return null; }),
-        apiClient.getCategories().catch(e => { console.error("Categories error:", e); return null; }),
-        apiClient.getSubCategories().catch(e => { console.error("SubCategories error:", e); return null; }),
-        apiClient.getRepairServices().catch(e => { console.error("Repairs error:", e); return null; })
+      // 使用 Promise.allSettled 确保即使部分失败也不会影响其他数据
+      const results = await Promise.allSettled([
+        apiClient.getProducts(),
+        apiClient.getAdminOrders(),
+        apiClient.getCategories(),
+        apiClient.getSubCategories(),
+        apiClient.getRepairServices()
       ]);
 
-      if (pData) setProducts(pData.map(p => {
-        // 解析 images（如果是 JSON 字符串）
-        let images = [];
-        if (p.images) {
-          try {
-            images = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
-          } catch (e) {
-            images = p.image ? [p.image] : [];
+      // 处理每个结果，只更新成功的数据
+      const [pResult, oResult, cResult, sResult, rResult] = results;
+
+      if (pResult.status === 'fulfilled' && pResult.value) {
+        setProducts(pResult.value.map(p => {
+          // 解析 images（如果是 JSON 字符串）
+          let images = [];
+          if (p.images) {
+            try {
+              images = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
+            } catch (e) {
+              images = p.image ? [p.image] : [];
+            }
+          } else if (p.image) {
+            images = [p.image];
           }
-        } else if (p.image) {
-          images = [p.image];
-        }
-        
-        return {
-          ...p, 
-          ofertaType: p.oferta_type, 
-          ofertaValue: p.oferta_value, 
-          subCategoryId: p.sub_category_id,
-          images: images,
-          image: images[0] || p.image || '',
-          giftProduct: p.gift_product || false
-        };
-      }));
-      if (oData) setOrders(oData);
-      if (cData) setCategories(cData);
-      if (sData) setSubCategories(sData);
-      if (rData) setRepairs(rData);
+          
+          return {
+            ...p, 
+            ofertaType: p.oferta_type, 
+            ofertaValue: p.oferta_value, 
+            subCategoryId: p.sub_category_id,
+            images: images,
+            image: images[0] || p.image || '',
+            giftProduct: p.gift_product || false
+          };
+        }));
+      } else if (pResult.status === 'rejected') {
+        console.error("Products error:", pResult.reason);
+      }
+
+      if (oResult.status === 'fulfilled' && oResult.value) {
+        setOrders(oResult.value);
+      } else if (oResult.status === 'rejected') {
+        console.error("Orders error:", oResult.reason);
+      }
+
+      if (cResult.status === 'fulfilled' && cResult.value) {
+        setCategories(cResult.value);
+      } else if (cResult.status === 'rejected') {
+        console.error("Categories error:", cResult.reason);
+      }
+
+      if (sResult.status === 'fulfilled' && sResult.value) {
+        setSubCategories(sResult.value);
+      } else if (sResult.status === 'rejected') {
+        console.error("SubCategories error:", sResult.reason);
+        // 如果子类别加载失败，不清空现有数据
+      }
+
+      if (rResult.status === 'fulfilled' && rResult.value) {
+        setRepairs(rResult.value);
+      } else if (rResult.status === 'rejected') {
+        console.error("Repairs error:", rResult.reason);
+      }
+
+      // 检查是否有任何关键数据加载失败
+      const hasFailures = results.some(r => r.status === 'rejected');
+      if (hasFailures) {
+        toast.error("Algunos datos no se pudieron cargar. Verifique la conexión.");
+      }
 
     } catch (error) {
       toast.error("Error cargando datos. Verifique que el servidor backend esté ejecutándose.");
-      console.error(error);
+      console.error("Fetch data error:", error);
+      // 不清空现有状态，保持数据可见
     } finally {
       setLoading(false);
     }
@@ -108,9 +143,13 @@ export default function AdminApp() {
     try {
       await apiClient.deleteProduct(id);
       toast.success("Producto eliminado");
-      fetchData();
+      // 直接从状态中移除，避免重新获取所有数据
+      setProducts(prev => prev.filter(p => p.id !== id));
     } catch (error) {
       toast.error("Error al eliminar: " + error.message);
+      console.error("Error deleting product:", error);
+      // 如果删除失败，重新获取数据以确保同步
+      fetchData();
     }
   };
   
@@ -134,18 +173,59 @@ export default function AdminApp() {
     };
     
     try {
+      let savedProduct;
       if (currentProduct.id) {
-        await apiClient.updateProduct(currentProduct.id, dbPayload);
+        // 更新现有商品
+        savedProduct = await apiClient.updateProduct(currentProduct.id, dbPayload);
         toast.success("Producto actualizado");
+        // 直接更新状态中的商品
+        if (savedProduct) {
+          setProducts(prev => prev.map(p => {
+            if (p.id === currentProduct.id) {
+              // 更新商品数据，保持 images 数组
+              return {
+                ...savedProduct,
+                ofertaType: savedProduct.oferta_type,
+                ofertaValue: savedProduct.oferta_value,
+                subCategoryId: savedProduct.sub_category_id,
+                images: images, // 保持前端的多图数组
+                image: images[0] || savedProduct.image || '',
+                giftProduct: savedProduct.gift_product || false
+              };
+            }
+            return p;
+          }));
+        } else {
+          // 如果返回数据不完整，重新获取
+          fetchData();
+        }
       } else {
-        await apiClient.createProduct(dbPayload);
+        // 创建新商品
+        savedProduct = await apiClient.createProduct(dbPayload);
         toast.success("Producto creado");
+        // 直接添加到状态
+        if (savedProduct) {
+          const newProduct = {
+            ...savedProduct,
+            ofertaType: savedProduct.oferta_type,
+            ofertaValue: savedProduct.oferta_value,
+            subCategoryId: savedProduct.sub_category_id,
+            images: images, // 保持前端的多图数组
+            image: images[0] || savedProduct.image || '',
+            giftProduct: savedProduct.gift_product || false
+          };
+          setProducts(prev => [...prev, newProduct]);
+        } else {
+          // 如果返回数据不完整，重新获取
+          fetchData();
+        }
       }
       setIsEditing(false); 
-      setCurrentProduct(null); 
-      fetchData();
+      setCurrentProduct(null);
     } catch (error) {
       toast.error("Error al guardar: " + error.message);
+      console.error("Error saving product:", error);
+      // 保存失败时不清空表单，让用户可以重试
     }
   };
 
@@ -274,25 +354,39 @@ export default function AdminApp() {
   const handleAddCategory = async () => { 
     if (!newCatName) return; 
     try {
-      await apiClient.createCategory({ name: newCatName, icon: newCatIcon });
+      const newCat = await apiClient.createCategory({ name: newCatName, icon: newCatIcon });
       toast.success("Categoría creada");
       setNewCatName(""); 
-      fetchData();
+      setNewCatIcon("Package");
+      // 直接添加到状态，避免重新获取所有数据
+      if (newCat) {
+        setCategories(prev => [...prev, newCat]);
+      } else {
+        fetchData();
+      }
     } catch (error) {
       toast.error("Error: " + error.message);
+      console.error("Error creating category:", error);
     }
   };
   
   const handleAddSubCategory = async (pid) => { 
     if (!newSubName) return; 
     try {
-      await apiClient.createSubCategory({ parent_id: pid, name: newSubName });
+      const newSub = await apiClient.createSubCategory({ parent_id: pid, name: newSubName });
       toast.success("Subcategoría creada");
       setNewSubName(""); 
       setSelectedParentForSub(null); 
-      fetchData();
+      // 直接添加到状态，避免重新获取所有数据
+      if (newSub) {
+        setSubCategories(prev => [...prev, newSub]);
+      } else {
+        // 如果返回的数据不完整，才重新获取
+        fetchData();
+      }
     } catch (error) {
       toast.error("Error: " + error.message);
+      console.error("Error creating subcategory:", error);
     }
   };
   
@@ -301,13 +395,21 @@ export default function AdminApp() {
     try {
       if (isSub) {
         await apiClient.deleteSubCategory(id);
+        // 直接从状态中移除，避免重新获取所有数据
+        setSubCategories(prev => prev.filter(s => s.id !== id));
       } else {
         await apiClient.deleteCategory(id);
+        // 直接从状态中移除，避免重新获取所有数据
+        setCategories(prev => prev.filter(c => c.id !== id));
+        // 同时移除该类别下的所有子类别
+        setSubCategories(prev => prev.filter(s => s.parent_id !== id));
       }
       toast.success("Eliminado");
-      fetchData();
     } catch (error) {
       toast.error("Error: " + error.message);
+      console.error("Error deleting category:", error);
+      // 如果删除失败，重新获取数据以确保同步
+      fetchData();
     }
   };
   
@@ -316,9 +418,13 @@ export default function AdminApp() {
     try {
       await apiClient.deleteRepairService(id);
       toast.success("Servicio eliminado");
-      fetchData();
+      // 直接从状态中移除，避免重新获取所有数据
+      setRepairs(prev => prev.filter(r => r.id !== id));
     } catch (error) {
       toast.error("Error: " + error.message);
+      console.error("Error deleting repair:", error);
+      // 如果删除失败，重新获取数据以确保同步
+      fetchData();
     }
   };
 
@@ -458,7 +564,7 @@ const renderRepairs = () => (
         const title = `${newRepair.model} - ${newRepair.repair_type || 'Reparación'}`;
         
         // 3. 发送给数据库（通过API）
-        await apiClient.createRepairService({
+        const newRepairService = await apiClient.createRepairService({
             brand: newRepair.brand,
             model: newRepair.model,
             repair_type: newRepair.repair_type,
@@ -470,7 +576,12 @@ const renderRepairs = () => (
         // 4. 成功
         toast.success("Servicio añadido", { id: toastId });
         setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO."}); 
-        fetchData();
+        // 直接添加到状态，避免重新获取所有数据
+        if (newRepairService) {
+          setRepairs(prev => [...prev, newRepairService]);
+        } else {
+          fetchData();
+        }
 
     } catch (err) {
         // 5. 捕获并显示错误
@@ -555,11 +666,21 @@ const renderRepairs = () => (
                       {o.note && <div className="text-xs bg-yellow-50 p-1 mt-1 rounded text-yellow-700">Nota: {o.note}</div>}
                    </td>
                    <td className="p-4 align-top">
-                      {Array.isArray(o.items) && o.items.map((item, idx) => (
-                          <div key={idx} className="flex justify-between text-xs mb-1 border-b border-dashed border-gray-100 pb-1">
-                              <span>{item.quantity}x {item.name}</span>
+                      {Array.isArray(o.items) && o.items.map((item, idx) => {
+                        const isGift = item.isGift || item.price === 0;
+                        return (
+                          <div key={idx} className={`flex justify-between items-center text-xs mb-1 border-b border-dashed pb-1 ${isGift ? 'bg-pink-50 border-pink-200 px-2 py-1 rounded' : 'border-gray-100'}`}>
+                              <span className="flex items-center gap-1.5">
+                                {isGift && <Gift size={12} className="text-pink-600 flex-shrink-0"/>}
+                                <span className={isGift ? 'font-bold text-pink-700' : ''}>
+                                  {item.quantity}x {item.name}
+                                </span>
+                                {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold">GRATIS</span>}
+                              </span>
+                              {!isGift && <span className="text-gray-500">€{(item.price * item.quantity).toFixed(2)}</span>}
                           </div>
-                      ))}
+                        );
+                      })}
                    </td>
                    <td className="p-4 align-top font-bold">€{o.total?.toFixed(2)}</td>
                    <td className="p-4 align-top">
@@ -609,11 +730,21 @@ const renderRepairs = () => (
                 </div>
                 <div className="border-t pt-3">
                   <div className="text-xs text-gray-600 mb-2 font-bold">Items:</div>
-                  {Array.isArray(o.items) && o.items.map((item, idx) => (
-                    <div key={idx} className="flex justify-between text-xs mb-1 pb-1 border-b border-dashed border-gray-100">
-                      <span>{item.quantity}x {item.name}</span>
-                    </div>
-                  ))}
+                  {Array.isArray(o.items) && o.items.map((item, idx) => {
+                    const isGift = item.isGift || item.price === 0;
+                    return (
+                      <div key={idx} className={`flex justify-between items-center text-xs mb-1 pb-1 border-b border-dashed ${isGift ? 'bg-pink-50 border-pink-200 px-2 py-1.5 rounded' : 'border-gray-100'}`}>
+                        <span className="flex items-center gap-1.5 flex-1">
+                          {isGift && <Gift size={12} className="text-pink-600 flex-shrink-0"/>}
+                          <span className={isGift ? 'font-bold text-pink-700' : ''}>
+                            {item.quantity}x {item.name}
+                          </span>
+                          {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold ml-1">GRATIS</span>}
+                        </span>
+                        {!isGift && <span className="text-gray-500">€{(item.price * item.quantity).toFixed(2)}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t">
                   <span className="font-bold text-lg text-gray-800">€{o.total?.toFixed(2)}</span>
