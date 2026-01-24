@@ -693,6 +693,7 @@ export default function App() {
   // 新增这两个状态用于筛选
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedRepairType, setSelectedRepairType] = useState(null); // 'pantalla' | 'bateria' | null
 
   const navigate = useNavigate();
   const [queryOrderId, setQueryOrderId] = useState(null);
@@ -761,7 +762,10 @@ export default function App() {
           giftProduct: p.gift_product || false
         })));
       } else {
-        toast.error("No se pudieron cargar los productos. ¿Está el backend en marcha? (npm run dev en /backend)");
+        const msg = import.meta.env.PROD
+          ? "No se pudieron cargar los productos. Compruebe su conexión; si usa Railway, el backend puede estar en reposo (espérale 1 min o revisa el panel)."
+          : "No se pudieron cargar los productos. ¿Está el backend en marcha? (npm run dev en /backend)";
+        toast.error(msg);
       }
 
       if (categoriesData) setCategories(categoriesData);
@@ -770,7 +774,10 @@ export default function App() {
 
     } catch (error) {
       console.error("Data load error:", error);
-      toast.error("Error al cargar datos. Compruebe que el backend esté en ejecución (npm run dev en /backend).");
+      const msg = import.meta.env.PROD
+        ? "Error al cargar datos. Compruebe su conexión o que el backend (Railway) esté activo."
+        : "Error al cargar datos. Compruebe que el backend esté en ejecución (npm run dev en /backend).";
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -1109,7 +1116,7 @@ export default function App() {
                 <div className="relative z-10 flex justify-between items-center">
                    <div>
                       <div className="flex items-center gap-2 mb-2"><Wrench className="text-red-500 animate-pulse" size={20}/><span className="font-bold text-[10px] bg-red-600 px-2 py-0.5 rounded text-white tracking-wider">SERVICIO OFICIAL</span></div>
-                      <h3 className="text-xl font-bold mb-1">Reparación Móvil</h3><p className="text-gray-400 text-xs">Cambio de pantalla, batería...<br/>Reserva con precio cerrado.</p>
+                      <h3 className="text-xl font-bold mb-1">Reparación Móvil</h3><p className="text-gray-400 text-xs">Cambio de pantalla, batería...<br/>Por cita · Consulta precio por WhatsApp.</p>
                    </div>
                    <Smartphone size={56} className="text-gray-600 group-hover:text-white transition-colors transform group-hover:rotate-12"/>
                 </div>
@@ -1171,8 +1178,8 @@ export default function App() {
               <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 rounded-3xl border border-gray-700 text-center relative overflow-hidden shadow-2xl">
                  <div className="absolute top-0 right-0 w-24 h-24 bg-red-600 blur-[60px] opacity-20"></div>
                  <Wrench size={40} className="mx-auto text-red-500 mb-4"/>
-                 <h3 className="text-xl font-bold mb-2">Reserva tu reparación</h3>
-                 <p className="text-gray-400 text-sm leading-relaxed">Selecciona tu modelo y asegura el precio online.</p>
+                 <h3 className="text-xl font-bold mb-2">Reparación por cita</h3>
+                 <p className="text-gray-400 text-sm leading-relaxed">Elige modelo y tipo de reparación, luego consulta el precio por WhatsApp.</p>
               </div>
 
               {/* 2. 核心：智能筛选器 (改为深色风格) */}
@@ -1183,7 +1190,7 @@ export default function App() {
                     {['Apple', 'Samsung', 'Xiaomi', 'Oppo'].map(brand => (
                       <button 
                         key={brand}
-                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); }} 
+                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); setSelectedRepairType(null); }} 
                         className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap px-4 ${selectedBrand === brand ? 'bg-gray-800 text-white shadow-lg border border-gray-700' : 'text-gray-500 hover:text-gray-300'}`}
                       >
                         {brand}
@@ -1198,7 +1205,7 @@ export default function App() {
                        <div className="relative">
                          <select 
                            value={selectedModel} 
-                           onChange={e => setSelectedModel(e.target.value)}
+                           onChange={e => { setSelectedModel(e.target.value); setSelectedRepairType(null); }}
                            className="w-full p-4 bg-gray-900 border border-gray-700 rounded-xl text-white font-bold outline-none focus:ring-2 focus:ring-red-900/50 appearance-none transition-all"
                          >
                            <option value="" className="text-gray-500">-- Elige tu dispositivo --</option>
@@ -1215,9 +1222,9 @@ export default function App() {
                        </div>
                     </div>
 
-                    {/* 维修列表 (已修改：处理"其他型号"逻辑) */}
+                    {/* 预约制：选型号 → 简单信息 + Cambiar pantalla / batería → WhatsApp 咨询价格 */}
                     <div className="space-y-3">
-                       {/* 情况 A: 没选型号 */}
+                       {/* A: 未选型号 */}
                        {!selectedModel && (
                          <div className="text-center py-10 border-2 border-dashed border-gray-800 rounded-2xl">
                             <Smartphone size={32} className="mx-auto mb-3 text-gray-700"/>
@@ -1225,7 +1232,7 @@ export default function App() {
                          </div>
                        )}
 
-                       {/* 情况 B: 选了"找不到型号" -> 显示联系卡片 */}
+                       {/* B: "找不到型号" → 直接 WhatsApp */}
                        {selectedModel === 'others' && (
                          <div className="bg-gray-800 p-6 rounded-2xl text-center border border-gray-700 animate-fade-in">
                             <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-400">
@@ -1233,51 +1240,96 @@ export default function App() {
                             </div>
                             <h3 className="text-xl font-bold text-white mb-2">¿Tu modelo no está en la lista?</h3>
                             <p className="text-gray-400 text-sm mb-6 leading-relaxed">
-                               No te preocupes. Trabajamos con casi todas las marcas. <br/>
-                               Contáctanos por WhatsApp para recibir un presupuesto personalizado al instante.
+                               Trabajamos con casi todas las marcas. Contáctanos por WhatsApp para consultar precio.
                             </p>
-                            
-                            {/* WhatsApp 按钮 */}
                             <a 
-                              href="https://wa.me/34646569480?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web." 
+                              href="https://wa.me/34646569480?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web.%20Quisiera%20consultar%20precio."
                               target="_blank" 
                               rel="noreferrer"
-                              className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full md:w-auto"
+                              className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full"
                             >
-                               <Smartphone size={20}/> Consultar por WhatsApp
+                               <Smartphone size={20}/> Consultar precio por WhatsApp
                             </a>
                          </div>
                        )}
 
-                       {/* 情况 C: 选了正常型号 -> 显示价格列表 */}
+                       {/* C: 已选型号 → 简单信息 + Cambiar pantalla / batería（点击仅选中）→ 再显示 Consultar / Pedir cita → WhatsApp */}
                        {selectedModel && selectedModel !== 'others' && (
-                         <>
-                           {repairs.filter(r => r.model === selectedModel).map(item => (
-                             <div key={item.id} className="bg-gray-800 p-4 rounded-2xl flex justify-between items-center shadow-lg border border-gray-700 group active:scale-95 transition-all cursor-pointer" onClick={() => addToCart(item)}>
-                                <div className="flex items-center gap-4">
-                                   <div className="w-10 h-10 bg-gray-900 text-gray-400 rounded-full flex items-center justify-center border border-gray-700 group-hover:border-red-500/50 group-hover:text-red-500 transition-colors">
-                                      {item.repair_type?.toLowerCase().includes('pantalla') ? <Smartphone size={18}/> : <Wrench size={18}/>}
+                         <div className="space-y-4 animate-fade-in">
+                           <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700">
+                             <p className="text-xs text-gray-500 uppercase font-bold mb-1">{selectedBrand}</p>
+                             <h3 className="text-lg font-bold text-white">{selectedModel}</h3>
+                             <p className="text-gray-400 text-sm mt-1">
+                               {!selectedRepairType
+                                 ? "Elige el tipo de reparación."
+                                 : `Has elegido: Cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}. Pulsa abajo para consultar o pedir cita.`}
+                             </p>
+                           </div>
+
+                           {!selectedRepairType ? (
+                             <>
+                               <div className="grid grid-cols-1 gap-3">
+                                 <button
+                                   type="button"
+                                   onClick={() => setSelectedRepairType('pantalla')}
+                                   className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
+                                 >
+                                   <div className="w-12 h-12 bg-gray-900 rounded-xl flex items-center justify-center text-red-400">
+                                     <Smartphone size={24}/>
                                    </div>
-                                   <div>
-                                      <h4 className="font-bold text-gray-100 text-sm">{item.repair_type || item.title}</h4>
-                                      <p className="text-[10px] text-gray-500">{item.description || "Reparación rápida*"}</p>
-                                      {!item.description && (
-                                        <p className="text-[9px] text-gray-600 mt-0.5">*Piezas disponibles: 1h | Sin stock: 2-3 días</p>
-                                      )}
+                                   <div className="flex-1">
+                                     <h4 className="font-bold text-white">Cambiar pantalla</h4>
+                                     <p className="text-gray-500 text-xs">Seleccionar</p>
                                    </div>
-                                </div>
-                                <div className="text-right">
-                                   <span className="block font-extrabold text-lg text-white">€{item.price}</span>
-                                   <button className="text-[10px] font-bold text-gray-900 bg-white px-3 py-1 rounded-full mt-1 group-hover:bg-red-600 group-hover:text-white transition-colors">Reservar</button>
-                                </div>
-                             </div>
-                           ))}
-                           
-                           {/* 防呆：如果选了型号但后台忘记录入维修项目 */}
-                           {repairs.filter(r => r.model === selectedModel).length === 0 && (
-                              <p className="text-center text-gray-500 text-sm py-4">No hay precios disponibles. Contáctanos.</p>
+                                   <ChevronRight className="text-gray-500" size={20}/>
+                                 </button>
+                                 <button
+                                   type="button"
+                                   onClick={() => setSelectedRepairType('bateria')}
+                                   className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
+                                 >
+                                   <div className="w-12 h-12 bg-gray-900 rounded-xl flex items-center justify-center text-amber-400">
+                                     <Wrench size={24}/>
+                                   </div>
+                                   <div className="flex-1">
+                                     <h4 className="font-bold text-white">Cambiar batería</h4>
+                                     <p className="text-gray-500 text-xs">Seleccionar</p>
+                                   </div>
+                                   <ChevronRight className="text-gray-500" size={20}/>
+                                 </button>
+                               </div>
+                               <button
+                                 onClick={() => setSelectedModel("")}
+                                 className="w-full text-center text-gray-500 text-sm py-2 hover:text-gray-300"
+                               >
+                                 ← Cambiar modelo
+                               </button>
+                             </>
+                           ) : (
+                             <>
+                               <a
+                                 href={`https://wa.me/34646569480?text=${encodeURIComponent(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}`}
+                                 target="_blank"
+                                 rel="noreferrer"
+                                 className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
+                               >
+                                 <Smartphone size={20}/> Consultar / Pedir cita por WhatsApp
+                               </a>
+                               <button
+                                 onClick={() => setSelectedRepairType(null)}
+                                 className="w-full text-center text-gray-500 text-sm py-2 hover:text-gray-300"
+                               >
+                                 ← Cambiar opción
+                               </button>
+                               <button
+                                 onClick={() => { setSelectedModel(""); setSelectedRepairType(null); }}
+                                 className="w-full text-center text-gray-500 text-sm py-2 hover:text-gray-300"
+                               >
+                                 ← Cambiar modelo
+                               </button>
+                             </>
                            )}
-                         </>
+                         </div>
                        )}
                     </div>
                  </div>
