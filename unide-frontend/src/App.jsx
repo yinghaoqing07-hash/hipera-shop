@@ -1148,7 +1148,7 @@ export default function App() {
                {categories.map(c => (
                  <button 
                    key={c.id} 
-                   onClick={() => {setMainCat(c); navTo("sub");}} 
+                   onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}} 
                    className="flex flex-col items-center gap-2 group w-24 flex-shrink-0"
                  >
                    <div className="w-20 h-20 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-95 transition-transform">
@@ -1713,7 +1713,7 @@ export default function App() {
             <h2 className="font-bold text-lg text-gray-800">{page === "offers" && "Todas las Ofertas"}{page === "main" && "Categorías"}{page === "sub" && mainCat?.name}{page === "products" && subCat?.name}</h2>
           </div>
           {page === "main" ? (
-             <div className="grid grid-cols-2 gap-3">{categories.map(c => <button key={c.id} className="bg-white p-4 rounded-xl shadow-sm text-left flex flex-col justify-between h-24 border-l-4 border-red-500 active:scale-95 transition-transform" onClick={() => {setMainCat(c); navTo("sub");}}><span className="font-bold text-lg text-gray-800">{c.name}</span><ChevronRight size={18} className="text-gray-300 self-end"/></button>)}</div>
+             <div className="grid grid-cols-2 gap-3">{categories.map(c => <button key={c.id} className="bg-white p-4 rounded-xl shadow-sm text-left flex flex-col justify-between h-24 border-l-4 border-red-500 active:scale-95 transition-transform" onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}}><span className="font-bold text-lg text-gray-800">{c.name}</span><ChevronRight size={18} className="text-gray-300 self-end"/></button>)}</div>
           ) : page === "sub" ? (
              <div className="space-y-6">
                {/* 子类别选项 - 固定在顶部 */}

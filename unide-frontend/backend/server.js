@@ -780,19 +780,20 @@ app.post('/api/admin/generate-description', authenticateAdmin, async (req, res) 
         text: `Analiza ${urls.length > 1 ? 'estas imágenes' : 'esta imagen'} de producto y extrae la siguiente información en formato JSON. Si hay múltiples imágenes, combina la información de todas ellas:
 
 {
-  "weight": "peso en g o ml (ej: '500g', '250ml', '1kg') o null si no se ve en ninguna imagen",
-  "quantity": "cantidad de unidades/piezas (ej: '2 unidades', '10 piezas', '1 unidad') o null si no se ve",
-  "ingredients": "lista completa de ingredientes o composición si es visible en alguna etiqueta, o null",
+  "name": "nombre del producto tal como aparece (ej: Ramen Sabor Pollo, Fideos Instantáneos)",
+  "brand": "marca del producto (ej: JML, Nissin) o null si no se ve",
+  "weight": "peso en g o ml exactamente como en etiqueta (ej: '109g', '500g', '250ml') o null si no se ve",
+  "quantity": "cantidad de unidades/piezas (ej: '2 unidades', '10 piezas') o null si no se ve",
+  "ingredients": "lista completa de ingredientes si es visible, o null",
   "description": "descripción breve del producto en español (1-2 frases)",
-  "specifications": "otras especificaciones visibles (tamaño, capacidad, etc.) o null"
+  "specifications": "otras especificaciones visibles o null"
 }
 
-REGLAS IMPORTANTES:
-- Analiza TODAS las imágenes proporcionadas y combina la información
-- Si una imagen muestra el frente y otra el dorso/etiqueta, extrae información de ambas
-- Solo extrae información que REALMENTE puedas ver en las imágenes/etiquetas
-- Si no ves peso, cantidad o ingredientes en ninguna imagen, usa null (no inventes)
-- description siempre debe tener un valor (breve descripción del producto)
+REGLAS:
+- Analiza TODAS las imágenes y combina la información
+- Solo extrae lo que REALMENTE ves; si no ves algo, usa null
+- description siempre debe tener un valor
+- name y brand deben ser el nombre y marca exactos del producto
 - Responde SOLO con el JSON, sin texto adicional`
       }
     ];
@@ -831,22 +832,26 @@ REGLAS IMPORTANTES:
     try {
       const productInfo = JSON.parse(responseContent);
       
-      // 格式化信息为易读的文本描述
+      // Producto nombre: NAME BRAND 109g (todo mayúsculas salvo peso)
+      const namePart = (productInfo.name || '').trim().toUpperCase();
+      const brandPart = (productInfo.brand || '').trim().toUpperCase();
+      const weightPart = (productInfo.weight || '').trim();
+      const productNameParts = [namePart, brandPart].filter(Boolean);
+      if (weightPart) productNameParts.push(weightPart);
+      const productName = productNameParts.join(' ') || null;
+
       let formattedDesc = productInfo.description || '';
       const parts = [];
-      
       if (productInfo.weight) parts.push(`Peso: ${productInfo.weight}`);
       if (productInfo.quantity) parts.push(`Cantidad: ${productInfo.quantity}`);
       if (productInfo.specifications) parts.push(productInfo.specifications);
       if (productInfo.ingredients) parts.push(`Ingredientes: ${productInfo.ingredients}`);
-      
-      if (parts.length > 0) {
-        formattedDesc += '\n\n' + parts.join('\n');
-      }
+      if (parts.length > 0) formattedDesc += '\n\n' + parts.join('\n');
       
       res.json({ 
         description: formattedDesc,
         productInfo: {
+          productName,
           weight: productInfo.weight || null,
           quantity: productInfo.quantity || null,
           ingredients: productInfo.ingredients || null,

@@ -305,10 +305,11 @@ export default function AdminApp() {
       // 发送所有图片到后端
       const result = await apiClient.generateDescription(images);
       
-      // 更新描述
       const updatedProduct = { ...currentProduct, description: result.description || "" };
       
-      // 如果有数量信息，尝试提取数字并更新stock（如果stock为空或默认值）
+      if (result.productInfo?.productName) {
+        updatedProduct.name = result.productInfo.productName;
+      }
       if (result.productInfo?.quantity) {
         const qtyMatch = result.productInfo.quantity.match(/(\d+)/);
         if (qtyMatch && (!currentProduct.stock || currentProduct.stock === 10)) {
@@ -319,6 +320,7 @@ export default function AdminApp() {
       setCurrentProduct(updatedProduct);
       
       const infoParts = [];
+      if (result.productInfo?.productName) infoParts.push(`Nombre: ${result.productInfo.productName}`);
       if (result.productInfo?.weight) infoParts.push(`Peso: ${result.productInfo.weight}`);
       if (result.productInfo?.quantity) infoParts.push(`Cantidad: ${result.productInfo.quantity}`);
       if (infoParts.length > 0) {
