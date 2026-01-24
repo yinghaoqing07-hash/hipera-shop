@@ -30,6 +30,26 @@ class ApiClient {
     }
   }
 
+  /** Simple GET (no Content-Type/Authorization) → no preflight; use for public APIs when CORS preflight fails. */
+  async requestSimple(endpoint) {
+    const url = this._url(endpoint);
+    try {
+      const response = await fetch(url, { method: 'GET' });
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const hint = contentType.includes('text/html') ? ' (404 o error; compruebe /api)' : '';
+        throw new Error(`Unexpected response type: ${contentType}${hint}`);
+      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Request failed ${response.status}`);
+      return data;
+    } catch (e) {
+      console.error('API Error:', e);
+      console.error('Failed URL:', url);
+      throw e;
+    }
+  }
+
   async request(endpoint, options = {}) {
     const url = this._url(endpoint);
     const token = this.getToken();
@@ -92,21 +112,21 @@ class ApiClient {
     return null;
   }
 
-  // Public endpoints
+  // Public endpoints (simple GET → no preflight, avoids CORS preflight issues)
   async getProducts() {
-    return this.request('/products');
+    return this.requestSimple('/products');
   }
 
   async getCategories() {
-    return this.request('/categories');
+    return this.requestSimple('/categories');
   }
 
   async getSubCategories() {
-    return this.request('/sub-categories');
+    return this.requestSimple('/sub-categories');
   }
 
   async getRepairServices() {
-    return this.request('/repair-services');
+    return this.requestSimple('/repair-services');
   }
 
   async createOrder(orderData) {
@@ -122,7 +142,7 @@ class ApiClient {
 
   // Public: Get order by ID (for QR code lookup)
   async getOrderById(orderId) {
-    return this.request(`/orders/${orderId}`);
+    return this.requestSimple(`/orders/${orderId}`);
   }
 
   // Admin endpoints

@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import { createClient } from '@supabase/supabase-js';
@@ -216,37 +215,26 @@ const autoPrintTicket = async (order) => {
 // Trust proxy (needed for Railway/reverse proxy setups)
 app.set('trust proxy', true);
 
+// Custom CORS middleware (runs first): always allow preflight and reflect origin
+app.use((req, res, next) => {
+  const origin = req.headers.origin || 'https://hipera-shop.vercel.app';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // Initialize Supabase with service role key (server-side only)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
-
-// CORS: 本地开发 + Vercel（含 *.vercel.app）+ FRONTEND_URL
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:3000',
-  'https://hipera-shop.vercel.app',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
-const corsOrigin = (origin, cb) => {
-  if (!origin) return cb(null, true);
-  if (allowedOrigins.includes(origin)) return cb(null, true);
-  if (origin.endsWith('.vercel.app')) return cb(null, true);
-  cb(null, false);
-};
-
-const corsOpts = {
-  origin: corsOrigin,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
-
-app.options('*', cors(corsOpts));
-app.use(cors(corsOpts));
 
 // 添加响应头防止CORB
 app.use((req, res, next) => {
@@ -256,16 +244,14 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Rate limiting
+// Rate limiting (skip OPTIONS so preflight always succeeds)
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  // 禁用 trust proxy 警告（在 Railway 等反向代理环境中，trust proxy 是必要的）
-  validate: {
-    trustProxy: false
-  }
+  skip: (req) => req.method === 'OPTIONS',
+  validate: { trustProxy: false }
 });
 app.use('/api/', limiter);
 
