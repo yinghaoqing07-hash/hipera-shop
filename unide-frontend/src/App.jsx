@@ -1256,15 +1256,21 @@ export default function App() {
                        {/* C: 已选型号 → 简单信息 + Cambiar pantalla / batería（点击仅选中）→ 再显示 Consultar / Pedir cita → WhatsApp */}
                        {selectedModel && selectedModel !== 'others' && (
                          <div className="space-y-4 animate-fade-in">
+                           {(() => {
+                             const modelRepair = repairs.find(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase() && r.model === selectedModel);
+                             const desc = modelRepair?.description;
+                             return (
                            <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700">
                              <p className="text-xs text-gray-500 uppercase font-bold mb-1">{selectedBrand}</p>
                              <h3 className="text-lg font-bold text-white">{selectedModel}</h3>
+                             {desc ? <p className="text-gray-400 text-sm mt-1">{desc}</p> : null}
                              <p className="text-gray-400 text-sm mt-1">
                                {!selectedRepairType
                                  ? "Elige el tipo de reparación."
                                  : `Has elegido: Cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}. Pulsa abajo para consultar o pedir cita.`}
                              </p>
                            </div>
+                           ); })()}
 
                            {!selectedRepairType ? (
                              <>
@@ -1298,36 +1304,16 @@ export default function App() {
                                    <ChevronRight className="text-gray-500" size={20}/>
                                  </button>
                                </div>
-                               <button
-                                 onClick={() => setSelectedModel("")}
-                                 className="w-full text-center text-gray-500 text-sm py-2 hover:text-gray-300"
-                               >
-                                 ← Cambiar modelo
-                               </button>
                              </>
                            ) : (
-                             <>
-                               <a
-                                 href={`https://wa.me/34646569480?text=${encodeURIComponent(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}`}
-                                 target="_blank"
-                                 rel="noreferrer"
-                                 className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
-                               >
-                                 <Smartphone size={20}/> Consultar / Pedir cita por WhatsApp
-                               </a>
-                               <button
-                                 onClick={() => setSelectedRepairType(null)}
-                                 className="w-full text-center text-gray-500 text-sm py-2 hover:text-gray-300"
-                               >
-                                 ← Cambiar opción
-                               </button>
-                               <button
-                                 onClick={() => { setSelectedModel(""); setSelectedRepairType(null); }}
-                                 className="w-full text-center text-gray-500 text-sm py-2 hover:text-gray-300"
-                               >
-                                 ← Cambiar modelo
-                               </button>
-                             </>
+                             <a
+                               href={`https://wa.me/34646569480?text=${encodeURIComponent(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}`}
+                               target="_blank"
+                               rel="noreferrer"
+                               className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
+                             >
+                               <Smartphone size={20}/> Consultar / Pedir cita por WhatsApp
+                             </a>
                            )}
                          </div>
                        )}
@@ -1342,25 +1328,10 @@ export default function App() {
                  </h3>
                  
                  <div className="space-y-5">
-                    {/* 使用方法 */}
-                    <div className="flex gap-4">
-                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-blue-400"><FileText size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Cómo utilizar</p><p className="text-xs text-gray-500 mt-0.5">Muestra la factura o ticket al personal.</p></div>
-                    </div>
-                    {/* 有效期 */}
-                    <div className="flex gap-4">
-                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-green-400"><Calendar size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Validez</p><p className="text-xs text-gray-500 mt-0.5">Válido <strong>180 días</strong> desde la compra.</p></div>
-                    </div>
                     {/* 时间 */}
                     <div className="flex gap-4">
                        <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-yellow-400"><Clock size={14}/></div>
                        <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Horario</p><p className="text-xs text-gray-500 mt-0.5">Lunes a Domingo, de 9:00 a 22:00.</p></div>
-                    </div>
-                    {/* 免预约 */}
-                    <div className="flex gap-4">
-                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-purple-400"><Users size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Sin Cita Previa</p><p className="text-xs text-gray-500 mt-0.5">Se atiende por orden de llegada.</p></div>
                     </div>
                     {/* 库存等待时间 */}
                     <div className="flex gap-4">
