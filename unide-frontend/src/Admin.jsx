@@ -42,7 +42,7 @@ export default function AdminApp() {
   const [newCatIcon, setNewCatIcon] = useState("Package");
   const [newSubName, setNewSubName] = useState("");
   const [selectedParentForSub, setSelectedParentForSub] = useState(null);
-  const [newRepair, setNewRepair] = useState({ title: "", price: "", original_price: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO." });
+  const [newRepair, setNewRepair] = useState({ brand: "", model: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO." });
 
   // 修改：增加了 description, oferta, oferta_type, oferta_value
   const [formData, setFormData] = useState({
@@ -540,60 +540,41 @@ const renderRepairs = () => (
     <div className="space-y-6">
       {/* 新增维修表单 */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
-        <h3 className="font-bold text-gray-800 text-sm">Añadir Nuevo Servicio</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mb-2">
-           <input id="repair-brand" name="repair-brand" placeholder="Marca (ej: Apple)" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <input id="repair-model" name="repair-model" placeholder="Modelo (ej: iPhone 13)" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <input id="repair-type" name="repair-type" placeholder="Tipo (ej: Pantalla)" value={newRepair.repair_type || ""} onChange={e => setNewRepair({...newRepair, repair_type: e.target.value})} className="border p-2 rounded-lg text-sm"/>
-           <input id="repair-price" name="repair-price" type="number" placeholder="Precio (€)" value={newRepair.price} onChange={e => setNewRepair({...newRepair, price: e.target.value})} className="border p-2 rounded-lg text-sm"/>
+        <h3 className="font-bold text-gray-800 text-sm">Añadir Modelo (solo marca, modelo, descripción)</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+           <div><label className="text-xs font-bold text-gray-500 block mb-1">Marca</label><input id="repair-brand" name="repair-brand" placeholder="ej: Apple" value={newRepair.brand || ""} onChange={e => setNewRepair({...newRepair, brand: e.target.value})} className="border p-2 rounded-lg text-sm w-full"/></div>
+           <div><label className="text-xs font-bold text-gray-500 block mb-1">Modelo</label><input id="repair-model" name="repair-model" placeholder="ej: iPhone 13" value={newRepair.model || ""} onChange={e => setNewRepair({...newRepair, model: e.target.value})} className="border p-2 rounded-lg text-sm w-full"/></div>
         </div>
         <div className="mb-2">
+           <label className="text-xs font-bold text-gray-500 block mb-1">Descripción</label>
            <input id="repair-description" name="repair-description" placeholder="Descripción" value={newRepair.description || ""} onChange={e => setNewRepair({...newRepair, description: e.target.value})} className="w-full border p-2 rounded-lg text-sm" />
-           <p className="text-xs text-gray-500 mt-1">Esta descripción se mostrará en la página de reparación (por defecto: Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.)</p>
+           <p className="text-xs text-gray-500 mt-1">Por defecto: Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.</p>
         </div>
         <button onClick={async () => {
-    // 1. 检查必填项 (如果有空的，弹窗提示)
-    if (!newRepair.brand) { toast.error("Falta la Marca (品牌)"); return; }
-    if (!newRepair.model) { toast.error("Falta el Modelo (型号)"); return; }
-    if (!newRepair.price) { toast.error("Falta el Precio (价格)"); return; }
+    if (!newRepair.brand?.trim()) { toast.error("Falta la Marca"); return; }
+    if (!newRepair.model?.trim()) { toast.error("Falta el Modelo"); return; }
 
     const toastId = toast.loading("Guardando...");
-
     try {
-        // 2. 构造标题
-        const title = `${newRepair.model} - ${newRepair.repair_type || 'Reparación'}`;
-        
-        // 3. 发送给数据库（通过API）
         const newRepairService = await apiClient.createRepairService({
-            brand: newRepair.brand,
-            model: newRepair.model,
-            repair_type: newRepair.repair_type,
-            price: parseFloat(newRepair.price),
-            title: title,
-            description: newRepair.description || "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO."
+            brand: newRepair.brand.trim(),
+            model: newRepair.model.trim(),
+            description: (newRepair.description || "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.").trim()
         });
-
-        // 4. 成功
-        toast.success("Servicio añadido", { id: toastId });
-        setNewRepair({title:"", price:"", original_price:"", brand: "", model: "", repair_type: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO."}); 
-        // 直接添加到状态，避免重新获取所有数据
-        if (newRepairService) {
-          setRepairs(prev => [...prev, newRepairService]);
-        } else {
-          fetchData();
-        }
-
+        toast.success("Modelo añadido", { id: toastId });
+        setNewRepair({ brand: "", model: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO." });
+        if (newRepairService) setRepairs(prev => [...prev, newRepairService]);
+        else fetchData();
     } catch (err) {
-        // 5. 捕获并显示错误
         console.error(err);
-        toast.error("Error: " + err.message, { id: toastId });
+        toast.error("Error: " + (err.message || "Error"), { id: toastId });
     }
 }} className="bg-gray-900 text-white px-4 py-2 rounded-lg font-bold text-sm">
     Añadir
 </button>
       </div>
 
-      {/* 列表显示 */}
+      {/* 列表显示：Marca · Modelo · Descripción */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {repairs.map(r => (
           <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
@@ -603,15 +584,13 @@ const renderRepairs = () => (
                       <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.brand}</span>
                       <span className="bg-blue-50 text-blue-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.model}</span>
                    </div>
-                   <h3 className="font-bold text-gray-800 text-sm mb-1">{r.repair_type || r.title}</h3>
-                   <p className="text-xs text-gray-500 mb-2">{r.description || "Reparación rápida*"}</p>
-                   <span className="text-red-600 font-bold">€{r.price}</span>
+                   <p className="text-xs text-gray-600 mb-2 line-clamp-2">{r.description || "—"}</p>
                 </div>
                 <button onClick={() => handleDeleteRepair(r.id)} className="text-gray-300 hover:text-red-600 p-2 flex-shrink-0"><Trash2 size={18}/></button>
              </div>
              <button 
                onClick={async () => {
-                 const newDesc = prompt("Editar descripción:", r.description || "Reparación rápida*");
+                 const newDesc = prompt("Editar descripción:", r.description || "");
                  if (newDesc !== null) {
                    try {
                      await apiClient.updateRepairService(r.id, { description: newDesc });

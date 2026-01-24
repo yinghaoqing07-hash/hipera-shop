@@ -222,33 +222,31 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// CORS: 允许本地开发 + Vercel 生产前端
+// CORS: 本地开发 + Vercel（含 *.vercel.app）+ FRONTEND_URL
 const allowedOrigins = [
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
   'https://hipera-shop.vercel.app',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
-// 处理 OPTIONS 预检请求
-app.options('*', cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    cb(null, false);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+const corsOrigin = (origin, cb) => {
+  if (!origin) return cb(null, true);
+  if (allowedOrigins.includes(origin)) return cb(null, true);
+  if (origin.endsWith('.vercel.app')) return cb(null, true);
+  cb(null, false);
+};
 
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    cb(null, false);
-  },
+const corsOpts = {
+  origin: corsOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+app.options('*', cors(corsOpts));
+app.use(cors(corsOpts));
 
 // 添加响应头防止CORB
 app.use((req, res, next) => {
@@ -620,12 +618,21 @@ app.delete('/api/admin/sub-categories/:id', authenticateAdmin, async (req, res) 
   }
 });
 
-// Repair service management (admin only)
+// Repair service management (admin only). Solo marca, modelo, descripción; el resto se rellena por defecto.
 app.post('/api/admin/repair-services', authenticateAdmin, async (req, res) => {
   try {
+    const { brand, model, description } = req.body;
+    const payload = {
+      brand: brand || '',
+      model: model || '',
+      description: description || 'Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.',
+      title: req.body.title ?? `${brand || ''} ${model || ''}`.trim() || 'Modelo',
+      repair_type: req.body.repair_type ?? '',
+      price: req.body.price != null ? Number(req.body.price) : 0
+    };
     const { data, error } = await supabase
       .from('repair_services')
-      .insert([req.body])
+      .insert([payload])
       .select()
       .single();
     
