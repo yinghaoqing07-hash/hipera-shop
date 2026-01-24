@@ -1,32 +1,31 @@
-// 生产环境唯一 API 基地址（Railway）
-const PROD_BASE = 'https://hipera-shop-production.up.railway.app/api';
+const RAILWAY_API = 'https://hipera-shop-production.up.railway.app/api';
 
 function getBase() {
-  if (import.meta.env.PROD) return PROD_BASE;
+  if (import.meta.env.PROD) return null; // prod: same-origin /api (Vercel proxy → Railway)
   const v = import.meta.env.VITE_API_URL;
   if (v && typeof v === 'string' && v.startsWith('http')) {
     const u = v.replace(/\/$/, '');
     return u.endsWith('/api') ? u : u + '/api';
   }
-  return PROD_BASE;
+  return RAILWAY_API;
 }
 
 const base = getBase();
-if (!import.meta.env.PROD) console.log('🔧 API base:', base);
+if (!import.meta.env.PROD) console.log('🔧 API base:', base || 'same-origin /api');
 
 class ApiClient {
   constructor() {
     this.baseURL = base;
   }
 
-  /** 用 URL 构造函数生成绝对 https 地址，避免相对路径请求到前端 */
   _url(endpoint) {
     const path = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    const b = (import.meta.env.PROD ? PROD_BASE : this.baseURL).replace(/\/$/, '') + '/';
+    if (import.meta.env.PROD) return `/api/${path}`;
+    const b = (this.baseURL || RAILWAY_API).replace(/\/$/, '') + '/';
     try {
       return new URL(path, b).href;
     } catch {
-      return PROD_BASE.replace(/\/$/, '') + (path.startsWith('/') ? path : '/' + path);
+      return RAILWAY_API.replace(/\/$/, '') + '/' + path;
     }
   }
 
