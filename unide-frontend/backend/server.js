@@ -215,17 +215,22 @@ const autoPrintTicket = async (order) => {
 // Trust proxy (needed for Railway/reverse proxy setups)
 app.set('trust proxy', true);
 
-// Custom CORS middleware (runs first): always allow preflight and reflect origin
+// CORS: valid header values only (Chrome rejects invalid tokens in Allow-Headers)
+const CORS_ALLOW_ORIGIN = 'https://hipera-shop.vercel.app';
+const CORS_ALLOW_HEADERS = 'Content-Type, Authorization, Accept';
+
 app.use((req, res, next) => {
-  const origin = req.headers.origin || 'https://hipera-shop.vercel.app';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  const raw = (req.headers.origin || '').trim();
+  const validOrigin = raw && raw !== 'null' && /^https?:\/\//.test(raw) ? raw : CORS_ALLOW_ORIGIN;
+  res.setHeader('Access-Control-Allow-Origin', validOrigin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
+  res.setHeader('Vary', 'Origin');
 
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Max-Age', '86400');
-    return res.sendStatus(204);
+    return res.status(204).end();
   }
   next();
 });
