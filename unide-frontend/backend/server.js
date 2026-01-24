@@ -613,12 +613,13 @@ app.delete('/api/admin/sub-categories/:id', authenticateAdmin, async (req, res) 
 app.post('/api/admin/repair-services', authenticateAdmin, async (req, res) => {
   try {
     const { brand, model, description } = req.body;
+    const fallbackTitle = `${brand || ''} ${model || ''}`.trim() || 'Modelo';
     const payload = {
       brand: brand || '',
       model: model || '',
       description: description || 'Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO.',
-      title: req.body.title ?? `${brand || ''} ${model || ''}`.trim() || 'Modelo',
-      repair_type: req.body.repair_type ?? '',
+      title: req.body.title != null ? req.body.title : fallbackTitle,
+      repair_type: req.body.repair_type != null ? req.body.repair_type : '',
       price: req.body.price != null ? Number(req.body.price) : 0
     };
     const { data, error } = await supabase
