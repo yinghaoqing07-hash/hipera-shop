@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { supabase } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import { useNavigate } from "react-router-dom"; 
@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Package, List, ShoppingBag, 
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
   ChevronRight, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
-  CheckCircle, Clock, Gift, Printer
+  CheckCircle, Clock, Gift, Printer, Menu
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -35,6 +35,8 @@ export default function AdminApp() {
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [loadError, setLoadError] = useState(false);
+  const fetchDataRetryRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // States for forms
@@ -52,8 +54,21 @@ export default function AdminApp() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Mantener backend despierto (Railway duerme sin tráfico): ping cada 4 min si la pestaña está visible
+  useEffect(() => {
+    if (!import.meta.env.PROD) return;
+    const ping = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetch('/api/health', { method: 'GET' }).catch(() => {});
+    };
+    const t = setInterval(ping, 4 * 60 * 1000);
+    ping();
+    return () => clearInterval(t);
+  }, []);
+
   const fetchData = async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       // 使用 Promise.allSettled 确保即使部分失败也不会影响其他数据
       const results = await Promise.allSettled([
@@ -120,16 +135,33 @@ export default function AdminApp() {
         console.error("Repairs error:", rResult.reason);
       }
 
-      // 检查是否有任何关键数据加载失败
       const hasFailures = results.some(r => r.status === 'rejected');
+      const allFailed = results.every(r => r.status === 'rejected');
       if (hasFailures) {
-        toast.error("Algunos datos no se pudieron cargar. Verifique la conexión.");
+        setLoadError(true);
+        if (allFailed && !fetchDataRetryRef.current) {
+          fetchDataRetryRef.current = true;
+          toast.error("Servidor iniciando o inactivo. Reintentando en 5 s…");
+          setTimeout(() => fetchData(), 5000);
+        } else if (!allFailed) {
+          toast.error("Algunos datos no se pudieron cargar. Verifique la conexión.");
+        } else {
+          toast.error("Error cargando datos. Compruebe el backend y pulse Reintentar.");
+        }
+      } else {
+        fetchDataRetryRef.current = false;
       }
 
     } catch (error) {
-      toast.error("Error cargando datos. Verifique que el servidor backend esté ejecutándose.");
+      setLoadError(true);
       console.error("Fetch data error:", error);
-      // 不清空现有状态，保持数据可见
+      if (!fetchDataRetryRef.current) {
+        fetchDataRetryRef.current = true;
+        toast.error("Servidor iniciando o inactivo. Reintentando en 5 s…");
+        setTimeout(() => fetchData(), 5000);
+      } else {
+        toast.error("Error cargando datos. Compruebe el backend y pulse Reintentar.");
+      }
     } finally {
       setLoading(false);
     }
@@ -1073,16 +1105,28 @@ const renderRepairs = () => (
         </nav>
         <div className="px-4 pt-4 border-t border-gray-800"><button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span>Salir</span></button></div>
       </aside>
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto h-screen">
-        {/* Mobile menu button */}
+      <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto h-screen pt-14 pl-4 pr-4 pb-4 md:pt-8 md:pl-8 md:pr-8 md:pb-8">
+        {/* Mobile menu button - reserve space so content is not hidden */}
         <button 
+          type="button"
           onClick={() => setSidebarOpen(true)}
-          className="md:hidden fixed top-4 left-4 z-30 bg-gray-900 text-white p-2 rounded-lg shadow-lg"
+          aria-label="Abrir menú"
+          className="md:hidden fixed top-4 left-4 z-30 bg-gray-900 text-white p-2.5 rounded-lg shadow-lg"
         >
-          <LayoutDashboard size={20} />
+          <Menu size={22} />
         </button>
-        {loading ? <div className="flex h-full items-center justify-center"><RefreshCw className="animate-spin text-gray-400" size={32}/></div> : (
+        {loading ? (
+          <div className="flex min-h-[60vh] items-center justify-center"><RefreshCw className="animate-spin text-gray-400" size={32}/></div>
+        ) : (
           <>
+            {loadError && (
+              <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2">
+                <span className="text-amber-800 text-sm font-medium">No se pudieron cargar todos los datos.</span>
+                <button type="button" onClick={() => { fetchDataRetryRef.current = false; fetchData(); }} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700">
+                  Reintentar
+                </button>
+              </div>
+            )}
             {activeTab === 'dashboard' && renderDashboard()} 
             {activeTab === 'products' && renderProducts()}
             {activeTab === 'categories' && renderCategoryManager()}
