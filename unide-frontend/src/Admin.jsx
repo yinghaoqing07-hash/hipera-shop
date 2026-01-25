@@ -8,8 +8,8 @@ import { useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, Package, List, ShoppingBag, 
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
-  ChevronRight, FolderPlus, ImageIcon, LogOut, Upload, Wrench, Search,
-  CheckCircle, Clock, Gift
+  ChevronRight, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
+  CheckCircle, Clock, Gift, Printer
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -440,7 +440,110 @@ export default function AdminApp() {
     }
   };
 
+  const printOrderTicket = async (order) => {
+    try {
+      const isService = order.items?.some(i => i.isService) ?? false;
+      const orderQueryUrl = `${window.location.origin.replace(/\/admin.*$/, '')}/?order=${order.id}`;
+      const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, { errorCorrectionLevel: 'H', width: 300, margin: 2 });
+      const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 260] });
+      let y = 10;
+      const centerX = 40;
+      doc.setFont('courier', 'bold');
+      doc.setFontSize(16);
+      doc.text('QIANG GUO SL', centerX, y, { align: 'center' });
+      y += 5;
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(8);
+      doc.text('Mercado & Servicios', centerX, y, { align: 'center' });
+      y += 5;
+      doc.text('Paseo del Sol 1, 28880 Meco', centerX, y, { align: 'center' });
+      y += 4;
+      doc.text('NIF: B86126638', centerX, y, { align: 'center' });
+      y += 4;
+      doc.text(new Date(order.created_at).toLocaleString('es-ES'), centerX, y, { align: 'center' });
+      y += 8;
+      doc.text('--------------------------------', centerX, y, { align: 'center' });
+      y += 4;
+      doc.setFont('courier', 'bold');
+      doc.text(isService ? 'RESGUARDO REPARACION' : 'TICKET DE CAJA', centerX, y, { align: 'center' });
+      y += 4;
+      doc.setFont('courier', 'normal');
+      doc.text(`Ref: ${order.id.slice(0, 8)}`, centerX, y, { align: 'center' });
+      y += 4;
+      doc.text('--------------------------------', centerX, y, { align: 'center' });
+      y += 6;
+      doc.setFontSize(8);
+      const regular = order.items?.filter(i => !(i.isGift || i.price === 0)) ?? [];
+      const gifts = order.items?.filter(i => i.isGift || i.price === 0) ?? [];
+      regular.forEach((item) => {
+        doc.text((item.name || '').substring(0, 25), 5, y);
+        y += 4;
+        doc.text(`${item.quantity} x ${(item.price || 0).toFixed(2)}`.padEnd(20) + `€${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`, 5, y);
+        y += 5;
+      });
+      if (gifts.length > 0) {
+        y += 2;
+        doc.text('--------------------------------', centerX, y, { align: 'center' });
+        y += 4;
+        doc.setFont('courier', 'bold');
+        doc.text('REGALO(S) — GRATIS', centerX, y, { align: 'center' });
+        y += 5;
+        doc.setFont('courier', 'normal');
+        gifts.forEach((item) => {
+          doc.text(`${(item.name || '').substring(0, 22)} [REGALO]`, 5, y);
+          y += 4;
+          doc.text(`${item.quantity} x 0.00`.padEnd(20) + 'GRATIS', 5, y);
+          y += 5;
+        });
+      }
+      y += 2;
+      doc.text('--------------------------------', centerX, y, { align: 'center' });
+      y += 6;
+      doc.setFont('courier', 'bold');
+      doc.setFontSize(12);
+      doc.text(`TOTAL:     EUR ${(order.total || 0).toFixed(2)}`, 5, y);
+      y += 6;
+      doc.setFontSize(8);
+      doc.setFont('courier', 'normal');
+      doc.text('(IVA Incluido)', 5, y);
+      y += 8;
+      doc.text(`Pago: ${(order.payment_method || 'Efectivo/Bizum').toUpperCase()}`, 5, y);
+      y += 10;
+      if (isService) {
+        doc.setFontSize(7);
+        doc.text('GARANTIA DE REPARACION: 6 MESES', centerX, y, { align: 'center' });
+        y += 3;
+        doc.text('Imprescindible presentar este ticket', centerX, y, { align: 'center' });
+        y += 6;
+      }
+      doc.addImage(qrCodeUrl, 'PNG', 20, y, 40, 40);
+      y += 45;
+      doc.setFontSize(8);
+      doc.text('¡Gracias por su visita!', centerX, y, { align: 'center' });
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      const iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:fixed;width:0;height:0;border:none;';
+      document.body.appendChild(iframe);
+      iframe.src = url;
+      iframe.onload = () => {
+        try { iframe.contentWindow?.print(); } catch (_) { window.open(url, '_blank'); }
+        setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(iframe); }, 1000);
+      };
+      toast.success('Imprimir ticket');
+    } catch (e) {
+      toast.error('Error al imprimir: ' + (e.message || 'Error'));
+    }
+  };
+
   // --- Renders ---
+  const todayOrders = orders.filter(o => {
+    if (!o.created_at) return false;
+    const d = new Date(o.created_at);
+    const t = new Date();
+    return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
+  });
+
   const renderDashboard = () => (
     <div className="space-y-6 animate-fade-in">
         <h2 className="text-2xl font-bold text-gray-800">Panel General</h2>
@@ -452,9 +555,39 @@ export default function AdminApp() {
             <div><p className="text-gray-500 text-xs uppercase font-bold">Pedidos</p><h3 className="text-2xl font-bold text-gray-800">{orders.length}</h3></div>
           </div>
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div><p className="text-gray-500 text-xs uppercase font-bold">Pedidos hoy</p><h3 className="text-2xl font-bold text-gray-800">{todayOrders.length}</h3></div>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
             <div><p className="text-gray-500 text-xs uppercase font-bold">Productos</p><h3 className="text-2xl font-bold text-gray-800">{products.length}</h3></div>
           </div>
         </div>
+        {todayOrders.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <h3 className="p-4 font-bold text-gray-800 border-b border-gray-100">Pedidos de hoy</h3>
+            <div className="divide-y max-h-64 overflow-y-auto">
+              {todayOrders.map(o => {
+                const dateStr = o.created_at ? new Date(o.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : '';
+                return (
+                  <div key={o.id} className="p-4 flex flex-wrap items-center justify-between gap-2 hover:bg-gray-50">
+                    <div className="min-w-0">
+                      <span className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</span>
+                      <span className="text-gray-400 text-xs ml-2">{dateStr}</span>
+                      <div className="font-bold text-gray-800 truncate">{o.phone}</div>
+                      <div className="text-xs text-gray-500 truncate">{o.address}</div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="font-bold text-gray-800">€{o.total?.toFixed(2)}</span>
+                      <button type="button" onClick={() => printOrderTicket(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Imprimir ticket">
+                        <Printer size={16}/>
+                      </button>
+                      <button type="button" onClick={() => { setActiveTab('orders'); }} className="text-xs text-blue-600 font-bold">Ver</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
     </div>
   );
 
@@ -622,10 +755,12 @@ const renderRepairs = () => (
              <thead className="bg-gray-50 font-bold text-gray-500">
                <tr>
                  <th className="p-4">Info</th>
+                 <th className="p-4">Fecha</th>
                  <th className="p-4">Items</th>
                  <th className="p-4">Total</th>
                  <th className="p-4">Pago</th>
                  <th className="p-4">Estado</th>
+                 <th className="p-4 text-center">Ticket</th>
                </tr>
              </thead>
              <tbody>
@@ -636,16 +771,17 @@ const renderRepairs = () => (
                    : paymentMethod === 'Bizum' 
                    ? 'bg-green-100 text-green-700' 
                    : 'bg-gray-100 text-gray-600';
-                 
+                 const orderDate = o.created_at ? new Date(o.created_at) : null;
+                 const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
                  return (
                  <tr key={o.id} className="border-b hover:bg-gray-50">
                    <td className="p-4 align-top">
                       <div className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</div>
-                      <div className="text-xs text-gray-400">{new Date(o.created_at).toLocaleString()}</div>
                       <div className="font-bold text-gray-800 mt-1">{o.phone}</div>
                       <div className="text-xs text-gray-500">{o.address}</div>
                       {o.note && <div className="text-xs bg-yellow-50 p-1 mt-1 rounded text-yellow-700">Nota: {o.note}</div>}
                    </td>
+                   <td className="p-4 align-top text-xs text-gray-600 whitespace-nowrap">{dateStr}</td>
                    <td className="p-4 align-top">
                       {Array.isArray(o.items) && o.items.map((item, idx) => {
                         const isGift = item.isGift || item.price === 0;
@@ -678,6 +814,11 @@ const renderRepairs = () => (
                         <option>Cancelado</option>
                       </select>
                    </td>
+                   <td className="p-4 align-top text-center">
+                      <button type="button" onClick={() => printOrderTicket(o)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold transition-colors" title="Imprimir ticket">
+                        <Printer size={14}/> Imprimir
+                      </button>
+                   </td>
                  </tr>
                )})}
              </tbody>
@@ -693,12 +834,14 @@ const renderRepairs = () => (
               ? 'bg-green-100 text-green-700' 
               : 'bg-gray-100 text-gray-600';
             
+            const orderDate = o.created_at ? new Date(o.created_at) : null;
+            const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
             return (
               <div key={o.id} className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</div>
-                    <div className="text-xs text-gray-400">{new Date(o.created_at).toLocaleString()}</div>
+                    <div className="text-xs text-gray-600 font-medium mt-0.5">📅 {dateStr}</div>
                   </div>
                   <span className={`px-2 py-1 rounded text-xs font-bold ${paymentColor}`}>
                     {paymentMethod}
@@ -727,15 +870,20 @@ const renderRepairs = () => (
                     );
                   })}
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
                   <span className="font-bold text-lg text-gray-800">€{o.total?.toFixed(2)}</span>
-                  <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                    <option>Procesando</option>
-                    <option>Pendiente de Pago</option>
-                    <option>Enviado</option>
-                    <option>Entregado</option>
-                    <option>Cancelado</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => printOrderTicket(o)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold">
+                      <Printer size={14}/> Ticket
+                    </button>
+                    <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <option>Procesando</option>
+                      <option>Pendiente de Pago</option>
+                      <option>Enviado</option>
+                      <option>Entregado</option>
+                      <option>Cancelado</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             );
@@ -944,6 +1092,7 @@ const renderRepairs = () => (
         )}
       </main>
       {isEditing && renderProductModal()}
+
     </div>
   );
 }

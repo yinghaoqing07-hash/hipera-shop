@@ -30,7 +30,6 @@ FRONTEND_URL=http://localhost:5173
 # AI features (optional)
 REMOVEBG_API_KEY=your_remove_bg_api_key
 OPENAI_API_KEY=your_openai_api_key
-
 # Auto-print (optional)
 AUTO_PRINT_ENABLED=true
 PRINTER_NAME=your_printer_name  # Optional: specify printer name, leave empty for default printer
@@ -96,7 +95,6 @@ When `REMOVEBG_API_KEY` and `OPENAI_API_KEY` are set, the admin panel can:
 - **Quitar fondo (AI)**: Remove background from product image via remove.bg, then upload result to Supabase.
 - **Centrar producto (AI)**: Automatically detect product content area and center it in the image. Works best with transparent backgrounds (after removing background).
 - **Extraer información (AI)**: Extract structured product information (weight, quantity, ingredients, specifications) from images using OpenAI GPT-4o. **Supports multiple images** - upload front, back, and label photos to extract complete information.
-
 ### OpenAI Vision 能力说明
 
 **✅ 可以提取的信息：**
