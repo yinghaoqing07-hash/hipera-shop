@@ -249,13 +249,13 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Rate limiting (skip OPTIONS so preflight always succeeds)
+// Rate limiting: skip OPTIONS + /api/health (keep-alive). Límite alto: proxy/Vercel agrupa IPs.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 500,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.method === 'OPTIONS',
+  skip: (req) => req.method === 'OPTIONS' || req.path === '/health',
   validate: { trustProxy: false }
 });
 app.use('/api/', limiter);

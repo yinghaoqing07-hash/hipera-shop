@@ -11,7 +11,15 @@ function getBase() {
 }
 
 const base = getBase();
+const FETCH_TIMEOUT_MS = 30000; // 30s – evita colgar en móvil / cold start
+
 if (!import.meta.env.PROD) console.log('🔧 API base:', base || 'same-origin /api');
+
+function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(id));
+}
 
 class ApiClient {
   constructor() {
@@ -33,7 +41,7 @@ class ApiClient {
   async requestSimple(endpoint) {
     const url = this._url(endpoint);
     try {
-      const response = await fetch(url, { method: 'GET' });
+      const response = await fetchWithTimeout(url, { method: 'GET' });
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         const hint = contentType.includes('text/html') ? ' (404 o error; compruebe /api)' : '';
@@ -43,9 +51,10 @@ class ApiClient {
       if (!response.ok) throw new Error(data.error || `Request failed ${response.status}`);
       return data;
     } catch (e) {
-      console.error('API Error:', e);
+      const msg = e.name === 'AbortError' ? 'Tiempo de espera agotado (30 s). Compruebe conexión o reintente.' : e.message;
+      console.error('API Error:', msg);
       console.error('Failed URL:', url);
-      throw e;
+      throw new Error(msg);
     }
   }
 
@@ -63,7 +72,7 @@ class ApiClient {
     };
 
     try {
-      const response = await fetch(url, config);
+      const response = await fetchWithTimeout(url, config);
       const contentType = response.headers.get('content-type') || '';
 
       if (!contentType.includes('application/json')) {
@@ -81,9 +90,10 @@ class ApiClient {
 
       return data;
     } catch (error) {
-      console.error('API Error:', error);
+      const msg = error.name === 'AbortError' ? 'Tiempo de espera agotado (30 s). Compruebe conexión o reintente.' : (error.message || 'API error');
+      console.error('API Error:', msg);
       console.error('Failed URL:', url);
-      throw error;
+      throw new Error(msg);
     }
   }
 

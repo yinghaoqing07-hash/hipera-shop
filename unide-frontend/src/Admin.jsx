@@ -36,7 +36,8 @@ export default function AdminApp() {
   const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [loadError, setLoadError] = useState(false);
-  const fetchDataRetryRef = useRef(false);
+  const fetchDataRetryCountRef = useRef(0);
+  const RETRY_DELAYS = [5000, 15000, 35000]; // 3 reintentos: 5s, 15s, 35s (cold start ~60s)
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // States for forms
@@ -54,14 +55,18 @@ export default function AdminApp() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // Mantener backend despierto (Railway duerme sin tráfico): ping cada 4 min si la pestaña está visible
+  // Mantener backend despierto (Railway duerme sin tráfico): ping cada 2 min si la pestaña está visible
   useEffect(() => {
     if (!import.meta.env.PROD) return;
     const ping = () => {
       if (document.visibilityState !== 'visible') return;
-      fetch('/api/health', { method: 'GET' }).catch(() => {});
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10000);
+      fetch('/api/health', { method: 'GET', signal: ctrl.signal })
+        .catch(() => {})
+        .finally(() => clearTimeout(t));
     };
-    const t = setInterval(ping, 4 * 60 * 1000);
+    const t = setInterval(ping, 2 * 60 * 1000);
     ping();
     return () => clearInterval(t);
   }, []);
@@ -139,28 +144,32 @@ export default function AdminApp() {
       const allFailed = results.every(r => r.status === 'rejected');
       if (hasFailures) {
         setLoadError(true);
-        if (allFailed && !fetchDataRetryRef.current) {
-          fetchDataRetryRef.current = true;
-          toast.error("Servidor iniciando o inactivo. Reintentando en 5 s…");
-          setTimeout(() => fetchData(), 5000);
+        const n = fetchDataRetryCountRef.current;
+        if (allFailed && n < RETRY_DELAYS.length) {
+          const delay = RETRY_DELAYS[n];
+          fetchDataRetryCountRef.current = n + 1;
+          toast.error(`Servidor inactivo. Reintentando en ${delay / 1000} s… (${n + 1}/${RETRY_DELAYS.length})`);
+          setTimeout(() => fetchData(), delay);
         } else if (!allFailed) {
           toast.error("Algunos datos no se pudieron cargar. Verifique la conexión.");
         } else {
-          toast.error("Error cargando datos. Compruebe el backend y pulse Reintentar.");
+          toast.error("Error cargando datos. Compruebe conexión y pulse Reintentar.");
         }
       } else {
-        fetchDataRetryRef.current = false;
+        fetchDataRetryCountRef.current = 0;
       }
 
     } catch (error) {
       setLoadError(true);
       console.error("Fetch data error:", error);
-      if (!fetchDataRetryRef.current) {
-        fetchDataRetryRef.current = true;
-        toast.error("Servidor iniciando o inactivo. Reintentando en 5 s…");
-        setTimeout(() => fetchData(), 5000);
+      const n = fetchDataRetryCountRef.current;
+      if (n < RETRY_DELAYS.length) {
+        const delay = RETRY_DELAYS[n];
+        fetchDataRetryCountRef.current = n + 1;
+        toast.error(`Servidor inactivo. Reintentando en ${delay / 1000} s… (${n + 1}/${RETRY_DELAYS.length})`);
+        setTimeout(() => fetchData(), delay);
       } else {
-        toast.error("Error cargando datos. Compruebe el backend y pulse Reintentar.");
+        toast.error("Error cargando datos. Compruebe conexión y pulse Reintentar.");
       }
     } finally {
       setLoading(false);
@@ -1122,7 +1131,7 @@ const renderRepairs = () => (
             {loadError && (
               <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2">
                 <span className="text-amber-800 text-sm font-medium">No se pudieron cargar todos los datos.</span>
-                <button type="button" onClick={() => { fetchDataRetryRef.current = false; fetchData(); }} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700">
+                <button type="button" onClick={() => { fetchDataRetryCountRef.current = 0; fetchData(); }} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700">
                   Reintentar
                 </button>
               </div>
