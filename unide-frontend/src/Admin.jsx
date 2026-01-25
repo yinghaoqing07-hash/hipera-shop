@@ -12,27 +12,8 @@ import {
   CheckCircle, Clock, Gift, Printer, Menu
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
-import Cropper from 'react-easy-crop';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
-
-async function getCroppedImg(imageSrc, pixelCrop) {
-  const img = await new Promise((resolve, reject) => {
-    const i = new Image();
-    i.onload = () => resolve(i);
-    i.onerror = reject;
-    i.src = imageSrc;
-  });
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(pixelCrop.width);
-  canvas.height = Math.round(pixelCrop.height);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('No canvas context');
-  ctx.drawImage(img, Math.round(pixelCrop.x), Math.round(pixelCrop.y), Math.round(pixelCrop.width), Math.round(pixelCrop.height), 0, 0, Math.round(pixelCrop.width), Math.round(pixelCrop.height));
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.92);
-  });
-}
 
 export default function AdminApp() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -55,17 +36,9 @@ export default function AdminApp() {
   const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [loadError, setLoadError] = useState(false);
-  const [ordersError, setOrdersError] = useState(false);
-  const [ordersLoading, setOrdersLoading] = useState(false);
   const fetchDataRetryCountRef = useRef(0);
   const RETRY_DELAYS = [5000, 15000, 35000]; // 3 reintentos: 5s, 15s, 35s (cold start ~60s)
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Crop modal: después de subir/seleccionar foto, recortar antes de usar
-  const [cropModal, setCropModal] = useState(null); // { src, file, queue: File[] }
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const croppedAreaPixelsRef = useRef(null);
 
   // States for forms
   const [newCatName, setNewCatName] = useState("");
@@ -98,35 +71,21 @@ export default function AdminApp() {
     return () => clearInterval(t);
   }, []);
 
-  const fetchOrdersOnly = async () => {
-    setOrdersLoading(true);
-    setOrdersError(false);
-    try {
-      const data = await apiClient.getAdminOrders();
-      setOrders(data || []);
-      setOrdersError(false);
-    } catch (e) {
-      console.error("Orders fetch error:", e);
-      setOrdersError(true);
-      toast.error("No se pudieron cargar los pedidos. Reintente.");
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
-
   const fetchData = async () => {
     setLoading(true);
     setLoadError(false);
-    setOrdersError(false);
     try {
-      // Primero: products, categories, subcategories, repairs (sin auth o más ligeros)
+      // 使用 Promise.allSettled 确保即使部分失败也不会影响其他数据
       const results = await Promise.allSettled([
         apiClient.getProducts(),
+        apiClient.getAdminOrders(),
         apiClient.getCategories(),
         apiClient.getSubCategories(),
         apiClient.getRepairServices()
       ]);
-      const [pResult, cResult, sResult, rResult] = results;
+
+      // 处理每个结果，只更新成功的数据
+      const [pResult, oResult, cResult, sResult, rResult] = results;
 
       if (pResult.status === 'fulfilled' && pResult.value) {
         setProducts(pResult.value.map(p => {
@@ -156,6 +115,12 @@ export default function AdminApp() {
         console.error("Products error:", pResult.reason);
       }
 
+      if (oResult.status === 'fulfilled' && oResult.value) {
+        setOrders(oResult.value);
+      } else if (oResult.status === 'rejected') {
+        console.error("Orders error:", oResult.reason);
+      }
+
       if (cResult.status === 'fulfilled' && cResult.value) {
         setCategories(cResult.value);
       } else if (cResult.status === 'rejected') {
@@ -173,17 +138,6 @@ export default function AdminApp() {
         setRepairs(rResult.value);
       } else if (rResult.status === 'rejected') {
         console.error("Repairs error:", rResult.reason);
-      }
-
-      // Pedidos aparte (auth): evita bloquear el resto; en móvil suele fallar más
-      await new Promise(r => setTimeout(r, 200));
-      try {
-        const ordersData = await apiClient.getAdminOrders();
-        setOrders(ordersData || []);
-        setOrdersError(false);
-      } catch (e) {
-        console.error("Orders error:", e);
-        setOrdersError(true);
       }
 
       const hasFailures = results.some(r => r.status === 'rejected');
@@ -316,65 +270,40 @@ export default function AdminApp() {
     }
   };
 
-  const openCropModal = (files) => {
-    const queue = Array.from(files);
-    if (queue.length === 0) return;
-    const file = queue[0];
-    const src = URL.createObjectURL(file);
-    croppedAreaPixelsRef.current = null;
-    setCrop({ x: 0, y: 0 });
-    setZoom(1);
-    setCropModal({ src, file, queue: queue.slice(1), total: queue.length, doneCount: 0 });
-  };
-
-  const closeCropModal = () => {
-    if (cropModal?.src) URL.revokeObjectURL(cropModal.src);
-    setCropModal(null);
-  };
-
-  const handleImageUpload = (event) => {
-    const files = event.target.files;
-    if (!files?.length) return;
-    openCropModal(files);
-    event.target.value = '';
-  };
-
-  const handleCropApply = async () => {
-    if (!cropModal) return;
-    const pixels = croppedAreaPixelsRef.current;
-    if (!pixels) {
-      toast.error("Ajusta el recorte y prueba de nuevo.");
-      return;
-    }
+  const handleImageUpload = async (event) => {
     try {
       setUploading(true);
-      const blob = await getCroppedImg(cropModal.src, pixels);
-      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}.jpg`;
-      const { error } = await supabase.storage.from('products').upload(fileName, blob, { contentType: 'image/jpeg' });
-      if (error) throw error;
-      const { data } = supabase.storage.from('products').getPublicUrl(fileName);
-      const existingImages = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
-      const allImages = [...existingImages, data.publicUrl];
-      setCurrentProduct({ ...currentProduct, images: allImages, image: allImages[0] });
-
-      URL.revokeObjectURL(cropModal.src);
-      const nextQueue = cropModal.queue.slice(1);
-      const done = (cropModal.doneCount ?? 0) + 1;
-      if (cropModal.queue.length === 0) {
-        setCropModal(null);
-        toast.success(cropModal.total > 1 ? `${cropModal.total} imágenes subidas y recortadas.` : "Imagen subida y recortada.");
-      } else {
-        const next = cropModal.queue[0];
-        const nextSrc = URL.createObjectURL(next);
-        croppedAreaPixelsRef.current = null;
-        setCrop({ x: 0, y: 0 });
-        setZoom(1);
-        setCropModal({ src: nextSrc, file: next, queue: nextQueue, total: cropModal.total, doneCount: done });
+      const files = Array.from(event.target.files || []);
+      if (files.length === 0) return;
+      
+      const uploadedUrls = [];
+      for (const file of files) {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+        const { error } = await supabase.storage.from('products').upload(fileName, file);
+        if (error) throw error;
+        const { data } = supabase.storage.from('products').getPublicUrl(fileName);
+        uploadedUrls.push(data.publicUrl);
       }
-    } catch (e) {
-      toast.error("Error al subir: " + (e.message || "Error"));
-    } finally {
+      
+      const existingImages = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
+      const allImages = [...existingImages, ...uploadedUrls];
+      
+      setCurrentProduct({ 
+        ...currentProduct, 
+        images: allImages,
+        image: allImages[0] // 主图（第一张）
+      });
+      
+      if (files.length > 1) {
+        toast.success(`${files.length} imágenes subidas`);
+      }
+    } catch(e) { 
+      toast.error("Error al subir: " + (e.message || "Error desconocido")); 
+    } finally { 
       setUploading(false);
+      // 重置 input 以便可以再次选择相同文件
+      event.target.value = '';
     }
   };
   
@@ -860,21 +789,7 @@ const renderRepairs = () => (
   
   const renderOrders = () => (
      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl md:text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
-          {ordersError && orders.length === 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-amber-700 text-sm">No se pudieron cargar los pedidos.</span>
-              <button type="button" onClick={fetchOrdersOnly} disabled={ordersLoading} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700 disabled:opacity-60">
-                {ordersLoading ? "Cargando…" : "Reintentar"}
-              </button>
-            </div>
-          )}
-        </div>
-        {ordersLoading && orders.length === 0 ? (
-          <div className="py-12 text-center text-gray-500">Cargando pedidos…</div>
-        ) : (
-        <>
+        <h2 className="text-xl md:text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
         {/* Desktop table */}
         <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-left text-sm">
@@ -1015,12 +930,10 @@ const renderRepairs = () => (
             );
           })}
         </div>
-        </>
-        )}
      </div>
   );
 
-  // ... Product Modal ...
+  // ... Product Modal ... (保持原样，为了简洁我这里没改动)
   const renderProductModal = () => {
     const filteredSubs = subCategories.filter(s => s.parent_id === parseInt(currentProduct.category));
     return (
@@ -1114,9 +1027,9 @@ const renderRepairs = () => (
                   {uploading ? (
                     <div className="text-gray-500">Subiendo...</div>
                   ) : (
-                    <div className="text-gray-400 text-sm">Click para subir o hacer foto · Podrás recortar antes de usar</div>
+                    <div className="text-gray-400 text-sm">Click para subir (puedes seleccionar múltiples imágenes)</div>
                   )}
-                  <input id="product-image" name="product-image" type="file" accept="image/*" capture="environment" multiple onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
+                  <input id="product-image" name="product-image" type="file" accept="image/*" multiple onChange={handleImageUpload} className="absolute inset-0 opacity-0"/>
               </div>
               
               {/* 显示已上传的图片 */}
@@ -1232,50 +1145,6 @@ const renderRepairs = () => (
         )}
       </main>
       {isEditing && renderProductModal()}
-
-      {/* Modal recortar imagen (tras seleccionar/subir foto) */}
-      {cropModal && (
-        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/80 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden flex flex-col shadow-2xl">
-            <div className="p-3 border-b flex items-center justify-between">
-              <span className="font-bold text-gray-800">
-                Recortar imagen{cropModal.total > 1 ? ` (${(cropModal.doneCount ?? 0) + 1} de ${cropModal.total})` : ''}
-              </span>
-              <button type="button" onClick={closeCropModal} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-            </div>
-            <div className="relative w-full h-[50vh] min-h-[280px] bg-gray-900">
-              <Cropper
-                image={cropModal.src}
-                crop={crop}
-                zoom={zoom}
-                aspect={1}
-                objectFit="cover"
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onCropComplete={(_, croppedAreaPixels) => { croppedAreaPixelsRef.current = croppedAreaPixels; }}
-                onCropAreaChange={(_, croppedAreaPixels) => { croppedAreaPixelsRef.current = croppedAreaPixels; }}
-              />
-            </div>
-            <div className="p-4 border-t space-y-3">
-              <p className="text-xs text-gray-500">Arrastra la imagen para mover · Zoom para acercar</p>
-              <label className="block text-xs font-bold text-gray-500">Zoom</label>
-              <input
-                type="range"
-                min={1}
-                max={3}
-                step={0.1}
-                value={zoom}
-                onChange={(e) => setZoom(Number(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-              />
-              <div className="flex gap-2">
-                <button type="button" onClick={closeCropModal} className="flex-1 py-2.5 rounded-xl border border-gray-300 font-bold text-gray-700 hover:bg-gray-50">Cancelar</button>
-                <button type="button" onClick={handleCropApply} disabled={uploading} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-50">{uploading ? "Subiendo…" : "Aplicar"}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );
