@@ -36,6 +36,8 @@ export default function AdminApp() {
   const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [loadError, setLoadError] = useState(false);
+  const [ordersError, setOrdersError] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const fetchDataRetryCountRef = useRef(0);
   const RETRY_DELAYS = [5000, 15000, 35000]; // 3 reintentos: 5s, 15s, 35s (cold start ~60s)
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -71,21 +73,35 @@ export default function AdminApp() {
     return () => clearInterval(t);
   }, []);
 
+  const fetchOrdersOnly = async () => {
+    setOrdersLoading(true);
+    setOrdersError(false);
+    try {
+      const data = await apiClient.getAdminOrders();
+      setOrders(data || []);
+      setOrdersError(false);
+    } catch (e) {
+      console.error("Orders fetch error:", e);
+      setOrdersError(true);
+      toast.error("No se pudieron cargar los pedidos. Reintente.");
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
   const fetchData = async () => {
     setLoading(true);
     setLoadError(false);
+    setOrdersError(false);
     try {
-      // 使用 Promise.allSettled 确保即使部分失败也不会影响其他数据
+      // Primero: products, categories, subcategories, repairs (sin auth o más ligeros)
       const results = await Promise.allSettled([
         apiClient.getProducts(),
-        apiClient.getAdminOrders(),
         apiClient.getCategories(),
         apiClient.getSubCategories(),
         apiClient.getRepairServices()
       ]);
-
-      // 处理每个结果，只更新成功的数据
-      const [pResult, oResult, cResult, sResult, rResult] = results;
+      const [pResult, cResult, sResult, rResult] = results;
 
       if (pResult.status === 'fulfilled' && pResult.value) {
         setProducts(pResult.value.map(p => {
@@ -115,12 +131,6 @@ export default function AdminApp() {
         console.error("Products error:", pResult.reason);
       }
 
-      if (oResult.status === 'fulfilled' && oResult.value) {
-        setOrders(oResult.value);
-      } else if (oResult.status === 'rejected') {
-        console.error("Orders error:", oResult.reason);
-      }
-
       if (cResult.status === 'fulfilled' && cResult.value) {
         setCategories(cResult.value);
       } else if (cResult.status === 'rejected') {
@@ -138,6 +148,17 @@ export default function AdminApp() {
         setRepairs(rResult.value);
       } else if (rResult.status === 'rejected') {
         console.error("Repairs error:", rResult.reason);
+      }
+
+      // Pedidos aparte (auth): evita bloquear el resto; en móvil suele fallar más
+      await new Promise(r => setTimeout(r, 200));
+      try {
+        const ordersData = await apiClient.getAdminOrders();
+        setOrders(ordersData || []);
+        setOrdersError(false);
+      } catch (e) {
+        console.error("Orders error:", e);
+        setOrdersError(true);
       }
 
       const hasFailures = results.some(r => r.status === 'rejected');
@@ -789,7 +810,21 @@ const renderRepairs = () => (
   
   const renderOrders = () => (
      <div className="space-y-4">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl md:text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
+          {ordersError && orders.length === 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-amber-700 text-sm">No se pudieron cargar los pedidos.</span>
+              <button type="button" onClick={fetchOrdersOnly} disabled={ordersLoading} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700 disabled:opacity-60">
+                {ordersLoading ? "Cargando…" : "Reintentar"}
+              </button>
+            </div>
+          )}
+        </div>
+        {ordersLoading && orders.length === 0 ? (
+          <div className="py-12 text-center text-gray-500">Cargando pedidos…</div>
+        ) : (
+        <>
         {/* Desktop table */}
         <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-left text-sm">
@@ -930,10 +965,12 @@ const renderRepairs = () => (
             );
           })}
         </div>
+        </>
+        )}
      </div>
   );
 
-  // ... Product Modal ... (保持原样，为了简洁我这里没改动)
+  // ... Product Modal ...
   const renderProductModal = () => {
     const filteredSubs = subCategories.filter(s => s.parent_id === parseInt(currentProduct.category));
     return (
