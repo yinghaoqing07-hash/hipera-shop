@@ -1249,12 +1249,15 @@ const renderRepairs = () => (
                 crop={crop}
                 zoom={zoom}
                 aspect={1}
+                objectFit="cover"
                 onCropChange={setCrop}
                 onZoomChange={setZoom}
                 onCropComplete={(_, croppedAreaPixels) => { croppedAreaPixelsRef.current = croppedAreaPixels; }}
+                onCropAreaChange={(_, croppedAreaPixels) => { croppedAreaPixelsRef.current = croppedAreaPixels; }}
               />
             </div>
             <div className="p-4 border-t space-y-3">
+              <p className="text-xs text-gray-500">Arrastra la imagen para mover · Zoom para acercar</p>
               <label className="block text-xs font-bold text-gray-500">Zoom</label>
               <input
                 type="range"
