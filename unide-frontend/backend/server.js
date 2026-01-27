@@ -794,6 +794,7 @@ REGLAS:
 - Solo extrae lo que REALMENTE ves; si no ves algo, usa null
 - description siempre debe tener un valor
 - name y brand deben ser el nombre y marca exactos del producto
+- NO incluyas fecha de caducidad (expiration date / best before) en description, specifications ni en ningún otro campo. Omítela siempre aunque aparezca en la etiqueta.
 - Responde SOLO con el JSON, sin texto adicional`
       }
     ];

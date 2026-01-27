@@ -538,106 +538,100 @@ const generateDocuments = async (order, type = 'both') => {
 
   // --- 模版 B: 80mm 热敏小票 (Ticket) ---
   const createThermalTicket = () => {
-    // 80mm 宽, 高度根据内容大概估算，这里设长一点 250mm
     const doc = new jsPDF({
       orientation: 'p',
       unit: 'mm',
-      format: [80, 260] 
+      format: [80, 260]
     });
 
     let y = 10;
-    const centerX = 40; // 80 / 2
+    const centerX = 40;
 
-    // Header
-    doc.setFont("courier", "bold");
-    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
     doc.text(companyData.name, centerX, y, { align: 'center' });
-    y += 5;
-    doc.setFontSize(8);
-    doc.setFont("courier", "normal");
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
     doc.text("Mercado & Servicios", centerX, y, { align: 'center' });
     y += 5;
     doc.text(companyData.address, centerX, y, { align: 'center' });
-    y += 4;
+    y += 5;
     doc.text(`NIF: ${companyData.nif}`, centerX, y, { align: 'center' });
-    y += 4;
+    y += 5;
     doc.text(new Date().toLocaleString(), centerX, y, { align: 'center' });
     y += 8;
 
-    // Ticket Info
+    doc.setFontSize(9);
     doc.text("--------------------------------", centerX, y, { align: 'center' });
-    y += 4;
-    doc.setFont("courier", "bold");
+    y += 5;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
     doc.text(isService ? "RESGUARDO REPARACION" : "TICKET DE CAJA", centerX, y, { align: 'center' });
-    y += 4;
-    doc.setFont("courier", "normal");
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
     doc.text(`Ref: ${order.id.slice(0, 8)}`, centerX, y, { align: 'center' });
-    y += 4;
+    y += 5;
     doc.text("--------------------------------", centerX, y, { align: 'center' });
     y += 6;
 
-    // Items: productos y regalos por separado
-    doc.setFontSize(8);
+    doc.setFontSize(10);
     const regularForTicket = order.items.filter(item => !(item.isGift || item.price === 0));
     const giftsForTicket = order.items.filter(item => item.isGift || item.price === 0);
 
     regularForTicket.forEach(item => {
       doc.text(item.name.substring(0, 25), 5, y);
-      y += 4;
+      y += 5;
       const line = `${item.quantity} x ${item.price.toFixed(2)}`.padEnd(20) + `€${(item.price * item.quantity).toFixed(2)}`;
       doc.text(line, 5, y);
-      y += 5;
+      y += 6;
     });
 
     if (giftsForTicket.length > 0) {
-      y += 2;
+      y += 3;
       doc.text("--------------------------------", centerX, y, { align: 'center' });
-      y += 4;
-      doc.setFont("courier", "bold");
-      doc.text("REGALO(S) — GRATIS", centerX, y, { align: 'center' });
       y += 5;
-      doc.setFont("courier", "normal");
+      doc.setFont("helvetica", "bold");
+      doc.text("REGALO(S) — GRATIS", centerX, y, { align: 'center' });
+      y += 6;
+      doc.setFont("helvetica", "normal");
       giftsForTicket.forEach(item => {
         doc.text(`${item.name.substring(0, 22)} [REGALO]`, 5, y);
-        y += 4;
-        doc.text(`${item.quantity} x 0.00`.padEnd(20) + `GRATIS`, 5, y);
         y += 5;
+        doc.text(`${item.quantity} x 0.00`.padEnd(20) + "GRATIS", 5, y);
+        y += 6;
       });
     }
 
-    y += 2;
+    y += 3;
     doc.text("--------------------------------", centerX, y, { align: 'center' });
     y += 6;
 
-    // Totals
-    doc.setFont("courier", "bold");
-    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
     doc.text(`TOTAL:     EUR ${order.total.toFixed(2)}`, 5, y);
+    y += 7;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text("(IVA Incluido)", 5, y);
     y += 6;
-    doc.setFontSize(8);
-    doc.setFont("courier", "normal");
-    doc.text(`(IVA Incluido)`, 5, y);
-    y += 8;
-
-    // Payment Method
+    doc.setFontSize(10);
     doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'Efectivo/Bizum'}`, 5, y);
     y += 10;
 
-    // Warranty Note (Short version)
     if (isService) {
-      doc.setFontSize(7);
+      doc.setFontSize(9);
       doc.text("GARANTIA DE REPARACION: 6 MESES", centerX, y, { align: 'center' });
-      y += 3;
+      y += 5;
       doc.text("Imprescindible presentar este ticket", centerX, y, { align: 'center' });
       y += 6;
     }
 
-    // QR Code
     doc.addImage(qrCodeUrl, 'PNG', 20, y, 40, 40);
     y += 45;
 
-    // Footer
-    doc.setFontSize(8);
+    doc.setFontSize(10);
     doc.text("¡Gracias por su visita!", centerX, y, { align: 'center' });
 
     doc.save(`Ticket_${order.id.slice(0, 8)}.pdf`);
@@ -1771,10 +1765,14 @@ export default function App() {
 {/* --- DETAIL PAGE (已修正：显示真实描述) --- */}
       {page === "detail" && selectedProduct && (
         <div className="bg-white min-h-screen pb-24">
-          {/* 顶部大图 */}
-          <div className="relative h-[45vh]">
-            <img src={selectedProduct.image} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/30 to-transparent h-24"></div>
+          {/* 顶部商品图：完整展示，下拉可看全图 */}
+          <div className="relative bg-gray-50">
+            <img
+              src={selectedProduct.image}
+              alt={selectedProduct.name}
+              className="w-full h-auto max-h-[85vh] object-contain object-center block"
+            />
+            <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/25 to-transparent pointer-events-none" aria-hidden="true" />
             <button onClick={handleBack} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/40"><ArrowLeft size={24}/></button>
           </div>
           
