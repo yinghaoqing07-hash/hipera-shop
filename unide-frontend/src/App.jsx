@@ -993,6 +993,22 @@ export default function App() {
   };
 
   // --- Renders ---
+  /** Calcula el precio original (antes del descuento). p.price = precio de venta. */
+  const getOriginalPrice = (p) => {
+    if (!p?.oferta) return null;
+    const salePrice = p.price || 0;
+    const type = p.ofertaType || 'percent';
+    const val = parseFloat(p.ofertaValue) || 0;
+    if (type === 'percent') {
+      if (val <= 0) return salePrice;
+      if (val >= 100) return null;
+      return salePrice / (1 - val / 100); // ej: 7.69 / 0.9 = 8.54 (-10%)
+    }
+    if (type === 'second') return salePrice / 0.75; // 2ª -50% → efectivo 25% off
+    if (type === 'gift') return salePrice * 2; // 2x1
+    return null;
+  };
+
   const renderProductCard = (p) => (
     <div key={p.id} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 active:scale-95 transition-transform relative group" onClick={() => {setSelectedProduct(p); navTo("detail");}}>
       <button onClick={(e) => toggleFavorite(e, p.id)} className="absolute top-2 right-2 z-20 bg-white/80 p-1.5 rounded-full shadow-sm backdrop-blur-sm text-gray-400 hover:text-red-500 transition-colors">
@@ -1002,11 +1018,11 @@ export default function App() {
         {renderDiscountTag(p)}
         <img src={p.image} className="w-full aspect-square rounded-xl object-cover bg-gray-50" />
       </div>
-      <p className="font-medium text-gray-800 text-sm line-clamp-1 mb-1">{p.name}</p>
+      <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words">{p.name}</p>
       <div className="flex justify-between items-end">
         <div>
           <p className="font-extrabold text-red-600 text-lg leading-none">€{p.price.toFixed(2)}</p>
-          {p.oferta && <p className="text-[10px] text-gray-400 line-through mt-0.5">€{(p.price * 1.2).toFixed(2)}</p>}
+          {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
         </div>
         <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg active:bg-red-600 transition-colors"><Plus size={16}/></button>
       </div>
@@ -1509,7 +1525,7 @@ export default function App() {
                            <img src={item.image} className="w-20 h-20 object-cover rounded-xl bg-gray-50"/>
                            <div className="flex-1 flex flex-col justify-between py-1">
                               <div>
-                                <p className="font-bold text-gray-800 line-clamp-1">{item.name}</p>
+                                <p className="font-bold text-gray-800 line-clamp-2">{item.name}</p>
                                 {item.isGift ? (
                                   <p className="text-pink-600 font-extrabold text-sm">🎁 GRATIS</p>
                                 ) : (
@@ -1546,7 +1562,7 @@ export default function App() {
                            <div className="absolute right-0 top-0 w-20 h-20 bg-blue-500 blur-[40px] opacity-20"></div>
                            <div className="w-20 h-20 bg-gray-700 rounded-xl flex items-center justify-center text-gray-400 flex-shrink-0"><Wrench size={24}/></div>
                            <div className="flex-1 flex flex-col justify-between py-1 relative z-10">
-                              <div><p className="font-bold text-gray-100 line-clamp-1">{item.name}</p><p className="text-blue-400 font-extrabold">€{item.price}</p></div>
+                              <div><p className="font-bold text-gray-100 line-clamp-2">{item.name}</p><p className="text-blue-400 font-extrabold">€{item.price}</p></div>
                               <div className="flex items-center justify-between">
                                  <div className="flex items-center gap-3 bg-gray-700 rounded-lg p-1">
                                     <button onClick={() => updateQty(item.id, item.name, -1)} className="w-7 h-7 bg-gray-600 rounded shadow-sm flex items-center justify-center text-gray-300 active:scale-90 transition-transform"><Minus size={14}/></button>
@@ -1669,7 +1685,7 @@ export default function App() {
                              className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
                            >
                              <img src={p.image} alt={p.name} className="w-full h-20 object-cover rounded-lg mb-2"/>
-                             <p className="text-xs font-bold text-gray-800 line-clamp-2 mb-1">{p.name}</p>
+                             <p className="text-xs font-bold text-gray-800 line-clamp-3 mb-1">{p.name}</p>
                              <p className="text-xs text-red-600 font-bold">GRATIS</p>
                            </button>
                          ))
@@ -1783,7 +1799,10 @@ export default function App() {
              {/* 标题和价格 */}
              <div className="flex justify-between items-start mb-2">
                <h2 className="text-2xl font-extrabold text-gray-900 w-3/4 leading-tight">{selectedProduct.name}</h2>
-               <div className="text-right"><p className="text-3xl font-extrabold text-red-600">€{selectedProduct.price.toFixed(2)}</p></div>
+               <div className="text-right">
+                 <p className="text-3xl font-extrabold text-red-600">€{selectedProduct.price.toFixed(2)}</p>
+                 {selectedProduct.oferta && (() => { const orig = getOriginalPrice(selectedProduct); return orig != null ? <p className="text-sm text-gray-400 line-through">€{orig.toFixed(2)}</p> : null; })()}
+               </div>
              </div>
              
              {/* 标签 */}
@@ -1809,7 +1828,7 @@ export default function App() {
                  {products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (
                    <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[100px] sm:min-w-[120px] md:min-w-[140px] w-[100px] sm:w-[120px] md:w-[140px] flex-shrink-0 snap-start bg-gray-50 p-1.5 md:p-2 rounded-xl border border-gray-100 cursor-pointer active:scale-95 transition-transform">
                      <img src={p.image} alt={p.name} className="w-full aspect-square object-cover rounded-lg mb-1.5 md:mb-2"/>
-                     <p className="text-[11px] md:text-xs font-bold text-gray-700 truncate">{p.name}</p>
+                     <p className="text-[11px] md:text-xs font-bold text-gray-700 line-clamp-2">{p.name}</p>
                      <p className="text-[11px] md:text-xs font-bold text-red-600">€{p.price}</p>
                    </div>
                  ))}
