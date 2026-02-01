@@ -166,6 +166,10 @@ class ApiClient {
     });
   }
 
+  async getAdminProducts() {
+    return this.request('/admin/products');
+  }
+
   async createProduct(productData) {
     return this.request('/admin/products', {
       method: 'POST',

@@ -22,7 +22,7 @@ const COMPANY_DATA = {
   phone: "+34 918 782 602",
 };
 
-const CSV_IMPORT_FIELDS = ['name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description', 'oferta', 'oferta_type', 'oferta_value', 'gift_product'];
+const CSV_IMPORT_FIELDS = ['name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description', 'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible'];
 const CSV_HEADER_ALIASES = {
   name: ['name', 'nombre', 'nombre del producto', 'producto'],
   price: ['price', 'precio', 'precio €'],
@@ -35,6 +35,7 @@ const CSV_HEADER_ALIASES = {
   oferta_type: ['oferta_type', 'oferta type', 'tipo oferta', 'tipo_oferta'],
   oferta_value: ['oferta_value', 'oferta value', 'valor', 'valor_oferta'],
   gift_product: ['gift_product', 'gift product', 'regalo', 'gift', 'producto regalo'],
+  visible: ['visible', 'mostrar', 'show', 'en_tienda', 'visible_en_tienda'],
 };
 
 function parseCSV(text) {
@@ -93,7 +94,8 @@ export default function AdminApp() {
   const [currentProduct, setCurrentProduct] = useState(null);
   const [newProduct, setNewProduct] = useState({
     name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
-    description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false
+    description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false,
+    visible: true
   });
   const [uploading, setUploading] = useState(false);
   const [removingBg, setRemovingBg] = useState(false);
@@ -150,7 +152,7 @@ export default function AdminApp() {
     try {
       // 使用 Promise.allSettled 确保即使部分失败也不会影响其他数据
       const results = await Promise.allSettled([
-        apiClient.getProducts(),
+        apiClient.getAdminProducts(),
         apiClient.getAdminOrders(),
         apiClient.getCategories(),
         apiClient.getSubCategories(),
@@ -283,7 +285,8 @@ export default function AdminApp() {
       oferta: currentProduct.oferta, 
       oferta_type: currentProduct.oferta_type || 'percent', 
       oferta_value: currentProduct.oferta_value || 0,
-      gift_product: currentProduct.giftProduct || false
+      gift_product: currentProduct.giftProduct || false,
+      visible: currentProduct.visible !== false
     };
     
     try {
@@ -488,7 +491,8 @@ export default function AdminApp() {
       oferta: newProduct.oferta || false,
       oferta_type: newProduct.oferta_type || 'percent',
       oferta_value: newProduct.oferta_value || 0,
-      gift_product: newProduct.giftProduct || false
+      gift_product: newProduct.giftProduct || false,
+      visible: newProduct.visible !== false
     };
     try {
       const saved = await apiClient.createProduct(payload);
@@ -504,15 +508,15 @@ export default function AdminApp() {
           giftProduct: saved.gift_product || false
         }]);
       } else fetchData();
-      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false });
+      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true });
     } catch (err) {
       toast.error("Error al crear: " + (err.message || "Error"));
     }
   };
 
   const downloadImportTemplate = () => {
-    const headers = ['name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description', 'oferta', 'oferta_type', 'oferta_value', 'gift_product'];
-    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', 'false', 'percent', '0', 'false'];
+    const headers = ['name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description', 'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible'];
+    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', 'false', 'percent', '0', 'false', 'true'];
     const lines = [headers.join(','), example.map((v) => (v.includes(',') ? `"${v}"` : v)).join(',')];
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -601,6 +605,7 @@ export default function AdminApp() {
         oferta_type: (get('oferta_type') || 'percent').toLowerCase().replace(/[^a-z]/g, '') === 'second' ? 'second' : (get('oferta_type') || '').toLowerCase().replace(/[^a-z]/g, '') === 'gift' ? 'gift' : 'percent',
         oferta_value: parseFloat((get('oferta_value') || '0').replace(',', '.')) || 0,
         gift_product: bool(get('gift_product')),
+        visible: get('visible') === '' || get('visible') === undefined ? true : bool(get('visible')),
       };
       try {
         await apiClient.createProduct(payload);
@@ -1093,20 +1098,20 @@ export default function AdminApp() {
     const filtered = products.filter(p => !searchLower || (p.name || '').toLowerCase().includes(searchLower));
     const catFilter = selectedProductCategory === '' ? null : (selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10));
 
-    const byCategory = {};
+    // Estructura: byCategoryAndSub[cid][subId] = [productos]
+    const byCategoryAndSub = {};
     filtered.forEach(p => {
       const raw = p.category;
       const cid = (raw != null && raw !== '') ? Number(raw) : '__none__';
       if (catFilter !== null && cid !== catFilter) return;
-      const key = cid === '__none__' ? '__none__' : cid;
-      if (!byCategory[key]) byCategory[key] = [];
-      byCategory[key].push(p);
+      const subRaw = p.subCategoryId ?? p.sub_category_id;
+      const subId = (subRaw != null && subRaw !== '') ? Number(subRaw) : '__none__';
+      if (!byCategoryAndSub[cid]) byCategoryAndSub[cid] = {};
+      if (!byCategoryAndSub[cid][subId]) byCategoryAndSub[cid][subId] = [];
+      byCategoryAndSub[cid][subId].push(p);
     });
 
-    // Mostrar siempre todas las categorías (incluso con 0 productos) + Sin categoría
-    const catOrder = catFilter !== null
-      ? [catFilter]
-      : [...categories.map(c => c.id), '__none__'];
+    const catOrder = catFilter !== null ? [catFilter] : [...categories.map(c => c.id), '__none__'];
 
     const renderProductRow = (p) => (
       <tr key={p.id}>
@@ -1174,6 +1179,7 @@ export default function AdminApp() {
             <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={newProduct.oferta || false} onChange={e => setNewProduct(p => ({ ...p, oferta: e.target.checked }))} className="rounded"/> <span className="text-sm font-medium">Oferta</span></label>
             {newProduct.oferta && (<><select value={newProduct.oferta_type || 'percent'} onChange={e => setNewProduct(p => ({ ...p, oferta_type: e.target.value }))} className="border p-1.5 rounded text-sm"><option value="percent">%</option><option value="second">2ª -50%</option><option value="gift">2x1</option></select><input type="number" placeholder="Valor" value={newProduct.oferta_value ?? ''} onChange={e => setNewProduct(p => ({ ...p, oferta_value: parseFloat(e.target.value) || 0 }))} className="w-20 border p-1.5 rounded text-sm"/></>)}
             <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={newProduct.giftProduct || false} onChange={e => setNewProduct(p => ({ ...p, giftProduct: e.target.checked }))} className="rounded"/> <span className="text-sm font-medium">Regalo (€65+)</span></label>
+            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={newProduct.visible !== false} onChange={e => setNewProduct(p => ({ ...p, visible: e.target.checked }))} className="rounded"/> <span className="text-sm font-medium">Mostrar en tienda</span></label>
           </div>
           <div>
             <label className="text-xs font-bold text-gray-500 mb-1 block">Imagen</label>
@@ -1208,71 +1214,98 @@ export default function AdminApp() {
         </form>
 
         <>
-          {/* Desktop: grouped by category, collapsed by default */}
+          {/* Desktop: Categoría → Subcategorías → Productos */}
             <div className="hidden md:block space-y-2">
               {catOrder.map(cid => {
-                const key = String(cid);
-                const expanded = !!expandedProductCats[key];
+                const catKey = `cat-${cid}`;
+                const catExpanded = !!expandedProductCats[catKey];
                 const catName = cid === '__none__' ? 'Sin categoría' : (categories.find(c => c.id === cid)?.name || 'Otros');
-                const list = byCategory[cid] || [];
+                const subs = cid === '__none__' ? [{ id: '__none__', name: 'Productos' }] : subCategories.filter(s => s.parent_id === cid);
+                const subOrder = cid === '__none__' ? ['__none__'] : [...subs.map(s => s.id), '__none__'];
+                const totalProducts = Object.values(byCategoryAndSub[cid] || {}).flat().length;
                 return (
                   <div key={cid} className="bg-white rounded-xl shadow-sm border overflow-hidden">
                     <button
                       type="button"
-                      onClick={() => setExpandedProductCats(prev => ({ ...prev, [key]: !prev[key] }))}
-                      className="w-full bg-gray-50 px-4 py-3 border-b font-bold text-gray-800 flex items-center justify-between hover:bg-gray-100 transition-colors text-left"
+                      onClick={() => setExpandedProductCats(prev => ({ ...prev, [catKey]: !prev[catKey] }))}
+                      className="w-full bg-gray-50 px-4 py-3 font-bold text-gray-800 flex items-center justify-between hover:bg-gray-100 transition-colors text-left"
                     >
                       <span className="flex items-center gap-2">
-                        {expanded ? <ChevronDown size={18} className="text-gray-500"/> : <ChevronRight size={18} className="text-gray-500"/>}
+                        {catExpanded ? <ChevronDown size={18} className="text-gray-500"/> : <ChevronRight size={18} className="text-gray-500"/>}
                         {catName}
                       </span>
-                      <span className="text-sm font-normal text-gray-500">{list.length} producto{list.length !== 1 ? 's' : ''}</span>
+                      <span className="text-sm font-normal text-gray-500">{subs.length} subcategoría{subs.length !== 1 ? 's' : ''} · {totalProducts} producto{totalProducts !== 1 ? 's' : ''}</span>
                     </button>
-                    {expanded && (
-                      list.length === 0 ? (
-                        <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos en esta categoría.</div>
-                      ) : (
-                        <table className="w-full text-left text-sm">
-                          <thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead>
-                          <tbody className="divide-y">
-                            {list.map(renderProductRow)}
-                          </tbody>
-                        </table>
-                      )
+                    {catExpanded && (
+                      <div className="border-t bg-gray-50/50">
+                        {cid === '__none__' ? (
+                          (() => {
+                            const list = (byCategoryAndSub[cid] || {})['__none__'] || [];
+                            return list.length === 0 ? <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos sin categoría.</div> : (
+                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>
+                            );
+                          })()
+                        ) : (
+                          subOrder.map(subId => {
+                            const subKey = `cat-${cid}-sub-${subId}`;
+                            const subExpanded = !!expandedProductCats[subKey];
+                            const subName = subId === '__none__' ? 'Sin subcategoría' : (subs.find(s => s.id === subId)?.name || 'Otros');
+                            const list = (byCategoryAndSub[cid] || {})[subId] || [];
+                            return (
+                              <div key={subId} className="border-b border-gray-100 last:border-b-0">
+                                <button type="button" onClick={() => setExpandedProductCats(prev => ({ ...prev, [subKey]: !prev[subKey] }))} className="w-full px-6 py-2.5 flex items-center justify-between text-left hover:bg-gray-100/80 transition-colors">
+                                  <span className="flex items-center gap-2 text-sm font-medium text-gray-700"><span className="text-gray-400">{subExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</span>{subName}</span>
+                                  <span className="text-xs text-gray-500">{list.length} producto{list.length !== 1 ? 's' : ''}</span>
+                                </button>
+                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>)}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     )}
                   </div>
                 );
               })}
             </div>
 
-            {/* Mobile: grouped by category, collapsed by default */}
+            {/* Mobile: Categoría → Subcategorías → Productos */}
             <div className="md:hidden space-y-2">
               {catOrder.map(cid => {
-                const key = String(cid);
-                const expanded = !!expandedProductCats[key];
+                const catKey = `cat-${cid}`;
+                const catExpanded = !!expandedProductCats[catKey];
                 const catName = cid === '__none__' ? 'Sin categoría' : (categories.find(c => c.id === cid)?.name || 'Otros');
-                const list = byCategory[cid] || [];
+                const subs = cid === '__none__' ? [{ id: '__none__', name: 'Productos' }] : subCategories.filter(s => s.parent_id === cid);
+                const subOrder = cid === '__none__' ? ['__none__'] : [...subs.map(s => s.id), '__none__'];
+                const totalProducts = Object.values(byCategoryAndSub[cid] || {}).flat().length;
                 return (
                   <div key={cid} className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedProductCats(prev => ({ ...prev, [key]: !prev[key] }))}
-                      className="w-full px-4 py-3 flex items-center justify-between font-bold text-gray-800 hover:bg-gray-50 transition-colors text-left"
-                    >
-                      <span className="flex items-center gap-2">
-                        {expanded ? <ChevronDown size={18} className="text-gray-500"/> : <ChevronRight size={18} className="text-gray-500"/>}
-                        {catName}
-                      </span>
-                      <span className="text-xs font-normal text-gray-500">{list.length} producto{list.length !== 1 ? 's' : ''}</span>
+                    <button type="button" onClick={() => setExpandedProductCats(prev => ({ ...prev, [catKey]: !prev[catKey] }))} className="w-full px-4 py-3 flex items-center justify-between font-bold text-gray-800 hover:bg-gray-50 transition-colors text-left">
+                      <span className="flex items-center gap-2">{catExpanded ? <ChevronDown size={18} className="text-gray-500"/> : <ChevronRight size={18} className="text-gray-500"/>}{catName}</span>
+                      <span className="text-xs font-normal text-gray-500">{subs.length} sub · {totalProducts} prod.</span>
                     </button>
-                    {expanded && (
-                      list.length === 0 ? (
-                        <div className="border-t px-4 py-6 text-center text-gray-500 text-sm">No hay productos en esta categoría.</div>
-                      ) : (
-                        <div className="border-t px-4 py-3 space-y-3">
-                          {list.map(renderProductCard)}
-                        </div>
-                      )
+                    {catExpanded && (
+                      <div className="border-t">
+                        {cid === '__none__' ? (
+                          (() => { const list = (byCategoryAndSub[cid] || {})['__none__'] || []; return list.length === 0 ? <div className="px-4 py-6 text-center text-gray-500 text-sm">No hay productos.</div> : <div className="px-4 py-3 space-y-3">{list.map(renderProductCard)}</div>; })()
+                        ) : (
+                          subOrder.map(subId => {
+                            const subKey = `cat-${cid}-sub-${subId}`;
+                            const subExpanded = !!expandedProductCats[subKey];
+                            const subName = subId === '__none__' ? 'Sin subcategoría' : (subs.find(s => s.id === subId)?.name || 'Otros');
+                            const list = (byCategoryAndSub[cid] || {})[subId] || [];
+                            return (
+                              <div key={subId} className="border-b border-gray-100">
+                                <button type="button" onClick={() => setExpandedProductCats(prev => ({ ...prev, [subKey]: !prev[subKey] }))} className="w-full px-5 py-2.5 flex items-center justify-between text-left bg-gray-50/50 hover:bg-gray-100">
+                                  <span className="flex items-center gap-2 text-sm font-medium text-gray-700"><span className="text-gray-400">{subExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</span>{subName}</span>
+                                  <span className="text-xs text-gray-500">{list.length}</span>
+                                </button>
+                                {subExpanded && (list.length === 0 ? <div className="px-6 py-4 text-center text-gray-500 text-sm">No hay productos.</div> : <div className="px-4 py-3 space-y-3">{list.map(renderProductCard)}</div>)}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     )}
                   </div>
                 );
@@ -1642,6 +1675,12 @@ const renderRepairs = () => (
                  className="w-full border p-2 rounded-lg text-sm resize-y min-h-[6rem]"
                  placeholder="Escribe detalles del producto. AI puede rellenar con «Extraer información»."
                />
+            </div>
+
+            {/* 👇 Mostrar en tienda */}
+            <div className="flex items-center gap-2 p-4 rounded-xl border border-gray-200 bg-gray-50">
+                <input type="checkbox" id="product-visible" checked={currentProduct.visible !== false} onChange={e => setCurrentProduct({...currentProduct, visible: e.target.checked})} className="w-4 h-4 rounded"/>
+                <label htmlFor="product-visible" className="font-bold text-sm text-gray-800">Mostrar en tienda (visible para clientes)</label>
             </div>
 
             {/* 👇 新增：免费商品标记 */}

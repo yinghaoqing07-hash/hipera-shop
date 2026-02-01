@@ -283,12 +283,13 @@ const authenticateAdmin = async (req, res, next) => {
 
 // ========== PUBLIC ROUTES (Frontend) ==========
 
-// Get products (public)
+// Get products (public) - solo productos visibles en tienda
 app.get('/api/products', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('products')
       .select('*')
+      .or('visible.is.null,visible.eq.true')
       .order('id', { ascending: true });
     
     if (error) throw error;
@@ -492,6 +493,20 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
       .select()
       .single();
     
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all products (admin only) - incluye los no visibles
+app.get('/api/admin/products', authenticateAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('id', { ascending: true });
     if (error) throw error;
     res.json(data);
   } catch (error) {
