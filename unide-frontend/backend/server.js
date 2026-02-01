@@ -378,10 +378,12 @@ app.post('/api/orders', async (req, res) => {
         console.warn(`[Orders] Insufficient stock: id=${item.id}, name=${item.name}, stock=${stock}, requested=${qty}`);
         return res.status(400).json({ error: `Stock insuficiente para "${item.name}". Disponible: ${stock}, solicitado: ${qty}.` });
       }
-      
+      const newStock = stock - qty;
+      const updatePayload = { stock: newStock };
+      if (newStock === 0) updatePayload.visible = false;
       await supabase
         .from('products')
-        .update({ stock: stock - qty })
+        .update(updatePayload)
         .eq('id', item.id);
     }
 
@@ -533,9 +535,11 @@ app.post('/api/admin/products', authenticateAdmin, async (req, res) => {
 app.put('/api/admin/products/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const payload = { ...req.body };
+    if (payload.stock === 0) payload.visible = false;
     const { data, error } = await supabase
       .from('products')
-      .update(req.body)
+      .update(payload)
       .eq('id', id)
       .select()
       .single();

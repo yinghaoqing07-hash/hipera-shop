@@ -259,13 +259,33 @@ export default function AdminApp() {
     try {
       await apiClient.deleteProduct(id);
       toast.success("Producto eliminado");
-      // 直接从状态中移除，避免重新获取所有数据
       setProducts(prev => prev.filter(p => p.id !== id));
     } catch (error) {
       toast.error("Error al eliminar: " + error.message);
-      console.error("Error deleting product:", error);
-      // 如果删除失败，重新获取数据以确保同步
       fetchData();
+    }
+  };
+
+  const [stockEdits, setStockEdits] = useState({});
+  const [updatingStockId, setUpdatingStockId] = useState(null);
+  const handleQuickStockUpdate = async (p) => {
+    const newStock = parseInt(stockEdits[p.id] ?? p.stock, 10);
+    if (Number.isNaN(newStock) || newStock < 0) {
+      toast.error("Stock inválido");
+      return;
+    }
+    setUpdatingStockId(p.id);
+    try {
+      const payload = { stock: newStock };
+      if (newStock > 0) payload.visible = true;
+      const updated = await apiClient.updateProduct(p.id, payload);
+      setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock: newStock, visible: newStock > 0 ? true : x.visible } : x));
+      setStockEdits(prev => { const n = {...prev}; delete n[p.id]; return n; });
+      toast.success(newStock > 0 ? "Stock actualizado, producto re-publicado" : "Stock actualizado");
+    } catch (e) {
+      toast.error("Error: " + (e.message || "Error"));
+    } finally {
+      setUpdatingStockId(null);
     }
   };
   
@@ -1057,6 +1077,45 @@ export default function AdminApp() {
             <div><p className="text-gray-500 text-xs uppercase font-bold">Productos</p><h3 className="text-2xl font-bold text-gray-800">{products.length}</h3></div>
           </div>
         </div>
+        {(() => {
+          const soldOut = products.filter(p => (p.stock ?? 0) === 0);
+          return soldOut.length > 0 ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <h3 className="p-4 font-bold text-gray-800 border-b border-gray-100">Productos agotados (stock=0)</h3>
+              <div className="divide-y max-h-72 overflow-y-auto">
+                {soldOut.map(p => (
+                  <div key={p.id} className="p-4 flex flex-wrap items-center gap-3 hover:bg-gray-50">
+                    <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 flex-shrink-0"/>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-gray-800 truncate">{p.name}</div>
+                      <div className="text-xs text-gray-500">€{p.price?.toFixed(2)}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        value={stockEdits[p.id] ?? p.stock ?? 0}
+                        onChange={e => setStockEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                        className="w-16 px-2 py-1.5 border rounded text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleQuickStockUpdate(p)}
+                        disabled={updatingStockId === p.id}
+                        className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {updatingStockId === p.id ? "..." : "Actualizar"}
+                      </button>
+                      <button type="button" onClick={() => handleDeleteProduct(p.id)} className="p-1.5 rounded-lg text-red-600 hover:bg-red-50" title="Eliminar">
+                        <Trash2 size={18}/>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null;
+        })()}
         {todayOrders.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <h3 className="p-4 font-bold text-gray-800 border-b border-gray-100">Pedidos de hoy</h3>
