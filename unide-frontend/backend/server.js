@@ -726,14 +726,17 @@ app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
         body: form
       });
     } else {
-      const form = new FormData();
-      form.append('image_file', imageBuffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
-      form.append('size', 'auto');
-      form.append('format', 'png');
+      // remove.bg: usar FormData nativo (Node 18+) con Blob - form-data pkg no funciona bien con fetch
+      const NodeFormData = globalThis.FormData;
+      const fd = new NodeFormData();
+      const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
+      fd.append('image_file', blob, 'image.jpg');
+      fd.append('size', 'auto');
+      fd.append('format', 'png');
       rb = await fetch('https://api.remove.bg/v1.0/removebg', {
         method: 'POST',
-        headers: { 'X-Api-Key': removeBgKey, ...form.getHeaders() },
-        body: form
+        headers: { 'X-Api-Key': removeBgKey },
+        body: fd
       });
     }
 
