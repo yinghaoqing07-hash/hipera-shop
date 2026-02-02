@@ -118,6 +118,7 @@ export default function AdminApp() {
   // Bulk AI: Quitar fondo / Centrar producto
   const [selectedProductIds, setSelectedProductIds] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState({ active: false, done: 0, total: 0, action: null, errors: [] });
+  const [bulkResultModal, setBulkResultModal] = useState({ open: false, success: 0, failed: 0, failedIds: [], action: null });
 
   // States for forms
   const [newCatName, setNewCatName] = useState("");
@@ -517,8 +518,8 @@ export default function AdminApp() {
 
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
-  const runBulkAction = async (action) => {
-    const ids = Array.from(selectedProductIds);
+  const runBulkAction = async (action, idsOverride = null) => {
+    const ids = idsOverride || Array.from(selectedProductIds);
     const items = ids.map(id => products.find(p => p.id === id)).filter(Boolean);
     const withImage = items.filter(p => p.image || (p.images && p.images[0]));
     if (withImage.length === 0) {
@@ -527,7 +528,7 @@ export default function AdminApp() {
     }
     setBulkProcessing({ active: true, done: 0, total: withImage.length, action, errors: [] });
     const errors = [];
-    const DELAY_MS = 2000; // 2s entre peticiones para evitar rate limit
+    const DELAY_MS = 5000; // 5s entre peticiones para evitar rate limit
     const MAX_RETRIES = 2;
 
     for (let i = 0; i < withImage.length; i++) {
@@ -574,13 +575,17 @@ export default function AdminApp() {
       setBulkProcessing(prev => ({ ...prev, done: i + 1, errors }));
     }
     setBulkProcessing(prev => ({ ...prev, active: false }));
-    const actionName = action === 'both' ? 'Quitar fondo + Centrar' : action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto';
-    toast.success(`${actionName}: ${withImage.length - errors.length}/${withImage.length} completados`);
-    if (errors.length > 0) {
-      const first = errors[0]?.msg || '';
-      toast.error(`${errors.length} fallaron${first ? ` (ej: ${first.slice(0, 50)}...)` : ''}`);
-    }
-    clearProductSelection();
+    const successCount = withImage.length - errors.length;
+    const failedIds = errors.map(e => e.id);
+    setBulkResultModal({ open: true, success: successCount, failed: errors.length, failedIds, action });
+    if (failedIds.length === 0) clearProductSelection();
+  };
+
+  const handleBulkRetryFailed = () => {
+    const { failedIds, action } = bulkResultModal;
+    setBulkResultModal(prev => ({ ...prev, open: false }));
+    setSelectedProductIds(new Set(failedIds));
+    runBulkAction(action, failedIds);
   };
 
   const handleCreateProduct = async (e) => {
@@ -1325,7 +1330,7 @@ export default function AdminApp() {
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
             {bulkProcessing.active ? (
               <span className="text-sm font-medium text-amber-800">
-                {bulkProcessing.action === 'both' ? 'Quitar fondo + Centrar' : bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~2s entre cada uno)
+                {bulkProcessing.action === 'both' ? 'Quitar fondo + Centrar' : bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~5s entre cada uno)
               </span>
             ) : (
               <>
@@ -1828,6 +1833,28 @@ const renderRepairs = () => (
     </div>
   );
 
+  const renderBulkResultModal = () => (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <h3 className="text-xl font-bold text-gray-800 mb-4">Resultado</h3>
+        <div className="space-y-2 mb-6">
+          <p className="text-green-600 font-medium">✓ {bulkResultModal.success} completados</p>
+          <p className="text-red-600 font-medium">✗ {bulkResultModal.failed} fallaron</p>
+        </div>
+        <div className="flex gap-3">
+          {bulkResultModal.failed > 0 && (
+            <button type="button" onClick={handleBulkRetryFailed} className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+              Reintentar fallidos ({bulkResultModal.failed})
+            </button>
+          )}
+          <button type="button" onClick={() => { setBulkResultModal(prev => ({ ...prev, open: false })); clearProductSelection(); }} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ... Product Modal ... (保持原样，为了简洁我这里没改动)
   const renderProductModal = () => {
     const filteredSubs = subCategories.filter(s => s.parent_id === parseInt(currentProduct.category));
@@ -2051,6 +2078,7 @@ const renderRepairs = () => (
       </main>
       {isEditing && renderProductModal()}
       {importModalOpen && renderImportModal()}
+      {bulkResultModal.open && renderBulkResultModal()}
 
     </div>
   );
