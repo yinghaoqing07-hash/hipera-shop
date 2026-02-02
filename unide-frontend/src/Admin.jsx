@@ -115,6 +115,10 @@ export default function AdminApp() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0, errors: [] });
 
+  // Bulk AI: Quitar fondo / Centrar producto
+  const [selectedProductIds, setSelectedProductIds] = useState(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState({ active: false, done: 0, total: 0, action: null, errors: [] });
+
   // States for forms
   const [newCatName, setNewCatName] = useState("");
   const [newCatIcon, setNewCatIcon] = useState("Package");
@@ -496,6 +500,66 @@ export default function AdminApp() {
     } catch (e) {
       toast.error("Centrar producto: " + (e.message || "Error"));
     } finally { setCenteringProduct(false); }
+  };
+
+  const toggleProductSelect = (id) => {
+    setSelectedProductIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectAllProducts = (ids) => {
+    setSelectedProductIds(prev => { const next = new Set(prev); ids.forEach(id => next.add(id)); return next; });
+  };
+  const clearProductSelection = () => setSelectedProductIds(new Set());
+
+  const runBulkAction = async (action) => {
+    const ids = Array.from(selectedProductIds);
+    const items = ids.map(id => products.find(p => p.id === id)).filter(Boolean);
+    const withImage = items.filter(p => p.image || (p.images && p.images[0]));
+    if (withImage.length === 0) {
+      toast.error("Los productos seleccionados no tienen imagen");
+      return;
+    }
+    setBulkProcessing({ active: true, done: 0, total: withImage.length, action, errors: [] });
+    const errors = [];
+    for (let i = 0; i < withImage.length; i++) {
+      const p = withImage[i];
+      const imgUrl = p.images?.[0] || p.image;
+      if (!imgUrl) continue;
+      try {
+        let newUrl;
+        if (action === 'removeBg') {
+          const r = await apiClient.removeBg(imgUrl);
+          newUrl = r?.image_url;
+        } else {
+          const r = await apiClient.centerProduct(imgUrl);
+          newUrl = r?.image_url;
+        }
+        if (newUrl) {
+          const imgs = p.images || (p.image ? [p.image] : []);
+          const newImages = [newUrl, ...imgs.slice(1)];
+          await apiClient.updateProduct(p.id, {
+            name: p.name, price: p.price, stock: p.stock, category: p.category,
+            sub_category_id: p.subCategoryId ?? p.sub_category_id, description: p.description || '',
+            oferta: p.oferta, oferta_type: p.oferta_type || 'percent', oferta_value: p.oferta_value || 0,
+            gift_product: p.giftProduct || false, visible: p.visible !== false,
+            image: newImages[0]
+          });
+          setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image: newImages[0], images: newImages } : x));
+        }
+      } catch (e) {
+        errors.push({ id: p.id, name: p.name, msg: e?.message || 'Error' });
+      }
+      setBulkProcessing(prev => ({ ...prev, done: i + 1, errors }));
+    }
+    setBulkProcessing(prev => ({ ...prev, active: false }));
+    const actionName = action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto';
+    toast.success(`${actionName}: ${withImage.length - errors.length}/${withImage.length} completados`);
+    if (errors.length > 0) toast.error(`${errors.length} fallaron`);
+    clearProductSelection();
   };
 
   const handleCreateProduct = async (e) => {
@@ -1176,6 +1240,11 @@ export default function AdminApp() {
 
     const renderProductRow = (p) => (
       <tr key={p.id}>
+        <td className="p-2 w-10">
+          {(p.image || p.images?.[0]) && (
+            <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" />
+          )}
+        </td>
         <td className="p-4 flex items-center gap-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100"/>
           <div><div className="font-bold">{p.name}</div>{p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}</div>
@@ -1187,7 +1256,13 @@ export default function AdminApp() {
     );
 
     const renderProductCard = (p) => (
-      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4">
+      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3">
+        {(p.image || p.images?.[0]) && (
+          <div className="flex-shrink-0 pt-1">
+            <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
         <div className="flex items-start gap-3 mb-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-12 h-12 rounded object-cover bg-gray-100 flex-shrink-0"/>
           <div className="flex-1 min-w-0">
@@ -1202,6 +1277,7 @@ export default function AdminApp() {
         <div className="flex gap-2 justify-end">
           <button type="button" onClick={() => { setCurrentProduct(p); setIsEditing(true); }} className="text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 flex items-center gap-1"><Edit2 size={16}/><span className="text-xs">Editar</span></button>
           <button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 flex items-center gap-1"><Trash2 size={16}/><span className="text-xs">Eliminar</span></button>
+        </div>
         </div>
       </div>
     );
@@ -1222,6 +1298,33 @@ export default function AdminApp() {
             Importar CSV
           </button>
         </div>
+
+        {/* Bulk AI: barra cuando hay selección */}
+        {(selectedProductIds.size > 0 || bulkProcessing.active) && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
+            {bulkProcessing.active ? (
+              <span className="text-sm font-medium text-amber-800">
+                {bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total}
+              </span>
+            ) : (
+              <>
+                <span className="text-sm font-medium text-amber-800">{selectedProductIds.size} seleccionados</span>
+                <button type="button" onClick={() => runBulkAction('removeBg')} className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">
+                  Quitar fondo (AI)
+                </button>
+                <button type="button" onClick={() => runBulkAction('center')} className="px-4 py-2 rounded-lg bg-purple-200 hover:bg-purple-300 text-purple-800 text-sm font-medium">
+                  Centrar producto (AI)
+                </button>
+                <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 text-sm">
+                  Cancelar
+                </button>
+                <button type="button" onClick={() => selectAllProducts(filtered.filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-amber-600 hover:underline">
+                  Seleccionar todos (con imagen)
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Inline: Añadir producto (form above categories) */}
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
@@ -1303,7 +1406,7 @@ export default function AdminApp() {
                           (() => {
                             const list = (byCategoryAndSub[cid] || {})['__none__'] || [];
                             return list.length === 0 ? <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos sin categoría.</div> : (
-                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>
+                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>
                             );
                           })()
                         ) : (
@@ -1318,7 +1421,7 @@ export default function AdminApp() {
                                   <span className="flex items-center gap-2 text-sm font-medium text-gray-700"><span className="text-gray-400">{subExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</span>{subName}</span>
                                   <span className="text-xs text-gray-500">{list.length} producto{list.length !== 1 ? 's' : ''}</span>
                                 </button>
-                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>)}
+                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>)}
                               </div>
                             );
                           })
