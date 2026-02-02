@@ -515,6 +515,8 @@ export default function AdminApp() {
   };
   const clearProductSelection = () => setSelectedProductIds(new Set());
 
+  const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
   const runBulkAction = async (action) => {
     const ids = Array.from(selectedProductIds);
     const items = ids.map(id => products.find(p => p.id === id)).filter(Boolean);
@@ -525,40 +527,53 @@ export default function AdminApp() {
     }
     setBulkProcessing({ active: true, done: 0, total: withImage.length, action, errors: [] });
     const errors = [];
+    const DELAY_MS = 2000; // 2s entre peticiones para evitar rate limit
+    const MAX_RETRIES = 2;
+
     for (let i = 0; i < withImage.length; i++) {
+      if (i > 0) await delay(DELAY_MS);
       const p = withImage[i];
       const imgUrl = p.images?.[0] || p.image;
       if (!imgUrl) continue;
-      try {
-        let newUrl;
-        if (action === 'removeBg') {
-          const r = await apiClient.removeBg(imgUrl);
-          newUrl = r?.image_url;
-        } else {
-          const r = await apiClient.centerProduct(imgUrl);
-          newUrl = r?.image_url;
+      let lastErr;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          let newUrl;
+          if (action === 'removeBg') {
+            const r = await apiClient.removeBg(imgUrl);
+            newUrl = r?.image_url;
+          } else {
+            const r = await apiClient.centerProduct(imgUrl);
+            newUrl = r?.image_url;
+          }
+          if (newUrl) {
+            const imgs = p.images || (p.image ? [p.image] : []);
+            const newImages = [newUrl, ...imgs.slice(1)];
+            await apiClient.updateProduct(p.id, {
+              name: p.name, price: p.price, stock: p.stock, category: p.category,
+              sub_category_id: p.subCategoryId ?? p.sub_category_id, description: p.description || '',
+              oferta: p.oferta, oferta_type: p.oferta_type || 'percent', oferta_value: p.oferta_value || 0,
+              gift_product: p.giftProduct || false, visible: p.visible !== false,
+              image: newImages[0]
+            });
+            setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image: newImages[0], images: newImages } : x));
+          }
+          break; // éxito
+        } catch (e) {
+          lastErr = e;
+          if (attempt < MAX_RETRIES) await delay(3000); // 3s antes de reintentar
         }
-        if (newUrl) {
-          const imgs = p.images || (p.image ? [p.image] : []);
-          const newImages = [newUrl, ...imgs.slice(1)];
-          await apiClient.updateProduct(p.id, {
-            name: p.name, price: p.price, stock: p.stock, category: p.category,
-            sub_category_id: p.subCategoryId ?? p.sub_category_id, description: p.description || '',
-            oferta: p.oferta, oferta_type: p.oferta_type || 'percent', oferta_value: p.oferta_value || 0,
-            gift_product: p.giftProduct || false, visible: p.visible !== false,
-            image: newImages[0]
-          });
-          setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image: newImages[0], images: newImages } : x));
-        }
-      } catch (e) {
-        errors.push({ id: p.id, name: p.name, msg: e?.message || 'Error' });
       }
+      if (lastErr) errors.push({ id: p.id, name: p.name, msg: lastErr?.message || 'Error' });
       setBulkProcessing(prev => ({ ...prev, done: i + 1, errors }));
     }
     setBulkProcessing(prev => ({ ...prev, active: false }));
     const actionName = action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto';
     toast.success(`${actionName}: ${withImage.length - errors.length}/${withImage.length} completados`);
-    if (errors.length > 0) toast.error(`${errors.length} fallaron`);
+    if (errors.length > 0) {
+      const first = errors[0]?.msg || '';
+      toast.error(`${errors.length} fallaron${first ? ` (ej: ${first.slice(0, 50)}...)` : ''}`);
+    }
     clearProductSelection();
   };
 
@@ -1304,7 +1319,7 @@ export default function AdminApp() {
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
             {bulkProcessing.active ? (
               <span className="text-sm font-medium text-amber-800">
-                {bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total}
+                {bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~2s entre cada uno)
               </span>
             ) : (
               <>
