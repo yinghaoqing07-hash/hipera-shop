@@ -118,7 +118,7 @@ export default function AdminApp() {
   // Bulk AI: Quitar fondo / Centrar producto
   const [selectedProductIds, setSelectedProductIds] = useState(new Set());
   const [bulkProcessing, setBulkProcessing] = useState({ active: false, done: 0, total: 0, action: null, errors: [] });
-  const [bulkResultModal, setBulkResultModal] = useState({ open: false, success: 0, failed: 0, failedIds: [], action: null });
+  const [bulkResultModal, setBulkResultModal] = useState({ open: false, success: 0, failed: 0, failedIds: [], failedItems: [], successItems: [], action: null });
 
   // States for forms
   const [newCatName, setNewCatName] = useState("");
@@ -577,7 +577,9 @@ export default function AdminApp() {
     setBulkProcessing(prev => ({ ...prev, active: false }));
     const successCount = withImage.length - errors.length;
     const failedIds = errors.map(e => e.id);
-    setBulkResultModal({ open: true, success: successCount, failed: errors.length, failedIds, action });
+    const successItems = withImage.filter(p => !errors.some(e => e.id === p.id)).map(p => ({ id: p.id, name: p.name }));
+    const failedItems = errors.map(e => ({ id: e.id, name: e.name, msg: e.msg }));
+    setBulkResultModal({ open: true, success: successCount, failed: errors.length, failedIds, failedItems, successItems, action });
     if (failedIds.length === 0) clearProductSelection();
   };
 
@@ -1325,36 +1327,6 @@ export default function AdminApp() {
           </button>
         </div>
 
-        {/* Bulk AI: barra cuando hay selección */}
-        {(selectedProductIds.size > 0 || bulkProcessing.active) && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
-            {bulkProcessing.active ? (
-              <span className="text-sm font-medium text-amber-800">
-                {bulkProcessing.action === 'both' ? 'Quitar fondo + Centrar' : bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~5s entre cada uno)
-              </span>
-            ) : (
-              <>
-                <span className="text-sm font-medium text-amber-800">{selectedProductIds.size} seleccionados</span>
-                <button type="button" onClick={() => runBulkAction('both')} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">
-                  Quitar fondo + Centrar (AI)
-                </button>
-                <button type="button" onClick={() => runBulkAction('removeBg')} className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">
-                  Solo Quitar fondo
-                </button>
-                <button type="button" onClick={() => runBulkAction('center')} className="px-4 py-2 rounded-lg bg-purple-200 hover:bg-purple-300 text-purple-800 text-sm font-medium">
-                  Solo Centrar
-                </button>
-                <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 text-sm">
-                  Cancelar
-                </button>
-                <button type="button" onClick={() => selectAllProducts(filtered.filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-amber-600 hover:underline">
-                  Seleccionar todos (con imagen)
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
         {/* Inline: Añadir producto (form above categories) */}
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
           <h3 className="font-bold text-gray-800 text-lg">Añadir producto nuevo</h3>
@@ -1835,13 +1807,38 @@ const renderRepairs = () => (
 
   const renderBulkResultModal = () => (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <h3 className="text-xl font-bold text-gray-800 mb-4">Resultado</h3>
-        <div className="space-y-2 mb-6">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="p-6 border-b">
+          <h3 className="text-xl font-bold text-gray-800 mb-2">Resultado</h3>
           <p className="text-green-600 font-medium">✓ {bulkResultModal.success} completados</p>
           <p className="text-red-600 font-medium">✗ {bulkResultModal.failed} fallaron</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {(bulkResultModal.successItems || []).length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-2 uppercase">Completados ({(bulkResultModal.successItems || []).length})</p>
+              <ul className="text-sm text-gray-700 space-y-1 max-h-32 overflow-y-auto">
+                {(bulkResultModal.successItems || []).map(item => (
+                  <li key={item.id} className="truncate">✓ {item.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(bulkResultModal.failedItems || []).length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-2 uppercase">Fallidos ({(bulkResultModal.failedItems || []).length})</p>
+              <ul className="text-sm text-gray-700 space-y-2 max-h-40 overflow-y-auto">
+                {(bulkResultModal.failedItems || []).map(item => (
+                  <li key={item.id} className="border-l-2 border-red-300 pl-2">
+                    <span className="font-medium text-red-700">✗ {item.name}</span>
+                    <p className="text-xs text-red-600 mt-0.5">{item.msg}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div className="p-6 border-t flex gap-3">
           {bulkResultModal.failed > 0 && (
             <button type="button" onClick={handleBulkRetryFailed} className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
               Reintentar fallidos ({bulkResultModal.failed})
@@ -2046,7 +2043,7 @@ const renderRepairs = () => (
         </nav>
         <div className="px-4 pt-4 border-t border-gray-800"><button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span>Salir</span></button></div>
       </aside>
-      <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto h-screen pt-14 pl-4 pr-4 pb-4 md:pt-8 md:pl-8 md:pr-8 md:pb-8">
+      <main className={`flex-1 min-w-0 overflow-x-hidden overflow-y-auto h-screen pt-14 pl-4 pr-4 pb-4 md:pt-8 md:pl-8 md:pr-8 md:pb-8 ${activeTab === 'products' && (selectedProductIds.size > 0 || bulkProcessing.active) ? 'pb-24' : ''}`}>
         {/* Mobile menu button - reserve space so content is not hidden */}
         <button 
           type="button"
@@ -2079,6 +2076,36 @@ const renderRepairs = () => (
       {isEditing && renderProductModal()}
       {importModalOpen && renderImportModal()}
       {bulkResultModal.open && renderBulkResultModal()}
+
+      {/* Bulk AI: barra fija abajo cuando hay selección en Productos */}
+      {activeTab === 'products' && (selectedProductIds.size > 0 || bulkProcessing.active) && (
+        <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-amber-50 border-t border-amber-200 shadow-lg z-20 p-4 flex flex-wrap items-center justify-center gap-3">
+          {bulkProcessing.active ? (
+            <span className="text-sm font-medium text-amber-800">
+              {bulkProcessing.action === 'both' ? 'Quitar fondo + Centrar' : bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~5s entre cada uno)
+            </span>
+          ) : (
+            <>
+              <span className="text-sm font-medium text-amber-800">{selectedProductIds.size} seleccionados</span>
+              <button type="button" onClick={() => runBulkAction('both')} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">
+                Quitar fondo + Centrar (AI)
+              </button>
+              <button type="button" onClick={() => runBulkAction('removeBg')} className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">
+                Solo Quitar fondo
+              </button>
+              <button type="button" onClick={() => runBulkAction('center')} className="px-4 py-2 rounded-lg bg-purple-200 hover:bg-purple-300 text-purple-800 text-sm font-medium">
+                Solo Centrar
+              </button>
+              <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 text-sm">
+                Cancelar
+              </button>
+              <button type="button" onClick={() => selectAllProducts(products.filter(p => !searchTerm.trim() || (p.name || '').toLowerCase().includes(searchTerm.toLowerCase().trim())).filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-amber-600 hover:underline">
+                Seleccionar todos (con imagen)
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
     </div>
   );
