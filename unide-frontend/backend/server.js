@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import FormData from 'form-data';
 import rateLimit from 'express-rate-limit';
 import { createClient } from '@supabase/supabase-js';
 import { Blob } from 'buffer';
@@ -263,21 +264,26 @@ app.use('/api/', limiter);
 // Authentication middleware
 const authenticateAdmin = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
     if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
+      return res.status(401).json({ error: 'Token no enviado. Cierra sesión y vuelve a iniciar sesión en /login' });
     }
 
     const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) {
-      return res.status(401).json({ error: 'Invalid token' });
+    if (error) {
+      console.warn('[Auth] getUser error:', error.message);
+      return res.status(401).json({ error: 'Token inválido o expirado. Cierra sesión y vuelve a iniciar sesión' });
+    }
+    if (!user) {
+      return res.status(401).json({ error: 'Sesión no válida. Vuelve a iniciar sesión' });
     }
 
-    // Check if user is admin (you can add role check here)
     req.user = user;
     next();
-  } catch (error) {
-    res.status(401).json({ error: 'Authentication failed' });
+  } catch (err) {
+    console.warn('[Auth] Exception:', err?.message);
+    res.status(401).json({ error: 'Error de autenticación. Intenta cerrar sesión y volver a entrar' });
   }
 };
 
@@ -686,84 +692,62 @@ app.delete('/api/admin/repair-services/:id', authenticateAdmin, async (req, res)
   }
 });
 
-// AI: remove.bg 去背 → 上传 Supabase，返回新图 URL
+// AI: 去背 → 支持 REMOVEBGAPI_KEY (removebgapi.com) 或 REMOVEBG_API_KEY (remove.bg)
 app.post('/api/admin/remove-bg', authenticateAdmin, async (req, res) => {
   try {
     const { image_url } = req.body;
     if (!image_url || typeof image_url !== 'string') {
       return res.status(400).json({ error: 'image_url required' });
     }
-    const key = process.env.REMOVEBG_API_KEY;
-    if (!key) return res.status(503).json({ error: 'REMOVEBG_API_KEY not configured' });
+    const removeBgApiKey = process.env.REMOVEBGAPI_KEY;
+    const removeBgKey = process.env.REMOVEBG_API_KEY;
+    if (!removeBgApiKey && !removeBgKey) {
+      return res.status(503).json({ error: 'REMOVEBGAPI_KEY 或 REMOVEBG_API_KEY 需在 backend/.env 中配置' });
+    }
 
-    // 先尝试直接使用 image_url（Supabase 公开 URL 应该可以直接访问）
-    let formData = new FormData();
-    formData.append('image_url', image_url);
-    formData.append('size', 'auto');
-    formData.append('format', 'png');
+    let imageBuffer;
+    try {
+      const imgResponse = await fetch(image_url);
+      if (!imgResponse.ok) throw new Error('Failed to download image');
+      imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
+    } catch (e) {
+      return res.status(400).json({ error: '无法下载图片: ' + (e.message || image_url) });
+    }
 
-    let rb = await fetch('https://api.remove.bg/v1.0/removebg', {
-      method: 'POST',
-      headers: { 'X-Api-Key': key },
-      body: formData
-    });
-
-    // 如果 URL 方式失败，尝试下载后上传文件
-    if (!rb.ok) {
-      const errText = await rb.text();
-      let err;
-      try {
-        err = JSON.parse(errText);
-      } catch {
-        err = { errors: [{ detail: errText }] };
-      }
-      
-      // 如果是 URL 访问问题，尝试下载后上传文件
-      if (err?.errors?.[0]?.detail?.includes('image_url') || err?.errors?.[0]?.detail?.includes('Please provide') || rb.status === 400) {
-        console.log('Trying file upload method instead of URL...');
-        
-        const imgResponse = await fetch(image_url);
-        if (!imgResponse.ok) {
-          return res.status(400).json({ error: 'Failed to download image from URL: ' + image_url });
-        }
-        const imageBuffer = Buffer.from(await imgResponse.arrayBuffer());
-        
-        // 使用原生 FormData 和 Blob（Node.js 18+ 支持）
-        const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
-        const blob = new Blob([imageBuffer], { type: contentType });
-        
-        formData = new FormData();
-        formData.append('image_file', blob, 'image.jpg');
-        formData.append('size', 'auto');
-        formData.append('format', 'png');
-
-        rb = await fetch('https://api.remove.bg/v1.0/removebg', {
-          method: 'POST',
-          headers: { 'X-Api-Key': key },
-          body: formData
-        });
-      }
+    let rb;
+    if (removeBgApiKey) {
+      const form = new FormData();
+      form.append('image_file', imageBuffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
+      form.append('format', 'png');
+      form.append('size', 'full');
+      rb = await fetch('https://removebgapi.com/api/v1/remove', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${removeBgApiKey}`, ...form.getHeaders() },
+        body: form
+      });
+    } else {
+      const form = new FormData();
+      form.append('image_file', imageBuffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
+      form.append('size', 'auto');
+      form.append('format', 'png');
+      rb = await fetch('https://api.remove.bg/v1.0/removebg', {
+        method: 'POST',
+        headers: { 'X-Api-Key': removeBgKey, ...form.getHeaders() },
+        body: form
+      });
     }
 
     if (!rb.ok) {
       const errText = await rb.text();
       let err;
-      try {
-        err = JSON.parse(errText);
-      } catch {
-        err = { errors: [{ detail: errText || rb.statusText }] };
+      try { err = JSON.parse(errText); } catch { err = { errors: [{ detail: errText }] }; }
+      let msg = err?.errors?.[0]?.detail || err?.errors?.[0]?.title || err?.message || rb.statusText;
+      if (typeof msg !== 'string') {
+        const e = err?.error;
+        msg = (typeof e === 'string' ? e : e?.message) || errText || '去背失败';
       }
-      const msg = err?.errors?.[0]?.detail || err?.errors?.[0]?.title || err?.error || rb.statusText;
-      console.error('remove.bg error:', { 
-        status: rb.status, 
-        error: err, 
-        errorDetails: JSON.stringify(err, null, 2),
-        imageUrl: image_url 
-      });
-      return res.status(rb.status >= 400 && rb.status < 500 ? 400 : 502).json({ 
-        error: msg || 'remove.bg failed',
-        details: err?.errors?.[0] 
-      });
+      msg = (msg && typeof msg === 'string' ? msg : errText) || '去背失败';
+      return res.status(rb.status >= 400 && rb.status < 500 ? 400 : 502).json({ error: msg });
     }
 
     const buf = Buffer.from(await rb.arrayBuffer());

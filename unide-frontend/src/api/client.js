@@ -1,3 +1,5 @@
+import { supabase } from '../supabaseClient';
+
 const RAILWAY_API = 'https://hipera-shop-production.up.railway.app/api';
 
 function getBase() {
@@ -60,7 +62,10 @@ class ApiClient {
 
   async request(endpoint, options = {}) {
     const url = this._url(endpoint);
-    const token = this.getToken();
+    const token = await this.getToken();
+    if (!token && endpoint.includes('/admin/')) {
+      throw new Error('Sesión expirada. Cierra sesión y vuelve a iniciar sesión en /login');
+    }
 
     const config = {
       ...options,
@@ -85,7 +90,9 @@ class ApiClient {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || `Request failed with status ${response.status}`);
+        const errMsg = data?.error;
+        const str = typeof errMsg === 'string' ? errMsg : (errMsg?.message || JSON.stringify(errMsg) || `Request failed ${response.status}`);
+        throw new Error(str);
       }
 
       return data;
@@ -97,28 +104,14 @@ class ApiClient {
     }
   }
 
-  getToken() {
-    // Get token from Supabase session
-    // Try multiple methods to get the token
+  async getToken() {
     try {
-      // Method 1: Try Supabase localStorage key
-      const supabaseKey = `sb-${import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0]}-auth-token`;
-      const sessionData = localStorage.getItem(supabaseKey);
-      if (sessionData) {
-        const session = JSON.parse(sessionData);
-        return session?.access_token || null;
-      }
-      
-      // Method 2: Try common Supabase storage key pattern
-      const keys = Object.keys(localStorage).filter(key => key.includes('supabase.auth.token'));
-      if (keys.length > 0) {
-        const session = JSON.parse(localStorage.getItem(keys[0]) || '{}');
-        return session?.access_token || null;
-      }
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token || null;
     } catch (e) {
       console.warn('Error getting token:', e);
+      return null;
     }
-    return null;
   }
 
   // Public endpoints (simple GET → no preflight, avoids CORS preflight issues)

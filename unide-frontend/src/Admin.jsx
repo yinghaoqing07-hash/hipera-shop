@@ -455,7 +455,8 @@ export default function AdminApp() {
       setNewProduct(prev => ({ ...prev, images: newImages, image: image_url }));
       toast.success("Fondo eliminado");
     } catch (e) {
-      toast.error("Quitar fondo: " + (e.message || "Error"));
+      const errMsg = typeof e?.message === 'string' ? e.message : (e?.message?.message || (typeof e?.message === 'object' ? 'Error de servicio' : String(e?.message || e || 'Error')));
+      toast.error("Quitar fondo: " + errMsg);
     } finally { setRemovingBg(false); }
   };
 
@@ -659,7 +660,8 @@ export default function AdminApp() {
       });
       toast.success("Fondo eliminado");
     } catch (e) {
-      toast.error("Quitar fondo: " + (e.message || "Error"));
+      const errMsg = typeof e?.message === 'string' ? e.message : (e?.message?.message || (typeof e?.message === 'object' ? 'Error de servicio' : String(e?.message || e || 'Error')));
+      toast.error("Quitar fondo: " + errMsg);
     } finally { setRemovingBg(false); }
   };
 
