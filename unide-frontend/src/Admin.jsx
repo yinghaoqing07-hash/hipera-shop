@@ -539,7 +539,13 @@ export default function AdminApp() {
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           let newUrl;
-          if (action === 'removeBg') {
+          if (action === 'both') {
+            const r1 = await apiClient.removeBg(imgUrl);
+            const url1 = r1?.image_url;
+            if (!url1) throw new Error('removeBg sin resultado');
+            const r2 = await apiClient.centerProduct(url1);
+            newUrl = r2?.image_url;
+          } else if (action === 'removeBg') {
             const r = await apiClient.removeBg(imgUrl);
             newUrl = r?.image_url;
           } else {
@@ -568,7 +574,7 @@ export default function AdminApp() {
       setBulkProcessing(prev => ({ ...prev, done: i + 1, errors }));
     }
     setBulkProcessing(prev => ({ ...prev, active: false }));
-    const actionName = action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto';
+    const actionName = action === 'both' ? 'Quitar fondo + Centrar' : action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto';
     toast.success(`${actionName}: ${withImage.length - errors.length}/${withImage.length} completados`);
     if (errors.length > 0) {
       const first = errors[0]?.msg || '';
@@ -1319,16 +1325,19 @@ export default function AdminApp() {
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
             {bulkProcessing.active ? (
               <span className="text-sm font-medium text-amber-800">
-                {bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~2s entre cada uno)
+                {bulkProcessing.action === 'both' ? 'Quitar fondo + Centrar' : bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~2s entre cada uno)
               </span>
             ) : (
               <>
                 <span className="text-sm font-medium text-amber-800">{selectedProductIds.size} seleccionados</span>
+                <button type="button" onClick={() => runBulkAction('both')} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">
+                  Quitar fondo + Centrar (AI)
+                </button>
                 <button type="button" onClick={() => runBulkAction('removeBg')} className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">
-                  Quitar fondo (AI)
+                  Solo Quitar fondo
                 </button>
                 <button type="button" onClick={() => runBulkAction('center')} className="px-4 py-2 rounded-lg bg-purple-200 hover:bg-purple-300 text-purple-800 text-sm font-medium">
-                  Centrar producto (AI)
+                  Solo Centrar
                 </button>
                 <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 text-sm">
                   Cancelar
