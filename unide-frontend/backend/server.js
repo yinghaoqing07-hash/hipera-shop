@@ -296,6 +296,7 @@ app.get('/api/products', async (req, res) => {
       .from('products')
       .select('*')
       .or('visible.is.null,visible.eq.true')
+      .order('sort_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
     
     if (error) throw error;
@@ -311,6 +312,7 @@ app.get('/api/categories', async (req, res) => {
     const { data, error } = await supabase
       .from('categories')
       .select('*')
+      .order('sort_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
     
     if (error) throw error;
@@ -326,6 +328,7 @@ app.get('/api/sub-categories', async (req, res) => {
     const { data, error } = await supabase
       .from('sub_categories')
       .select('*')
+      .order('sort_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
     
     if (error) throw error;
@@ -514,6 +517,7 @@ app.get('/api/admin/products', authenticateAdmin, async (req, res) => {
     const { data, error } = await supabase
       .from('products')
       .select('*')
+      .order('sort_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
     if (error) throw error;
     res.json(data);
@@ -572,6 +576,20 @@ app.delete('/api/admin/products/:id', authenticateAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/admin/reorder/products', authenticateAdmin, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array required' });
+    for (let i = 0; i < ids.length; i++) {
+      const { error } = await supabase.from('products').update({ sort_order: i }).eq('id', ids[i]);
+      if (error) throw error;
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Category management (admin only)
 app.post('/api/admin/categories', authenticateAdmin, async (req, res) => {
   try {
@@ -603,6 +621,20 @@ app.delete('/api/admin/categories/:id', authenticateAdmin, async (req, res) => {
   }
 });
 
+app.put('/api/admin/reorder/categories', authenticateAdmin, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array required' });
+    for (let i = 0; i < ids.length; i++) {
+      const { error } = await supabase.from('categories').update({ sort_order: i }).eq('id', ids[i]);
+      if (error) throw error;
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Sub-category management (admin only)
 app.post('/api/admin/sub-categories', authenticateAdmin, async (req, res) => {
   try {
@@ -628,6 +660,20 @@ app.delete('/api/admin/sub-categories/:id', authenticateAdmin, async (req, res) 
       .eq('id', id);
     
     if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/admin/reorder/sub-categories', authenticateAdmin, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array required' });
+    for (let i = 0; i < ids.length; i++) {
+      const { error } = await supabase.from('sub_categories').update({ sort_order: i }).eq('id', ids[i]);
+      if (error) throw error;
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });

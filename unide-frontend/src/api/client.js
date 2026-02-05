@@ -183,6 +183,10 @@ class ApiClient {
     });
   }
 
+  async reorderProducts(ids) {
+    return this.request('/admin/reorder/products', { method: 'PUT', body: JSON.stringify({ ids }) });
+  }
+
   async createCategory(categoryData) {
     return this.request('/admin/categories', {
       method: 'POST',
@@ -196,6 +200,10 @@ class ApiClient {
     });
   }
 
+  async reorderCategories(ids) {
+    return this.request('/admin/reorder/categories', { method: 'PUT', body: JSON.stringify({ ids }) });
+  }
+
   async createSubCategory(subCategoryData) {
     return this.request('/admin/sub-categories', {
       method: 'POST',
@@ -207,6 +215,10 @@ class ApiClient {
     return this.request(`/admin/sub-categories/${subCategoryId}`, {
       method: 'DELETE',
     });
+  }
+
+  async reorderSubCategories(ids) {
+    return this.request('/admin/reorder/sub-categories', { method: 'PUT', body: JSON.stringify({ ids }) });
   }
 
   async createRepairService(repairData) {

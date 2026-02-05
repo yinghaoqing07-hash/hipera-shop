@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Package, List, ShoppingBag, 
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
-  CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet
+  CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 
@@ -271,7 +271,79 @@ export default function AdminApp() {
     }
   };
 
+  const handleReorderCategories = async (newOrderIds) => {
+    try {
+      setReordering(true);
+      await apiClient.reorderCategories(newOrderIds);
+      setCategories(prev => {
+        const byId = Object.fromEntries(prev.map(c => [c.id, c]));
+        return newOrderIds.map(id => byId[id]).filter(Boolean);
+      });
+      toast.success("Orden guardado");
+    } catch (e) {
+      toast.error("Error: " + (e?.message || "Error"));
+    } finally { setReordering(false); }
+  };
+
+  const handleReorderSubCategories = async (parentId, newOrderIdsThisParent) => {
+    try {
+      setReordering(true);
+      const subsThisParent = subCategories.filter(s => s.parent_id === parentId);
+      const reorderedSubs = newOrderIdsThisParent.map(id => subsThisParent.find(x => x.id === id)).filter(Boolean);
+      const ordered = [];
+      let p1Used = false;
+      for (const s of subCategories) {
+        if (s.parent_id === parentId) {
+          if (!p1Used) { ordered.push(...reorderedSubs); p1Used = true; }
+        } else {
+          ordered.push(s);
+        }
+      }
+      await apiClient.reorderSubCategories(ordered.map(x => x.id));
+      setSubCategories(ordered);
+      toast.success("Orden guardado");
+    } catch (e) {
+      toast.error("Error: " + (e?.message || "Error"));
+    } finally { setReordering(false); }
+  };
+
+  const handleReorderProducts = async (newOrderIdsFull) => {
+    try {
+      setReordering(true);
+      await apiClient.reorderProducts(newOrderIdsFull);
+      setProducts(prev => {
+        const byId = Object.fromEntries(prev.map(p => [p.id, p]));
+        return newOrderIdsFull.map(id => byId[id]).filter(Boolean);
+      });
+      toast.success("Orden guardado");
+    } catch (e) {
+      toast.error("Error: " + (e?.message || "Error"));
+    } finally { setReordering(false); }
+  };
+
+  const buildProductReorder = (cid, subId, newOrderedIdsThisGroup) => {
+    const subProducts = products.filter(p => {
+      const pc = (p.category != null && p.category !== '') ? Number(p.category) : '__none__';
+      const ps = (p.subCategoryId ?? p.sub_category_id) != null && (p.subCategoryId ?? p.sub_category_id) !== '' ? Number(p.subCategoryId ?? p.sub_category_id) : '__none__';
+      return pc === cid && ps === subId;
+    });
+    const reordered = newOrderedIdsThisGroup.map(id => subProducts.find(x => x.id === id)).filter(Boolean);
+    const result = [];
+    let used = false;
+    for (const p of products) {
+      const pc = (p.category != null && p.category !== '') ? Number(p.category) : '__none__';
+      const ps = (p.subCategoryId ?? p.sub_category_id) != null && (p.subCategoryId ?? p.sub_category_id) !== '' ? Number(p.subCategoryId ?? p.sub_category_id) : '__none__';
+      if (pc === cid && ps === subId) {
+        if (!used) { result.push(...reordered); used = true; }
+      } else {
+        result.push(p);
+      }
+    }
+    return result.map(x => x.id);
+  };
+
   const [stockEdits, setStockEdits] = useState({});
+  const [reordering, setReordering] = useState(false);
   const [updatingStockId, setUpdatingStockId] = useState(null);
   const handleQuickStockUpdate = async (p) => {
     const newStock = parseInt(stockEdits[p.id] ?? p.stock, 10);
@@ -1266,12 +1338,24 @@ export default function AdminApp() {
 
     const catOrder = catFilter !== null ? [catFilter] : [...categories.map(c => c.id), '__none__'];
 
-    const renderProductRow = (p) => (
-      <tr key={p.id}>
+    const productDnD = (p, targetP, list, cid, subId) => {
+      if (p.id === targetP.id) return;
+      const ids = list.map(x => x.id);
+      const fromIdx = ids.indexOf(p.id);
+      const toIdx = ids.indexOf(targetP.id);
+      if (fromIdx < 0 || toIdx < 0) return;
+      ids.splice(fromIdx, 1);
+      ids.splice(ids.indexOf(targetP.id), 0, p.id);
+      handleReorderProducts(buildProductReorder(cid, subId, ids));
+    };
+
+    const renderProductRow = (p, cid, subId, list) => (
+      <tr key={p.id} draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
         <td className="p-2 w-10">
           {(p.image || p.images?.[0]) && (
-            <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" />
+            <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" onClick={e => e.stopPropagation()}/>
           )}
+          <GripVertical size={14} className="text-gray-400 cursor-grab inline-block" style={{ verticalAlign: 'middle' }}/>
         </td>
         <td className="p-4 flex items-center gap-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100"/>
@@ -1283,13 +1367,14 @@ export default function AdminApp() {
       </tr>
     );
 
-    const renderProductCard = (p) => (
-      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3">
-        {(p.image || p.images?.[0]) && (
-          <div className="flex-shrink-0 pt-1">
-            <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" />
-          </div>
-        )}
+    const renderProductCard = (p, cid, subId, list) => (
+      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3" draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
+        <div className="flex-shrink-0 pt-1 flex flex-col gap-1">
+          {(p.image || p.images?.[0]) && (
+            <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" onClick={e => e.stopPropagation()}/>
+          )}
+          <GripVertical size={14} className="text-gray-400 cursor-grab"/>
+        </div>
         <div className="flex-1 min-w-0">
         <div className="flex items-start gap-3 mb-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-12 h-12 rounded object-cover bg-gray-100 flex-shrink-0"/>
@@ -1327,6 +1412,7 @@ export default function AdminApp() {
           </button>
         </div>
 
+        <p className="text-xs text-gray-500">Arrastra productos (⋮⋮) para cambiar orden en la tienda</p>
         {/* Inline: Añadir producto (form above categories) */}
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
           <h3 className="font-bold text-gray-800 text-lg">Añadir producto nuevo</h3>
@@ -1407,7 +1493,7 @@ export default function AdminApp() {
                           (() => {
                             const list = (byCategoryAndSub[cid] || {})['__none__'] || [];
                             return list.length === 0 ? <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos sin categoría.</div> : (
-                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>
+                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>
                             );
                           })()
                         ) : (
@@ -1422,7 +1508,7 @@ export default function AdminApp() {
                                   <span className="flex items-center gap-2 text-sm font-medium text-gray-700"><span className="text-gray-400">{subExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</span>{subName}</span>
                                   <span className="text-xs text-gray-500">{list.length} producto{list.length !== 1 ? 's' : ''}</span>
                                 </button>
-                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(renderProductRow)}</tbody></table>)}
+                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>)}
                               </div>
                             );
                           })
@@ -1452,7 +1538,7 @@ export default function AdminApp() {
                     {catExpanded && (
                       <div className="border-t">
                         {cid === '__none__' ? (
-                          (() => { const list = (byCategoryAndSub[cid] || {})['__none__'] || []; return list.length === 0 ? <div className="px-4 py-6 text-center text-gray-500 text-sm">No hay productos.</div> : <div className="px-4 py-3 space-y-3">{list.map(renderProductCard)}</div>; })()
+                          (() => { const list = (byCategoryAndSub[cid] || {})['__none__'] || []; return list.length === 0 ? <div className="px-4 py-6 text-center text-gray-500 text-sm">No hay productos.</div> : <div className="px-4 py-3 space-y-3">{list.map(p => renderProductCard(p, cid, '__none__', list))}</div>; })()
                         ) : (
                           subOrder.map(subId => {
                             const subKey = `cat-${cid}-sub-${subId}`;
@@ -1465,7 +1551,7 @@ export default function AdminApp() {
                                   <span className="flex items-center gap-2 text-sm font-medium text-gray-700"><span className="text-gray-400">{subExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</span>{subName}</span>
                                   <span className="text-xs text-gray-500">{list.length}</span>
                                 </button>
-                                {subExpanded && (list.length === 0 ? <div className="px-6 py-4 text-center text-gray-500 text-sm">No hay productos.</div> : <div className="px-4 py-3 space-y-3">{list.map(renderProductCard)}</div>)}
+                                {subExpanded && (list.length === 0 ? <div className="px-6 py-4 text-center text-gray-500 text-sm">No hay productos.</div> : <div className="px-4 py-3 space-y-3">{list.map(p => renderProductCard(p, cid, subId, list))}</div>)}
                               </div>
                             );
                           })
@@ -1481,28 +1567,75 @@ export default function AdminApp() {
     );
   };
 
-  const renderCategoryManager = () => (
+  const renderCategoryManager = () => {
+    const sortedCats = [...categories].sort((a, b) => (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
+    const onCatDragStart = (e, c) => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'category', id: c.id })); e.dataTransfer.effectAllowed = 'move'; };
+    const onCatDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+    const onCatDrop = (e, targetCat) => {
+      e.preventDefault();
+      try {
+        const d = JSON.parse(e.dataTransfer.getData('application/json'));
+        if (d.type !== 'category' || d.id === targetCat.id) return;
+        const ids = sortedCats.map(x => x.id);
+        const fromIdx = ids.indexOf(d.id);
+        const toIdx = ids.indexOf(targetCat.id);
+        if (fromIdx < 0 || toIdx < 0) return;
+        ids.splice(fromIdx, 1);
+        ids.splice(ids.indexOf(targetCat.id), 0, d.id);
+        handleReorderCategories(ids);
+      } catch (_) {}
+    };
+
+    return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row gap-3 mb-6 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
         <div className="flex-1"><label className="text-xs font-bold text-gray-500 block mb-1">Nombre</label><input id="category-name" name="category-name" value={newCatName} onChange={e => setNewCatName(e.target.value)} className="border p-2 rounded-lg w-full"/></div>
         <div className="sm:w-40"><label className="text-xs font-bold text-gray-500 block mb-1">Icono</label><select id="category-icon" name="category-icon" value={newCatIcon} onChange={e => setNewCatIcon(e.target.value)} className="border p-2 rounded-lg w-full">{AVAILABLE_ICONS.map(i=><option key={i} value={i}>{i}</option>)}</select></div>
         <button onClick={handleAddCategory} className="bg-gray-900 text-white px-4 py-2.5 rounded-lg font-bold whitespace-nowrap sm:self-end">Crear</button>
       </div>
+      <p className="text-xs text-gray-500 mb-2">Arrastra para cambiar el orden (se aplica en la tienda)</p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {categories.map(c => (
-          <div key={c.id} className="bg-white border rounded-xl overflow-hidden shadow-sm">
-            <div className="bg-gray-50 p-3 flex justify-between font-bold text-gray-800 border-b"><span>{c.icon} {c.name}</span><button onClick={() => handleDeleteCategory(c.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={16}/></button></div>
+        {sortedCats.map(c => {
+          const subs = subCategories.filter(s => s.parent_id === c.id).sort((a, b) => (a.sort_order ?? a.id) - (b.sort_order ?? b.id));
+          return (
+          <div key={c.id} className="bg-white border rounded-xl overflow-hidden shadow-sm" draggable onDragStart={e => onCatDragStart(e, c)} onDragOver={onCatDragOver} onDrop={e => onCatDrop(e, c)}>
+            <div className="bg-gray-50 p-3 flex justify-between items-center font-bold text-gray-800 border-b">
+              <span className="flex items-center gap-1"><GripVertical size={16} className="text-gray-400 cursor-grab"/>{c.icon} {c.name}</span>
+              <button onClick={() => handleDeleteCategory(c.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={16}/></button>
+            </div>
             <div className="p-3">
-               <ul className="space-y-2 mb-2">{subCategories.filter(s => s.parent_id === c.id).map(s => <li key={s.id} className="flex justify-between text-sm text-gray-600"><span>- {s.name}</span><button onClick={() => handleDeleteCategory(s.id, true)} className="text-gray-300 hover:text-red-600"><Trash2 size={14}/></button></li>)}</ul>
+               <ul className="space-y-2 mb-2">
+                 {subs.map(s => (
+                   <li key={s.id} className="flex justify-between items-center text-sm text-gray-600 group" draggable onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('application/json', JSON.stringify({ type: 'sub', parentId: c.id, id: s.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => {
+                     e.preventDefault(); e.stopPropagation();
+                     try {
+                       const d = JSON.parse(e.dataTransfer.getData('application/json'));
+                       if (d.type !== 'sub' || d.parentId !== c.id || d.id === s.id) return;
+                       const ids = subs.map(x => x.id);
+                       const fromIdx = ids.indexOf(d.id);
+                       const toIdx = ids.indexOf(s.id);
+                       if (fromIdx < 0 || toIdx < 0) return;
+                       ids.splice(fromIdx, 1);
+                       ids.splice(ids.indexOf(s.id), 0, d.id);
+                       handleReorderSubCategories(c.id, ids);
+                     } catch (_) {}
+                   }}>
+                     <span className="flex items-center gap-1"><GripVertical size={12} className="text-gray-300 opacity-0 group-hover:opacity-100 cursor-grab"/>- {s.name}</span>
+                     <button onClick={() => handleDeleteCategory(s.id, true)} className="text-gray-300 hover:text-red-600"><Trash2 size={14}/></button>
+                   </li>
+                 ))}
+               </ul>
                {selectedParentForSub === c.id ? (
                  <div className="flex gap-1"><input id="sub-category-name" name="sub-category-name" autoFocus placeholder="Sub..." value={newSubName} onChange={e => setNewSubName(e.target.value)} className="border p-1 text-sm rounded w-full"/><button onClick={() => handleAddSubCategory(c.id)} className="bg-blue-600 text-white px-2 rounded text-xs">OK</button></div>
                ) : <button onClick={() => setSelectedParentForSub(c.id)} className="w-full py-1 text-xs text-blue-600 border border-dashed border-blue-200 rounded">+ Añadir Sub</button>}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
+  };
 
 const renderRepairs = () => (
     <div className="space-y-6">
