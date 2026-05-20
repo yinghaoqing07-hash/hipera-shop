@@ -1,7 +1,5 @@
 import { supabase } from '../supabaseClient';
 
-const RAILWAY_API = 'https://hipera-shop-production.up.railway.app/api';
-
 function getBase() {
   if (import.meta.env.PROD) return null; // prod: same-origin /api (Vercel proxy → Railway)
   const v = import.meta.env.VITE_API_URL;
@@ -9,7 +7,12 @@ function getBase() {
     const u = v.replace(/\/$/, '');
     return u.endsWith('/api') ? u : u + '/api';
   }
-  return RAILWAY_API;
+  // En desarrollo VITE_API_URL es obligatorio: si falta, fallamos rápido
+  // en vez de tocar la URL de producción de Railway por accidente.
+  throw new Error(
+    'VITE_API_URL no está configurada. Crea un archivo .env en la raíz con:\n' +
+    '  VITE_API_URL=http://localhost:3001/api'
+  );
 }
 
 const base = getBase();
@@ -31,12 +34,8 @@ class ApiClient {
   _url(endpoint) {
     const path = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
     if (import.meta.env.PROD) return `/api/${path}`;
-    const b = (this.baseURL || RAILWAY_API).replace(/\/$/, '') + '/';
-    try {
-      return new URL(path, b).href;
-    } catch {
-      return RAILWAY_API.replace(/\/$/, '') + '/' + path;
-    }
+    const b = this.baseURL.replace(/\/$/, '') + '/';
+    return new URL(path, b).href;
   }
 
   /** Simple GET (no Content-Type/Authorization) → no preflight; use for public APIs when CORS preflight fails. */

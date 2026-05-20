@@ -4,6 +4,8 @@ import autoTable from 'jspdf-autotable';
 import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
 import { supabase } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
+import CookieConsent from './components/CookieConsent';
+import { useCookieConsent } from './hooks/useCookieConsent';
 import React, { useCallback, useEffect, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
@@ -171,31 +173,6 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
   );
 };
 
-// --- 新增组件：Cookie 弹窗 (GDPR 合规) ---
-const CookieConsent = () => {
-  const [accepted, setAccepted] = useState(() => localStorage.getItem('cookieConsent'));
-
-  if (accepted) return null;
-
-  return (
-    <div className="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur text-white p-4 z-50 animate-slide-up border-t border-gray-700 shadow-2xl">
-      <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center gap-4 text-sm">
-        <div className="flex items-start gap-3">
-           <Cookie className="text-yellow-500 flex-shrink-0" size={24}/>
-           <p className="text-gray-300">
-             Usamos cookies propias y de terceros para mejorar tu experiencia y gestionar tus pedidos. 
-             Si continúas navegando, aceptas su uso.
-           </p>
-        </div>
-        <div className="flex gap-2 w-full md:w-auto">
-           <button onClick={() => {localStorage.setItem('cookieConsent', 'true'); setAccepted(true);}} className="flex-1 md:flex-none bg-white text-gray-900 px-6 py-2 rounded-lg font-bold hover:bg-gray-200 transition-colors">Aceptar</button>
-           <button onClick={() => {localStorage.setItem('cookieConsent', 'false'); setAccepted(true);}} className="flex-1 md:flex-none border border-gray-600 text-gray-400 px-6 py-2 rounded-lg font-medium hover:text-white hover:border-gray-400 transition-colors">Rechazar</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // --- 新增组件：法律条款页面内容 ---
 // --- 组件：法律页面 (已更新真实地址) ---
 const LegalPage = ({ type, onBack }) => {
@@ -214,7 +191,7 @@ const LegalPage = ({ type, onBack }) => {
     cookies: { 
       title: "Política de Cookies", 
       icon: <Cookie/>, 
-      text: "Utilizamos cookies técnicas imprescindibles para el funcionamiento de la cesta de la compra y el inicio de sesión. No utilizamos cookies publicitarias de terceros ni vendemos sus datos de navegación." 
+      text: "HIPERA utiliza exclusivamente cookies técnicas imprescindibles para el funcionamiento de la cesta de la compra, el inicio de sesión y la seguridad de la sesión. No utilizamos cookies de análisis, publicidad ni de terceros, ni vendemos sus datos de navegación. Las categorías de análisis y marketing que aparecen en el banner de consentimiento están preparadas para un posible uso futuro y permanecen desactivadas por defecto. Puede revisar y modificar sus preferencias en cualquier momento desde el enlace «Gestionar cookies» en el pie de página." 
     },
     devoluciones: {
       title: "Política de Devoluciones y Reembolsos",
@@ -683,6 +660,7 @@ export default function App() {
   const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
   const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
   const [selectedGift, setSelectedGift] = useState(null); // 选中的免费商品
+  const { openSettings: openCookieSettings } = useCookieConsent();
 
   // 新增这两个状态用于筛选
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
@@ -1056,7 +1034,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans selection:bg-red-100">
       <Toaster position="top-center" toastOptions={{style:{borderRadius:'12px', background:'#333', color:'#fff'}}}/>
-      <CookieConsent /> {/* 🍪 新增：Cookie 弹窗 */}
+      <CookieConsent onShowPolicy={() => { setLegalType("cookies"); navTo("legal"); }} />
 
       {/* Payment Modal */}
       {showPayment && (
@@ -1868,6 +1846,7 @@ export default function App() {
              <button onClick={() => { setLegalType("privacidad"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Privacidad</button>
              <button onClick={() => { setLegalType("cookies"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Cookies</button>
              <button onClick={() => { setLegalType("devoluciones"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Devoluciones</button>
+             <button onClick={openCookieSettings} className="hover:text-gray-900 transition-colors">Gestionar cookies</button>
           </div>
           
           <p className="text-[10px] text-gray-300 mt-6">© {new Date().getFullYear()} QIANG GUO SL. Todos los derechos reservados.</p>
