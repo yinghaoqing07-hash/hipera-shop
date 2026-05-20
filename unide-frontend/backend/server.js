@@ -242,6 +242,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+// Health check (for Railway/Vercel monitoring + debugging env issues)
+app.get('/api/health', async (_req, res) => {
+  const hasUrl = !!process.env.SUPABASE_URL;
+  const hasKey = !!process.env.SUPABASE_SERVICE_KEY;
+  try {
+    // Lightweight sanity check: attempt a simple query.
+    // If env vars are missing or network/DNS fails, this will throw.
+    const { error } = await supabase.from('products').select('id').limit(1);
+    if (error) throw error;
+    return res.json({ ok: true, supabase: { hasUrl, hasServiceKey: hasKey } });
+  } catch (e) {
+    const msg = e?.message || String(e);
+    const cause = e?.cause?.message || e?.cause?.code || null;
+    return res.status(500).json({ ok: false, supabase: { hasUrl, hasServiceKey: hasKey }, error: msg, cause });
+  }
+});
+
 // 添加响应头防止CORB
 app.use((req, res, next) => {
   res.header('X-Content-Type-Options', 'nosniff');
@@ -302,7 +319,10 @@ app.get('/api/products', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const msg = error?.message || String(error);
+    const cause = error?.cause?.message || error?.cause?.code || null;
+    console.error('[GET /api/products] Error:', msg, cause ? `cause=${cause}` : '');
+    res.status(500).json({ error: msg, cause });
   }
 });
 
