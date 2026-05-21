@@ -28,27 +28,24 @@ import {
   TERMS_UPDATED_AT,
   TERMS_VERSION,
 } from '../../config/legal';
-
-const COMPANY = {
-  name: 'QIANG GUO, S.L.',
-  nif: 'B86126638',
-  address: 'Paseo del Sol nº 1, 28880 Meco (Madrid), España',
-  phone: '+34 918 782 602',
-  emailGeneral: 'info@hipera.es',
-  emailPrivacy: 'privacidad@hipera.es',
-  emailComplaints: 'reclamaciones@hipera.es',
-  website: 'https://hipera-shop.vercel.app',
-  hours: 'Lunes a Domingo, 09:00 – 22:00',
-  activity:
-    'Comercio minorista de alimentación, bazar y servicios de reparación de dispositivos móviles',
-  registry:
-    'Registro Mercantil de Madrid — [PENDIENTE: usuario debe completar Tomo, Folio, Hoja, Sección]',
-};
+import { COMPANY } from '../../config/company';
+import {
+  Section,
+  Subsection,
+  Lit,
+  Email,
+  VersionBanner,
+  DocFooter,
+} from './_components';
 
 export default function TerminosCondiciones() {
   return (
     <div className="space-y-6">
-      <VersionBanner />
+      <VersionBanner
+        docVersion={TERMS_DOCUMENT_VERSION}
+        consentVersion={TERMS_VERSION}
+        updatedAt={TERMS_UPDATED_AT}
+      />
       <Intro />
 
       <Section number="1" title="Información de la empresa">
@@ -729,32 +726,20 @@ export default function TerminosCondiciones() {
         </Subsection>
       </Section>
 
-      <DocFooter />
+      <DocFooter
+        docVersion={TERMS_DOCUMENT_VERSION}
+        consentVersion={TERMS_VERSION}
+        updatedAt={TERMS_UPDATED_AT}
+      />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------
-// Componentes auxiliares
+// Intro (texto introductorio específico de T&C — el resto de helpers
+// se importan desde ./_components y los datos de empresa desde
+// ../../config/company)
 // ---------------------------------------------------------------------
-
-function VersionBanner() {
-  return (
-    <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs text-gray-600">
-      <div className="flex flex-wrap justify-between gap-2">
-        <span>
-          Versión del documento: <strong>{TERMS_DOCUMENT_VERSION}</strong>
-        </span>
-        <span>
-          Versión de consentimiento: <strong>v{TERMS_VERSION}</strong>
-        </span>
-        <span>
-          Vigente desde: <strong>{TERMS_UPDATED_AT}</strong>
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function Intro() {
   return (
@@ -767,54 +752,5 @@ function Intro() {
       establecimiento físico de HIPERA. La realización de un pedido implica la
       aceptación íntegra de estas Condiciones en su versión vigente.
     </p>
-  );
-}
-
-function Section({ number, title, children }) {
-  return (
-    <section className="border-t border-gray-100 pt-5 first:border-t-0 first:pt-0">
-      <h2 className="font-bold text-base md:text-lg text-gray-900 mb-3">
-        {number}. {title}
-      </h2>
-      <div className="text-sm text-gray-700 leading-relaxed space-y-3">{children}</div>
-    </section>
-  );
-}
-
-function Subsection({ title, children }) {
-  return (
-    <div className="ml-1 mt-3">
-      <h3 className="font-semibold text-sm text-gray-900 mb-1">{title}</h3>
-      <div className="space-y-2">{children}</div>
-    </div>
-  );
-}
-
-function Lit({ children }) {
-  return <em className="text-gray-900 not-italic font-medium">{children}</em>;
-}
-
-function Email({ addr }) {
-  return (
-    <a
-      href={`mailto:${addr}`}
-      className="text-red-600 underline hover:text-red-700"
-    >
-      {addr}
-    </a>
-  );
-}
-
-function DocFooter() {
-  return (
-    <div className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500 space-y-1">
-      <p>
-        <strong>{COMPANY.name}</strong> · NIF {COMPANY.nif} · {COMPANY.address}
-      </p>
-      <p>
-        Documento legal vinculante. Documento v{TERMS_DOCUMENT_VERSION} · Consentimiento
-        v{TERMS_VERSION} · Vigente desde {TERMS_UPDATED_AT}.
-      </p>
-    </div>
   );
 }

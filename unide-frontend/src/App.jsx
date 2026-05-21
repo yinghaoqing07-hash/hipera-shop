@@ -7,6 +7,7 @@ import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
 import TerminosCondiciones from './pages/legal/TerminosCondiciones';
+import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
 import {
   recordAcceptance as recordTermsAcceptance,
@@ -193,7 +194,7 @@ const LegalPage = ({ type, onBack }) => {
     privacidad: { 
       title: "Política de Privacidad", 
       icon: <ShieldCheck/>, 
-      text: "En HIPERA respetamos su privacidad. Los datos personales recogidos (nombre, dirección, teléfono) se utilizan exclusivamente para la gestión de pedidos, envíos y garantías de reparación. Cumplimos con el Reglamento General de Protección de Datos (RGPD). Usted tiene derecho a acceder, rectificar o suprimir sus datos solicitándolo en tienda." 
+      text: null // 渲染外部组件 PoliticaPrivacidad
     },
     cookies: { 
       title: "Política de Cookies", 
@@ -348,6 +349,8 @@ const LegalPage = ({ type, onBack }) => {
                renderDevolucionesContent()
              ) : type === 'terminos' ? (
                <TerminosCondiciones />
+             ) : type === 'privacidad' ? (
+               <PoliticaPrivacidad />
              ) : (
                <>
                  <p className="font-medium text-gray-800 mb-4">{data.text}</p>
@@ -360,7 +363,7 @@ const LegalPage = ({ type, onBack }) => {
                </>
              )}
 
-            {type !== 'terminos' && (
+            {type !== 'terminos' && type !== 'privacidad' && (
               <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
                 <span>QIANG GUO SL © {new Date().getFullYear()}</span>
                 <span>Actualizado: Enero 2026</span>

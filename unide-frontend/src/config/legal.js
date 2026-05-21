@@ -25,7 +25,12 @@
 //                    basado en RDLeg 1/2007, LSSI-CE, RD 1906/1999.
 //                    Re-aceptación requerida.
 //   Privacidad
-//     v1 / doc 0.x — Texto provisional. Reescritura programada en 1.4.
+//     v1 / doc 0.x — Texto provisional embebido en App.jsx.
+//     v2 / doc 1.0 — Primer documento formal completo (11 secciones)
+//                    basado en RGPD (UE) 2016/679, LOPDGDD 3/2018,
+//                    LSSI-CE 34/2002. Stack real de encargados del
+//                    tratamiento (Railway, Vercel, Supabase, Stripe,
+//                    Resend). Re-aceptación requerida.
 // =====================================================================
 
 // --- Términos y Condiciones ---
@@ -34,6 +39,6 @@ export const TERMS_DOCUMENT_VERSION = '1.0';
 export const TERMS_UPDATED_AT = '2026-05-21';
 
 // --- Política de Privacidad ---
-export const PRIVACY_VERSION = 1;                // pendiente reescritura en 1.4
-export const PRIVACY_DOCUMENT_VERSION = '0.9';   // marcado como provisional hasta 1.4
+export const PRIVACY_VERSION = 2;                // ↑ desde v1 (era texto provisional)
+export const PRIVACY_DOCUMENT_VERSION = '1.0';
 export const PRIVACY_UPDATED_AT = '2026-05-21';
