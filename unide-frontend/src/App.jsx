@@ -6,6 +6,7 @@ import { supabase } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
+import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
 import {
   recordAcceptance as recordTermsAcceptance,
@@ -203,6 +204,11 @@ const LegalPage = ({ type, onBack }) => {
       title: "Política de Devoluciones y Reembolsos",
       icon: <RotateCcw/>,
       text: null // 使用自定义内容
+    },
+    terminos: {
+      title: "Términos y Condiciones",
+      icon: <ClipboardList/>,
+      text: null // 渲染外部组件 TerminosCondiciones
     }
   };
   const data = content[type] || content.aviso;
@@ -340,6 +346,8 @@ const LegalPage = ({ type, onBack }) => {
           <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-8 rounded-2xl border border-gray-100 shadow-sm text-sm md:text-base">
              {type === 'devoluciones' ? (
                renderDevolucionesContent()
+             ) : type === 'terminos' ? (
+               <TerminosCondiciones />
              ) : (
                <>
                  <p className="font-medium text-gray-800 mb-4">{data.text}</p>
@@ -352,10 +360,12 @@ const LegalPage = ({ type, onBack }) => {
                </>
              )}
 
-             <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
-               <span>QIANG GUO SL © {new Date().getFullYear()}</span>
-               <span>Actualizado: Enero 2026</span>
-             </div>
+            {type !== 'terminos' && (
+              <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
+                <span>QIANG GUO SL © {new Date().getFullYear()}</span>
+                <span>Actualizado: Enero 2026</span>
+              </div>
+            )}
           </div>
        </div>
     </div>
@@ -708,7 +718,7 @@ export default function App() {
     }
     // 2) 从外部页面（如 /register 新标签）跳转过来直达某个法律页
     const legalParam = urlParams.get('legal');
-    const VALID_LEGAL = ['aviso', 'privacidad', 'cookies', 'devoluciones'];
+    const VALID_LEGAL = ['aviso', 'privacidad', 'cookies', 'devoluciones', 'terminos'];
     if (legalParam && VALID_LEGAL.includes(legalParam)) {
       setLegalType(legalParam);
       setPage('legal');
@@ -1768,7 +1778,7 @@ export default function App() {
                      Política de Privacidad
                    </button>{' '}
                    y los{' '}
-                   <button type="button" onClick={() => { setLegalType('aviso'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                   <button type="button" onClick={() => { setLegalType('terminos'); navTo('legal'); }} className="text-red-600 font-medium underline">
                      Términos y Condiciones
                    </button>
                    .
@@ -1935,6 +1945,7 @@ export default function App() {
           <div className="flex flex-wrap justify-center gap-4 text-xs font-bold text-gray-400">
              <button onClick={() => { setLegalType("aviso"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Aviso Legal</button>
              <button onClick={() => { setLegalType("privacidad"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Privacidad</button>
+             <button onClick={() => { setLegalType("terminos"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Términos y Condiciones</button>
              <button onClick={() => { setLegalType("cookies"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Cookies</button>
              <button onClick={() => { setLegalType("devoluciones"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Devoluciones</button>
              <button onClick={openCookieSettings} className="hover:text-gray-900 transition-colors">Gestionar cookies</button>

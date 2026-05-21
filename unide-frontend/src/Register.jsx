@@ -109,7 +109,7 @@ export default function Register() {
             />
             <span id="legal-consent-text" className="text-xs text-gray-600 leading-relaxed">
               He leído y acepto la {legalLink('privacidad', 'Política de Privacidad')}{' '}
-              y los {legalLink('aviso', 'Términos y Condiciones')} de HIPERA.{' '}
+              y los {legalLink('terminos', 'Términos y Condiciones')} de HIPERA.{' '}
               <span className="text-gray-400">
                 (versión {TERMS_VERSION}.{PRIVACY_VERSION})
               </span>
