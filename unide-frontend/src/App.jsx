@@ -6,6 +6,12 @@ import { supabase } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
+import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
+import {
+  recordAcceptance as recordTermsAcceptance,
+  getLatestAcceptance as getLatestTermsAcceptance,
+  needsReacceptance as needsTermsReacceptance,
+} from './utils/termsAcceptance';
 import React, { useCallback, useEffect, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
@@ -661,6 +667,11 @@ export default function App() {
   const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
   const [selectedGift, setSelectedGift] = useState(null); // 选中的免费商品
   const { openSettings: openCookieSettings } = useCookieConsent();
+  // Aceptación de Términos y Privacidad (RGPD): última registrada en BD y
+  // checkbox del checkout cuando hay que re-aceptar (versión actualizada
+  // o nunca aceptó). Para invitados, también obliga a marcar.
+  const [latestTermsAcceptance, setLatestTermsAcceptance] = useState(null);
+  const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
 
   // 新增这两个状态用于筛选
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
@@ -688,12 +699,20 @@ export default function App() {
 
   // --- Init ---
   useEffect(() => {
-    // 检查URL中是否有订单ID（从二维码扫描）
     const urlParams = new URLSearchParams(window.location.search);
+    // 1) 二维码扫描进入的订单查询
     const orderId = urlParams.get('order');
     if (orderId && !queryOrderId) {
       setQueryOrderId(orderId);
       fetchOrderById(orderId);
+    }
+    // 2) 从外部页面（如 /register 新标签）跳转过来直达某个法律页
+    const legalParam = urlParams.get('legal');
+    const VALID_LEGAL = ['aviso', 'privacidad', 'cookies', 'devoluciones'];
+    if (legalParam && VALID_LEGAL.includes(legalParam)) {
+      setLegalType(legalParam);
+      setPage('legal');
+      setHistory(['home', 'legal']);
     }
   }, []);
 
@@ -701,8 +720,35 @@ export default function App() {
     const savedAddress = JSON.parse(localStorage.getItem('lastAddress') || '{}');
     if (savedAddress.address) setCheckoutForm(prev => ({...prev, ...savedAddress}));
 
-    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
+    const handleSession = async (session) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      if (!u) {
+        setLatestTermsAcceptance(null);
+        return;
+      }
+      // Si el registro dejó una aceptación pendiente (sin sesión en aquel
+      // momento), la sincronizamos ahora que ya hay sesión.
+      try {
+        const pendingRaw = localStorage.getItem('pendingTermsAcceptance');
+        if (pendingRaw) {
+          const pending = JSON.parse(pendingRaw);
+          await recordTermsAcceptance({ source: pending?.source || 'register', userId: u.id });
+          localStorage.removeItem('pendingTermsAcceptance');
+        }
+      } catch (e) {
+        if (!import.meta.env.PROD) console.warn('[auth] flush pending acceptance:', e?.message);
+      }
+      // Cacheamos la última aceptación para que el checkout sepa si hay
+      // que volver a pedir consentimiento (Art. 7 RGPD: vigente e informado).
+      try {
+        const latest = await getLatestTermsAcceptance(u.id);
+        setLatestTermsAcceptance(latest);
+      } catch { /* ignore */ }
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => { handleSession(session); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => handleSession(session));
 
     fetchData();
     return () => subscription.unsubscribe();
@@ -855,10 +901,33 @@ export default function App() {
   const isGiftEligible = subtotal >= 65;
 
   // --- Step 1: Open Payment Modal ---
-  const handleInitiateCheckout = () => {
+  // Mostrar checkbox de aceptación si: a) usuario invitado, b) usuario
+  // logueado pero sin aceptación previa, o c) la versión vigente subió.
+  const checkoutNeedsTermsCheckbox = !user || needsTermsReacceptance(latestTermsAcceptance);
+
+  const handleInitiateCheckout = async () => {
     if (!checkoutForm.address || !checkoutForm.phone) {
       toast.error("Faltan datos de envío");
       return;
+    }
+    if (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted) {
+      toast.error("Debes aceptar la Política de Privacidad y los Términos y Condiciones.");
+      return;
+    }
+    // Si hay que re-aceptar y el usuario está logueado, registrar ahora
+    // (antes del pago) para que quede prueba aunque se cancele el pago.
+    if (user && needsTermsReacceptance(latestTermsAcceptance) && checkoutTermsAccepted) {
+      try {
+        await recordTermsAcceptance({ source: 'checkout', userId: user.id });
+        setLatestTermsAcceptance({
+          terms_version: TERMS_VERSION,
+          privacy_version: PRIVACY_VERSION,
+          accepted_at: new Date().toISOString(),
+          source: 'checkout',
+        });
+      } catch (e) {
+        if (!import.meta.env.PROD) console.warn('[checkout] recordAcceptance:', e?.message);
+      }
     }
     setSelectedPayment(""); // 重置支付方式选择
     setShowPayment(true); // 打开支付弹窗
@@ -1685,8 +1754,30 @@ export default function App() {
                 <input id="phone" name="phone" type="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
                 <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder="Nota para repartidor (Opcional)" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
              </div>
+             {checkoutNeedsTermsCheckbox && (
+               <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-white">
+                 <input
+                   type="checkbox"
+                   checked={checkoutTermsAccepted}
+                   onChange={e => setCheckoutTermsAccepted(e.target.checked)}
+                   className="mt-1 h-4 w-4 accent-red-600 cursor-pointer flex-shrink-0"
+                 />
+                 <span className="text-xs text-gray-600 leading-relaxed">
+                   He leído y acepto la{' '}
+                   <button type="button" onClick={() => { setLegalType('privacidad'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                     Política de Privacidad
+                   </button>{' '}
+                   y los{' '}
+                   <button type="button" onClick={() => { setLegalType('aviso'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                     Términos y Condiciones
+                   </button>
+                   .
+                 </span>
+               </label>
+             )}
+
              {/* 按钮修改：现在是打开支付弹窗 */}
-             <button disabled={!checkoutForm.address || !checkoutForm.phone} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
+             <button disabled={!checkoutForm.address || !checkoutForm.phone || (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted)} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
                Continuar al Pago <Wallet size={20}/>
              </button>
           </div>
