@@ -28,10 +28,14 @@ import {
 import { useNavigate } from "react-router-dom";
 import toast, { Toaster } from 'react-hot-toast';
 
+// Banners servidos desde /public/banners (Vercel CDN, mismo origen).
+// El carrusel rota automáticamente sobre BANNERS.length, así que ajustar
+// este array es la única operación necesaria para añadir/quitar imágenes.
+// TODO (post Phase 1): sustituir por fotos reales del establecimiento
+// (estanterías, caja, mostrador de reparación) cuando estén disponibles.
 const BANNERS = [
-  "https://images.unsplash.com/photo-1607082349566-187342175e2f?w=1200",
-  "https://images.unsplash.com/photo-1542838132-92c53300491e?w=1200",
-  "https://images.unsplash.com/photo-1586201375754-12a5b2fda9b4?w=1200"
+  "/banners/banner-1.jpg",
+  "/banners/banner-2.jpg"
 ];
 
 const ProductSkeleton = () => (

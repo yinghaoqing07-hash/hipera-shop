@@ -110,14 +110,21 @@ export default function PoliticaPrivacidad() {
 
         <Subsection title="1.3. Delegado de Protección de Datos (DPO)">
           <p>
-            HIPERA <strong>no está obligada</strong> a designar Delegado de Protección
-            de Datos en aplicación del <Lit>Art. 37 RGPD</Lit> ni del{' '}
-            <Lit>Art. 34 LOPDGDD</Lit>, dado que: (i) no es autoridad ni organismo
-            público; (ii) sus actividades principales no consisten en operaciones de
-            tratamiento que requieran una observación habitual y sistemática a gran
-            escala; y (iii) no trata a gran escala categorías especiales de datos
-            del <Lit>Art. 9 RGPD</Lit>. No obstante, todas las consultas en materia
-            de privacidad se gestionan a través de <Email addr={COMPANY.emailPrivacy} />.
+            Tras analizar la naturaleza, alcance, contexto y finalidades de los
+            tratamientos realizados actualmente, HIPERA considera que no está
+            obligada a designar Delegado de Protección de Datos en aplicación del{' '}
+            <Lit>Art. 37 RGPD</Lit> ni del <Lit>Art. 34 LOPDGDD</Lit>, dado que:
+            (i) no es autoridad ni organismo público; (ii) sus actividades
+            principales no consisten en operaciones de tratamiento que requieran
+            una observación habitual y sistemática a gran escala; y (iii) no trata
+            a gran escala categorías especiales de datos del <Lit>Art. 9 RGPD</Lit>.
+          </p>
+          <p>
+            Esta valoración se revisa periódicamente. En caso de modificación
+            sustancial de la actividad o de los tratamientos realizados, HIPERA
+            reevaluará la necesidad de designar un DPO. Todas las consultas en
+            materia de privacidad se gestionan a través de{' '}
+            <Email addr={COMPANY.emailPrivacy} />.
           </p>
         </Subsection>
       </Section>
@@ -454,6 +461,15 @@ export default function PoliticaPrivacidad() {
               únicamente cuando una reparación deba escalarse al fabricante en
               garantía, y limitado a los datos imprescindibles (modelo, número de
               serie y descripción de la avería).
+            </li>
+            <li>
+              <strong>Meta Platforms Ireland Limited (WhatsApp):</strong> cuando el
+              Usuario decide voluntariamente contactar con HIPERA a través de los
+              enlaces directos a WhatsApp disponibles en el sitio web, su número
+              de teléfono y el contenido del mensaje son tratados por Meta conforme
+              a su propia política de privacidad. HIPERA no comparte datos del
+              Usuario con Meta proactivamente; la comunicación se inicia
+              exclusivamente por decisión del Usuario.
             </li>
           </ul>
           <p className="text-xs text-gray-500">

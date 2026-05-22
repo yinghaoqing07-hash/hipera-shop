@@ -87,20 +87,28 @@ export default function TerminosCondiciones() {
         </p>
         <Subsection title="2.1 Capacidad para contratar">
           <p>
-            Para realizar pedidos en HIPERA es necesario ser mayor de 18 años y disponer
-            de capacidad legal para contratar conforme al ordenamiento español. Los menores
-            de 14 a 17 años podrán realizar compras únicamente con autorización expresa de
-            su representante legal.
+            Para realizar pedidos en HIPERA es necesario disponer de capacidad legal
+            para contratar conforme al ordenamiento español. Los menores podrán
+            contratar únicamente a través de sus representantes legales o con la
+            autorización suficiente conforme al <Lit>Art. 1263 del Código Civil</Lit>.
+            HIPERA se reserva el derecho de rechazar pedidos cuando existan dudas
+            razonables sobre la capacidad para contratar del comprador, sin necesidad
+            de justificación adicional.
           </p>
         </Subsection>
         <Subsection title="2.2 Verificación de edad para productos restringidos">
           <p>
-            La venta de bebidas alcohólicas, tabaco y otros productos sujetos a restricción
-            por edad está limitada a personas mayores de la edad legal aplicable. HIPERA se
-            reserva el derecho de solicitar verificación documental de la edad en el
-            momento de la entrega y, en su caso, de rechazar la entrega cuando el
-            destinatario no acredite la edad requerida, reembolsando el importe del
-            producto restringido.
+            La venta de bebidas alcohólicas y otros productos sujetos a restricción
+            por edad está limitada a personas mayores de la edad legal aplicable.
+            HIPERA sólo comercializa productos sujetos a restricción de edad cuando
+            está legalmente habilitada para ello y aplica los mecanismos de
+            verificación exigidos por la normativa aplicable.
+          </p>
+          <p>
+            HIPERA se reserva el derecho de solicitar verificación documental de la
+            edad en el momento de la entrega y, en su caso, de rechazar la entrega
+            cuando el destinatario no acredite la edad requerida, reembolsando el
+            importe del producto restringido.
           </p>
         </Subsection>
         <Subsection title="2.3 Archivo y reproducción del contrato">
@@ -285,6 +293,12 @@ export default function TerminosCondiciones() {
             comunicarse a <Email addr={COMPANY.emailGeneral} /> en un plazo máximo de
             48 horas desde la recepción.
           </p>
+          <p className="text-xs text-gray-500">
+            Este plazo de 48 horas se establece a efectos de gestión logística y no
+            limita los derechos legales del consumidor en materia de garantía de
+            conformidad, reclamaciones u otras acciones reconocidas por la
+            legislación aplicable.
+          </p>
         </Subsection>
         <Subsection title="7.4 Recogida en tienda">
           <p>
@@ -308,7 +322,7 @@ export default function TerminosCondiciones() {
         </p>
         <Subsection title="8.1 Forma de ejercicio">
           <p>
-            El cliente puede ejercer el desistimiento comunicándolo a
+            El cliente puede ejercer el desistimiento comunicándolo a{' '}
             <Email addr={COMPANY.emailGeneral} /> o por teléfono. De forma alternativa, está
             disponible el modelo de formulario tipo (Anexo B del{' '}
             <Lit>RDLeg 1/2007</Lit>) en la Política de Devoluciones.
@@ -455,42 +469,114 @@ export default function TerminosCondiciones() {
         </Subsection>
         <Subsection title="10.5 Garantía de la reparación">
           <p>
-            Las reparaciones realizadas por HIPERA gozan de una garantía de{' '}
-            <strong>6 meses</strong> sobre el trabajo efectuado, conforme al Art. 11 del{' '}
-            <Lit>Real Decreto 58/1988</Lit>. Los componentes nuevos sustituidos disponen,
-            además, de la garantía propia del fabricante.
+            Las reparaciones realizadas por HIPERA gozan de una garantía comercial
+            de <strong>seis (6) meses</strong> sobre el trabajo efectuado, que supera
+            el plazo mínimo legal de tres (3) meses establecido en el{' '}
+            <Lit>Real Decreto 58/1988</Lit> sobre prestación de servicios de
+            asistencia técnica. Los componentes nuevos sustituidos disponen, además,
+            de la garantía propia del fabricante.
           </p>
           <p>
             La garantía cubre los defectos atribuibles al trabajo realizado o a los
-            componentes utilizados. No cubre daños posteriores ajenos a la reparación,
-            uso indebido, golpes, exposición a líquidos u otras causas externas.
+            componentes utilizados. No cubre daños posteriores ajenos a la
+            reparación, uso indebido, golpes, exposición a líquidos u otras causas
+            externas.
           </p>
         </Subsection>
-        <Subsection title="10.6 Responsabilidad sobre los datos del cliente">
-          <p>
-            El cliente es responsable de respaldar sus datos personales antes de entregar
-            el dispositivo. HIPERA realizará la reparación sin acceder al contenido
-            personal del cliente, salvo cuando sea técnicamente necesario. HIPERA
-            garantiza la confidencialidad y eliminación de cualquier dato accedido tras la
-            reparación. Se recomienda al cliente eliminar contraseñas y datos sensibles
-            antes de entregar el dispositivo.
-          </p>
+        <Subsection title="10.6 Protección de datos del dispositivo del Cliente">
+          <div className="ml-1 mt-3">
+            <h4 className="font-semibold text-sm text-gray-900 mb-1">
+              10.6.1. Responsabilidad del Cliente antes de la entrega
+            </h4>
+            <p>Se recomienda al Cliente, antes de entregar el dispositivo para reparación:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2 mt-1">
+              <li>
+                Realizar una copia de seguridad de sus datos personales (fotos,
+                contactos, mensajes, etc.).
+              </li>
+              <li>
+                Cerrar sesión en cuentas sensibles (banca, correo electrónico, redes
+                sociales).
+              </li>
+              <li>Retirar la tarjeta SIM y la tarjeta de memoria (SD), si las hubiera.</li>
+              <li>Eliminar contraseñas guardadas o información altamente sensible.</li>
+              <li>
+                Proporcionar, en su caso, un método temporal de desbloqueo únicamente
+                cuando sea estrictamente necesario para la reparación.
+              </li>
+            </ul>
+          </div>
+          <div className="ml-1 mt-3">
+            <h4 className="font-semibold text-sm text-gray-900 mb-1">
+              10.6.2. Compromisos de HIPERA
+            </h4>
+            <p>HIPERA y su personal técnico se comprometen a:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2 mt-1">
+              <li>
+                Acceder al contenido del dispositivo únicamente cuando sea técnicamente
+                imprescindible para diagnosticar o realizar la reparación.
+              </li>
+              <li>Limitar dicho acceso al alcance mínimo necesario.</li>
+              <li>
+                No copiar, descargar, transmitir, visualizar ni utilizar el contenido
+                personal del Cliente para ningún fin ajeno a la reparación.
+              </li>
+              <li>
+                Eliminar de forma segura cualquier dato técnico temporal generado
+                durante el diagnóstico (logs, capturas, archivos de prueba) tras la
+                finalización del servicio.
+              </li>
+              <li>
+                Solicitar autorización expresa al Cliente cuando, excepcionalmente,
+                sea necesario acceder a una aplicación o archivo concreto para
+                resolver el problema reportado.
+              </li>
+            </ul>
+          </div>
+          <div className="ml-1 mt-3">
+            <h4 className="font-semibold text-sm text-gray-900 mb-1">
+              10.6.3. Confidencialidad
+            </h4>
+            <p>
+              Todo el personal de HIPERA con acceso a dispositivos en reparación
+              está sujeto a deber de confidencialidad, sin perjuicio de las
+              obligaciones legales que pudieran imponer la comunicación a
+              autoridades en supuestos tasados (Cuerpos y Fuerzas de Seguridad,
+              requerimientos judiciales).
+            </p>
+          </div>
         </Subsection>
         <Subsection title="10.7 Equipos no recogidos">
           <p>
-            El cliente dispone de un plazo de 30 días naturales desde la comunicación de
-            la finalización de la reparación para recoger su equipo. HIPERA realizará al
-            menos dos avisos por correo electrónico, WhatsApp o teléfono durante dicho
-            plazo.
+            El cliente dispone de un plazo de 30 días naturales desde la comunicación
+            de la finalización de la reparación para recoger su equipo. HIPERA
+            realizará al menos dos avisos por correo electrónico, WhatsApp o
+            teléfono durante dicho plazo.
           </p>
           <p>
-            Transcurridos los 30 días sin recogida ni respuesta, HIPERA continuará sus
-            intentos de contacto. Si transcurridos <strong>6 meses</strong> desde la
-            finalización de la reparación el equipo no ha sido recogido y el cliente no
-            ha respondido a los avisos, HIPERA podrá ejercer su derecho de retención y
-            disponer del equipo conforme a la normativa aplicable sobre bienes
-            abandonados (<Lit>Código Civil Art. 1780 y ss.</Lit>), sin perjuicio de las
-            cantidades adeudadas.
+            Transcurridos los 30 días sin recogida ni respuesta, HIPERA continuará
+            sus intentos de contacto. Si transcurridos <strong>6 meses</strong>{' '}
+            desde la finalización de la reparación el equipo no ha sido recogido y
+            el cliente no ha respondido a los avisos, HIPERA podrá:
+          </p>
+          <ul className="list-disc list-inside space-y-1 ml-2">
+            <li>
+              Aplicar gastos razonables de custodia conforme a tarifas comunicadas
+              previamente al cliente.
+            </li>
+            <li>
+              Ejercer los derechos legalmente reconocidos sobre bienes abandonados
+              (<Lit>Código Civil Art. 1780 y ss.</Lit>).
+            </li>
+            <li>
+              Acudir al procedimiento que corresponda conforme a la normativa
+              aplicable, previa comunicación fehaciente al cliente cuando sea
+              posible.
+            </li>
+          </ul>
+          <p>
+            En todo caso, HIPERA garantizará la eliminación segura de cualquier dato
+            personal que pudiera permanecer en el dispositivo antes de su disposición.
           </p>
         </Subsection>
         <Subsection title="10.8 Limitaciones">
@@ -541,10 +627,22 @@ export default function TerminosCondiciones() {
           servicios que comercializa conforme a la legislación aplicable.
         </p>
         <Subsection title="12.1 Supuestos en los que HIPERA no responde">
+          <p>
+            HIPERA no responderá de daños imputables exclusivamente a terceros
+            (transportistas o fabricantes) cuando la ley permita dicha exclusión,
+            sin perjuicio de los derechos irrenunciables del consumidor frente a
+            HIPERA como vendedor conforme al <Lit>RDLeg 1/2007</Lit>. Asimismo,
+            HIPERA no responderá de:
+          </p>
           <ul className="list-disc list-inside space-y-1 ml-2">
-            <li>Fallos imputables exclusivamente al transportista o al fabricante, sin perjuicio de los derechos del consumidor frente a HIPERA conforme a la garantía legal.</li>
-            <li>Daños o desperfectos derivados del uso indebido, manipulación o instalación incorrecta por parte del cliente.</li>
-            <li>Interrupciones o errores técnicos del sitio web cuya causa no sea imputable a HIPERA.</li>
+            <li>
+              Daños o desperfectos derivados del uso indebido, manipulación o
+              instalación incorrecta por parte del cliente.
+            </li>
+            <li>
+              Interrupciones o errores técnicos del sitio web cuya causa no sea
+              imputable a HIPERA.
+            </li>
             <li>Contenidos de terceros enlazados desde el sitio web.</li>
           </ul>
         </Subsection>
@@ -560,9 +658,15 @@ export default function TerminosCondiciones() {
         <Subsection title="12.3 Indemnización máxima">
           <p>
             Sin perjuicio de los supuestos no excluibles del apartado anterior, la
-            responsabilidad contractual de HIPERA frente al cliente queda limitada al
-            importe efectivamente pagado por el cliente por el producto o servicio que
-            causó el daño.
+            responsabilidad contractual de HIPERA frente al cliente queda limitada
+            al importe efectivamente pagado por el cliente por el producto o
+            servicio que causó el daño.
+          </p>
+          <p className="text-xs text-gray-500">
+            En relaciones con consumidores, esta limitación de responsabilidad sólo
+            será aplicable en la medida permitida por la normativa imperativa de
+            consumo, sin afectar a los derechos irrenunciables reconocidos por el{' '}
+            <Lit>RDLeg 1/2007</Lit>.
           </p>
         </Subsection>
       </Section>
@@ -648,18 +752,26 @@ export default function TerminosCondiciones() {
             <li><strong>AESAN</strong> — Agencia Española de Seguridad Alimentaria y Nutrición, para asuntos sanitarios o alimentarios.</li>
           </ul>
         </Subsection>
-        <Subsection title="15.3 Plataforma europea de resolución de litigios en línea (ODR)">
+        <Subsection title="15.3 Resolución alternativa de litigios">
           <p>
-            Conforme al Reglamento (UE) 524/2013, los consumidores residentes en la Unión
-            Europea pueden plantear sus reclamaciones a través de la plataforma de la
-            Comisión Europea:{' '}
+            La antigua plataforma europea de resolución de litigios en línea (ODR),
+            prevista en el <Lit>Reglamento (UE) 524/2013</Lit>, dejó de estar
+            operativa el 20 de julio de 2025 por decisión de la Comisión Europea
+            (<Lit>Reglamento (UE) 2024/3228</Lit>). El consumidor puede acudir a las
+            vías de reclamación indicadas en los apartados 15.1 y 15.2 anteriores,
+            incluida la OMIC, las autoridades de consumo competentes y, en su caso,
+            los órganos de resolución alternativa de litigios disponibles en su
+            jurisdicción conforme a la <Lit>Ley 7/2017</Lit>.
+          </p>
+          <p className="text-xs text-gray-500">
+            Información actualizada sobre vías de resolución disponibles en{' '}
             <a
-              href="https://ec.europa.eu/consumers/odr"
+              href="https://consumer-redress.ec.europa.eu/dispute-resolution-bodies"
               target="_blank"
               rel="noopener noreferrer"
               className="text-red-600 underline hover:text-red-700"
             >
-              https://ec.europa.eu/consumers/odr
+              consumer-redress.ec.europa.eu/dispute-resolution-bodies
             </a>
             .
           </p>
