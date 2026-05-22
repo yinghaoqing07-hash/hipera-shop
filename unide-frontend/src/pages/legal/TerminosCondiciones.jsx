@@ -325,7 +325,14 @@ export default function TerminosCondiciones() {
             El cliente puede ejercer el desistimiento comunicándolo a{' '}
             <Email addr={COMPANY.emailGeneral} /> o por teléfono. De forma alternativa, está
             disponible el modelo de formulario tipo (Anexo B del{' '}
-            <Lit>RDLeg 1/2007</Lit>) en la Política de Devoluciones.
+            <Lit>RDLeg 1/2007</Lit>) en la{' '}
+            <a
+              href="/?legal=devoluciones"
+              className="text-red-600 underline hover:text-red-700"
+            >
+              Política de Devoluciones
+            </a>
+            .
           </p>
         </Subsection>
         <Subsection title="8.2 Estado del producto">

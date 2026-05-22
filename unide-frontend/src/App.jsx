@@ -8,6 +8,7 @@ import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
 import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
+import PoliticaDevoluciones from './pages/legal/PoliticaDevoluciones';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
 import {
   recordAcceptance as recordTermsAcceptance,
@@ -20,7 +21,7 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info, Calendar, Users, Wallet, CheckCircle2, RotateCcw,
+  Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -218,124 +219,6 @@ const LegalPage = ({ type, onBack }) => {
   };
   const data = content[type] || content.aviso;
 
-  // 退货政策特殊内容
-  const renderDevolucionesContent = () => (
-    <div className="space-y-6">
-      {/* 14天退货权 */}
-      <div className="bg-blue-50 border-l-4 border-blue-600 p-5 rounded-r-xl">
-        <h3 className="font-bold text-blue-900 text-lg mb-3 flex items-center gap-2">
-          <Calendar size={20}/> Derecho de Desistimiento - 14 Días
-        </h3>
-        <p className="text-blue-800 text-sm leading-relaxed mb-3">
-          De acuerdo con la <strong>Directiva Europea 2011/83/EU</strong> y la legislación española de consumo, 
-          usted tiene derecho a desistir del contrato de compra en un plazo de <strong>14 días naturales</strong> 
-          desde la recepción del producto, sin necesidad de indicar el motivo.
-        </p>
-        <div className="bg-white p-4 rounded-lg mt-3">
-          <p className="text-xs text-blue-700 font-bold mb-2">📅 Plazo de desistimiento:</p>
-          <p className="text-sm text-blue-800">14 días naturales contados desde la fecha de recepción del pedido.</p>
-        </div>
-      </div>
-
-      {/* 退货条件 */}
-      <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-        <h3 className="font-bold text-gray-900 text-lg mb-4">Condiciones para la Devolución</h3>
-        <ul className="space-y-3 text-sm text-gray-700">
-          <li className="flex items-start gap-3">
-            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
-            <span>El producto debe estar <strong>sin usar</strong> y en su estado original.</span>
-          </li>
-          <li className="flex items-start gap-3">
-            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
-            <span>Debe conservar el <strong>embalaje original</strong> y todas las etiquetas.</span>
-          </li>
-          <li className="flex items-start gap-3">
-            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
-            <span>Debe incluir todos los <strong>accesorios y documentación</strong> que venían con el producto.</span>
-          </li>
-          <li className="flex items-start gap-3">
-            <CheckCircle2 size={18} className="text-green-600 flex-shrink-0 mt-0.5"/>
-            <span>Los productos perecederos o personalizados <strong>no son elegibles</strong> para devolución.</span>
-          </li>
-        </ul>
-      </div>
-
-      {/* 退货流程 */}
-      <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-        <h3 className="font-bold text-gray-900 text-lg mb-4">Proceso de Devolución</h3>
-        <ol className="space-y-3 text-sm text-gray-700 list-decimal list-inside">
-          <li className="pl-2">
-            <strong>Contacte con nosotros:</strong> Llame al <strong>+34 918 782 602</strong> o visite nuestra tienda física 
-            en Paseo del Sol 1, 28880 Meco (Madrid) dentro del plazo de 14 días.
-          </li>
-          <li className="pl-2">
-            <strong>Prepare el paquete:</strong> Empaque el producto en su embalaje original con todos los accesorios.
-          </li>
-          <li className="pl-2">
-            <strong>Devolución:</strong> Puede traer el producto a nuestra tienda o acordaremos la recogida (según disponibilidad).
-          </li>
-          <li className="pl-2">
-            <strong>Inspección:</strong> Revisaremos el producto para verificar que cumple las condiciones de devolución.
-          </li>
-          <li className="pl-2">
-            <strong>Reembolso:</strong> Una vez aprobada la devolución, procesaremos el reembolso en un plazo máximo de 14 días.
-          </li>
-        </ol>
-      </div>
-
-      {/* 退款信息 */}
-      <div className="bg-green-50 border-l-4 border-green-600 p-5 rounded-r-xl">
-        <h3 className="font-bold text-green-900 text-lg mb-3">Reembolso</h3>
-        <div className="space-y-2 text-sm text-green-800">
-          <p><strong>Método de reembolso:</strong> El reembolso se realizará mediante el mismo método de pago utilizado en la compra original.</p>
-          <p><strong>Plazo:</strong> Máximo 14 días hábiles desde la aprobación de la devolución.</p>
-          <p><strong>Gastos de envío:</strong> Si el cliente devuelve el producto, los gastos de envío iniciales no serán reembolsados, salvo que el producto esté defectuoso o no corresponda con el pedido.</p>
-        </div>
-      </div>
-
-      {/* 维修服务例外条款 */}
-      <div className="bg-red-50 border-l-4 border-red-600 p-5 rounded-r-xl">
-        <h3 className="font-bold text-red-900 text-lg mb-3 flex items-center gap-2">
-          <Wrench size={20}/> Excepción: Servicios de Reparación
-        </h3>
-        <p className="text-red-800 text-sm leading-relaxed mb-3">
-          <strong>IMPORTANTE:</strong> Los servicios de reparación de dispositivos móviles <strong>NO están sujetos</strong> 
-          al derecho de desistimiento de 14 días, según el artículo 103.m) de la Ley General para la Defensa de los 
-          Consumidores y Usuarios.
-        </p>
-        <div className="bg-white p-4 rounded-lg mt-3">
-          <p className="text-xs text-red-700 font-bold mb-2">⚠️ Excepciones aplicables:</p>
-          <ul className="text-sm text-red-800 space-y-1 list-disc list-inside">
-            <li>Servicios de reparación de móviles y dispositivos electrónicos</li>
-            <li>Servicios que han comenzado con el consentimiento del consumidor antes del fin del plazo de desistimiento</li>
-            <li>Servicios completamente ejecutados antes del fin del plazo de desistimiento</li>
-          </ul>
-        </div>
-        <div className="bg-yellow-50 border border-yellow-300 p-4 rounded-lg mt-4">
-          <p className="text-xs text-yellow-800 font-bold mb-1">📋 Garantía de Reparación:</p>
-          <p className="text-sm text-yellow-900">
-            Aunque no aplica el derecho de desistimiento, todos nuestros servicios de reparación incluyen una 
-            <strong> garantía de 180 días (6 meses)</strong> sobre la reparación efectuada. Si la reparación presenta 
-            defectos dentro de este período, la repararemos nuevamente sin coste adicional.
-          </p>
-        </div>
-      </div>
-
-      {/* 联系信息 */}
-      <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-        <h3 className="font-bold text-gray-900 text-lg mb-3">Contacto para Devoluciones</h3>
-        <div className="space-y-2 text-sm text-gray-700">
-          <p><strong>Dirección:</strong> Paseo del Sol 1, 28880 Meco (Madrid)</p>
-          <p><strong>Teléfono:</strong> +34 918 782 602</p>
-          <p><strong>Horario:</strong> Lunes a Domingo, de 9:00 a 22:00</p>
-          <p className="text-xs text-gray-500 mt-3">
-            Para cualquier consulta sobre devoluciones, puede visitarnos en tienda o contactarnos por teléfono.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-white p-6 animate-fade-in">
        <button onClick={onBack} className="flex items-center gap-2 text-gray-500 mb-6 hover:text-gray-900 font-medium px-2 py-1 rounded-lg hover:bg-gray-100 w-fit transition-colors">
@@ -350,7 +233,7 @@ const LegalPage = ({ type, onBack }) => {
           
           <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-8 rounded-2xl border border-gray-100 shadow-sm text-sm md:text-base">
              {type === 'devoluciones' ? (
-               renderDevolucionesContent()
+               <PoliticaDevoluciones />
              ) : type === 'terminos' ? (
                <TerminosCondiciones />
              ) : type === 'privacidad' ? (
@@ -367,7 +250,7 @@ const LegalPage = ({ type, onBack }) => {
                </>
              )}
 
-            {type !== 'terminos' && type !== 'privacidad' && (
+            {type !== 'terminos' && type !== 'privacidad' && type !== 'devoluciones' && (
               <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
                 <span>QIANG GUO SL © {new Date().getFullYear()}</span>
                 <span>Actualizado: Enero 2026</span>

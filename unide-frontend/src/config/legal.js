@@ -50,6 +50,22 @@
 //                    homepage migrados de Unsplash a /public local
 //                    (eliminada transferencia US adicional). NO requiere
 //                    re-aceptación.
+//   Devoluciones
+//     v0 / doc 0.x — Texto provisional embebido en App.jsx
+//                    (renderDevolucionesContent), con bloque "sin usar"
+//                    contrario a Art. 108.2 y sin Anexo B.
+//     v1 / doc 1.0 — Primer documento formal completo (11 secciones)
+//                    como manual operativo complementario a T&C §8,
+//                    basado en RDLeg 1/2007 (Arts. 102-108 + 114-127)
+//                    y Directiva 2011/83/UE. Incluye criterio Art.
+//                    108.2 (no exige "sin usar"), modelo Anexo B
+//                    imprimible, tabla comparativa desistimiento vs
+//                    garantía y excepciones del Art. 103.
+//                    NO se requiere consentimiento explícito en
+//                    checkout: la Política es informativa y se acepta
+//                    indirectamente al aceptar T&C §8 (la base
+//                    contractual). Versionado preparado para futuros
+//                    cambios materiales.
 // =====================================================================
 
 // --- Términos y Condiciones ---
@@ -61,3 +77,11 @@ export const TERMS_UPDATED_AT = '2026-05-22';
 export const PRIVACY_VERSION = 2;                // sin cambio (revisión menor 1.0 → 1.1)
 export const PRIVACY_DOCUMENT_VERSION = '1.1';
 export const PRIVACY_UPDATED_AT = '2026-05-22';
+
+// --- Política de Devoluciones ---
+// Documento informativo (manual operativo complementario a T&C §8),
+// no requiere consentimiento explícito en checkout. El versionado se
+// mantiene por si futuros cambios materiales obligan a notificar.
+export const RETURNS_VERSION = 1;
+export const RETURNS_DOCUMENT_VERSION = '1.0';
+export const RETURNS_UPDATED_AT = '2026-05-22';
