@@ -10,6 +10,7 @@ import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
 import PoliticaDevoluciones from './pages/legal/PoliticaDevoluciones';
 import PoliticaEnvios from './pages/legal/PoliticaEnvios';
+import AvisoLegal from './pages/legal/AvisoLegal';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
 import {
   recordAcceptance as recordTermsAcceptance,
@@ -191,11 +192,10 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
 // --- 组件：法律页面 (已更新真实地址) ---
 const LegalPage = ({ type, onBack }) => {
   const content = {
-    aviso: { 
-      title: "Aviso Legal", 
-      icon: <Info/>, 
-      // 👇 更新了这里的地址
-      text: "Este sitio web es propiedad de QIANG GUO SL © con NIF B86126638 y domicilio fiscal en Paseo del Sol 1, 28880 Meco (Madrid). Inscrita en el Registro Mercantil de Madrid. Para cualquier consulta, contáctenos en el local o al teléfono +34 918 782 602." 
+    aviso: {
+      title: "Aviso Legal",
+      icon: <Info/>,
+      text: null // 渲染外部组件 AvisoLegal
     },
     privacidad: { 
       title: "Política de Privacidad", 
@@ -246,6 +246,8 @@ const LegalPage = ({ type, onBack }) => {
                <TerminosCondiciones />
              ) : type === 'privacidad' ? (
                <PoliticaPrivacidad />
+             ) : type === 'aviso' ? (
+               <AvisoLegal />
              ) : (
                <>
                  <p className="font-medium text-gray-800 mb-4">{data.text}</p>
@@ -258,7 +260,7 @@ const LegalPage = ({ type, onBack }) => {
                </>
              )}
 
-            {type !== 'terminos' && type !== 'privacidad' && type !== 'devoluciones' && type !== 'envios' && (
+            {type !== 'terminos' && type !== 'privacidad' && type !== 'devoluciones' && type !== 'envios' && type !== 'aviso' && (
               <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
                 <span>QIANG GUO SL © {new Date().getFullYear()}</span>
                 <span>Actualizado: Enero 2026</span>

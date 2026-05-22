@@ -85,6 +85,27 @@
 //                    la Política es informativa y se acepta
 //                    indirectamente al aceptar T&C §7 (la base
 //                    contractual).
+//   Aviso Legal
+//     v0 / doc 0.x — Texto provisional embebido en App.jsx
+//                    (LegalPage.content.aviso.text), ~50 palabras,
+//                    sin estructura de secciones y sin la mayor parte
+//                    del contenido obligatorio del Art. 10 LSSI-CE.
+//     v1 / doc 1.0 — Primer documento formal completo (8 secciones,
+//                    ~21 subsections) basado en Art. 10 LSSI-CE
+//                    34/2002 + RDLeg 1/1996 LPI + Ley 17/2001 Marcas
+//                    + Reg. UE 524/2013 + Reg. UE 2024/3228 ODR
+//                    (cross-ref a T&C §15.3).
+//                    Cubre identificación, condiciones de uso del sitio,
+//                    propiedad intelectual e industrial, política de
+//                    enlaces (salientes y entrantes/hotlinking),
+//                    exención de responsabilidad y jurisdicción.
+//                    No reproduce contenido de T&C/Privacy/Cookies/
+//                    Devoluciones/Envíos; sólo cross-ref breve.
+//                    Mientras COMPANY.registry contenga "[PENDIENTE]"
+//                    se muestra automáticamente un aviso al Usuario
+//                    en §1.2 (datos en trámite de verificación).
+//                    NO requiere consentimiento explícito en checkout:
+//                    es un aviso informativo de cumplimiento LSSI-CE.
 // =====================================================================
 
 // --- Términos y Condiciones ---
@@ -114,3 +135,12 @@ export const RETURNS_UPDATED_AT = '2026-05-22';
 export const SHIPPING_VERSION = 1;
 export const SHIPPING_DOCUMENT_VERSION = '1.0';
 export const SHIPPING_UPDATED_AT = '2026-05-23';
+
+// --- Aviso Legal ---
+// Documento informativo de cumplimiento LSSI-CE (Art. 10), no requiere
+// consentimiento explícito en checkout. El versionado se mantiene por si
+// futuros cambios materiales (completar Registro Mercantil, ampliación
+// de actividad, cambio de denominación social, etc.) obligan a notificar.
+export const LEGAL_NOTICE_VERSION = 1;
+export const LEGAL_NOTICE_DOCUMENT_VERSION = '1.0';
+export const LEGAL_NOTICE_UPDATED_AT = '2026-05-23';
