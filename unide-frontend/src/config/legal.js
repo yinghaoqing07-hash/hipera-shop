@@ -66,6 +66,25 @@
 //                    indirectamente al aceptar T&C §8 (la base
 //                    contractual). Versionado preparado para futuros
 //                    cambios materiales.
+//   Envíos
+//     v0 / doc 0.x — Sin documento dedicado. T&C §7 prometía remitirse
+//                    a la "Política de Envíos" sin que ésta existiese.
+//     v1 / doc 1.0 — Primer documento formal completo (8 secciones)
+//                    como manual operativo complementario a T&C §7,
+//                    basado en RDLeg 1/2007 (Arts. 66 bis, 66 ter,
+//                    97 y 60.2.e) y Directiva 2011/83/UE.
+//                    Cumple las cuatro promesas explícitas de T&C §7:
+//                    zonas de cobertura (Meco + zona local ~10 km),
+//                    plazos estimados (recogida 2-4h / domicilio
+//                    24-72h, sin perjuicio del legal 30 días),
+//                    tarifa única (4,99 €) y umbral gratuito (40 €).
+//                    Operador logístico genérico para evitar bump de
+//                    PRIVACY_VERSION; si se firma contrato con un
+//                    operador concreto, actualizar Privacy §6.
+//                    NO requiere consentimiento explícito en checkout:
+//                    la Política es informativa y se acepta
+//                    indirectamente al aceptar T&C §7 (la base
+//                    contractual).
 // =====================================================================
 
 // --- Términos y Condiciones ---
@@ -85,3 +104,13 @@ export const PRIVACY_UPDATED_AT = '2026-05-22';
 export const RETURNS_VERSION = 1;
 export const RETURNS_DOCUMENT_VERSION = '1.0';
 export const RETURNS_UPDATED_AT = '2026-05-22';
+
+// --- Política de Envíos ---
+// Documento informativo (manual operativo complementario a T&C §7),
+// no requiere consentimiento explícito en checkout. El versionado se
+// mantiene por si futuros cambios materiales (ampliación de zona,
+// nueva tarifa, contratación de operador logístico concreto, etc.)
+// obligan a notificar.
+export const SHIPPING_VERSION = 1;
+export const SHIPPING_DOCUMENT_VERSION = '1.0';
+export const SHIPPING_UPDATED_AT = '2026-05-23';

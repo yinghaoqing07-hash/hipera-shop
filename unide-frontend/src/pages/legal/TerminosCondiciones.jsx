@@ -259,8 +259,14 @@ export default function TerminosCondiciones() {
       <Section number="7" title="Envío y entrega">
         <p>
           Las zonas de cobertura, plazos estimados, tarifas y umbrales de envío gratuito
-          se detallan en la <strong>Política de Envíos</strong>, que forma parte integrante
-          de las presentes condiciones.
+          se detallan en la{' '}
+          <a
+            href="/?legal=envios"
+            className="text-red-600 underline hover:text-red-700 font-semibold"
+          >
+            Política de Envíos
+          </a>
+          , que forma parte integrante de las presentes condiciones.
         </p>
         <Subsection title="7.1 Plazo máximo de entrega">
           <p>

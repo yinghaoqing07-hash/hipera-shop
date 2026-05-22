@@ -9,6 +9,7 @@ import { useCookieConsent } from './hooks/useCookieConsent';
 import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
 import PoliticaDevoluciones from './pages/legal/PoliticaDevoluciones';
+import PoliticaEnvios from './pages/legal/PoliticaEnvios';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
 import {
   recordAcceptance as recordTermsAcceptance,
@@ -211,6 +212,11 @@ const LegalPage = ({ type, onBack }) => {
       icon: <RotateCcw/>,
       text: null // 使用自定义内容
     },
+    envios: {
+      title: "Política de Envíos",
+      icon: <Truck/>,
+      text: null // 渲染外部组件 PoliticaEnvios
+    },
     terminos: {
       title: "Términos y Condiciones",
       icon: <ClipboardList/>,
@@ -234,6 +240,8 @@ const LegalPage = ({ type, onBack }) => {
           <div className="prose text-gray-600 leading-relaxed bg-gray-50 p-8 rounded-2xl border border-gray-100 shadow-sm text-sm md:text-base">
              {type === 'devoluciones' ? (
                <PoliticaDevoluciones />
+             ) : type === 'envios' ? (
+               <PoliticaEnvios />
              ) : type === 'terminos' ? (
                <TerminosCondiciones />
              ) : type === 'privacidad' ? (
@@ -250,7 +258,7 @@ const LegalPage = ({ type, onBack }) => {
                </>
              )}
 
-            {type !== 'terminos' && type !== 'privacidad' && type !== 'devoluciones' && (
+            {type !== 'terminos' && type !== 'privacidad' && type !== 'devoluciones' && type !== 'envios' && (
               <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
                 <span>QIANG GUO SL © {new Date().getFullYear()}</span>
                 <span>Actualizado: Enero 2026</span>
@@ -608,7 +616,7 @@ export default function App() {
     }
     // 2) 从外部页面（如 /register 新标签）跳转过来直达某个法律页
     const legalParam = urlParams.get('legal');
-    const VALID_LEGAL = ['aviso', 'privacidad', 'cookies', 'devoluciones', 'terminos'];
+    const VALID_LEGAL = ['aviso', 'privacidad', 'cookies', 'devoluciones', 'envios', 'terminos'];
     if (legalParam && VALID_LEGAL.includes(legalParam)) {
       setLegalType(legalParam);
       setPage('legal');
@@ -1838,6 +1846,7 @@ export default function App() {
              <button onClick={() => { setLegalType("terminos"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Términos y Condiciones</button>
              <button onClick={() => { setLegalType("cookies"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Cookies</button>
              <button onClick={() => { setLegalType("devoluciones"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Devoluciones</button>
+             <button onClick={() => { setLegalType("envios"); navTo("legal"); }} className="hover:text-gray-900 transition-colors">Envíos</button>
              <button onClick={openCookieSettings} className="hover:text-gray-900 transition-colors">Gestionar cookies</button>
           </div>
           
