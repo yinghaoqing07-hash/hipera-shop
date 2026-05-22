@@ -50,19 +50,24 @@ export default function PoliticaDevoluciones() {
     <div className="space-y-6 text-gray-700">
       {/*
         Reglas de impresión específicas de esta Política. Al pulsar el
-        botón «Imprimir» en §10, queremos que únicamente el formulario
-        del Anexo B (id="anexo-b-form") se envíe al papel, no las once
-        secciones completas (~9 páginas).
+        botón «Imprimir» en §10, queremos imprimir SOLO el formulario
+        del Anexo B (id="anexo-b-form"), no las once secciones completas.
 
-        Patrón CSS canónico de "print one element":
-          - Ocultamos todo (visibility: hidden) para que conserve el
-            espacio en pantalla pero no se imprima.
-          - Reactivamos el subárbol del formulario.
-          - Sacamos el formulario del flujo normal con position:absolute
-            anclado a (0,0) para que ocupe la página desde la esquina
-            superior izquierda y los navegadores no impriman páginas
-            adicionales en blanco.
-          - @page controla márgenes de papel reales.
+        Iteración 1 (visibility: hidden + position: absolute):
+          imprimía sólo el formulario en la página 1, pero la altura del
+          documento permanecía intacta → 9 páginas en blanco al final.
+
+        Iteración 2 (este bloque) — usa `display: none` para colapsar
+        físicamente el resto del documento fuera del layout. El reto es
+        que ocultar todos los descendientes de body también oculta los
+        ANCESTROS del formulario (root div, wrappers, Section, ...). La
+        solución es declarar visibles los ancestros con `:has()`:
+
+          body :has(#anexo-b-form) → todos los antepasados del form
+          #anexo-b-form * (display: revert) → toda la subárbol del form
+
+        Soporte de :has(): Chrome 105+ (2022-08), Safari 15.4+ (2022-03),
+        Firefox 121+ (2023-12). En 2026 es baseline.
 
         El <style> vive en el árbol de la Política, así que al navegar a
         otra página estas reglas se desmontan automáticamente.
@@ -70,16 +75,56 @@ export default function PoliticaDevoluciones() {
       <style>{`
         @media print {
           @page { margin: 1.5cm; }
-          html, body { background: #fff !important; }
-          body * { visibility: hidden !important; }
-          #anexo-b-form, #anexo-b-form * { visibility: visible !important; }
+
+          /* 1. Punto de partida: ocultar todo el árbol del body. */
+          body * { display: none !important; }
+
+          /* 2. Reabrir los ancestros del formulario (root div, wrappers,
+                Section, etc.) y limpiar su estilo decorativo para que
+                no contaminen la página impresa con cajas grises,
+                bordes redondeados, max-width, padding, etc. */
+          body :has(#anexo-b-form) {
+            display: block !important;
+            background: transparent !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            max-width: none !important;
+            width: auto !important;
+          }
+
+          /* 3. Reactivar la subárbol del formulario con su display
+                natural (revert vuelve al UA default por elemento). */
+          #anexo-b-form,
+          #anexo-b-form * {
+            display: revert !important;
+          }
+
+          /* 4. Aspecto final del contenedor del formulario impreso. */
           #anexo-b-form {
-            position: absolute;
-            left: 0;
-            top: 0;
-            right: 0;
-            margin: 0;
-            box-shadow: none;
+            display: block !important;
+            padding: 1cm !important;
+            margin: 0 !important;
+            border: 2px solid #000 !important;
+            border-radius: 8px !important;
+            background: #fff !important;
+            max-width: none !important;
+            box-shadow: none !important;
+          }
+
+          /* 5. Ocultar específicamente el botón «Imprimir» dentro del
+                formulario (display: revert lo habría restaurado). */
+          #anexo-b-form button { display: none !important; }
+
+          /* 6. Garantizar que body/html colapsan a la altura del
+                contenido (sin páginas en blanco al final). */
+          html, body {
+            height: auto !important;
+            overflow: visible !important;
+            background: #fff !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
         }
       `}</style>
