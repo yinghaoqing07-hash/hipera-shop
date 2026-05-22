@@ -48,6 +48,42 @@ import {
 export default function PoliticaDevoluciones() {
   return (
     <div className="space-y-6 text-gray-700">
+      {/*
+        Reglas de impresión específicas de esta Política. Al pulsar el
+        botón «Imprimir» en §10, queremos que únicamente el formulario
+        del Anexo B (id="anexo-b-form") se envíe al papel, no las once
+        secciones completas (~9 páginas).
+
+        Patrón CSS canónico de "print one element":
+          - Ocultamos todo (visibility: hidden) para que conserve el
+            espacio en pantalla pero no se imprima.
+          - Reactivamos el subárbol del formulario.
+          - Sacamos el formulario del flujo normal con position:absolute
+            anclado a (0,0) para que ocupe la página desde la esquina
+            superior izquierda y los navegadores no impriman páginas
+            adicionales en blanco.
+          - @page controla márgenes de papel reales.
+
+        El <style> vive en el árbol de la Política, así que al navegar a
+        otra página estas reglas se desmontan automáticamente.
+      */}
+      <style>{`
+        @media print {
+          @page { margin: 1.5cm; }
+          html, body { background: #fff !important; }
+          body * { visibility: hidden !important; }
+          #anexo-b-form, #anexo-b-form * { visibility: visible !important; }
+          #anexo-b-form {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            margin: 0;
+            box-shadow: none;
+          }
+        }
+      `}</style>
+
       <VersionBanner
         docVersion={RETURNS_DOCUMENT_VERSION}
         consentVersion={RETURNS_VERSION}
@@ -600,15 +636,18 @@ export default function PoliticaDevoluciones() {
           electrónico de HIPERA indicadas en el §3.
         </p>
 
-        <div className="border-2 border-gray-300 rounded-xl p-5 bg-white print:border-black print:bg-white print:p-4 mt-3">
-          <div className="flex justify-between items-start mb-4 print:hidden">
-            <h3 className="text-base font-bold text-gray-900">
+        <div
+          id="anexo-b-form"
+          className="border-2 border-gray-300 rounded-xl p-5 bg-white print:border-black print:bg-white print:p-4 mt-3"
+        >
+          <div className="flex justify-between items-start mb-4">
+            <h3 className="text-base print:text-lg font-bold text-gray-900">
               Formulario de desistimiento — Anexo B RDLeg 1/2007
             </h3>
             <button
               type="button"
               onClick={() => window.print()}
-              className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors"
+              className="text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors print:hidden"
             >
               Imprimir
             </button>
