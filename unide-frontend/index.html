@@ -1,10 +1,112 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>unide-frontend</title>
+    <title>HIPERA — Tu mercado de confianza en Meco</title>
+    <meta name="description" content="HIPERA es un supermercado familiar en Meco (Madrid) con productos frescos diarios, ofertas semanales y servicio de reparación de móviles. Recogida en tienda gratuita y envío a domicilio en la zona local." />
+
+    <!-- Open Graph / Facebook / WhatsApp preview -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="HIPERA — Tu mercado de confianza en Meco" />
+    <meta property="og:description" content="Supermercado familiar en Meco (Madrid) con productos frescos, ofertas semanales y reparación de móviles." />
+    <meta property="og:url" content="https://hipera-shop.vercel.app" />
+    <!-- TODO: replace with HIPERA branded image once store photos available
+         (1200x630 with logo, store name, address) -->
+    <meta property="og:image" content="https://hipera-shop.vercel.app/banners/banner-1.jpg" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:site_name" content="HIPERA" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="HIPERA — Tu mercado de confianza en Meco" />
+    <meta name="twitter:description" content="Supermercado familiar en Meco (Madrid) con productos frescos, ofertas semanales y reparación de móviles." />
+    <!-- TODO: replace with HIPERA branded image (see og:image TODO above) -->
+    <meta name="twitter:image" content="https://hipera-shop.vercel.app/banners/banner-1.jpg" />
+
+    <!-- Robots / SEO técnico -->
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#dc2626" />
+    <link rel="canonical" href="https://hipera-shop.vercel.app" />
+
+    <!-- ====================================================== -->
+    <!-- Schema.org JSON-LD — LocalBusiness / Supermarket        -->
+    <!-- Permite que Google muestre rich result (tarjeta lateral -->
+    <!-- con dirección, horario y teléfono) al buscar "HIPERA"   -->
+    <!-- o "supermercado Meco". Fuente única en index.html para  -->
+    <!-- que se entregue en el HTML inicial, no tras hidratación.-->
+    <!--                                                          -->
+    <!-- ⚠️ Coherencia obligatoria con Política de Envíos §2.2:   -->
+    <!-- "areaServed" debe coincidir con la lista de localidades  -->
+    <!-- cubiertas en /?legal=envios. Mientras §2.2 esté marcado  -->
+    <!-- [PENDIENTE: confirmar con padres], aquí sólo se publica  -->
+    <!-- Meco. Cuando se confirme la lista definitiva, actualizar -->
+    <!-- AMBOS sitios al mismo tiempo (PoliticaEnvios.jsx §2.2    -->
+    <!-- + este bloque) para evitar discrepancias indexadas por   -->
+    <!-- Google que pudieran generar reclamaciones de zonas no    -->
+    <!-- efectivamente cubiertas.                                 -->
+    <!-- ====================================================== -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Supermarket",
+      "name": "HIPERA",
+      "legalName": "QIANG GUO, S.L.",
+      "description": "Supermercado familiar en Meco (Madrid) con productos frescos diarios, ofertas semanales y reparación de móviles. Recogida en tienda gratuita y envío a domicilio en la zona local.",
+      "url": "https://hipera-shop.vercel.app",
+      "image": "https://hipera-shop.vercel.app/banners/banner-1.jpg",
+      "telephone": "+34918782602",
+      "vatID": "B86126638",
+      "priceRange": "€",
+      "currenciesAccepted": "EUR",
+      "paymentAccepted": "Cash, Credit Card, Bizum",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Paseo del Sol 1",
+        "addressLocality": "Meco",
+        "postalCode": "28880",
+        "addressRegion": "Madrid",
+        "addressCountry": "ES"
+      },
+      "openingHoursSpecification": [
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday"
+          ],
+          "opens": "09:00",
+          "closes": "22:00"
+        }
+      ],
+      "areaServed": [
+        { "@type": "City", "name": "Meco" }
+      ],
+      "knowsAbout": [
+        "Productos frescos",
+        "Alimentación",
+        "Bazar",
+        "Reparación de móviles"
+      ]
+    }
+    </script>
+    <!-- TODO geo: añadir coordenadas GPS precisas de Paseo del Sol 1
+         (no las del centro de Meco). Buscar en Google Maps y añadir:
+           "geo": {
+             "@type": "GeoCoordinates",
+             "latitude": <valor>,
+             "longitude": <valor>
+           }
+         dentro del bloque JSON-LD anterior, antes de "openingHoursSpecification".
+         Coordenadas aproximadas centro Meco (referencia, NO usar directamente):
+         40.55389°N, -3.32611°W (fuente: Wikipedia).
+    -->
   </head>
   <body>
     <div id="root"></div>

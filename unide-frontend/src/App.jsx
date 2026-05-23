@@ -23,7 +23,7 @@ import {
   Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
-  Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw,
+  Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -34,11 +34,32 @@ import toast, { Toaster } from 'react-hot-toast';
 // Banners servidos desde /public/banners (Vercel CDN, mismo origen).
 // El carrusel rota automáticamente sobre BANNERS.length, así que ajustar
 // este array es la única operación necesaria para añadir/quitar imágenes.
+//
+// Estructura por banner:
+//   - src       Ruta del archivo (relativa a /public).
+//   - alt       Texto alternativo (obligatorio por accesibilidad y SEO).
+//   - headline  Array de líneas que se renderiza como <span/> apiladas.
+//   - badge     Etiqueta superior pequeña (texto en mayúsculas).
+//   - target    Página de destino al hacer clic (acepta cualquier valor
+//               válido para navTo: 'offers', 'main', 'repair', etc.).
+//
 // TODO (post Phase 1): sustituir por fotos reales del establecimiento
 // (estanterías, caja, mostrador de reparación) cuando estén disponibles.
 const BANNERS = [
-  "/banners/banner-1.jpg",
-  "/banners/banner-2.jpg"
+  {
+    src: "/banners/banner-1.jpg",
+    alt: "Frescura garantizada — productos diarios en HIPERA",
+    headline: ["Frescura", "Garantizada"],
+    badge: "NUEVO",
+    target: "offers",
+  },
+  {
+    src: "/banners/banner-2.jpg",
+    alt: "Ofertas semanales en HIPERA — supermercado en Meco",
+    headline: ["Ofertas", "Semanales"],
+    badge: "PROMO",
+    target: "offers",
+  },
 ];
 
 const ProductSkeleton = () => (
@@ -1055,7 +1076,7 @@ export default function App() {
           {page !== 'checkout' && page !== 'repair' && (
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-red-500 transition-colors" size={16} />
-              <input id="search" name="search" placeholder="Buscar productos..." value={searchQuery} onChange={e => {setSearchQuery(e.target.value); if(e.target.value && page==='home') navTo("products");}} className="w-full pl-10 pr-4 py-2.5 bg-gray-100 border-none rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-red-100 outline-none transition-all shadow-inner" />
+              <input id="search" name="search" placeholder="Buscar productos..." value={searchQuery} onChange={e => {setSearchQuery(e.target.value); if(e.target.value.length >= 2 && page==='home') navTo("products");}} className="w-full pl-10 pr-4 py-2.5 bg-gray-100 border-none rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-red-100 outline-none transition-all shadow-inner" />
             </div>
           )}
         </div>
@@ -1073,10 +1094,34 @@ export default function App() {
             <button onClick={() => navTo("favorites")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-pink-50 text-pink-600 rounded-full"><Heart size={18} /></div><span className="text-[10px] font-bold text-gray-700">Favs</span></button>
             <button onClick={() => navTo("orders")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-green-50 text-green-600 rounded-full"><ClipboardList size={18} /></div><span className="text-[10px] font-bold text-gray-700">Pedidos</span></button>
           </div>
-          <div className="relative rounded-2xl overflow-hidden shadow-lg aspect-[2.2/1]">
-            <img src={BANNERS[bannerIndex]} className="w-full h-full object-cover transition-all duration-700 hover:scale-105" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-5"><div><span className="bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold mb-1 inline-block">NUEVO</span><p className="text-white font-bold text-xl leading-tight">Frescura<br/>Garantizada</p></div></div>
-          </div>
+          <button
+            type="button"
+            onClick={() => navTo(BANNERS[bannerIndex].target)}
+            aria-label={BANNERS[bannerIndex].alt}
+            className="relative rounded-2xl overflow-hidden shadow-lg aspect-[2.2/1] w-full block text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+          >
+            <img
+              src={BANNERS[bannerIndex].src}
+              alt={BANNERS[bannerIndex].alt}
+              width="1320"
+              height="600"
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover transition-all duration-700 group-hover:scale-105"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-5">
+              <div>
+                <span className="bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold mb-1 inline-block">
+                  {BANNERS[bannerIndex].badge}
+                </span>
+                <p className="text-white font-bold text-xl leading-tight">
+                  {BANNERS[bannerIndex].headline.map((line, i) => (
+                    <span key={i} className="block">{line}</span>
+                  ))}
+                </p>
+              </div>
+            </div>
+          </button>
           <div className="grid grid-cols-1 gap-4">
              <div onClick={() => navTo("repair")} className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
                 <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-red-600 to-transparent opacity-50 group-hover:opacity-80 transition-opacity"></div>
@@ -1089,26 +1134,28 @@ export default function App() {
                 </div>
              </div>
           </div>
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-xl text-gray-800">Ofertas Flash</h3>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {loading ? (
-                [1,2,3,4,5,6].map(i => <ProductSkeleton key={i}/>)
-              ) : (
-                products.filter(p => p.oferta).slice(0, 6).map(p => renderProductCard(p))
+          {(loading || products.filter(p => p.oferta).length > 0) && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-xl text-gray-800">Ofertas Flash</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {loading ? (
+                  [1,2,3,4,5,6].map(i => <ProductSkeleton key={i}/>)
+                ) : (
+                  products.filter(p => p.oferta).slice(0, 6).map(p => renderProductCard(p))
+                )}
+              </div>
+              {!loading && products.filter(p => p.oferta).length > 6 && (
+                <button
+                  onClick={() => navTo("offers")}
+                  className="w-full mt-4 bg-red-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  Ver más ofertas <ChevronRight size={18}/>
+                </button>
               )}
             </div>
-            {!loading && products.filter(p => p.oferta).length > 6 && (
-              <button 
-                onClick={() => navTo("offers")} 
-                className="w-full mt-4 bg-red-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                Ver más ofertas <ChevronRight size={18}/>
-              </button>
-            )}
-          </div>
+          )}
           <div>
              <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
              <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide">
@@ -1831,10 +1878,22 @@ export default function App() {
           <h3 className="font-bold text-gray-900 mb-1">HIPERA</h3>
           <p className="text-gray-400 text-xs mb-6">Tu mercado de confianza desde 2024</p>
           <div className="mb-8 space-y-2 border-b border-gray-50 pb-6 mx-auto max-w-xs">
-             <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-600">
+             <a
+               href="https://www.google.com/maps/search/?api=1&query=Paseo+del+Sol+1%2C+28880+Meco%2C+Madrid"
+               target="_blank"
+               rel="noopener noreferrer"
+               className="flex items-center justify-center gap-2 text-xs font-medium text-gray-600 hover:text-red-600 transition-colors"
+             >
                 <MapPin size={14} className="text-red-600"/>
                 <span>Paseo del Sol 1, 28880 Meco</span>
-             </div>
+             </a>
+             <a
+               href="tel:+34918782602"
+               className="flex items-center justify-center gap-2 text-xs font-medium text-gray-600 hover:text-red-600 transition-colors"
+             >
+                <Phone size={14} className="text-red-600"/>
+                <span>+34 918 782 602</span>
+             </a>
              <div className="flex items-center justify-center gap-2 text-xs font-medium text-gray-600">
                 <Clock size={14} className="text-red-600"/>
                 <span>Lunes a Domingo: 9:00 - 22:00</span>
