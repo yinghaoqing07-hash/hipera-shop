@@ -95,6 +95,26 @@ const ProductSkeleton = () => (
 const STORE_OPEN_HOUR = 9;
 const STORE_CLOSE_HOUR = 22;
 
+// =====================================================================
+// Tarifas operativas de envío — single source of truth
+// =====================================================================
+// Estos valores DEBEN COINCIDIR EXACTAMENTE con los publicados en la
+// Política de Envíos §4.1 (tarifa única) y §4.3 (umbral gratuito). El
+// histórico previo cobraba 4,50 € con umbral 50 € en el código, pero
+// la documentación legal (T&C §7, Política de Envíos, Política de
+// Devoluciones §5.5, FaqSection) ya establecía 4,99 € / 40 €. La
+// inconsistencia se corrigió el 2026-05-25 alineando el código a la
+// documentación.
+//
+// Cualquier modificación futura requiere actualización síncrona en:
+//   - PoliticaEnvios.jsx §4.1 (tarifa) y §4.3 (umbral)
+//   - PoliticaDevoluciones.jsx §5.5 (matriz reembolso de envío)
+//   - FaqSection (este archivo, respuesta "¿Cuánto cuesta el envío?")
+//   - SHIPPING_VERSION en config/legal.js (bump al cambiar valores)
+// =====================================================================
+const SHIPPING_FEE_STANDARD = 4.99;
+const FREE_SHIPPING_THRESHOLD = 40;
+
 function getStoreStatus(now = new Date()) {
   const hour = now.getHours();
   const minute = now.getMinutes();
@@ -1085,10 +1105,10 @@ export default function App() {
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const shippingFee = subtotal >= 50 ? 0 : 4.50; 
+  const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FEE_STANDARD;
   const total = subtotal + shippingFee;
   const minOrderMet = subtotal >= 20;
-  const isFreeShipping = subtotal >= 50;
+  const isFreeShipping = subtotal >= FREE_SHIPPING_THRESHOLD;
   const isGiftEligible = subtotal >= 65;
 
   // --- Step 1: Open Payment Modal ---
@@ -1861,7 +1881,7 @@ export default function App() {
                   {!isFreeShipping && (
                     <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded-lg flex items-center gap-2">
                       <div className="flex-1">
-                        Faltan <span className="font-bold text-blue-600">€{(50 - subtotal).toFixed(2)}</span> para envío GRATIS
+                        Faltan <span className="font-bold text-blue-600">€{(FREE_SHIPPING_THRESHOLD - subtotal).toFixed(2)}</span> para envío GRATIS
                         <div className="h-1.5 w-full bg-blue-100 rounded-full mt-1 overflow-hidden">
                           <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{width: `${Math.min((subtotal/50)*100, 100)}%`}}></div>
                         </div>
