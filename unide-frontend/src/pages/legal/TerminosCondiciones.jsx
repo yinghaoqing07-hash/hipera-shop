@@ -352,10 +352,22 @@ export default function TerminosCondiciones() {
         </Subsection>
         <Subsection title="8.3 Reembolso">
           <p>
-            Una vez ejercido el desistimiento, HIPERA reembolsará el importe íntegro del
-            producto y los <strong>gastos de envío estándar iniciales</strong> en un plazo
-            máximo de 14 días naturales, utilizando el mismo medio de pago empleado por el
-            cliente. HIPERA podrá retener el reembolso hasta haber recibido el producto o
+            Una vez ejercido el desistimiento, HIPERA reembolsará el importe de los
+            productos devueltos en un plazo máximo de 14 días naturales, utilizando
+            el mismo medio de pago empleado por el cliente. Los{' '}
+            <strong>gastos de envío estándar iniciales</strong> se reembolsarán
+            íntegros cuando el desistimiento alcance la <strong>totalidad</strong>{' '}
+            del pedido y dichos gastos hubieran sido efectivamente facturados; el
+            régimen aplicable a las devoluciones <strong>parciales</strong> y la
+            interacción con el umbral de envío gratuito se desarrolla en los §§5.4
+            y 5.5 de la{' '}
+            <a
+              href="/?legal=devoluciones"
+              className="text-red-600 underline hover:text-red-700"
+            >
+              Política de Devoluciones
+            </a>
+            . HIPERA podrá retener el reembolso hasta haber recibido el producto o
             la prueba de su devolución, lo que ocurra primero (Art. 107.2).
           </p>
         </Subsection>

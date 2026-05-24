@@ -378,20 +378,106 @@ export default function PoliticaDevoluciones() {
           </p>
         </Subsection>
 
-        <Subsection title="5.4. Importe reembolsado y gastos de envío">
+        <Subsection title="5.4. Importe reembolsado y gastos de envío (desistimiento total)">
           <p>
-            HIPERA reembolsará la totalidad de los pagos recibidos del Cliente,
-            incluidos los gastos de envío <strong>estándar</strong> aplicados al pedido
-            inicial. Conforme al Art. 107.3 del <Lit>RDLeg 1/2007</Lit>, en el supuesto
-            de que el Cliente hubiera elegido expresamente una modalidad de entrega{' '}
-            <strong>diferente y más cara</strong> que la entrega ordinaria ofrecida por
-            HIPERA, el sobrecoste de dicha modalidad <strong>no será reembolsable</strong>.
+            En caso de desistimiento sobre la <strong>totalidad</strong> del pedido,
+            HIPERA reembolsará todos los pagos recibidos del Cliente en relación con
+            dicho pedido, incluidos los gastos de envío <strong>estándar</strong>{' '}
+            facturados. Conforme al Art. 107.3 del <Lit>RDLeg 1/2007</Lit>, en el
+            supuesto de que el Cliente hubiera elegido expresamente una modalidad de
+            entrega <strong>diferente y más cara</strong> que la entrega ordinaria
+            ofrecida por HIPERA, el sobrecoste de dicha modalidad{' '}
+            <strong>no será reembolsable</strong>.
           </p>
           <p className="text-xs text-gray-500">
             Ejemplo: si el envío estándar son 4,99 € y el Cliente eligió «envío urgente»
             por 9,99 €, HIPERA reembolsará el precio del producto más 4,99 € (importe
             del envío estándar). Los 5 € adicionales correspondientes al upgrade no
             son reembolsables.
+          </p>
+          <p className="text-xs text-gray-500">
+            El régimen de reembolso de los gastos de envío en caso de devolución{' '}
+            <strong>parcial</strong> (cuando el Cliente conserva al menos una unidad
+            del pedido) y la interacción con el umbral de envío gratuito del §4.3 de
+            la Política de Envíos se desarrollan en §5.5.
+          </p>
+        </Subsection>
+
+        <Subsection title="5.5. Devolución parcial y umbral de envío gratuito">
+          <p>
+            El reembolso de los gastos de envío del pedido original depende del
+            importe inicialmente facturado por dicho concepto y del alcance de la
+            devolución, conforme a la siguiente matriz:
+          </p>
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
+              <thead className="bg-gray-100 text-gray-900">
+                <tr>
+                  <th className="text-left p-2 border-b border-gray-200 font-semibold">Pedido original</th>
+                  <th className="text-left p-2 border-b border-gray-200 font-semibold">Envío facturado</th>
+                  <th className="text-left p-2 border-b border-gray-200 font-semibold">Tipo de devolución</th>
+                  <th className="text-left p-2 border-b border-gray-200 font-semibold">Reembolso del envío</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-700">
+                <tr>
+                  <td className="p-2 border-b border-gray-100">≥ 40 €</td>
+                  <td className="p-2 border-b border-gray-100">0 € (gratuito por superar umbral, §4.3 Política de Envíos)</td>
+                  <td className="p-2 border-b border-gray-100">Total o parcial</td>
+                  <td className="p-2 border-b border-gray-100"><strong>0 €</strong> (no procede)</td>
+                </tr>
+                <tr>
+                  <td className="p-2 border-b border-gray-100">&lt; 40 €</td>
+                  <td className="p-2 border-b border-gray-100">4,99 € (tarifa única, §4.1 Política de Envíos)</td>
+                  <td className="p-2 border-b border-gray-100"><strong>Total</strong></td>
+                  <td className="p-2 border-b border-gray-100"><strong>4,99 €</strong> (íntegro)</td>
+                </tr>
+                <tr>
+                  <td className="p-2 border-b border-gray-100">&lt; 40 €</td>
+                  <td className="p-2 border-b border-gray-100">4,99 €</td>
+                  <td className="p-2 border-b border-gray-100"><strong>Parcial</strong></td>
+                  <td className="p-2 border-b border-gray-100"><strong>0 €</strong> (no se reembolsa)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            <strong>Justificación:</strong> los gastos de envío se devengan por el
+            transporte físico del pedido al domicilio del Cliente. Cuando el Cliente
+            conserva al menos una unidad del pedido, dicho transporte ya se ha
+            ejecutado y los gastos de envío correspondientes no resultan
+            reembolsables. La gratuidad del envío por superar el umbral del §4.3 se
+            determina con el importe del pedido en el momento de su confirmación y
+            tiene carácter <strong>definitivo</strong>: si tras una devolución
+            parcial el importe retenido por el Cliente quedara por debajo de 40 €,
+            HIPERA <strong>no</strong> reclamará retroactivamente al Cliente los
+            gastos de envío.
+          </p>
+          <p className="text-xs text-gray-500">
+            <strong>Ejemplo A</strong> (pedido bajo umbral, desistimiento total):
+            productos 35 € + envío 4,99 € = 39,99 €. El Cliente desiste de todo el
+            pedido. Reembolso: 35 € + 4,99 € = <strong>39,99 €</strong>.
+          </p>
+          <p className="text-xs text-gray-500">
+            <strong>Ejemplo B</strong> (pedido bajo umbral, desistimiento parcial):
+            productos 35 € + envío 4,99 € = 39,99 €. El Cliente desiste sólo de un
+            producto valorado en 10 €. Reembolso: <strong>10 €</strong> (sin
+            reembolso del envío).
+          </p>
+          <p className="text-xs text-gray-500">
+            <strong>Ejemplo C</strong> (pedido sobre umbral, desistimiento parcial):
+            productos 45 € + envío 0 € (gratuito) = 45 €. El Cliente desiste sólo
+            de un producto valorado en 7 €. Reembolso: <strong>7 €</strong> (no
+            existe envío facturado que reembolsar).
+          </p>
+          <p className="text-xs text-gray-500">
+            Este apartado regula exclusivamente el <strong>reembolso</strong> de los
+            gastos de envío facturados en el pedido original. El{' '}
+            <strong>coste directo de devolver el producto</strong> al establecimiento
+            o a través de transportista se rige por <strong>§6</strong> (a cargo del
+            Cliente en el desistimiento libre; a cargo de HIPERA cuando concurra
+            alguno de los supuestos del §6.2 — producto defectuoso, error de
+            HIPERA, etc.).
           </p>
         </Subsection>
       </Section>

@@ -109,9 +109,17 @@
 // =====================================================================
 
 // --- Términos y Condiciones ---
-export const TERMS_VERSION = 2;                  // sin cambio (revisión menor 1.0 → 1.1)
-export const TERMS_DOCUMENT_VERSION = '1.1';
-export const TERMS_UPDATED_AT = '2026-05-22';
+// 1.1 → 1.2 (2026-05-25): aclaración §8.3 sobre el reembolso de los
+// gastos de envío en desistimientos parciales. El texto previo
+// hablaba de «importe íntegro del producto y los gastos de envío
+// estándar iniciales» sin distinguir total vs parcial; la nueva
+// redacción acota el reembolso íntegro al desistimiento total y
+// remite a Política de Devoluciones §§5.4-5.5 para el desarrollo.
+// Se trata como cambio material por afectar al cálculo económico
+// del reembolso → re-consent en checkout para usuarios existentes.
+export const TERMS_VERSION = 3;
+export const TERMS_DOCUMENT_VERSION = '1.2';
+export const TERMS_UPDATED_AT = '2026-05-25';
 
 // --- Política de Privacidad ---
 export const PRIVACY_VERSION = 2;                // sin cambio (revisión menor 1.0 → 1.1)
@@ -122,9 +130,13 @@ export const PRIVACY_UPDATED_AT = '2026-05-22';
 // Documento informativo (manual operativo complementario a T&C §8),
 // no requiere consentimiento explícito en checkout. El versionado se
 // mantiene por si futuros cambios materiales obligan a notificar.
-export const RETURNS_VERSION = 1;
-export const RETURNS_DOCUMENT_VERSION = '1.0';
-export const RETURNS_UPDATED_AT = '2026-05-22';
+// 1.0 → 1.1 (2026-05-25): aclaración §5.4 (alcance: desistimiento
+// total) y nuevo §5.5 (matriz reembolso de envío × umbral 40 € ×
+// tipo de devolución, con 3 ejemplos). Cambio material por afectar
+// al cálculo económico del reembolso.
+export const RETURNS_VERSION = 2;
+export const RETURNS_DOCUMENT_VERSION = '1.1';
+export const RETURNS_UPDATED_AT = '2026-05-25';
 
 // --- Política de Envíos ---
 // Documento informativo (manual operativo complementario a T&C §7),
