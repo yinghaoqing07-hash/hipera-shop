@@ -20,7 +20,7 @@ import {
 import React, { useCallback, useEffect, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
-  Tag, Trash2, ChevronRight, Home, Gift, Truck, Heart,
+  Tag, Trash2, ChevronRight, ChevronDown, Home, Gift, Truck, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
   Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone,
@@ -69,6 +69,266 @@ const ProductSkeleton = () => (
     <div className="h-6 bg-gray-200 rounded w-1/2"></div>
   </div>
 );
+
+// =====================================================================
+// StoreInfoBar — estado de apertura de la tienda física
+// =====================================================================
+// Banda discreta bajo el Header en la página de inicio que muestra si
+// el establecimiento físico está abierto o cerrado en este momento,
+// junto al tiempo restante hasta el siguiente cambio de estado.
+//
+// La información detallada de envío (tarifas, plazos, recogida gratis)
+// se ha trasladado a la sección "Preguntas frecuentes" (FaqSection),
+// que la presenta en formato accordion y permite incluir respuestas
+// más completas con enlaces a la Política de Envíos.
+//
+// Horarios cableados (deben coincidir con COMPANY.hours y con el
+// "openingHoursSpecification" del JSON-LD en index.html):
+//   - Apertura: 09:00
+//   - Cierre:   22:00
+//   - Días:     Lunes a Domingo (sin variación semanal)
+//
+// La cadena de estado se recalcula cada 60 s con setInterval para
+// reflejar el paso del tiempo sin necesidad de recargar la página.
+// =====================================================================
+
+const STORE_OPEN_HOUR = 9;
+const STORE_CLOSE_HOUR = 22;
+
+function getStoreStatus(now = new Date()) {
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const isOpen = hour >= STORE_OPEN_HOUR && hour < STORE_CLOSE_HOUR;
+
+  if (isOpen) {
+    const minutesToClose = (STORE_CLOSE_HOUR - hour) * 60 - minute;
+    const h = Math.floor(minutesToClose / 60);
+    const m = minutesToClose % 60;
+    const remaining = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    return { isOpen: true, label: `Abierto · Cierra en ${remaining}` };
+  }
+
+  const openLabel = hour < STORE_OPEN_HOUR ? 'hoy' : 'mañana';
+  return { isOpen: false, label: `Cerrado · Abre ${openLabel} a las ${STORE_OPEN_HOUR}:00` };
+}
+
+function StoreInfoBar() {
+  const [status, setStatus] = useState(() => getStoreStatus());
+
+  useEffect(() => {
+    const id = setInterval(() => setStatus(getStoreStatus()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="bg-white border-b border-gray-100">
+      <div className="px-4 py-2 flex items-center gap-2 text-xs">
+        <span
+          aria-hidden="true"
+          className={`inline-block w-2 h-2 rounded-full ${status.isOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}
+        />
+        <span aria-live="polite" className="font-medium text-gray-800">
+          {status.label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// FaqSection — Preguntas frecuentes (accordion)
+// =====================================================================
+// Acordeón clásico de 8 preguntas habituales sobre el funcionamiento
+// de HIPERA. Reemplaza al desaparecido bloque informativo de envío de
+// la barra superior y absorbe esa información dentro de respuestas
+// más detalladas con enlaces a las políticas legales correspondientes.
+//
+// Convenciones:
+//   - Sólo un item abierto a la vez (estado: openIndex).
+//   - Las respuestas pueden contener JSX (enlaces a /?legal=...).
+//   - Los enlaces internos a páginas legales reciben handlers (no
+//     <a href>) para evitar recargas de página y mantener el estado
+//     de cliente (carrito, sesión, favoritos).
+//
+// Coherencia obligatoria con las políticas legales vigentes:
+//   - Plazos / zonas      → Política de Envíos §2, §3
+//   - Tarifa / umbral     → Política de Envíos §4
+//   - Devoluciones        → Política de Devoluciones §2 (desistimiento)
+//   - Garantía            → T&C §9 (3 años, 2 años segunda mano)
+//   - Reparación          → T&C §10 + página /repair
+// =====================================================================
+
+function FaqSection({ onLegalClick, onRepairClick }) {
+  const [openIndex, setOpenIndex] = useState(null);
+
+  const faqs = [
+    {
+      q: '¿Cómo hago un pedido?',
+      a: (
+        <>
+          Navega por las categorías o usa el buscador para encontrar lo que
+          necesitas, añade los productos al carrito y completa el proceso de
+          compra. Recibirás un correo electrónico con la confirmación del
+          pedido y los detalles de entrega.
+        </>
+      ),
+    },
+    {
+      q: '¿Hasta dónde repartís?',
+      a: (
+        <>
+          Realizamos envío a domicilio en Meco y poblaciones cercanas dentro
+          de un radio de aproximadamente 10 km. Consulta la lista completa de
+          zonas cubiertas en nuestra{' '}
+          <button
+            type="button"
+            onClick={() => onLegalClick('envios')}
+            className="text-red-600 underline hover:text-red-700"
+          >
+            Política de Envíos
+          </button>
+          .
+        </>
+      ),
+    },
+    {
+      q: '¿Puedo recoger en tienda?',
+      a: (
+        <>
+          Sí. La recogida en tienda es <strong>gratuita y sin importe mínimo</strong>{' '}
+          en Paseo del Sol 1, 28880 Meco. Te avisaremos cuando tu pedido esté
+          listo, normalmente en 2-4 horas desde la confirmación.
+        </>
+      ),
+    },
+    {
+      q: '¿Cuánto cuesta el envío a domicilio?',
+      a: (
+        <>
+          El envío a domicilio tiene una tarifa única de{' '}
+          <strong>4,99 €</strong>. Los pedidos a partir de{' '}
+          <strong>40 €</strong> (antes de aplicar los gastos de envío)
+          disfrutan de <strong>envío gratuito</strong>.
+        </>
+      ),
+    },
+    {
+      q: '¿En cuánto tiempo recibiré mi pedido?',
+      a: (
+        <>
+          <strong>Recogida en tienda:</strong> 2-4 horas tras la confirmación
+          (mismo día si se confirma antes de las 18:00).{' '}
+          <strong>Envío a domicilio:</strong> 24-72 horas en la zona local,
+          sin perjuicio del plazo legal máximo de 30 días naturales (Art. 66
+          bis RDLeg 1/2007).
+        </>
+      ),
+    },
+    {
+      q: '¿Qué métodos de pago aceptáis?',
+      a: (
+        <>
+          Aceptamos pago con tarjeta (Visa, Mastercard) y <strong>Bizum</strong>{' '}
+          a través de pasarela segura. En el establecimiento físico también
+          aceptamos efectivo.
+        </>
+      ),
+    },
+    {
+      q: '¿Cómo funcionan las devoluciones?',
+      a: (
+        <>
+          <p className="mb-2">
+            <strong>Productos no perecederos</strong> (cereales, conservas,
+            snacks, bebidas envasadas, productos de bazar): puedes ejercer
+            el derecho de desistimiento durante{' '}
+            <strong>14 días naturales</strong> desde la recepción del pedido,
+            sin necesidad de justificar el motivo.
+          </p>
+          <p className="mb-2">
+            <strong>Productos frescos y perecederos</strong> (carne, pescado,
+            lácteos, frutas y verduras, panadería, comida preparada,
+            congelados): <strong>no admiten desistimiento</strong> por su
+            propia naturaleza (Art. 103 <em>RDLeg 1/2007</em>), pero puedes
+            siempre solicitar devolución, sustitución o reembolso si recibes
+            el producto <strong>defectuoso, caducado, dañado durante el
+            transporte o distinto al pedido</strong>.
+          </p>
+          <p>
+            Consulta el detalle completo (incluida la lista de excepciones
+            legales) en nuestra{' '}
+            <button
+              type="button"
+              onClick={() => onLegalClick('devoluciones')}
+              className="text-red-600 underline hover:text-red-700"
+            >
+              Política de Devoluciones
+            </button>
+            .
+          </p>
+        </>
+      ),
+    },
+    {
+      q: '¿Ofrecéis reparación de móviles?',
+      a: (
+        <>
+          Sí. Somos servicio oficial de reparación: cambio de pantalla,
+          batería y otras intervenciones. Selecciona tu modelo y tipo de
+          reparación en el{' '}
+          <button
+            type="button"
+            onClick={onRepairClick}
+            className="text-red-600 underline hover:text-red-700"
+          >
+            Centro de Reparación
+          </button>{' '}
+          y consulta el precio por WhatsApp.
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <h2 className="font-bold text-xl text-center text-gray-900 mb-6">
+        Preguntas frecuentes
+      </h2>
+      <div className="divide-y divide-gray-100">
+        {faqs.map((faq, i) => {
+          const isOpen = openIndex === i;
+          return (
+            <div key={i}>
+              <button
+                type="button"
+                onClick={() => setOpenIndex(isOpen ? null : i)}
+                aria-expanded={isOpen}
+                aria-controls={`faq-panel-${i}`}
+                className="w-full py-4 px-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              >
+                <span className="text-sm font-medium text-gray-900 pr-3">
+                  {faq.q}
+                </span>
+                <ChevronDown
+                  size={18}
+                  className={`text-red-600 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {isOpen && (
+                <div
+                  id={`faq-panel-${i}`}
+                  className="px-2 pb-4 text-sm text-gray-600 leading-relaxed"
+                >
+                  {faq.a}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 // --- 组件：图标映射 (已扩充全品类) ---
 const IconByName = ({ name, size=24, className }) => {
@@ -1082,6 +1342,9 @@ export default function App() {
         </div>
       </header>
 
+      {/* Estado de apertura de la tienda física (solo Home) */}
+      {page === 'home' && <StoreInfoBar />}
+
       {/* ⚖️ 法律页面 */}
       {page === "legal" && <LegalPage type={legalType} onBack={handleBack}/>}
 
@@ -1122,6 +1385,7 @@ export default function App() {
               </div>
             </div>
           </button>
+
           <div className="grid grid-cols-1 gap-4">
              <div onClick={() => navTo("repair")} className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
                 <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-red-600 to-transparent opacity-50 group-hover:opacity-80 transition-opacity"></div>
@@ -1175,6 +1439,12 @@ export default function App() {
                ))}
              </div>
           </div>
+
+          {/* Preguntas frecuentes (FAQ accordion) — final del Home */}
+          <FaqSection
+            onLegalClick={(type) => { setLegalType(type); navTo('legal'); }}
+            onRepairClick={() => navTo('repair')}
+          />
         </div>
       )}
 
