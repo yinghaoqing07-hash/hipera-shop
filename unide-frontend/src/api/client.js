@@ -142,8 +142,18 @@ class ApiClient {
   }
 
   // Public: Get order by ID (for QR code lookup)
+  // Nota: por RGPD el backend ya NO devuelve address/phone/user_id en
+  // este endpoint público. Si la UI necesita esos campos, debe usar
+  // getUserOrders() con sesión autenticada.
   async getOrderById(orderId) {
     return this.requestSimple(`/orders/${orderId}`);
+  }
+
+  // Identidad y permisos del usuario autenticado actual.
+  // El frontend usa isAdmin para gobernar el acceso a /admin sin
+  // necesidad de exponer la whitelist ADMIN_EMAILS en el cliente.
+  async getMe() {
+    return this.request('/me');
   }
 
   // Admin endpoints

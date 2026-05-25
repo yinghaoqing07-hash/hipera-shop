@@ -33,12 +33,22 @@ NODE_ENV=production
 
 # CORS配置
 FRONTEND_URL=http://localhost:5173
+
+# 管理员白名单（必填，否则 /admin 对所有人返回 403）
+# 逗号分隔的邮箱列表；大小写不敏感；空格会自动 trim
+ADMIN_EMAILS=tu_email@gmail.com,otro_admin@gmail.com
 ```
 
 **重要提示：**
 - `SUPABASE_SERVICE_KEY` 需要从 Supabase Dashboard → Settings → API 获取
 - 使用 **service_role** 密钥（不是 anon 密钥）
 - 这个密钥有完整数据库访问权限，**绝对不能**暴露在前端代码中
+- `ADMIN_EMAILS` 是 **强制变量**：
+  - 没设置 → 任何账号访问 `/api/admin/*` 或 `/admin` 都会被拒绝（403），
+    后端启动时会打印警告
+  - 仅这些邮箱对应的 Supabase 用户可以进入后台
+  - 普通客户注册账号后**不会**获得 admin 权限
+  - 修改后必须重启后端服务器才能生效
 
 #### 1.3 启动后端服务器
 
@@ -134,7 +144,11 @@ VITE_API_URL=https://your-backend-domain.com/api
 **Railway**
 1. [railway.app](https://railway.app) 注册并连接 GitHub
 2. New Project → Deploy from GitHub → 选本仓库，**Root Directory** 设为 `backend`
-3. 在 Project → Variables 添加：`SUPABASE_URL`、`SUPABASE_SERVICE_KEY`、`FRONTEND_URL=https://hipera-shop.vercel.app`
+3. 在 Project → Variables 添加（**所有变量缺一不可**）：
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_KEY`
+   - `FRONTEND_URL=https://hipera-shop.vercel.app`
+   - `ADMIN_EMAILS=tu_email@gmail.com`（逗号分隔多个；**没配置就没人能登 /admin**）
 4. 部署完成后记下 **公网 URL**，如 `https://xxx.up.railway.app`
 5. API 基地址为：`https://xxx.up.railway.app`（若未挂子路径）或 `https://xxx.up.railway.app/api`（若挂在 `/api`，依你配置为准）
 
@@ -210,3 +224,9 @@ curl -X POST http://localhost:3001/api/orders \
 - 确认JWT token有效
 - 检查token是否在请求头中正确传递
 - 验证Supabase用户认证状态
+
+### `/admin` 提示 "Acceso restringido" 或 API 返回 403
+- 后端的 `ADMIN_EMAILS` 是否包含你登录用的邮箱？（区分逗号分隔，大小写不敏感）
+- 修改 Railway/服务器的环境变量后**必须重启服务**（Railway: Deployments → Restart）
+- 检查后端启动日志是否有 `[Auth] ⚠️ ADMIN_EMAILS no está configurada` 警告
+- `GET /api/me` 可以快速验证：用浏览器开发者工具 Network 面板查看返回的 `isAdmin` 字段

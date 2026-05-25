@@ -278,8 +278,54 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Authentication middleware
-const authenticateAdmin = async (req, res, next) => {
+// =====================================================================
+// Authentication & authorization
+// =====================================================================
+// Historia previa: el middleware authenticateAdmin sólo verificaba que
+// el JWT de Supabase fuera válido, pero NO comprobaba el rol del
+// usuario. Combinado con /register público (main.jsx), cualquier
+// persona podía crearse una cuenta, obtener un JWT y consumir todos
+// los endpoints /api/admin/*. Esto se corrigió el 2026-05-25 añadiendo
+// una whitelist de emails de administrador parametrizada por entorno.
+//
+// Configuración (variable obligatoria en producción):
+//   ADMIN_EMAILS=email1@dominio.com,email2@dominio.com
+//
+// Sin la variable definida, NO se concede acceso administrativo a
+// nadie (fail closed). El endpoint /api/me permite al frontend
+// consultar si el usuario autenticado actual está en la whitelist
+// (para mostrar/ocultar /admin) sin filtrar el listado completo.
+// =====================================================================
+
+const parseAdminEmails = () => {
+  const raw = process.env.ADMIN_EMAILS || '';
+  return raw
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const isAdminUser = (user) => {
+  const list = parseAdminEmails();
+  if (list.length === 0) return false;
+  const email = (user?.email || '').trim().toLowerCase();
+  if (!email) return false;
+  return list.includes(email);
+};
+
+// Aviso de arranque si la whitelist está vacía en producción.
+if (process.env.NODE_ENV === 'production' && parseAdminEmails().length === 0) {
+  console.warn(
+    '[Auth] ⚠️ ADMIN_EMAILS no está configurada. Todos los endpoints ' +
+    '/api/admin/* y /admin del frontend devolverán 403. Configura ' +
+    'ADMIN_EMAILS=email1,email2 en las variables de entorno del servidor ' +
+    'antes de intentar acceder al panel.'
+  );
+}
+
+// Validación de JWT (no exige rol). Usado por /api/me y compuesto por
+// authenticateAdmin para añadir comprobación de whitelist.
+const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
@@ -302,6 +348,20 @@ const authenticateAdmin = async (req, res, next) => {
     console.warn('[Auth] Exception:', err?.message);
     res.status(401).json({ error: 'Error de autenticación. Intenta cerrar sesión y volver a entrar' });
   }
+};
+
+// Validación de JWT + whitelist de email. Para endpoints administrativos.
+const authenticateAdmin = (req, res, next) => {
+  authenticateUser(req, res, (err) => {
+    if (err) return next(err);
+    if (!isAdminUser(req.user)) {
+      console.warn(`[Auth] Acceso admin denegado para email=${req.user?.email || '(sin email)'}`);
+      return res.status(403).json({
+        error: 'Acceso denegado: la cuenta no tiene permisos de administrador.',
+      });
+    }
+    next();
+  });
 };
 
 // ========== PUBLIC ROUTES (Frontend) ==========
@@ -448,28 +508,61 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// Get order by ID (public - for QR code lookup)
+// Identidad y permisos del usuario autenticado.
+// Permite al frontend saber si la sesión actual tiene acceso a /admin
+// sin exponer la whitelist completa de ADMIN_EMAILS.
+app.get('/api/me', authenticateUser, (req, res) => {
+  res.json({
+    id: req.user.id,
+    email: req.user.email,
+    isAdmin: isAdminUser(req.user),
+  });
+});
+
+// Get order by ID (público — lookup por QR del ticket)
+//
+// Endpoint accesible sin autenticación porque está pensado para que el
+// cliente que tiene el QR del ticket consulte el estado de su pedido.
+// Por minimización de datos (RGPD Art. 5.1.c) NO se devuelven los
+// campos personales `address`, `phone` y `user_id`: el cliente ya
+// conoce esos datos (los introdujo él mismo) y, si la URL del pedido
+// se compartiera o quedara en el historial del navegador, no se
+// expondrían datos identificativos adicionales.
+//
+// Si el cliente necesita ver la dirección y el teléfono asociados al
+// pedido, debe iniciar sesión y consultar GET /api/orders/user/:userId,
+// que sí los devuelve completos por estar autenticado.
+const PUBLIC_ORDER_FIELDS = [
+  'id',
+  'status',
+  'total',
+  'items',
+  'payment_method',
+  'note',
+  'created_at',
+].join(',');
+
 app.get('/api/orders/:orderId', async (req, res) => {
   try {
     const { orderId } = req.params;
-    
+
     const { data, error } = await supabase
       .from('orders')
-      .select('*')
+      .select(PUBLIC_ORDER_FIELDS)
       .eq('id', orderId)
       .single();
-    
+
     if (error) {
       if (error.code === 'PGRST116') {
         return res.status(404).json({ error: 'Pedido no encontrado' });
       }
       throw error;
     }
-    
+
     if (!data) {
       return res.status(404).json({ error: 'Pedido no encontrado' });
     }
-    
+
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
