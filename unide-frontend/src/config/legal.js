@@ -122,9 +122,16 @@ export const TERMS_DOCUMENT_VERSION = '1.2';
 export const TERMS_UPDATED_AT = '2026-05-25';
 
 // --- Política de Privacidad ---
-export const PRIVACY_VERSION = 2;                // sin cambio (revisión menor 1.0 → 1.1)
-export const PRIVACY_DOCUMENT_VERSION = '1.1';
-export const PRIVACY_UPDATED_AT = '2026-05-22';
+// 1.1 → 1.2 (2026-05-26): activación efectiva de Resend Inc. como
+// encargado del tratamiento de emails transaccionales (§6.1 y §7.1).
+// El procesador ya estaba listado en la versión 1.1 con la coletilla
+// "cuando esté disponible"; ahora se ha completado la integración
+// técnica y se retiran ambas menciones condicionales. Cambio material
+// por incorporación efectiva de una transferencia internacional a
+// EE.UU. → re-consent en checkout para usuarios existentes.
+export const PRIVACY_VERSION = 3;
+export const PRIVACY_DOCUMENT_VERSION = '1.2';
+export const PRIVACY_UPDATED_AT = '2026-05-26';
 
 // --- Política de Devoluciones ---
 // Documento informativo (manual operativo complementario a T&C §8),

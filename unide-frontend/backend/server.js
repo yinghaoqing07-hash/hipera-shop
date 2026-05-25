@@ -13,6 +13,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
+import { sendOrderConfirmationEmail } from './services/email.js';
 
 dotenv.config();
 
@@ -436,12 +437,19 @@ app.get('/api/repair-services', async (req, res) => {
 // Create order (public - but should validate)
 app.post('/api/orders', async (req, res) => {
   try {
-    const { user_id, address, phone, note, total, status, payment_method, items } = req.body;
-    
+    const { user_id, address, phone, note, total, status, payment_method, items, customer_email } = req.body;
+
     // Validate required fields
     if (!address || !phone || !total || !items) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    // Normalización defensiva del email (tolerante a typos comunes de
+    // mayúsculas/espacios sin romper el pedido si la cadena viene mal).
+    const normalizedEmail = typeof customer_email === 'string'
+      ? customer_email.trim().toLowerCase()
+      : null;
+    const hasValidEmail = normalizedEmail && normalizedEmail.includes('@');
 
     // Deduct stock for products (skip services and gift items)
     for (const item of items) {
@@ -488,6 +496,7 @@ app.post('/api/orders', async (req, res) => {
         status: status || 'Procesando',
         payment_method: payment_method || 'Pendiente',
         items,
+        customer_email: hasValidEmail ? normalizedEmail : null,
         created_at: new Date().toISOString()
       }])
       .select()
@@ -500,6 +509,17 @@ app.post('/api/orders', async (req, res) => {
       autoPrintTicket(data).catch(err => {
         console.error('Error en auto-impresión:', err);
       });
+    }
+
+    // Confirmación por email (asíncrono, best-effort — nunca bloquea ni
+    // falla la creación del pedido aunque Resend caiga, el dominio no
+    // esté verificado, o el cliente no haya facilitado un email válido).
+    if (hasValidEmail) {
+      sendOrderConfirmationEmail(data, normalizedEmail).catch((err) => {
+        console.error('[Email] Excepción inesperada (no propagada):', err?.message || err);
+      });
+    } else {
+      console.warn(`[Email] Pedido ${data?.id?.slice?.(0, 8) || '?'} sin customer_email válido — skip envío`);
     }
 
     res.json(data);

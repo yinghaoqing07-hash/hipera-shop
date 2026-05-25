@@ -428,7 +428,7 @@ export default function PoliticaPrivacidad() {
               hint="Entidad UE con sede en Dublín (Irlanda). Certificación PCI-DSS nivel 1. Sin transferencia internacional para clientes europeos."
             />
             <MatrixRow
-              left="Resend Inc. (cuando esté disponible)"
+              left="Resend Inc."
               right="Envío de correos electrónicos transaccionales (confirmaciones de pedido, recuperación de contraseña, notificaciones de reparación)."
               hint="Procesamiento en EE.UU. Transferencia amparada por SCC (véase §7). Únicamente datos imprescindibles (email destinatario y contenido del mensaje)."
             />
@@ -493,8 +493,9 @@ export default function PoliticaPrivacidad() {
 
         <Subsection title="7.1. Transferencias a EE.UU.: Resend Inc.">
           <p>
-            El envío de correos electrónicos transaccionales (cuando dicha
-            funcionalidad esté activa) se realiza a través de <strong>Resend Inc.</strong>,
+            El envío de correos electrónicos transaccionales (confirmación de
+            pedidos y comunicaciones operativas necesarias para la ejecución
+            del contrato) se realiza a través de <strong>Resend Inc.</strong>,
             entidad con domicilio en los Estados Unidos. Esta transferencia se
             ampara en las siguientes garantías acumulativas:
           </p>

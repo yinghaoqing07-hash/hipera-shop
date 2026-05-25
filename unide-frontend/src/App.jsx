@@ -869,7 +869,7 @@ export default function App() {
 
   // --- Orders & Payment ---
   const [myOrders, setMyOrders] = useState([]);
-  const [checkoutForm, setCheckoutForm] = useState({ address: "", phone: "", note: "" });
+  const [checkoutForm, setCheckoutForm] = useState({ address: "", phone: "", note: "", email: "" });
   
   // New Payment States
   const [showPayment, setShowPayment] = useState(false); // 控制弹窗
@@ -934,6 +934,13 @@ export default function App() {
     const handleSession = async (session) => {
       const u = session?.user ?? null;
       setUser(u);
+      // Prefill del email en el checkout cuando el usuario tiene sesión.
+      // Sólo se rellena si el campo está vacío para no pisar lo que el
+      // cliente haya escrito manualmente (p. ej. quiere recibir la
+      // confirmación en otra dirección distinta a la de su cuenta).
+      if (u?.email) {
+        setCheckoutForm((prev) => (prev.email ? prev : { ...prev, email: u.email }));
+      }
       if (!u) {
         setLatestTermsAcceptance(null);
         return;
@@ -1116,9 +1123,19 @@ export default function App() {
   // logueado pero sin aceptación previa, o c) la versión vigente subió.
   const checkoutNeedsTermsCheckbox = !user || needsTermsReacceptance(latestTermsAcceptance);
 
+  // Validador mínimo de email (mismo criterio que el backend: requiere
+  // arroba). El input HTML type="email" ya hace una validación más
+  // estricta, pero replicamos aquí para evitar enviar al backend
+  // strings claramente inválidas.
+  const isEmailFormatOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
+
   const handleInitiateCheckout = async () => {
     if (!checkoutForm.address || !checkoutForm.phone) {
       toast.error("Faltan datos de envío");
+      return;
+    }
+    if (!isEmailFormatOk(checkoutForm.email)) {
+      toast.error("Email inválido — necesitamos uno válido para enviarte la confirmación del pedido");
       return;
     }
     if (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted) {
@@ -1149,7 +1166,11 @@ export default function App() {
     setIsProcessingPayment(true);
 
     try {
-      localStorage.setItem('lastAddress', JSON.stringify({ address: checkoutForm.address, phone: checkoutForm.phone }));
+      localStorage.setItem('lastAddress', JSON.stringify({
+        address: checkoutForm.address,
+        phone: checkoutForm.phone,
+        email: checkoutForm.email,
+      }));
 
       // 创建订单（通过API，后端会处理库存检查和扣减）
       const paymentMethodName = selectedPayment === 'contra_reembolso' ? 'Contra Reembolso' : selectedPayment === 'bizum' ? 'Bizum' : 'Pendiente';
@@ -1166,7 +1187,8 @@ export default function App() {
       }
 
       const orderData = await apiClient.createOrder({
-        user_id: user?.id || null, 
+        user_id: user?.id || null,
+        customer_email: checkoutForm.email,
         address: checkoutForm.address,
         phone: checkoutForm.phone,
         note: checkoutForm.note,
@@ -1997,8 +2019,9 @@ export default function App() {
 
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
                 <h3 className="font-bold flex items-center gap-2 text-gray-800"><MapPin size={18} className="text-red-600"/> Datos de entrega</h3>
+                <input id="email" name="email" type="email" autoComplete="email" inputMode="email" value={checkoutForm.email} onChange={e => setCheckoutForm({...checkoutForm, email: e.target.value})} placeholder="Email para la confirmación *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
                 <input id="address" name="address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
-                <input id="phone" name="phone" type="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                <input id="phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
                 <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder="Nota para repartidor (Opcional)" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
              </div>
              {checkoutNeedsTermsCheckbox && (
@@ -2024,7 +2047,7 @@ export default function App() {
              )}
 
              {/* 按钮修改：现在是打开支付弹窗 */}
-             <button disabled={!checkoutForm.address || !checkoutForm.phone || (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted)} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
+             <button disabled={!isEmailFormatOk(checkoutForm.email) || !checkoutForm.address || !checkoutForm.phone || (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted)} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
                Continuar al Pago <Wallet size={20}/>
              </button>
           </div>

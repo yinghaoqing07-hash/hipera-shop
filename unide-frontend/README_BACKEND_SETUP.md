@@ -37,6 +37,15 @@ FRONTEND_URL=http://localhost:5173
 # 管理员白名单（必填，否则 /admin 对所有人返回 403）
 # 逗号分隔的邮箱列表；大小写不敏感；空格会自动 trim
 ADMIN_EMAILS=tu_email@gmail.com,otro_admin@gmail.com
+
+# Resend 邮件服务（生产环境必填，否则下单时不会发确认邮件）
+# 1. 在 https://resend.com 注册并完成域名验证（见下方 DNS 配置）
+# 2. https://resend.com/api-keys 创建 API Key
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxx
+# 发件人地址（必须使用已验证域名）
+RESEND_FROM_EMAIL=HIPERA <pedidos@hipera.es>
+# 回复地址（可选；默认与 RESEND_FROM_EMAIL 相同）
+RESEND_REPLY_TO=info@hipera.es
 ```
 
 **重要提示：**
@@ -49,6 +58,56 @@ ADMIN_EMAILS=tu_email@gmail.com,otro_admin@gmail.com
   - 仅这些邮箱对应的 Supabase 用户可以进入后台
   - 普通客户注册账号后**不会**获得 admin 权限
   - 修改后必须重启后端服务器才能生效
+- `RESEND_API_KEY` + `RESEND_FROM_EMAIL`：
+  - 没设置 → 下单不会失败，但**不会发**确认邮件，后端启动时会打印警告
+  - 发件域名必须先在 Resend 控制台验证（见下方"Resend 域名验证"）
+  - 仅适用于**事务性邮件**（订单确认），不用于营销推送
+
+### 1.3 数据库迁移
+
+下面的 SQL 迁移文件需要**手动**在 Supabase → SQL Editor 中执行
+（按文件名升序执行；已执行过的可跳过）：
+
+```text
+supabase_migration_visible.sql
+supabase_migration_sort_order.sql
+supabase_migration_user_terms_acceptances.sql
+supabase_migration_user_consents.sql
+supabase_migration_user_consents_view_security.sql
+supabase_migration_orders_customer_email.sql   ← 新增（订单邮件确认）
+```
+
+`orders_customer_email` 添加 `customer_email` 列（nullable）用于：
+- 后端把客户邮箱保存到订单
+- 之后从 admin 重新触发邮件
+- 售后支持时按邮箱查订单
+
+### 1.4 Resend 域名验证（生产环境必做）
+
+要让 `pedidos@hipera.es` 这种地址能发邮件，必须在 Cloudflare DNS 上
+为 `hipera.es` 配置 SPF + DKIM + MX，并在 Resend 控制台验证通过。
+
+**步骤：**
+
+1. 进 https://resend.com → 注册免费账号（每月 3000 封）
+2. 左侧 **Domains** → **Add Domain** → 输入 `hipera.es`
+3. Resend 给出一组 DNS 记录（一般 4 条：1× MX、1× SPF TXT、1× DKIM TXT、1× DMARC TXT）
+4. 进 Cloudflare → 选 `hipera.es` 域 → **DNS → Records** → 逐条 **Add record**：
+   - Type: `MX` / `TXT` 按 Resend 提示填
+   - Name: 严格按 Resend 给的（注意是 `send` 子域还是根域）
+   - Content / Priority: 复制粘贴
+   - **Proxy status: DNS only**（**不要打开** Cloudflare 橙云，否则 SPF/DKIM 失效）
+   - TTL: Auto
+5. 全部加完后回 Resend → **Verify**（通常几分钟内完成；最长 24h）
+6. 状态变 ✅ 后，去 **API Keys** → **Create API Key**（权限选 *Sending access* 即可）
+7. 把 key 填到 Railway 的 `RESEND_API_KEY`，把 `pedidos@hipera.es`
+   填到 `RESEND_FROM_EMAIL`，**重启**后端服务
+
+**常见坑：**
+- Cloudflare 默认会代理（橙云） → 必须切到 **DNS only**（灰云）
+- `hipera.es` 如果已经在 Cloudflare 注册商处买的，DNS 区可能要等域名状态从 Pending → Active
+- Resend free plan 限制每月 3000 封 + 单收件人 100 封/天，够你们这种小店用
+- 测试期可以先用 Resend 提供的 `onboarding@resend.dev` 作为 from（仅能发到注册时的邮箱），但生产必须用自己域名
 
 #### 1.3 启动后端服务器
 
@@ -149,6 +208,9 @@ VITE_API_URL=https://your-backend-domain.com/api
    - `SUPABASE_SERVICE_KEY`
    - `FRONTEND_URL=https://hipera-shop.vercel.app`
    - `ADMIN_EMAILS=tu_email@gmail.com`（逗号分隔多个；**没配置就没人能登 /admin**）
+   - `RESEND_API_KEY=re_xxxxxxxxxxxx`（域名验证完后从 Resend 控制台拿）
+   - `RESEND_FROM_EMAIL=HIPERA <pedidos@hipera.es>`（必须是已在 Resend 验证的域）
+   - `RESEND_REPLY_TO=info@hipera.es`（可选，默认与 FROM 相同）
 4. 部署完成后记下 **公网 URL**，如 `https://xxx.up.railway.app`
 5. API 基地址为：`https://xxx.up.railway.app`（若未挂子路径）或 `https://xxx.up.railway.app/api`（若挂在 `/api`，依你配置为准）
 
@@ -230,3 +292,18 @@ curl -X POST http://localhost:3001/api/orders \
 - 修改 Railway/服务器的环境变量后**必须重启服务**（Railway: Deployments → Restart）
 - 检查后端启动日志是否有 `[Auth] ⚠️ ADMIN_EMAILS no está configurada` 警告
 - `GET /api/me` 可以快速验证：用浏览器开发者工具 Network 面板查看返回的 `isAdmin` 字段
+
+### 下单后客户没收到确认邮件
+- 后端启动日志有没有 `[Email] ⚠️ RESEND_API_KEY no configurada` 警告？
+  - 有 → Railway 没配 `RESEND_API_KEY`
+- 后端日志里有 `[Email] Resend error: ...` 吗？
+  - `domain not verified` → 去 Resend 控制台 **Domains** 看 `hipera.es` 状态
+  - `from address must use verified domain` → `RESEND_FROM_EMAIL` 的域名不在已验证列表里
+  - `rate limit` → 单收件人每天上限 100 封（免费层）
+- 域名验证状态确认：
+  - Resend Dashboard → Domains → `hipera.es` 应显示 ✅
+  - 检查 Cloudflare DNS 里 SPF/DKIM 记录的 **Proxy status** 必须是 **DNS only**（灰云），
+    不能是橙云
+- 测试期想跳过域名验证 → 临时用 `RESEND_FROM_EMAIL=onboarding@resend.dev`，
+  但只能发给 Resend 注册时的邮箱（生产必须换回 `pedidos@hipera.es`）
+- 客户邮箱写错了？查 Supabase `orders.customer_email` 字段确认
