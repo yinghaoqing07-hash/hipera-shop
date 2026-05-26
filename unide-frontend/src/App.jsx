@@ -1683,9 +1683,18 @@ export default function App() {
         </div>
       )}
 
-      {/* --- ORDER QUERY PAGE (从二维码扫描) --- */}
+      {/* --- ORDER QUERY PAGE (escaneo de QR de ticket o enlace del email) ---
+          Decisión 2026-05-27: este bloque NO es mutuamente excluyente con el
+          resto de pantallas (home/cart/products/...): cuando se entra desde
+          el email transaccional, el state inicial sigue siendo `page: 'home'`,
+          así que la home se renderizaba simultáneamente y ocupaba el viewport.
+          El cliente veía la home y creía que el enlace estaba roto, cuando en
+          realidad la consulta de pedido estaba debajo (había que hacer scroll).
+          Solución: forzamos overlay a pantalla completa con `fixed inset-0`
+          y `z-50` (sobre header y todo lo demás) más `overflow-y-auto` para
+          que el contenido largo se desplace dentro del propio overlay. */}
       {queryOrderId && (
-        <div className="p-4 min-h-screen bg-gray-50">
+        <div className="fixed inset-0 z-50 bg-gray-50 overflow-y-auto p-4">
           <div className="flex items-center gap-2 mb-6 sticky top-0 bg-gray-50 z-10 py-2">
             <button onClick={() => { setQueryOrderId(null); setQueryOrder(null); navTo("home"); }} className="p-2 bg-white rounded-full shadow-sm text-gray-700">
               <ArrowLeft size={20}/>
