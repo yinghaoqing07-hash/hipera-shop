@@ -1,14 +1,13 @@
 // src/Login.jsx
 import React, { useState } from "react";
 import { supabase } from './supabaseClient';
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Lock, Mail, ArrowRight, ShoppingBag } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -23,7 +22,16 @@ export default function Login() {
       alert("Error: " + error.message);
       setLoading(false);
     } else {
-      navigate("/"); // 登录成功直接去首页
+      // Forzamos full reload en vez de navigate("/") por dos motivos:
+      // 1. Multi-tab safety: si el cliente tiene otra pestaña abierta de
+      //    hipera, la sincronización vía SPA puede dejar esta pestaña
+      //    con React state desactualizado (signed in en localStorage
+      //    pero no en el componente). Con location.href forzamos a que
+      //    la app vuelva a leer la sesión desde cero.
+      // 2. Defensa frente a estados pegajosos del SDK (locks colgados,
+      //    suscripciones obsoletas). Un full reload garantiza un punto
+      //    de partida limpio tras el login.
+      window.location.href = '/';
     }
   };
 
