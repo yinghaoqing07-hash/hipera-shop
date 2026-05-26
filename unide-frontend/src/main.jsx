@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { supabase } from './supabaseClient';
+import { supabase, clearSupabaseLocalSession } from './supabaseClient';
 import { apiClient } from './api/client';
 import './index.css';
 
@@ -101,15 +101,14 @@ const AdminProtectedRoute = ({ children }) => {
             <button
               type="button"
               onClick={() => {
-                // Lanzamos signOut sin await y navegamos inmediatamente.
-                // Si el token de Supabase está corrupto en el navegador
-                // del cliente (incidencia 2026-05-26), la llamada se
-                // queda colgada hasta el timeout interno y el botón
-                // parecería no responder. Forzamos la navegación a
-                // /login: la pérdida de localStorage al recargar y la
-                // limpieza posterior bastan para invalidar la sesión
-                // en el lado del navegador, aunque la petición remota
-                // de revocación no haya terminado.
+                // Limpiamos sincronamente los tokens locales (ver
+                // clearSupabaseLocalSession en supabaseClient.js para
+                // el razonamiento completo). Sin esa limpieza previa
+                // el location.href siguiente recarga la pagina antes
+                // de que el SDK haya borrado el localStorage, el
+                // siguiente arranque lee la sesion stale y el guard
+                // de admin vuelve a quedarse en bucle.
+                clearSupabaseLocalSession();
                 supabase.auth.signOut().catch((e) => {
                   if (!import.meta.env.PROD) console.warn('[admin] signOut bg:', e?.message);
                 });

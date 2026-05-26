@@ -2,7 +2,7 @@ import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import React, { useEffect, useRef, useState } from "react";
-import { supabase } from './supabaseClient'; // 保留用于用户认证
+import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import { 
   LayoutDashboard, Package, List, ShoppingBag, 
@@ -255,10 +255,15 @@ export default function AdminApp() {
     }
   };
 
-  // Multi-tab safe (2026-05-27): signOut en background + full reload
-  // a /login. El await previo podia colgar 30s si el SDK quedaba
-  // bloqueado por una pestaña hermana, dejando el panel sin reaccionar.
+  // Cierre de sesion robusto (2026-05-27 fix b): limpiamos primero los
+  // tokens sb-* de localStorage en sincrono, despues lanzamos signOut()
+  // en background y forzamos reload. Si solo lanzaramos signOut() y
+  // location.href de inmediato, el SDK no habria llegado a borrar los
+  // tokens (lo hace tras la respuesta del /logout), la pagina se
+  // recargaria leyendo localStorage stale y el admin volveria a quedar
+  // logueado dando la impresion de que el boton "no funciona".
   const handleLogout = () => {
+    clearSupabaseLocalSession();
     supabase.auth.signOut().catch(() => {});
     window.location.href = '/login';
   };

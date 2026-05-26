@@ -2,7 +2,7 @@ import QRCode from 'qrcode'; // <--- 新增这个
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
-import { supabase } from './supabaseClient'; // 保留用于用户认证
+import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
@@ -1809,14 +1809,22 @@ export default function App() {
                    <div className="flex items-center gap-3"><div className="w-10 h-10 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-bold">{user.email[0].toUpperCase()}</div><div className="flex flex-col"><span className="text-xs text-gray-400 uppercase font-bold">Cuenta</span><span className="font-bold text-gray-800 text-sm">{user.email.split('@')[0]}</span></div></div>
                    <button
                      onClick={() => {
-                       // Multi-tab safe sign out (2026-05-27): lanzamos
-                       // signOut() en segundo plano y forzamos full
-                       // reload a /. navTo() era SPA y dejaba la React
-                       // state con el usuario "fantasma" si el SDK no
-                       // emitia SIGNED_OUT a tiempo (problema reportado
-                       // con dos pestañas abiertas). Un full reload
-                       // garantiza que toda la app vuelve a leer la
-                       // sesion desde localStorage en limpio.
+                       // Cierre de sesion robusto (2026-05-27, fix b):
+                       // limpiamos PRIMERO los tokens de Supabase en
+                       // localStorage de forma sincrona, y solo despues
+                       // disparamos signOut() para revocar el token en
+                       // el servidor y forzamos full reload.
+                       //
+                       // El intento anterior (signOut() + location.href)
+                       // fallaba porque signOut() limpia localStorage de
+                       // forma asincrona DESPUES de recibir la respuesta
+                       // del endpoint /logout; cuando el location.href
+                       // descarga la pagina, esa respuesta aun no ha
+                       // llegado y localStorage conserva el token, asi
+                       // que la pagina recargada vuelve a quedar
+                       // logueada. Limpiar de forma sincrona elimina
+                       // toda dependencia del round-trip a Supabase.
+                       clearSupabaseLocalSession();
                        supabase.auth.signOut().catch(() => {});
                        window.location.href = '/';
                      }}
