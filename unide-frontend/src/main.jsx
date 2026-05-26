@@ -100,8 +100,19 @@ const AdminProtectedRoute = ({ children }) => {
             </a>
             <button
               type="button"
-              onClick={async () => {
-                await supabase.auth.signOut();
+              onClick={() => {
+                // Lanzamos signOut sin await y navegamos inmediatamente.
+                // Si el token de Supabase está corrupto en el navegador
+                // del cliente (incidencia 2026-05-26), la llamada se
+                // queda colgada hasta el timeout interno y el botón
+                // parecería no responder. Forzamos la navegación a
+                // /login: la pérdida de localStorage al recargar y la
+                // limpieza posterior bastan para invalidar la sesión
+                // en el lado del navegador, aunque la petición remota
+                // de revocación no haya terminado.
+                supabase.auth.signOut().catch((e) => {
+                  if (!import.meta.env.PROD) console.warn('[admin] signOut bg:', e?.message);
+                });
                 window.location.href = '/login';
               }}
               className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"

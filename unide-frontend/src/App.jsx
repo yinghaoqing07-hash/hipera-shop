@@ -1142,20 +1142,28 @@ export default function App() {
       toast.error("Debes aceptar la Política de Privacidad y los Términos y Condiciones.");
       return;
     }
-    // Si hay que re-aceptar y el usuario está logueado, registrar ahora
-    // (antes del pago) para que quede prueba aunque se cancele el pago.
+    // Si hay que re-aceptar y el usuario está logueado, registrar la
+    // aceptación en segundo plano. IMPORTANTE: NO usar await aquí — el
+    // historial de incidencias (2026-05-26) mostró que, cuando el token
+    // de Supabase queda corrupto en el navegador del cliente, cualquier
+    // llamada a supabase se queda colgada hasta el timeout interno (30s).
+    // Si esperásemos a recordTermsAcceptance, el botón "Continuar al
+    // Pago" quedaría sin respuesta visible durante esos 30 s y los
+    // clientes lo interpretan como un fallo total. Lanzamos la
+    // promesa, actualizamos el estado local de forma optimista y
+    // abrimos inmediatamente el modal de pago. Si la persistencia
+    // falla, la próxima sesión simplemente volverá a pedir la
+    // aceptación — coste aceptable frente a bloquear el checkout.
     if (user && needsTermsReacceptance(latestTermsAcceptance) && checkoutTermsAccepted) {
-      try {
-        await recordTermsAcceptance({ source: 'checkout', userId: user.id });
-        setLatestTermsAcceptance({
-          terms_version: TERMS_VERSION,
-          privacy_version: PRIVACY_VERSION,
-          accepted_at: new Date().toISOString(),
-          source: 'checkout',
-        });
-      } catch (e) {
+      setLatestTermsAcceptance({
+        terms_version: TERMS_VERSION,
+        privacy_version: PRIVACY_VERSION,
+        accepted_at: new Date().toISOString(),
+        source: 'checkout',
+      });
+      recordTermsAcceptance({ source: 'checkout', userId: user.id }).catch((e) => {
         if (!import.meta.env.PROD) console.warn('[checkout] recordAcceptance:', e?.message);
-      }
+      });
     }
     setSelectedPayment(""); // 重置支付方式选择
     setShowPayment(true); // 打开支付弹窗
