@@ -164,6 +164,35 @@ export const SHIPPING_VERSION = 1;
 export const SHIPPING_DOCUMENT_VERSION = '1.0';
 export const SHIPPING_UPDATED_AT = '2026-05-23';
 
+// --- Política de Cookies ---
+// Documento independiente exigido por el Art. 22.2 LSSI-CE y la Guía
+// AEPD julio 2023. Hasta hoy había solo un párrafo embebido en
+// LegalPage.content.cookies.text (App.jsx), insuficiente para una
+// AEPD que exige tabla detallada de cookies, identificación del
+// titular, duración y mecanismos de revocación. El nuevo documento
+// (PoliticaCookies.jsx) cubre nueve secciones y reemplaza el párrafo
+// embebido.
+//
+// COOKIES_VERSION es relevante para el banner de consentimiento:
+// useCookieConsent.js persiste la versión de consentimiento que el
+// Usuario aceptó en localStorage. Si la subimos al añadir cookies
+// nuevas o cambiar el titular de alguna, el banner volverá a aparecer
+// para que se renueve el consentimiento.
+//
+// 0.x → 1.0 (2026-05-27): primer documento formal completo (9
+// secciones) basado en Art. 22.2 LSSI-CE, Guía AEPD 2023 y RGPD.
+// Tabla detallada de localStorage (sb-*, cookieConsentV2, cart,
+// favorites, lastAddress, pendingTermsAcceptance) con titular,
+// categoría AEPD, finalidad y duración. Información sobre futuras
+// cookies de análisis y marketing (off por defecto), transferencias
+// internacionales asociadas (SCC para Supabase/Resend) y mecanismos
+// de revocación. Re-consent NO necesario al alta porque las
+// categorías efectivamente activas son las estrictamente necesarias
+// y funcionales que ya estaban exentas del consentimiento.
+export const COOKIES_VERSION = 1;
+export const COOKIES_DOCUMENT_VERSION = '1.0';
+export const COOKIES_UPDATED_AT = '2026-05-27';
+
 // --- Aviso Legal ---
 // Documento informativo de cumplimiento LSSI-CE (Art. 10), no requiere
 // consentimiento explícito en checkout. El versionado se mantiene por si

@@ -10,6 +10,7 @@ import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
 import PoliticaDevoluciones from './pages/legal/PoliticaDevoluciones';
 import PoliticaEnvios from './pages/legal/PoliticaEnvios';
+import PoliticaCookies from './pages/legal/PoliticaCookies';
 import AvisoLegal from './pages/legal/AvisoLegal';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
 import {
@@ -503,10 +504,10 @@ const LegalPage = ({ type, onBack }) => {
       icon: <ShieldCheck/>, 
       text: null // 渲染外部组件 PoliticaPrivacidad
     },
-    cookies: { 
-      title: "Política de Cookies", 
-      icon: <Cookie/>, 
-      text: "HIPERA utiliza exclusivamente cookies técnicas imprescindibles para el funcionamiento de la cesta de la compra, el inicio de sesión y la seguridad de la sesión. No utilizamos cookies de análisis, publicidad ni de terceros, ni vendemos sus datos de navegación. Las categorías de análisis y marketing que aparecen en el banner de consentimiento están preparadas para un posible uso futuro y permanecen desactivadas por defecto. Puede revisar y modificar sus preferencias en cualquier momento desde el enlace «Gestionar cookies» en el pie de página." 
+    cookies: {
+      title: "Política de Cookies",
+      icon: <Cookie/>,
+      text: null // 渲染外部组件 PoliticaCookies (v1.0, 2026-05-27)
     },
     devoluciones: {
       title: "Política de Devoluciones y Reembolsos",
@@ -547,12 +548,14 @@ const LegalPage = ({ type, onBack }) => {
                <TerminosCondiciones />
              ) : type === 'privacidad' ? (
                <PoliticaPrivacidad />
+             ) : type === 'cookies' ? (
+               <PoliticaCookies />
              ) : type === 'aviso' ? (
                <AvisoLegal />
              ) : (
                <>
                  <p className="font-medium text-gray-800 mb-4">{data.text}</p>
-                 
+
                  {/* 通用的填充文本，增加篇幅感 */}
                  <div className="space-y-4 text-gray-500">
                    <p>El acceso y/o uso de este portal atribuye la condición de USUARIO, que acepta, desde dicho acceso y/o uso, las Condiciones Generales de Uso aquí reflejadas.</p>
@@ -560,13 +563,6 @@ const LegalPage = ({ type, onBack }) => {
                  </div>
                </>
              )}
-
-            {type !== 'terminos' && type !== 'privacidad' && type !== 'devoluciones' && type !== 'envios' && type !== 'aviso' && (
-              <div className="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-400 flex justify-between items-center">
-                <span>QIANG GUO SL © {new Date().getFullYear()}</span>
-                <span>Actualizado: Enero 2026</span>
-              </div>
-            )}
           </div>
        </div>
     </div>

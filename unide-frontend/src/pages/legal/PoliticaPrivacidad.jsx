@@ -285,8 +285,14 @@ export default function PoliticaPrivacidad() {
             <li>
               <strong>Datos técnicos y de navegación:</strong> dirección IP, tipo
               de navegador, sistema operativo, idioma, fechas y horas de acceso,
-              páginas visitadas. Véase la <Lit>Política de Cookies</Lit> para más
-              detalle.
+              páginas visitadas. Véase la{' '}
+              <a
+                href="/?legal=cookies"
+                className="text-red-600 underline hover:text-red-700"
+              >
+                Política de Cookies
+              </a>{' '}
+              para más detalle.
             </li>
             <li>
               <strong>Registros de consentimientos y aceptaciones legales:</strong>{' '}
@@ -809,10 +815,23 @@ export default function PoliticaPrivacidad() {
 
         <Subsection title="11.4. Coherencia con la Política de Cookies">
           <p>
-            La presente Política se complementa con la <Lit>Política de Cookies</Lit>{' '}
-            y los <Lit>Términos y Condiciones</Lit>. En caso de discrepancia
-            aparente, prevalecerá lo dispuesto en el documento más específico para
-            la materia tratada. HIPERA mantiene sincronizados los tres documentos.
+            La presente Política se complementa con la{' '}
+            <a
+              href="/?legal=cookies"
+              className="text-red-600 underline hover:text-red-700"
+            >
+              Política de Cookies
+            </a>{' '}
+            y los{' '}
+            <a
+              href="/?legal=terminos"
+              className="text-red-600 underline hover:text-red-700"
+            >
+              Términos y Condiciones
+            </a>
+            . En caso de discrepancia aparente, prevalecerá lo dispuesto en el
+            documento más específico para la materia tratada. HIPERA mantiene
+            sincronizados los tres documentos.
           </p>
         </Subsection>
       </Section>
