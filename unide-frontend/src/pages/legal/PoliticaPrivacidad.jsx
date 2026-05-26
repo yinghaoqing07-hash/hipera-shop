@@ -429,8 +429,14 @@ export default function PoliticaPrivacidad() {
             />
             <MatrixRow
               left="Resend Inc."
-              right="Envío de correos electrónicos transaccionales (confirmaciones de pedido, recuperación de contraseña, notificaciones de reparación)."
-              hint="Procesamiento en EE.UU. Transferencia amparada por SCC (véase §7). Únicamente datos imprescindibles (email destinatario y contenido del mensaje)."
+              right={
+                <>
+                  Envío de correos electrónicos transaccionales (confirmaciones de pedido,
+                  recuperación de contraseña, notificaciones de reparación) desde la
+                  dirección <Email addr={COMPANY.emailOrders} />.
+                </>
+              }
+              hint="Almacenamiento físico en la región eu-west-1 (Irlanda) del proveedor; sociedad matriz constituida en EE.UU. Transferencia internacional amparada por SCC (véase §7). Únicamente datos imprescindibles (email destinatario y contenido del mensaje)."
             />
           </div>
         </Subsection>
@@ -496,8 +502,15 @@ export default function PoliticaPrivacidad() {
             El envío de correos electrónicos transaccionales (confirmación de
             pedidos y comunicaciones operativas necesarias para la ejecución
             del contrato) se realiza a través de <strong>Resend Inc.</strong>,
-            entidad con domicilio en los Estados Unidos. Esta transferencia se
-            ampara en las siguientes garantías acumulativas:
+            sociedad con domicilio social en los Estados Unidos. HIPERA ha
+            configurado el servicio para que el almacenamiento y procesamiento
+            ordinario del correo electrónico tenga lugar en la región{' '}
+            <strong>eu-west-1 (Irlanda)</strong> del proveedor, dentro del
+            Espacio Económico Europeo. No obstante, en la medida en que la
+            sociedad matriz está constituida fuera del EEE y pudieran existir
+            accesos puntuales de soporte técnico desde dicho territorio, la
+            relación se califica como transferencia internacional y se ampara
+            en las siguientes garantías acumulativas:
           </p>
           <ul className="list-disc pl-5 space-y-1">
             <li>

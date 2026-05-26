@@ -189,7 +189,7 @@ VITE_API_URL=https://your-backend-domain.com/api
 
 ### ⚠️ 重要：Vercel 前端不能请求 localhost
 
-前端部署在 **https://hipera-shop.vercel.app** 时，**不要** 使用 `http://localhost:3001` 作为 API 地址。浏览器会拦截公网页面对本机地址的请求（Private Network Access / loopback 限制），导致：
+前端部署在 **https://hipera.es**（或 alias 技术域名 `https://hipera-shop.vercel.app`）时，**不要** 使用 `http://localhost:3001` 作为 API 地址。浏览器会拦截公网页面对本机地址的请求（Private Network Access / loopback 限制），导致：
 
 - `Access to fetch at 'http://localhost:3001/api/...' has been blocked by CORS policy: Permission was denied for this request to access the loopback address space`
 - `Failed to load resource: net::ERR_FAILED`
@@ -206,7 +206,7 @@ VITE_API_URL=https://your-backend-domain.com/api
 3. 在 Project → Variables 添加（**所有变量缺一不可**）：
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_KEY`
-   - `FRONTEND_URL=https://hipera-shop.vercel.app`
+   - `FRONTEND_URL=https://hipera.es`（生产域名；构建链接的 URL 都基于这个）
    - `ADMIN_EMAILS=tu_email@gmail.com`（逗号分隔多个；**没配置就没人能登 /admin**）
    - `RESEND_API_KEY=re_xxxxxxxxxxxx`（域名验证完后从 Resend 控制台拿）
    - `RESEND_FROM_EMAIL=HIPERA <pedidos@hipera.es>`（必须是已在 Resend 验证的域）
@@ -219,7 +219,7 @@ VITE_API_URL=https://your-backend-domain.com/api
 2. Build: `npm install`，Start: `npm start`
 3. 环境变量同上；记下生成的 **HTTPS 地址**
 
-后端已配置 CORS，允许 `https://hipera-shop.vercel.app` 和 `http://localhost:5173`。
+后端已配置 CORS，允许 `https://hipera.es`（canonical）、`https://hipera-shop.vercel.app`（alias 技术域名）和 `http://localhost:5173`。
 
 ### 2. 再部署前端（Vercel）
 
@@ -233,7 +233,8 @@ VITE_API_URL=https://your-backend-domain.com/api
 | 环境 | 前端地址 | VITE_API_URL | 后端 CORS |
 |------|----------|--------------|-----------|
 | 本地开发 | http://localhost:5173 | http://localhost:3001/api | ✅ 已允许 |
-| 生产 (Vercel) | https://hipera-shop.vercel.app | **必须是** 已部署后端的 HTTPS 地址，如 `https://xxx.up.railway.app/api` | ✅ 已允许 |
+| 生产 (canonical) | https://hipera.es | **必须是** 已部署后端的 HTTPS 地址，如 `https://xxx.up.railway.app/api` | ✅ 已允许 |
+| 生产 (alias Vercel) | https://hipera-shop.vercel.app | 同上 | ✅ 已允许 |
 
 ## 🔍 测试
 

@@ -39,7 +39,7 @@ const getClient = () => {
 };
 
 const FROM_DEFAULT = 'HIPERA <pedidos@hipera.es>';
-const FRONTEND_DEFAULT = 'https://hipera-shop.vercel.app';
+const FRONTEND_DEFAULT = 'https://hipera.es';
 
 // Aviso de arranque si Resend no está configurada en producción.
 if (process.env.NODE_ENV === 'production' && !process.env.RESEND_API_KEY) {

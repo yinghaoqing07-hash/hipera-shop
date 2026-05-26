@@ -581,7 +581,7 @@ const generateDocuments = async (order, type = 'both') => {
     address: "Paseo del Sol 1, 28880 Meco",
     nif: "B86126638",
     phone: "+34 918 782 602",
-    web: "hipera.vercel.app"
+    web: "hipera.es"
   };
   const generateInvoice = (order) => generateDocuments(order, 'invoice');
 

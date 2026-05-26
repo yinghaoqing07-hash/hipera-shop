@@ -202,6 +202,13 @@ export default function TerminosCondiciones() {
             realización. Esta confirmación incluye el detalle del pedido, los datos de
             envío, el importe total y un resumen de las condiciones aplicables.
           </p>
+          <p className="text-xs text-gray-500">
+            El correo de confirmación se remite desde la dirección{' '}
+            <Email addr={COMPANY.emailOrders} /> a la cuenta de correo facilitada por
+            el Cliente en el proceso de compra. Se recomienda añadir dicha dirección
+            a la lista de remitentes seguros para evitar que las comunicaciones
+            operativas del pedido sean clasificadas como correo no deseado.
+          </p>
         </Subsection>
         <Subsection title="5.2 Perfeccionamiento del contrato y corrección de errores">
           <p>
@@ -237,8 +244,8 @@ export default function TerminosCondiciones() {
         </p>
         <ul className="list-disc list-inside space-y-1 ml-2">
           <li><strong>Contra reembolso</strong></li>
-          <li><strong>Bizum</strong> (cuando esté disponible)</li>
-          <li><strong>Tarjeta de crédito o débito</strong> (cuando esté disponible)</li>
+          <li><strong>Bizum</strong> mediante el número operativo facilitado en el proceso de pago; el cliente envía la transferencia desde su aplicación bancaria y HIPERA verifica la recepción antes de preparar el pedido.</li>
+          <li><strong>Tarjeta de crédito o débito</strong> (cuando esté disponible mediante pasarela de pagos certificada PCI-DSS)</li>
         </ul>
         <p>
           HIPERA no almacena los datos de tarjeta de pago. El procesamiento se delega en

@@ -109,28 +109,37 @@
 // =====================================================================
 
 // --- Términos y Condiciones ---
-// 1.1 → 1.2 (2026-05-25): aclaración §8.3 sobre el reembolso de los
-// gastos de envío en desistimientos parciales. El texto previo
-// hablaba de «importe íntegro del producto y los gastos de envío
-// estándar iniciales» sin distinguir total vs parcial; la nueva
-// redacción acota el reembolso íntegro al desistimiento total y
-// remite a Política de Devoluciones §§5.4-5.5 para el desarrollo.
-// Se trata como cambio material por afectar al cálculo económico
-// del reembolso → re-consent en checkout para usuarios existentes.
+// 1.2 → 1.3 (2026-05-26): revisión correctiva no material:
+//   • §5.1 menciona el remitente operativo pedidos@hipera.es para
+//     que el cliente pueda whitelistarlo y evitar spam.
+//   • §6 actualiza la descripción de Bizum (de "(cuando esté
+//     disponible)" a operativo con verificación manual de la
+//     transferencia), reflejando el estado real del checkout.
+//   • Tarjeta se mantiene como "cuando esté disponible" hasta que
+//     se integre Stripe.
+// NO requiere re-aceptación: ningún cambio modifica la base
+// económica, las obligaciones de las partes ni las garantías.
 export const TERMS_VERSION = 3;
-export const TERMS_DOCUMENT_VERSION = '1.2';
-export const TERMS_UPDATED_AT = '2026-05-25';
+export const TERMS_DOCUMENT_VERSION = '1.3';
+export const TERMS_UPDATED_AT = '2026-05-26';
 
 // --- Política de Privacidad ---
-// 1.1 → 1.2 (2026-05-26): activación efectiva de Resend Inc. como
-// encargado del tratamiento de emails transaccionales (§6.1 y §7.1).
-// El procesador ya estaba listado en la versión 1.1 con la coletilla
-// "cuando esté disponible"; ahora se ha completado la integración
-// técnica y se retiran ambas menciones condicionales. Cambio material
-// por incorporación efectiva de una transferencia internacional a
-// EE.UU. → re-consent en checkout para usuarios existentes.
+// 1.2 → 1.3 (2026-05-26): revisión correctiva no material que
+// precisa la operativa de Resend tras su activación:
+//   • §6.1 indica que el remitente operativo es pedidos@hipera.es
+//     y que el almacenamiento físico se realiza en la región
+//     eu-west-1 (Irlanda) del proveedor.
+//   • §7.1 reformula la transferencia internacional: el
+//     procesamiento ordinario tiene lugar en el EEE (Irlanda) y la
+//     calificación como transferencia internacional se mantiene
+//     únicamente por la matriz estadounidense del proveedor y los
+//     posibles accesos puntuales de soporte técnico.
+//   • Las SCC y demás salvaguardas listadas en §7.1 NO cambian.
+// NO requiere re-aceptación: las finalidades, bases jurídicas,
+// destinatarios y garantías del tratamiento son las mismas
+// publicadas en 1.2; sólo se aporta mayor precisión geográfica.
 export const PRIVACY_VERSION = 3;
-export const PRIVACY_DOCUMENT_VERSION = '1.2';
+export const PRIVACY_DOCUMENT_VERSION = '1.3';
 export const PRIVACY_UPDATED_AT = '2026-05-26';
 
 // --- Política de Devoluciones ---
@@ -160,6 +169,12 @@ export const SHIPPING_UPDATED_AT = '2026-05-23';
 // consentimiento explícito en checkout. El versionado se mantiene por si
 // futuros cambios materiales (completar Registro Mercantil, ampliación
 // de actividad, cambio de denominación social, etc.) obligan a notificar.
+// 1.0 → 1.1 (2026-05-26): actualización del campo "Sitio web" del
+// titular para reflejar el dominio definitivo https://hipera.es
+// (registrado en Cloudflare el 2026-05-25). El alias técnico de
+// despliegue (hipera-shop.vercel.app) deja de exponerse como URL
+// canónica en este aviso y en los metadatos SEO (index.html). El
+// resto del documento no varía.
 export const LEGAL_NOTICE_VERSION = 1;
-export const LEGAL_NOTICE_DOCUMENT_VERSION = '1.0';
-export const LEGAL_NOTICE_UPDATED_AT = '2026-05-23';
+export const LEGAL_NOTICE_DOCUMENT_VERSION = '1.1';
+export const LEGAL_NOTICE_UPDATED_AT = '2026-05-26';

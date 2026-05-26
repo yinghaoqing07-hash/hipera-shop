@@ -32,7 +32,7 @@ const generateTicketPDF = async (order) => {
 
   // 生成二维码 - 包含可访问的URL链接
   // 构建订单查询URL（前端地址 + 订单ID）
-  const frontendUrl = process.env.FRONTEND_URL || 'https://hipera-shop.vercel.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://hipera.es';
   const orderQueryUrl = `${frontendUrl}/?order=${order.id}`;
   const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, {
     errorCorrectionLevel: 'H', // 高纠错级别，确保打印后仍可扫描
@@ -217,8 +217,12 @@ const autoPrintTicket = async (order) => {
 // Trust proxy (needed for Railway/reverse proxy setups)
 app.set('trust proxy', true);
 
-// CORS: valid header values only (Chrome rejects invalid tokens in Allow-Headers)
-const CORS_ALLOW_ORIGIN = 'https://hipera-shop.vercel.app';
+// CORS: valid header values only (Chrome rejects invalid tokens in Allow-Headers).
+// El dominio canónico desde 2026-05-25 es https://hipera.es (Cloudflare DNS +
+// Vercel Domains). El alias técnico https://hipera-shop.vercel.app sigue activo
+// y se acepta como origen para no romper despliegues de preview ni accesos
+// directos al deploy de Vercel.
+const CORS_ALLOW_ORIGIN = 'https://hipera.es';
 const CORS_ALLOW_HEADERS = 'Content-Type, Authorization, Accept';
 
 app.use((req, res, next) => {
