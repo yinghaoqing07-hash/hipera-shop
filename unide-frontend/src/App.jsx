@@ -1807,7 +1807,24 @@ export default function App() {
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-xl flex justify-between items-center mb-6 border border-gray-100 shadow-sm">
                    <div className="flex items-center gap-3"><div className="w-10 h-10 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-bold">{user.email[0].toUpperCase()}</div><div className="flex flex-col"><span className="text-xs text-gray-400 uppercase font-bold">Cuenta</span><span className="font-bold text-gray-800 text-sm">{user.email.split('@')[0]}</span></div></div>
-                   <button onClick={() => {supabase.auth.signOut(); navTo("home"); toast("Sesión cerrada");}} className="text-red-600 bg-red-50 p-2 rounded-lg"><LogOut size={18}/></button>
+                   <button
+                     onClick={() => {
+                       // Multi-tab safe sign out (2026-05-27): lanzamos
+                       // signOut() en segundo plano y forzamos full
+                       // reload a /. navTo() era SPA y dejaba la React
+                       // state con el usuario "fantasma" si el SDK no
+                       // emitia SIGNED_OUT a tiempo (problema reportado
+                       // con dos pestañas abiertas). Un full reload
+                       // garantiza que toda la app vuelve a leer la
+                       // sesion desde localStorage en limpio.
+                       supabase.auth.signOut().catch(() => {});
+                       window.location.href = '/';
+                     }}
+                     className="text-red-600 bg-red-50 p-2 rounded-lg"
+                     aria-label="Cerrar sesión"
+                   >
+                     <LogOut size={18}/>
+                   </button>
                 </div>
                 {myOrders.length === 0 ? <p className="text-center text-gray-400 py-10">No tienes pedidos aún.</p> : myOrders.map(order => (
                   <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">

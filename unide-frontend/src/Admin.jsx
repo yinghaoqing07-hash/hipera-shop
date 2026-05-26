@@ -4,7 +4,6 @@ import autoTable from 'jspdf-autotable';
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
-import { useNavigate } from "react-router-dom"; 
 import { 
   LayoutDashboard, Package, List, ShoppingBag, 
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
@@ -79,7 +78,7 @@ function mapHeadersToFields(headers) {
 
 export default function AdminApp() {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const navigate = useNavigate();
+
   
   // Data
   const [products, setProducts] = useState([]);
@@ -256,7 +255,13 @@ export default function AdminApp() {
     }
   };
 
-  const handleLogout = async () => { await supabase.auth.signOut(); navigate("/login"); };
+  // Multi-tab safe (2026-05-27): signOut en background + full reload
+  // a /login. El await previo podia colgar 30s si el SDK quedaba
+  // bloqueado por una pestaña hermana, dejando el panel sin reaccionar.
+  const handleLogout = () => {
+    supabase.auth.signOut().catch(() => {});
+    window.location.href = '/login';
+  };
 
   // --- Actions ---
   const handleDeleteProduct = async (id) => { 
