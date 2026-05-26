@@ -2046,10 +2046,31 @@ export default function App() {
                </label>
              )}
 
-             {/* 按钮修改：现在是打开支付弹窗 */}
-             <button disabled={!isEmailFormatOk(checkoutForm.email) || !checkoutForm.address || !checkoutForm.phone || (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted)} onClick={handleInitiateCheckout} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
-               Continuar al Pago <Wallet size={20}/>
-             </button>
+            {/* Continuar al Pago.
+                Decisión UX (2026-05-26): NO usamos `disabled` nativo. Si el
+                botón quedaba bloqueado el cliente no veía por qué (sólo un
+                fade visual) y reportaba "no pasa nada al pulsar". En su
+                lugar el botón siempre es clicable y `handleInitiateCheckout`
+                muestra toasts específicos por cada campo faltante (email,
+                dirección, teléfono, casilla de consentimiento). Mantenemos
+                el efecto visual de "no listo" mediante opacidad y cursor
+                para no perder la señal de incompleto. */}
+            {(() => {
+              const checkoutReady =
+                isEmailFormatOk(checkoutForm.email) &&
+                checkoutForm.address &&
+                checkoutForm.phone &&
+                (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted);
+              return (
+                <button
+                  onClick={handleInitiateCheckout}
+                  aria-disabled={!checkoutReady}
+                  className={`w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 active:scale-95 transition-transform flex justify-center items-center gap-2 ${checkoutReady ? '' : 'opacity-50 shadow-none cursor-not-allowed'}`}
+                >
+                  Continuar al Pago <Wallet size={20}/>
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}
