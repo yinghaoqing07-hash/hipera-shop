@@ -115,7 +115,11 @@ const renderItemsText = (items = []) => items
 
 const renderOrderHtml = (order, frontendUrl) => {
   const id = shortId(order.id);
-  const trackingUrl = `${frontendUrl}/?orderId=${encodeURIComponent(order.id)}`;
+  // IMPORTANTE: el parámetro DEBE ser ?order= (no ?orderId=). El frontend
+  // (src/App.jsx) sólo escucha urlParams.get('order'), y el QR de la
+  // factura PDF también usa este nombre. Si se rompe la coherencia, el
+  // enlace del email cae a la home en lugar de abrir el seguimiento.
+  const trackingUrl = `${frontendUrl}/?order=${encodeURIComponent(order.id)}`;
   const statusBadge = order.status === 'Pendiente de Pago'
     ? '<span style="display:inline-block;background:#ffedd5;color:#9a3412;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;">Pendiente de pago</span>'
     : '<span style="display:inline-block;background:#dcfce7;color:#166534;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;">En preparación</span>';
@@ -206,7 +210,8 @@ const renderOrderHtml = (order, frontendUrl) => {
 
 const renderOrderText = (order, frontendUrl) => {
   const id = shortId(order.id);
-  const trackingUrl = `${frontendUrl}/?orderId=${encodeURIComponent(order.id)}`;
+  // Misma coherencia que renderOrderHtml: ?order= (no ?orderId=).
+  const trackingUrl = `${frontendUrl}/?order=${encodeURIComponent(order.id)}`;
   const lines = [
     '¡Pedido confirmado!',
     '',
