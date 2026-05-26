@@ -74,13 +74,21 @@ supabase_migration_sort_order.sql
 supabase_migration_user_terms_acceptances.sql
 supabase_migration_user_consents.sql
 supabase_migration_user_consents_view_security.sql
-supabase_migration_orders_customer_email.sql   ← 新增（订单邮件确认）
+supabase_migration_orders_customer_email.sql       ← 订单邮件确认
+supabase_migration_orders_delivery_method.sql      ← 新增（到店自取）
 ```
 
 `orders_customer_email` 添加 `customer_email` 列（nullable）用于：
 - 后端把客户邮箱保存到订单
 - 之后从 admin 重新触发邮件
 - 售后支持时按邮箱查订单
+
+`orders_delivery_method` 添加 `delivery_method` 列：
+- 取值：`home_delivery`（默认，宅配）/ `store_pickup`（到店自取）
+- CHECK 约束保证不会写入未知值
+- 历史订单自动获得 `home_delivery`，不影响读取
+- 后端 `POST /api/orders` 已接受该字段；前端 checkout 已有 UI 选择器
+- 邮件模板会按值切换"送货地址"vs"到店自取地址"
 
 ### 1.4 Resend 域名验证（生产环境必做）
 

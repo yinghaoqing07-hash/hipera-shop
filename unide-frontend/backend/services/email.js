@@ -124,6 +124,29 @@ const renderOrderHtml = (order, frontendUrl) => {
     ? '<span style="display:inline-block;background:#ffedd5;color:#9a3412;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;">Pendiente de pago</span>'
     : '<span style="display:inline-block;background:#dcfce7;color:#166534;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;">En preparación</span>';
 
+  // Bloque "Datos de entrega" adaptado a la modalidad: envío a
+  // domicilio muestra la dirección del cliente, recogida en tienda
+  // muestra dirección de HIPERA y aclara que avisaremos cuando esté
+  // listo. La compatibilidad hacia atrás está garantizada: si
+  // delivery_method es null/undefined (datos previos a la migración)
+  // se interpreta como envío a domicilio.
+  const isStorePickup = order.delivery_method === 'store_pickup';
+  const deliveryHeading = isStorePickup ? 'Recogida en tienda' : 'Datos de envío';
+  const deliveryBlock = isStorePickup
+    ? `<div style="font-size:14px;color:#0f172a;line-height:1.6;margin-bottom:8px;">
+        <strong>HIPERA</strong><br/>
+        Paseo del Sol 1, 28880 Meco (Madrid)<br/>
+        <span style="color:#64748b;">Tel.</span> +34 918 782 602<br/>
+        <span style="color:#64748b;">Horario:</span> Lunes a Domingo, 09:00 – 22:00
+       </div>
+       <div style="font-size:13px;color:#475569;background:#ecfeff;border:1px solid #cffafe;padding:10px 12px;border-radius:8px;margin-bottom:16px;">
+         Te avisaremos por email o teléfono en cuanto tu pedido esté listo para recoger. Trae este correo (o el número de pedido <strong>#${id}</strong>) para identificarte.
+       </div>`
+    : `<div style="font-size:14px;color:#0f172a;line-height:1.6;margin-bottom:16px;">
+        ${escapeHtml(order.address || '—')}<br/>
+        <span style="color:#64748b;">Tel.</span> ${escapeHtml(order.phone || '—')}
+       </div>`;
+
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -165,11 +188,8 @@ const renderOrderHtml = (order, frontendUrl) => {
             </tr>
           </table>
 
-          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em;margin:16px 0 8px 0;">Datos de envío</div>
-          <div style="font-size:14px;color:#0f172a;line-height:1.6;margin-bottom:16px;">
-            ${escapeHtml(order.address || '—')}<br/>
-            <span style="color:#64748b;">Tel.</span> ${escapeHtml(order.phone || '—')}
-          </div>
+          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em;margin:16px 0 8px 0;">${deliveryHeading}</div>
+          ${deliveryBlock}
 
           ${order.payment_method ? `
           <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em;margin:16px 0 8px 0;">Forma de pago</div>
@@ -225,11 +245,29 @@ const renderOrderText = (order, frontendUrl) => {
     '',
     `TOTAL: ${formatEUR(order.total)}`,
     '',
-    'DATOS DE ENVÍO',
-    '--------------',
-    `Dirección: ${order.address || '—'}`,
-    `Teléfono: ${order.phone || '—'}`,
   ];
+  // Bloque de entrega adaptado al método. Misma lógica que la versión
+  // HTML: store_pickup → instrucciones de recogida en HIPERA; en otro
+  // caso (incluido datos antiguos sin delivery_method) → datos de envío.
+  if (order.delivery_method === 'store_pickup') {
+    lines.push(
+      'RECOGIDA EN TIENDA',
+      '------------------',
+      'HIPERA · Paseo del Sol 1, 28880 Meco (Madrid)',
+      'Tel.: +34 918 782 602',
+      'Horario: Lunes a Domingo, 09:00 – 22:00',
+      '',
+      `Te avisaremos cuando esté listo para recoger. Trae el número de pedido #${id}.`,
+      `Teléfono de contacto: ${order.phone || '—'}`,
+    );
+  } else {
+    lines.push(
+      'DATOS DE ENVÍO',
+      '--------------',
+      `Dirección: ${order.address || '—'}`,
+      `Teléfono: ${order.phone || '—'}`,
+    );
+  }
   if (order.payment_method) lines.push(`Forma de pago: ${order.payment_method}`);
   if (order.note) lines.push('', `Nota: ${order.note}`);
   lines.push('', `Ver estado: ${trackingUrl}`, '');

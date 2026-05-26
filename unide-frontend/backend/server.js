@@ -439,14 +439,59 @@ app.get('/api/repair-services', async (req, res) => {
 });
 
 // Create order (public - but should validate)
+// =====================================================================
+// Modalidades de entrega aceptadas — alineado con la columna
+// orders.delivery_method (CHECK constraint en supabase_migration_orders_
+// delivery_method.sql). Cualquier valor fuera de esta lista se normaliza
+// a 'home_delivery' para evitar 400s por front antiguo o por inputs
+// inesperados; esto preserva la compatibilidad hacia atrás con los
+// payloads que el frontend enviaba antes de existir el selector.
+// =====================================================================
+const VALID_DELIVERY_METHODS = ['home_delivery', 'store_pickup'];
+
 app.post('/api/orders', async (req, res) => {
   try {
-    const { user_id, address, phone, note, total, status, payment_method, items, customer_email } = req.body;
+    const {
+      user_id,
+      address,
+      phone,
+      note,
+      total,
+      status,
+      payment_method,
+      items,
+      customer_email,
+      delivery_method,
+    } = req.body;
 
-    // Validate required fields
-    if (!address || !phone || !total || !items) {
+    // Resolución del método de entrega. El default 'home_delivery'
+    // garantiza el comportamiento histórico para clientes antiguos que
+    // no envíen el campo (la columna de DB también tiene el mismo
+    // default por la migración).
+    const resolvedDeliveryMethod = VALID_DELIVERY_METHODS.includes(delivery_method)
+      ? delivery_method
+      : 'home_delivery';
+    const isStorePickup = resolvedDeliveryMethod === 'store_pickup';
+
+    // Validate required fields. La dirección sólo es obligatoria para
+    // envío a domicilio; en recogida en tienda no tiene sentido pedir
+    // direccion postal del cliente (la entrega ocurre en el local).
+    if (!phone || !total || !items) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    if (!isStorePickup && !address) {
+      return res.status(400).json({ error: 'La dirección de entrega es obligatoria para envío a domicilio.' });
+    }
+
+    // Para recogida en tienda, normalizamos address a una etiqueta
+    // estable que aclara dónde se recoge el pedido. Así los registros
+    // antiguos del back-office (tickets PDF, listados) muestran texto
+    // legible en lugar de cadena vacía o null. Mantenemos la información
+    // dentro de la columna address para no duplicar la lógica de
+    // renderizado en cada consumidor del registro.
+    const finalAddress = isStorePickup
+      ? 'Recogida en tienda — Paseo del Sol 1, 28880 Meco (Madrid)'
+      : address;
 
     // Normalización defensiva del email (tolerante a typos comunes de
     // mayúsculas/espacios sin romper el pedido si la cadena viene mal).
@@ -493,7 +538,7 @@ app.post('/api/orders', async (req, res) => {
       .from('orders')
       .insert([{
         user_id: user_id || null,
-        address,
+        address: finalAddress,
         phone,
         note,
         total,
@@ -501,6 +546,7 @@ app.post('/api/orders', async (req, res) => {
         payment_method: payment_method || 'Pendiente',
         items,
         customer_email: hasValidEmail ? normalizedEmail : null,
+        delivery_method: resolvedDeliveryMethod,
         created_at: new Date().toISOString()
       }])
       .select()
@@ -562,6 +608,7 @@ const PUBLIC_ORDER_FIELDS = [
   'total',
   'items',
   'payment_method',
+  'delivery_method',
   'note',
   'created_at',
 ].join(',');

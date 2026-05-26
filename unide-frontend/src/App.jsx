@@ -21,7 +21,7 @@ import {
 import React, { useCallback, useEffect, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
-  Tag, Trash2, ChevronRight, ChevronDown, Home, Gift, Truck, Heart,
+  Tag, Trash2, ChevronRight, ChevronDown, Home, Gift, Truck, Store, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
   Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone,
@@ -384,7 +384,7 @@ const IconByName = ({ name, size=24, className }) => {
 };
 
 // --- 新增：支付方式选择弹窗组件 ---
-const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment, setSelectedPayment }) => {
+const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment, setSelectedPayment, isStorePickup = false }) => {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
@@ -420,8 +420,8 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
                     <Wallet size={20}/>
                   </div>
                   <div className="flex-1">
-                    <p className="font-bold text-gray-900">Pago Contra Reembolso</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Paga cuando recibas tu pedido</p>
+                    <p className="font-bold text-gray-900">{isStorePickup ? 'Pagar en tienda al recoger' : 'Pago Contra Reembolso'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{isStorePickup ? 'En efectivo o tarjeta en HIPERA' : 'Paga cuando recibas tu pedido'}</p>
                   </div>
                   {selectedPayment === 'contra_reembolso' && (
                     <CheckCircle2 size={20} className="text-blue-600"/>
@@ -463,8 +463,12 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
 
            {selectedPayment === 'contra_reembolso' && (
              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
-               <p className="font-bold mb-1">💵 Pago contra reembolso:</p>
-               <p>Pagarás el importe total cuando recibas tu pedido en casa.</p>
+               <p className="font-bold mb-1">{isStorePickup ? '🏪 Pago en tienda:' : '💵 Pago contra reembolso:'}</p>
+               <p>
+                 {isStorePickup
+                   ? 'Pagarás el importe total cuando recojas el pedido en HIPERA (Paseo del Sol 1, Meco). Aceptamos efectivo y tarjeta.'
+                   : 'Pagarás el importe total cuando recibas tu pedido en casa.'}
+               </p>
              </div>
            )}
         </div>
@@ -865,7 +869,19 @@ export default function App() {
 
   // --- Orders & Payment ---
   const [myOrders, setMyOrders] = useState([]);
-  const [checkoutForm, setCheckoutForm] = useState({ address: "", phone: "", note: "", email: "" });
+  const [checkoutForm, setCheckoutForm] = useState({
+    address: "",
+    phone: "",
+    note: "",
+    email: "",
+    // Modalidad de entrega — alineado con la columna orders.delivery_method
+    // del backend. Cumple la promesa expresa de Política de Envíos §2.1
+    // (recogida en tienda gratuita) que antes solo existía en el documento
+    // legal pero no en la UI. Valores admitidos: 'home_delivery' |
+    // 'store_pickup'. El default es envío a domicilio para preservar el
+    // comportamiento que conocían los clientes habituales.
+    deliveryMethod: "home_delivery",
+  });
   
   // New Payment States
   const [showPayment, setShowPayment] = useState(false); // 控制弹窗
@@ -1108,7 +1124,16 @@ export default function App() {
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FEE_STANDARD;
+  // En recogida en tienda (Click & Collect) NUNCA se cobra envío, con
+  // independencia del subtotal: no hay transporte físico que repercutir.
+  // El cálculo se evalúa cada render porque depende de checkoutForm,
+  // que el usuario puede cambiar libremente desde el selector del
+  // checkout. Para envío a domicilio se mantiene la regla histórica
+  // tarifa única / umbral gratuito definida en Política de Envíos §4.
+  const isStorePickup = checkoutForm.deliveryMethod === "store_pickup";
+  const shippingFee = isStorePickup
+    ? 0
+    : (subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FEE_STANDARD);
   const total = subtotal + shippingFee;
   const minOrderMet = subtotal >= 20;
   const isFreeShipping = subtotal >= FREE_SHIPPING_THRESHOLD;
@@ -1126,8 +1151,18 @@ export default function App() {
   const isEmailFormatOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
 
   const handleInitiateCheckout = async () => {
-    if (!checkoutForm.address || !checkoutForm.phone) {
-      toast.error("Faltan datos de envío");
+    // Validación específica por modalidad: la dirección sólo es
+    // obligatoria para envío a domicilio. En recogida en tienda el
+    // pedido se entrega físicamente en HIPERA (Paseo del Sol 1) y la
+    // dirección postal del cliente no aporta valor; pedirla obligaría
+    // a inventarse una y deteriora la UX prometida en Política de
+    // Envíos §2.1.
+    if (!checkoutForm.phone) {
+      toast.error("Indica un teléfono de contacto para avisarte sobre el pedido.");
+      return;
+    }
+    if (checkoutForm.deliveryMethod === "home_delivery" && !checkoutForm.address) {
+      toast.error("Faltan datos de envío — indica la dirección o cambia a recogida en tienda.");
       return;
     }
     if (!isEmailFormatOk(checkoutForm.email)) {
@@ -1170,6 +1205,10 @@ export default function App() {
     setIsProcessingPayment(true);
 
     try {
+      // No guardamos la modalidad de entrega en lastAddress: queremos
+      // que cada nuevo pedido vuelva a decidir si es envío o recogida
+      // (no es razonable «recordar» que la última vez fue store_pickup
+      // y obligar al cliente a desmarcarlo cada vez).
       localStorage.setItem('lastAddress', JSON.stringify({
         address: checkoutForm.address,
         phone: checkoutForm.phone,
@@ -1190,19 +1229,33 @@ export default function App() {
         });
       }
 
+      // Para recogida en tienda dejamos address en blanco en el payload:
+      // el backend (server.js, POST /api/orders) lo normaliza a una
+      // etiqueta estable («Recogida en tienda — Paseo del Sol 1, 28880
+      // Meco …») para que cualquier consumidor del registro de la BBDD
+      // muestre texto legible sin necesidad de leer delivery_method.
       const orderData = await apiClient.createOrder({
         user_id: user?.id || null,
         customer_email: checkoutForm.email,
-        address: checkoutForm.address,
+        address: isStorePickup ? '' : checkoutForm.address,
         phone: checkoutForm.phone,
         note: checkoutForm.note,
         total: total, // 总价不变（免费商品不计入总价）
         status: selectedPayment === 'contra_reembolso' ? "Pendiente de Pago" : "Procesando",
         payment_method: paymentMethodName,
+        delivery_method: checkoutForm.deliveryMethod,
         items: finalCart
       });
 
-      toast.success(selectedPayment === 'contra_reembolso' ? "¡Pedido Confirmado! Paga al recibir." : "¡Pedido Confirmado! Revisa tu Bizum.");
+      // Mensaje matizado por método de pago + modalidad de entrega.
+      // En contra_reembolso + store_pickup se paga en mostrador, no al
+      // repartidor; el copy "Paga al recibir" sería desconcertante.
+      const successMsg = selectedPayment === 'contra_reembolso'
+        ? (isStorePickup
+            ? "¡Pedido Confirmado! Pagarás al recoger en la tienda."
+            : "¡Pedido Confirmado! Paga al recibir.")
+        : "¡Pedido Confirmado! Revisa tu Bizum.";
+      toast.success(successMsg);
       
       // 重置免费商品选择
       setSelectedGift(null);
@@ -1344,12 +1397,13 @@ export default function App() {
 
       {/* Payment Modal */}
       {showPayment && (
-        <PaymentModal 
-           total={total} 
+        <PaymentModal
+           total={total}
+           isStorePickup={isStorePickup}
            onClose={() => {
              setShowPayment(false);
              setSelectedPayment("");
-           }} 
+           }}
            onConfirm={handleConfirmPayment}
            isProcessing={isProcessingPayment}
            selectedPayment={selectedPayment}
@@ -1724,11 +1778,27 @@ export default function App() {
               </div>
 
               <div className="border-t pt-4 space-y-3">
-                <div>
-                  <p className="text-xs font-bold text-gray-500 uppercase mb-1">Cliente</p>
-                  <p className="text-sm text-gray-800">{queryOrder.address || 'Cliente General'}</p>
-                  <p className="text-sm text-gray-600">{queryOrder.phone || ''}</p>
-                </div>
+                {/* Bloque de entrega adaptado al método.
+                    GET /api/orders/:orderId (público) sólo devuelve
+                    delivery_method, address es opcional en respuesta;
+                    si delivery_method viniera como null por datos
+                    legacy lo tratamos como envío a domicilio. */}
+                {queryOrder.delivery_method === 'store_pickup' ? (
+                  <div>
+                    <p className="text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1.5">
+                      <Store size={12}/> Recogida en tienda
+                    </p>
+                    <p className="text-sm text-gray-800">HIPERA · Paseo del Sol 1, 28880 Meco (Madrid)</p>
+                    <p className="text-xs text-gray-500 mt-1">Te avisaremos cuando esté listo para recoger.</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1.5">
+                      <Truck size={12}/> Envío a domicilio
+                    </p>
+                    <p className="text-sm text-gray-800">{queryOrder.address || 'Cliente General'}</p>
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-bold text-gray-500 uppercase mb-2">Productos</p>
@@ -1833,7 +1903,17 @@ export default function App() {
                 {myOrders.length === 0 ? <p className="text-center text-gray-400 py-10">No tienes pedidos aún.</p> : myOrders.map(order => (
                   <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                     <div className="flex justify-between items-start mb-3"><div><span className="font-bold text-gray-800 block text-xs font-mono bg-gray-100 px-2 py-1 rounded w-fit mb-1">#{order.id.slice(0,8)}</span><span className="text-xs text-gray-400">{new Date(order.created_at).toLocaleDateString()}</span></div><span className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg font-bold ${order.status==='Entregado'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}`}>{order.status}</span></div>
-                    <div className="flex justify-between items-end border-t pt-3 border-gray-50"><span className="text-sm text-gray-500">{order.items?.length || 0} productos</span><span className="font-extrabold text-lg text-gray-900">€{order.total?.toFixed(2)}</span></div>
+                    <div className="flex justify-between items-end border-t pt-3 border-gray-50">
+                      <div className="flex items-center gap-2 text-sm text-gray-500">
+                        {order.delivery_method === 'store_pickup' ? (
+                          <span className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px] font-semibold"><Store size={12}/> Recogida</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-gray-600 bg-gray-100 px-2 py-0.5 rounded text-[11px] font-semibold"><Truck size={12}/> Envío</span>
+                        )}
+                        <span>· {order.items?.length || 0} productos</span>
+                      </div>
+                      <span className="font-extrabold text-lg text-gray-900">€{order.total?.toFixed(2)}</span>
+                    </div>
                     <button 
                       onClick={() => generateInvoice(order)} 
                       className="mt-4 w-full border border-gray-200 py-2 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
@@ -2055,12 +2135,93 @@ export default function App() {
                </div>
              )}
 
+             {/* =====================================================
+                 Selector de modalidad de entrega (Click & Collect)
+                 -----------------------------------------------------
+                 Cumple la promesa expresa de Política de Envíos §2.1
+                 (recogida gratuita en HIPERA). Hasta este commit la UI
+                 sólo permitía envío a domicilio y la documentación
+                 legal prometía una opción que no existía. Mantener la
+                 coherencia documento/UI es exigencia AEPD/LSSI y reduce
+                 riesgo contractual.
+
+                 Decisión UX: dos botones grandes apilados verticalmente
+                 con icono, título y descripción de coste/plazo. La
+                 modalidad activa se distingue por borde rojo y fondo
+                 leve; el estado es accesible mediante aria-pressed. */}
+             <div className="bg-white p-5 rounded-2xl shadow-sm space-y-3 border border-gray-100">
+                <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                  <Truck size={18} className="text-red-600"/> Modalidad de entrega
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    aria-pressed={checkoutForm.deliveryMethod === 'home_delivery'}
+                    onClick={() => setCheckoutForm({...checkoutForm, deliveryMethod: 'home_delivery'})}
+                    className={`text-left p-4 rounded-xl border-2 transition-all ${
+                      checkoutForm.deliveryMethod === 'home_delivery'
+                        ? 'border-red-500 bg-red-50/50 shadow-sm'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Truck size={18} className={checkoutForm.deliveryMethod === 'home_delivery' ? 'text-red-600' : 'text-gray-500'}/>
+                      <span className="font-bold text-gray-900 text-sm">Envío a domicilio</span>
+                    </div>
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      {subtotal >= FREE_SHIPPING_THRESHOLD
+                        ? <span className="text-green-700 font-semibold">GRATIS</span>
+                        : <>€{SHIPPING_FEE_STANDARD.toFixed(2)} · GRATIS desde €{FREE_SHIPPING_THRESHOLD}</>
+                      }
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-1">Meco y zona local. 24–72 h.</p>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={checkoutForm.deliveryMethod === 'store_pickup'}
+                    onClick={() => setCheckoutForm({...checkoutForm, deliveryMethod: 'store_pickup'})}
+                    className={`text-left p-4 rounded-xl border-2 transition-all ${
+                      checkoutForm.deliveryMethod === 'store_pickup'
+                        ? 'border-red-500 bg-red-50/50 shadow-sm'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Store size={18} className={checkoutForm.deliveryMethod === 'store_pickup' ? 'text-red-600' : 'text-gray-500'}/>
+                      <span className="font-bold text-gray-900 text-sm">Recoger en tienda</span>
+                    </div>
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      <span className="text-green-700 font-semibold">GRATIS</span> · Sin envío
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-1">Listo en 2–4 h en horario comercial.</p>
+                  </button>
+                </div>
+             </div>
+
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
-                <h3 className="font-bold flex items-center gap-2 text-gray-800"><MapPin size={18} className="text-red-600"/> Datos de entrega</h3>
+                <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                  <MapPin size={18} className="text-red-600"/>
+                  {isStorePickup ? 'Datos de contacto' : 'Datos de entrega'}
+                </h3>
                 <input id="email" name="email" type="email" autoComplete="email" inputMode="email" value={checkoutForm.email} onChange={e => setCheckoutForm({...checkoutForm, email: e.target.value})} placeholder="Email para la confirmación *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
-                <input id="address" name="address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                {/* En recogida en tienda no se pide dirección postal: el
+                    pedido se entrega físicamente en HIPERA. Mostramos en
+                    su lugar una tarjeta informativa con la ubicación
+                    exacta. */}
+                {isStorePickup ? (
+                  <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
+                    <Store size={18} className="text-blue-600 mt-0.5 flex-shrink-0"/>
+                    <div className="text-sm text-gray-700 leading-relaxed">
+                      <p className="font-semibold text-gray-900">Recogida en HIPERA</p>
+                      <p className="text-xs text-gray-600 mt-0.5">Paseo del Sol 1, 28880 Meco (Madrid)</p>
+                      <p className="text-xs text-gray-500 mt-1">Te avisaremos por email o teléfono cuando esté listo.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <input id="address" name="address" autoComplete="street-address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                )}
                 <input id="phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
-                <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder="Nota para repartidor (Opcional)" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
+                <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder={isStorePickup ? "Nota para la recogida (opcional)" : "Nota para repartidor (opcional)"} className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
              </div>
              {checkoutNeedsTermsCheckbox && (
                <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-white">
@@ -2094,9 +2255,12 @@ export default function App() {
                 el efecto visual de "no listo" mediante opacidad y cursor
                 para no perder la señal de incompleto. */}
             {(() => {
+              // En store_pickup no se exige address (el pedido se
+              // recoge en HIPERA y no hay transporte). Mantenemos el
+              // resto de campos como obligatorios.
               const checkoutReady =
                 isEmailFormatOk(checkoutForm.email) &&
-                checkoutForm.address &&
+                (isStorePickup || checkoutForm.address) &&
                 checkoutForm.phone &&
                 (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted);
               return (
