@@ -161,6 +161,16 @@ class ApiClient {
     return this.request('/admin/orders');
   }
 
+  // Polling ligero: devuelve sólo pedidos con created_at > since.
+  // Respuesta: { orders, count, server_time }. El admin debe usar
+  // server_time como `since` de la siguiente llamada para evitar
+  // problemas de drift de reloj entre cliente y servidor.
+  async getNewAdminOrders(since) {
+    const params = new URLSearchParams();
+    if (since) params.set('since', since);
+    return this.request(`/admin/orders/new?${params.toString()}`);
+  }
+
   async updateOrderStatus(orderId, status) {
     return this.request(`/admin/orders/${orderId}`, {
       method: 'PATCH',

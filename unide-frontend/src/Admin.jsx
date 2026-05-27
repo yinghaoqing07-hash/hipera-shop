@@ -8,9 +8,11 @@ import {
   LayoutDashboard, Package, List, ShoppingBag, 
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
-  CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical
+  CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
+  Bell, BellOff
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
+import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
 
@@ -133,6 +135,47 @@ export default function AdminApp() {
   });
 
   useEffect(() => { fetchData(); }, []);
+
+  // =================================================================
+  // Alerta de pedidos nuevos (sonido + badge + notificación)
+  // =================================================================
+  // El hook gestiona polling cada 20 s contra /api/admin/orders/new,
+  // sonido vía Web Audio API y notificación del SO opcional. La
+  // primera carga inicializa `lastSeen` al "ahora" del cliente, así
+  // que el histórico no se reporta como nuevo (sólo lo que entre a
+  // partir de este momento).
+  const {
+    newOrders,
+    newCount,
+    isMuted,
+    toggleMute,
+    playSound,
+    markAllSeen,
+    notifPermission,
+    requestNotifPermission,
+    lastNewOrderAt,
+  } = useNewOrdersAlert({ pollIntervalMs: 20000, enabled: true });
+
+  // Cuando entra un pedido nuevo refrescamos sólo la lista de orders
+  // (no recargamos todo el panel) para que la pestaña "Pedidos"
+  // muestre el nuevo registro completo aunque el dueño ya estuviera
+  // viéndola. Es una fetch ligera y el backend ya está despierto por
+  // el polling.
+  useEffect(() => {
+    if (newCount === 0) return;
+    apiClient.getAdminOrders()
+      .then((data) => { if (Array.isArray(data)) setOrders(data); })
+      .catch(() => { /* el banner ya está visible, no hace falta toast */ });
+  }, [newCount]);
+
+  // Cambia el título de la pestaña para que el aviso sea visible
+  // incluso cuando el admin está en otra pestaña/aplicación. Se
+  // resetea al marcar como visto.
+  useEffect(() => {
+    const base = 'Admin · HIPERA';
+    document.title = newCount > 0 ? `(${newCount}) ${base}` : base;
+    return () => { document.title = base; };
+  }, [newCount]);
 
   // Mantener backend despierto (Railway duerme sin tráfico): ping cada 2 min si la pestaña está visible
   useEffect(() => {
@@ -2184,7 +2227,43 @@ const renderRepairs = () => (
             <button onClick={() => { setActiveTab("repairs"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='repairs'?'bg-red-600':'hover:bg-gray-800'}`}><Wrench size={20}/><span>Reparaciones</span></button>
             <button onClick={() => { setActiveTab("orders"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
         </nav>
-        <div className="px-4 pt-4 border-t border-gray-800"><button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span>Salir</span></button></div>
+        <div className="px-4 pt-4 border-t border-gray-800 space-y-2">
+          {/* Controles de alerta sonora de pedidos nuevos.
+              Persistente en localStorage: si el dueño silencia un
+              día, sigue silenciado al volver. */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleMute}
+              title={isMuted ? 'Activar sonido' : 'Silenciar sonido'}
+              className={`p-2 rounded-lg transition-colors ${isMuted ? 'bg-gray-800 text-gray-500 hover:text-gray-300' : 'bg-gray-800 text-yellow-400 hover:bg-gray-700'}`}
+              aria-label={isMuted ? 'Activar sonido' : 'Silenciar sonido'}
+            >
+              {isMuted ? <BellOff size={18}/> : <Bell size={18}/>}
+            </button>
+            <button
+              type="button"
+              onClick={playSound}
+              className="flex-1 px-2 py-2 text-xs text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              title="Reproduce el sonido de prueba (sirve también para desbloquear el audio del navegador la primera vez)."
+            >
+              Probar sonido
+            </button>
+          </div>
+          {/* Permiso de notificaciones del sistema operativo: sólo
+              mostramos el botón si está en 'default' (aún no se ha
+              decidido). Si ya fue 'denied' o 'granted' no insistimos. */}
+          {notifPermission === 'default' && (
+            <button
+              type="button"
+              onClick={requestNotifPermission}
+              className="w-full p-2 text-xs bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-medium"
+            >
+              Activar avisos del navegador
+            </button>
+          )}
+          <button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span>Salir</span></button>
+        </div>
       </aside>
       <main className={`flex-1 min-w-0 overflow-x-hidden overflow-y-auto h-screen pt-14 pl-4 pr-4 pb-4 md:pt-8 md:pl-8 md:pr-8 md:pb-8 ${activeTab === 'products' && (selectedProductIds.size > 0 || bulkProcessing.active) ? 'pb-24' : ''}`}>
         {/* Mobile menu button - reserve space so content is not hidden */}
@@ -2196,6 +2275,53 @@ const renderRepairs = () => (
         >
           <Menu size={22} />
         </button>
+
+        {/* Banner persistente de pedidos nuevos. Se muestra encima
+            del contenido independientemente de la pestaña activa,
+            así el dueño siempre lo ve aunque esté en Productos /
+            Categorías / etc. */}
+        {newCount > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-4 p-3 md:p-4 bg-red-600 text-white rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3 flex-shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-300 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-400"></span>
+              </span>
+              <div>
+                <p className="font-bold text-sm md:text-base">
+                  {newCount === 1 ? '1 pedido nuevo sin atender' : `${newCount} pedidos nuevos sin atender`}
+                </p>
+                {lastNewOrderAt && (
+                  <p className="text-xs text-red-100">
+                    Último a las {lastNewOrderAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setActiveTab('orders'); setSidebarOpen(false); markAllSeen(); }}
+                className="px-4 py-2 bg-white text-red-600 rounded-lg text-sm font-bold hover:bg-red-50 active:scale-95 transition-all"
+              >
+                Ver pedidos
+              </button>
+              <button
+                type="button"
+                onClick={markAllSeen}
+                className="px-3 py-2 border border-white/40 text-white rounded-lg text-sm font-medium hover:bg-red-700 active:scale-95 transition-all"
+                title="Marcar como vistos sin abrir la pestaña de pedidos"
+              >
+                Marcar visto
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex min-h-[60vh] items-center justify-center"><RefreshCw className="animate-spin text-gray-400" size={32}/></div>
         ) : (

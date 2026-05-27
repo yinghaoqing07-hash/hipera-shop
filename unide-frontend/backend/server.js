@@ -675,6 +675,58 @@ app.get('/api/admin/orders', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Polling ligero de pedidos posteriores a un timestamp.
+// Diseñado para que el panel admin pueda preguntar "¿hay algo nuevo desde
+// la última vez que miré?" cada 20-30s sin descargar todo el histórico.
+//
+// Query params:
+//   ?since=ISO_TIMESTAMP   (obligatorio) sólo devuelve pedidos con
+//                          created_at > since.
+//   ?limit=N               (opcional, default 50) corta el resultado para
+//                          casos patológicos en los que el admin no entra
+//                          al panel durante días.
+//
+// Respuesta:
+//   { orders: [...], count: <int>, server_time: <ISO> }
+//
+// El campo server_time es importante: el admin lo usa como `since` de la
+// siguiente llamada, evitando el riesgo de pedir "todo lo posterior a mi
+// reloj local" cuando el reloj del cliente y del servidor están
+// desincronizados (zonas horarias, drift). Siempre nos basamos en el
+// reloj autoritativo del backend.
+app.get('/api/admin/orders/new', authenticateAdmin, async (req, res) => {
+  try {
+    const since = typeof req.query.since === 'string' ? req.query.since : null;
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 && limitRaw <= 200 ? limitRaw : 50;
+
+    // Validación defensiva del parámetro `since`: si es inválido o falta,
+    // devolvemos lista vacía + server_time. El frontend lo usará como
+    // baseline para la siguiente petición sin reportar falsos positivos.
+    const sinceMs = since ? Date.parse(since) : NaN;
+    const serverTime = new Date().toISOString();
+    if (!Number.isFinite(sinceMs)) {
+      return res.json({ orders: [], count: 0, server_time: serverTime });
+    }
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .gt('created_at', new Date(sinceMs).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    res.json({
+      orders: data || [],
+      count: (data || []).length,
+      server_time: serverTime,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Update order status (admin only)
 app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
   try {
