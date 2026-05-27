@@ -1,6 +1,12 @@
-import QRCode from 'qrcode'; // <--- 新增这个
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// jsPDF + jspdf-autotable + qrcode ahora se cargan a demanda desde
+// src/utils/orderDocuments.js (dynamic import) cuando el cliente pulsa
+// "Descargar factura/ticket". Mantener estos imports estáticos antes
+// metía ~700 KB de PDF tooling en el bundle inicial de la home, pese
+// a que la mayoría de visitantes no descarga ningún PDF.
+//
+// Si necesitas generar PDFs en un nuevo lugar:
+//   const { generateDocuments } = await import('./utils/orderDocuments');
+//   await generateDocuments(order, 'both');
 import { Download } from "lucide-react"; // 记得确保引入了 Download 图标
 import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
@@ -94,8 +100,40 @@ const ProductSkeleton = () => (
 // reflejar el paso del tiempo sin necesidad de recargar la página.
 // =====================================================================
 
-const STORE_OPEN_HOUR = 9;
-const STORE_CLOSE_HOUR = 22;
+// =====================================================================
+// Horario operativo de la tienda física (zona horaria Europe/Madrid)
+// =====================================================================
+// Los valores DEBEN coincidir con:
+//   - COMPANY.hours (config/company.js)
+//   - openingHoursSpecification del JSON-LD (index.html)
+//   - Política de Envíos §3 (plazo de preparación)
+//
+// Importante: usamos minutos enteros para que la frontera sea precisa
+// (22:00 cierra justo a las 22:00, no se considera cerrado a las
+// 21:59). El navegador del cliente puede estar en cualquier huso
+// horario; convertimos a Europe/Madrid antes de comparar para que un
+// cliente conectado desde, p. ej., Estados Unidos vea coherente la
+// disponibilidad real del comercio.
+// =====================================================================
+const STORE_OPEN_HOUR = 9;    // 09:00
+const STORE_CLOSE_HOUR = 22;  // 22:00 (último minuto operativo: 21:59)
+
+// Devuelve { hour, minute } del momento `date` en zona Europe/Madrid,
+// independientemente de la zona horaria del navegador. Usamos
+// Intl.DateTimeFormat con 'es-ES' y `timeZone: 'Europe/Madrid'`. Es
+// barato (no requiere parser custom) y maneja DST automáticamente.
+function getMadridHM(date) {
+  const fmt = new Intl.DateTimeFormat('es-ES', {
+    timeZone: 'Europe/Madrid',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(date);
+  const hh = parts.find(p => p.type === 'hour')?.value || '00';
+  const mm = parts.find(p => p.type === 'minute')?.value || '00';
+  return { hour: parseInt(hh, 10), minute: parseInt(mm, 10) };
+}
 
 // =====================================================================
 // Tarifas operativas de envío — single source of truth
@@ -117,21 +155,57 @@ const STORE_CLOSE_HOUR = 22;
 const SHIPPING_FEE_STANDARD = 4.99;
 const FREE_SHIPPING_THRESHOLD = 40;
 
+// Devuelve el estado operativo de la tienda en este momento. La forma
+// del objeto se mantuvo retro-compatible con el StoreInfoBar previo
+// (isOpen + label), añadiendo campos adicionales que aprovechan los
+// avisos de checkout/cart/email:
+//
+//   isOpen        — booleano principal
+//   label         — texto humano: "Abierto · Cierra en 3h 12m" / etc.
+//   minutesToOpen — cuánto falta para abrir (0 si ya está abierto)
+//   nextOpenLabel — "hoy a las 09:00" / "mañana a las 09:00"
+//
+// Convertimos a Europe/Madrid antes de comparar para que un cliente
+// conectado desde otro huso horario vea coherente la disponibilidad
+// real del comercio.
 function getStoreStatus(now = new Date()) {
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const isOpen = hour >= STORE_OPEN_HOUR && hour < STORE_CLOSE_HOUR;
+  const { hour, minute } = getMadridHM(now);
+  const minuteOfDay = hour * 60 + minute;
+  const openMinute = STORE_OPEN_HOUR * 60;
+  const closeMinute = STORE_CLOSE_HOUR * 60;
+  const isOpen = minuteOfDay >= openMinute && minuteOfDay < closeMinute;
 
   if (isOpen) {
-    const minutesToClose = (STORE_CLOSE_HOUR - hour) * 60 - minute;
+    const minutesToClose = closeMinute - minuteOfDay;
     const h = Math.floor(minutesToClose / 60);
     const m = minutesToClose % 60;
     const remaining = h > 0 ? `${h}h ${m}m` : `${m}m`;
-    return { isOpen: true, label: `Abierto · Cierra en ${remaining}` };
+    return {
+      isOpen: true,
+      label: `Abierto · Cierra en ${remaining}`,
+      minutesToOpen: 0,
+      nextOpenLabel: `hoy a las ${String(STORE_OPEN_HOUR).padStart(2, '0')}:00`,
+    };
   }
 
-  const openLabel = hour < STORE_OPEN_HOUR ? 'hoy' : 'mañana';
-  return { isOpen: false, label: `Cerrado · Abre ${openLabel} a las ${STORE_OPEN_HOUR}:00` };
+  // Cerrado: calculamos cuánto falta para que abra. Dos casos:
+  //   • Antes de las 09:00 → abre hoy a las 09:00
+  //   • Entre 22:00 y 23:59 → abre mañana a las 09:00
+  const beforeOpening = minuteOfDay < openMinute;
+  const minutesToOpen = beforeOpening
+    ? openMinute - minuteOfDay
+    : 24 * 60 - minuteOfDay + openMinute;
+  const openWhen = beforeOpening ? 'hoy' : 'mañana';
+  const h = Math.floor(minutesToOpen / 60);
+  const m = minutesToOpen % 60;
+  const remaining = h > 0 ? `${h}h ${m}m` : `${m}m`;
+
+  return {
+    isOpen: false,
+    label: `Cerrado · Abre ${openWhen} a las ${String(STORE_OPEN_HOUR).padStart(2, '0')}:00 (en ${remaining})`,
+    minutesToOpen,
+    nextOpenLabel: `${openWhen} a las ${String(STORE_OPEN_HOUR).padStart(2, '0')}:00`,
+  };
 }
 
 function StoreInfoBar() {
@@ -152,6 +226,54 @@ function StoreInfoBar() {
         <span aria-live="polite" className="font-medium text-gray-800">
           {status.label}
         </span>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// AfterHoursNotice — aviso para clientes que compran fuera de horario
+// =====================================================================
+// El StoreInfoBar muestra el estado de forma discreta en home, pero
+// alguien que llega directo al carrito o al checkout fuera de horario
+// puede no haberlo visto. Este componente es un banner más visible
+// que aparece SOLO cuando la tienda está cerrada, en las páginas
+// donde la expectativa de tiempo es crítica (cart / checkout).
+//
+// Decisión de diseño: NO bloqueamos la compra. Eso destruiría
+// conversión y va contra LSSI Art. 27 (el comercio puede aceptar
+// pedidos 24/7 mientras los confirme cuando proceda). Nos limitamos
+// a informar de cuándo se procesará realmente el pedido, para que
+// el cliente no se quede esperando a media noche pensando que llega
+// en una hora.
+// =====================================================================
+function AfterHoursNotice({ context = 'cart' }) {
+  const [status, setStatus] = useState(() => getStoreStatus());
+
+  useEffect(() => {
+    const id = setInterval(() => setStatus(getStoreStatus()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (status.isOpen) return null;
+
+  const ctxLabel = context === 'checkout'
+    ? 'Tu pedido se procesará'
+    : 'Los pedidos hechos fuera de horario se procesan';
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5 text-amber-900"
+    >
+      <Clock size={18} className="text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
+      <div className="text-sm leading-relaxed">
+        <p className="font-semibold mb-0.5">Estamos cerrados ahora mismo</p>
+        <p className="text-amber-800">
+          {ctxLabel} <strong>{status.nextOpenLabel}</strong> cuando abramos. Horario habitual: <strong>09:00 – 22:00</strong>.
+          {context === 'checkout' && ' Puedes completar el pedido con normalidad.'}
+        </p>
       </div>
     </div>
   );
@@ -600,271 +722,9 @@ const LegalPage = ({ type, onBack }) => {
   );
 };
 
-// --- 工具：高级票据生成系统 (Factura A4 + Ticket 80mm) ---
-const generateDocuments = async (order, type = 'both') => {
-  const isService = order.items.some(i => i.isService);
-  const companyData = {
-    name: "QIANG GUO SL",
-    address: "Paseo del Sol 1, 28880 Meco",
-    nif: "B86126638",
-    phone: "+34 918 782 602",
-    web: "hipera.es"
-  };
-  const generateInvoice = (order) => generateDocuments(order, 'invoice');
-
-  // 生成二维码 Data URL - 包含可访问的URL链接
-  const orderQueryUrl = `${window.location.origin}/?order=${order.id}`;
-  const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, {
-    errorCorrectionLevel: 'H',
-    width: 300,
-    margin: 2
-  });
-
-  // --- 模版 A: A4 正式发票 (Factura) ---
-  const createA4Invoice = () => {
-    const doc = new jsPDF();
-    
-    // 1. Header
-    doc.setFillColor(220, 38, 38); // Red Brand Color
-    doc.rect(0, 0, 210, 40, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(24);
-    doc.setFont("helvetica", "bold");
-    doc.text(companyData.name, 14, 20);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text("Mercado & Reparaciones", 14, 26);
-
-    doc.setFontSize(10);
-    doc.text(companyData.address, 196, 15, { align: 'right' });
-    doc.text(`NIF: ${companyData.nif}`, 196, 20, { align: 'right' });
-    doc.text(`Tel: ${companyData.phone}`, 196, 25, { align: 'right' });
-
-    // 2. Client & Order Info
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(11);
-    doc.text(`CLIENTE:`, 14, 55);
-    doc.setFont("helvetica", "normal");
-    doc.text(order.address || "Cliente General", 14, 62);
-    doc.text(order.phone || "", 14, 67);
-
-    doc.setFont("helvetica", "bold");
-    doc.text(isService ? "FACTURA DE SERVICIO" : "FACTURA SIMPLIFICADA", 140, 55);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Núm: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
-    doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 67);
-    doc.text(`Forma de Pago: ${order.payment_method?.toUpperCase() || 'CONTADO'}`, 140, 72);
-
-    // 3. Tablas: productos y regalos por separado
-    const regularItems = order.items.filter(item => !(item.isGift || item.price === 0));
-    const giftItems = order.items.filter(item => item.isGift || item.price === 0);
-
-    let startY = 80;
-
-    if (regularItems.length > 0) {
-      const tableRows = regularItems.map(item => [
-        item.name,
-        item.quantity,
-        `${(item.price / 1.21).toFixed(2)}`,
-        '21%',
-        `€${(item.price * item.quantity).toFixed(2)}`
-      ]);
-      autoTable(doc, {
-        startY,
-        head: [["Descripción", "Cant.", "Precio Base", "IVA", "TOTAL"]],
-        body: tableRows,
-        theme: 'grid',
-        headStyles: { fillColor: [31, 41, 55] },
-        styles: { fontSize: 9 },
-      });
-      startY = doc.lastAutoTable.finalY + 8;
-    }
-
-    if (giftItems.length > 0) {
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(180, 80, 120);
-      doc.text("Regalo(s) — GRATIS", 14, startY);
-      startY += 6;
-      doc.setTextColor(0, 0, 0);
-      doc.setFont("helvetica", "normal");
-      const giftRows = giftItems.map(item => [
-        `${item.name} [REGALO]`,
-        item.quantity,
-        '0.00',
-        '—',
-        '€0.00'
-      ]);
-      autoTable(doc, {
-        startY,
-        head: [["Descripción", "Cant.", "Precio Base", "IVA", "TOTAL"]],
-        body: giftRows,
-        theme: 'grid',
-        headStyles: { fillColor: [180, 80, 120] },
-        styles: { fontSize: 9 },
-      });
-      startY = doc.lastAutoTable.finalY + 8;
-    }
-
-    // 4. Totals
-    const finalY = startY + 2;
-    const subTotal = order.total / 1.21;
-    const iva = order.total - subTotal;
-
-    doc.setFontSize(10);
-    doc.text(`Base Imponible:`, 160, finalY, { align: 'right' });
-    doc.text(`€${subTotal.toFixed(2)}`, 190, finalY, { align: 'right' });
-    
-    doc.text(`IVA (21%):`, 160, finalY + 5, { align: 'right' });
-    doc.text(`€${iva.toFixed(2)}`, 190, finalY + 5, { align: 'right' });
-
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.text(`TOTAL A PAGAR:`, 160, finalY + 14, { align: 'right' });
-    doc.text(`€${order.total.toFixed(2)}`, 190, finalY + 14, { align: 'right' });
-
-    // 5. Warranty Box (维修专用)
-    if (isService) {
-      const boxY = finalY + 25;
-      doc.setDrawColor(200);
-      doc.setFillColor(248, 248, 248);
-      doc.rect(14, boxY, 182, 50, 'FD');
-      
-      doc.setFontSize(10);
-      doc.setTextColor(220, 38, 38);
-      doc.text("GARANTÍA Y CONDICIONES", 18, boxY + 8);
-      
-      doc.setFontSize(8);
-      doc.setTextColor(80);
-      const terms = [
-        "1. Validez: 180 días de garantía sobre la reparación efectuada.",
-        "2. Exclusiones: No cubre daños por humedad, golpes posteriores o manipulación externa.",
-        "3. Recogida: Dispone de 3 meses para recoger su dispositivo. Pasado este tiempo,",
-        "   será enviado a reciclaje según normativa vigente.",
-        "4. Datos: La empresa no se hace responsable de la pérdida de software o datos."
-      ];
-      terms.forEach((line, i) => doc.text(line, 18, boxY + 16 + (i*5)));
-    }
-
-    // 6. Footer QR
-    doc.addImage(qrCodeUrl, 'PNG', 14, 250, 25, 25);
-    doc.setFontSize(8);
-    doc.setTextColor(150);
-    doc.text("Escanea para ver tu pedido online", 42, 260);
-    doc.text("Gracias por su visita.", 42, 265);
-
-    doc.save(`Factura_${order.id.slice(0, 8)}.pdf`);
-  };
-
-  // --- 模版 B: 80mm 热敏小票 (Ticket) ---
-  const createThermalTicket = () => {
-    const doc = new jsPDF({
-      orientation: 'p',
-      unit: 'mm',
-      format: [80, 260]
-    });
-
-    let y = 10;
-    const centerX = 40;
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text(companyData.name, centerX, y, { align: 'center' });
-    y += 6;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Mercado & Servicios", centerX, y, { align: 'center' });
-    y += 5;
-    doc.text(companyData.address, centerX, y, { align: 'center' });
-    y += 5;
-    doc.text(`NIF: ${companyData.nif}`, centerX, y, { align: 'center' });
-    y += 5;
-    doc.text(new Date().toLocaleString(), centerX, y, { align: 'center' });
-    y += 8;
-
-    doc.setFontSize(9);
-    doc.text("--------------------------------", centerX, y, { align: 'center' });
-    y += 5;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(isService ? "RESGUARDO REPARACION" : "TICKET DE CAJA", centerX, y, { align: 'center' });
-    y += 5;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(`Ref: ${order.id.slice(0, 8)}`, centerX, y, { align: 'center' });
-    y += 5;
-    doc.text("--------------------------------", centerX, y, { align: 'center' });
-    y += 6;
-
-    doc.setFontSize(10);
-    const regularForTicket = order.items.filter(item => !(item.isGift || item.price === 0));
-    const giftsForTicket = order.items.filter(item => item.isGift || item.price === 0);
-
-    regularForTicket.forEach(item => {
-      doc.text(item.name.substring(0, 25), 5, y);
-      y += 5;
-      const line = `${item.quantity} x ${item.price.toFixed(2)}`.padEnd(20) + `€${(item.price * item.quantity).toFixed(2)}`;
-      doc.text(line, 5, y);
-      y += 6;
-    });
-
-    if (giftsForTicket.length > 0) {
-      y += 3;
-      doc.text("--------------------------------", centerX, y, { align: 'center' });
-      y += 5;
-      doc.setFont("helvetica", "bold");
-      doc.text("REGALO(S) — GRATIS", centerX, y, { align: 'center' });
-      y += 6;
-      doc.setFont("helvetica", "normal");
-      giftsForTicket.forEach(item => {
-        doc.text(`${item.name.substring(0, 22)} [REGALO]`, 5, y);
-        y += 5;
-        doc.text(`${item.quantity} x 0.00`.padEnd(20) + "GRATIS", 5, y);
-        y += 6;
-      });
-    }
-
-    y += 3;
-    doc.text("--------------------------------", centerX, y, { align: 'center' });
-    y += 6;
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text(`TOTAL:     EUR ${order.total.toFixed(2)}`, 5, y);
-    y += 7;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text("(IVA Incluido)", 5, y);
-    y += 6;
-    doc.setFontSize(10);
-    doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'Efectivo/Bizum'}`, 5, y);
-    y += 10;
-
-    if (isService) {
-      doc.setFontSize(9);
-      doc.text("GARANTIA DE REPARACION: 6 MESES", centerX, y, { align: 'center' });
-      y += 5;
-      doc.text("Imprescindible presentar este ticket", centerX, y, { align: 'center' });
-      y += 6;
-    }
-
-    doc.addImage(qrCodeUrl, 'PNG', 20, y, 40, 40);
-    y += 45;
-
-    doc.setFontSize(10);
-    doc.text("¡Gracias por su visita!", centerX, y, { align: 'center' });
-
-    doc.save(`Ticket_${order.id.slice(0, 8)}.pdf`);
-  };
-
-  // 执行下载
-  if (type === 'invoice' || type === 'both') createA4Invoice();
-  if (type === 'ticket' || type === 'both') {
-     // 稍微延迟一下，防止浏览器拦截
-     setTimeout(() => createThermalTicket(), 500);
-  }
-};
+// generateDocuments() vive en src/utils/orderDocuments.js y se carga
+// con dynamic import en los call-sites para mantener jsPDF/QRCode
+// fuera del bundle inicial.
 
 export default function App() {
   // --- Core Data ---
@@ -1152,9 +1012,23 @@ export default function App() {
     }));
   };
 
-  // 生成发票/票据的函数（供订单页面使用）
-  const generateInvoice = (order) => {
-    generateDocuments(order, 'both');
+  // generateInvoice — descarga factura A4 + ticket 80mm
+  // ----------------------------------------------------
+  // Dynamic import de jsPDF + QRCode + autoTable: estas librerías
+  // pesan ~700 KB en conjunto y la mayoría de clientes nunca pulsa
+  // "Descargar factura". Las cargamos sólo cuando se necesita.
+  // El import es muy rápido en segundas llamadas (cacheado por el
+  // browser). El toast informativo es opcional pero útil porque
+  // en conexiones lentas la primera descarga puede tardar ~1s en
+  // empezar.
+  const generateInvoice = async (order) => {
+    try {
+      const mod = await import('./utils/orderDocuments');
+      await mod.generateDocuments(order, 'both');
+    } catch (e) {
+      console.error('[generateInvoice] dynamic import failed:', e?.message);
+      toast.error('No se pudieron generar los documentos. Reintenta en unos segundos.');
+    }
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -1325,6 +1199,12 @@ export default function App() {
       
       // 询问用户是否下载票据
       if(window.confirm("Pago completado. ¿Quieres descargar los recibos?")) {
+         // Cargamos el módulo de generación de PDFs UNA SOLA VEZ
+         // aquí; las llamadas siguientes a generateDocuments en este
+         // bloque ya tienen el chunk cacheado. Esto evita downloads
+         // duplicados del bundle PDF cuando hay productos+servicios.
+         const { generateDocuments } = await import('./utils/orderDocuments');
+
          // 分离商品和服务（包括免费商品）
          const productItems = finalCart.filter(item => !item.isService);
          const serviceItems = finalCart.filter(item => item.isService);
@@ -1433,7 +1313,7 @@ export default function App() {
       </button>
       <div className="relative mb-2">
         {renderDiscountTag(p)}
-        <img src={p.image} className="w-full aspect-square rounded-xl object-cover bg-gray-50" />
+        <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square rounded-xl object-cover bg-gray-50" />
       </div>
       <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words">{p.name}</p>
       <div className="flex justify-between items-end">
@@ -1556,7 +1436,8 @@ export default function App() {
               alt={BANNERS[bannerIndex].alt}
               width="1320"
               height="600"
-              loading="lazy"
+              loading="eager"
+              fetchpriority="high"
               decoding="async"
               className="w-full h-full object-cover transition-all duration-700 group-hover:scale-105"
             />
@@ -2036,6 +1917,8 @@ export default function App() {
               </div>
             ) : (
               <div className="space-y-6">
+                {/* Aviso de cierre (oculto en horario laboral) */}
+                <AfterHoursNotice context="cart" />
                 {/* 1. 普通商品部分 */}
                 {cart.filter(i => !i.isService).length > 0 && (
                    <div className="space-y-3">
@@ -2044,7 +1927,7 @@ export default function App() {
                       
                       {cart.filter(i => !i.isService).map(item => (
                         <div key={`${item.id}-${item.name}`} className={`flex gap-3 p-3 rounded-2xl shadow-sm border ${item.isGift ? 'bg-pink-50 border-pink-200' : 'bg-white border-gray-100'}`}>
-                           <img src={item.image} className="w-20 h-20 object-cover rounded-xl bg-gray-50"/>
+                           <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="w-20 h-20 object-cover rounded-xl bg-gray-50"/>
                            <div className="flex-1 flex flex-col justify-between py-1">
                               <div>
                                 <p className="font-bold text-gray-800 line-clamp-2">{item.name}</p>
@@ -2166,6 +2049,8 @@ export default function App() {
         <div className="p-4 bg-gray-50 min-h-screen animate-slide-up">
           <div className="flex items-center gap-2 mb-6"><button onClick={handleBack} className="p-2 bg-white rounded-full shadow-sm"><ArrowLeft size={20}/></button><h2 className="font-bold text-xl">Finalizar Compra</h2></div>
           <div className="space-y-6">
+             {/* Aviso si el cliente intenta comprar fuera de horario */}
+             <AfterHoursNotice context="checkout" />
              {/* 免费商品选择 - 当订单 >= 65 欧元时显示 */}
              {subtotal >= 65 && (
                <div className="bg-gradient-to-br from-red-50 to-pink-50 p-5 rounded-2xl shadow-sm border-2 border-red-200">
@@ -2177,7 +2062,7 @@ export default function App() {
                  {selectedGift ? (
                    <div className="bg-white p-4 rounded-xl border-2 border-red-500 flex items-center justify-between">
                      <div className="flex items-center gap-3 flex-1">
-                       <img src={selectedGift.image} alt={selectedGift.name} className="w-16 h-16 object-cover rounded-lg"/>
+                       <img src={selectedGift.image} alt={selectedGift.name} loading="lazy" decoding="async" className="w-16 h-16 object-cover rounded-lg"/>
                        <div className="flex-1">
                          <p className="font-bold text-gray-800 text-sm">{selectedGift.name}</p>
                          <p className="text-xs text-red-600 font-bold">GRATIS</p>
@@ -2206,7 +2091,7 @@ export default function App() {
                              onClick={() => setSelectedGift(p)}
                              className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
                            >
-                             <img src={p.image} alt={p.name} className="w-full h-20 object-cover rounded-lg mb-2"/>
+                             <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full h-20 object-cover rounded-lg mb-2"/>
                              <p className="text-xs font-bold text-gray-800 line-clamp-3 mb-1">{p.name}</p>
                              <p className="text-xs text-red-600 font-bold">GRATIS</p>
                            </button>
@@ -2495,7 +2380,7 @@ export default function App() {
                <div className="flex gap-2 md:gap-3 overflow-x-auto pb-4 -mx-1 px-1 scrollbar-hide snap-x snap-mandatory">
                  {products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (
                    <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[100px] sm:min-w-[120px] md:min-w-[140px] w-[100px] sm:w-[120px] md:w-[140px] flex-shrink-0 snap-start bg-gray-50 p-1.5 md:p-2 rounded-xl border border-gray-100 cursor-pointer active:scale-95 transition-transform">
-                     <img src={p.image} alt={p.name} className="w-full aspect-square object-cover rounded-lg mb-1.5 md:mb-2"/>
+                     <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square object-cover rounded-lg mb-1.5 md:mb-2"/>
                      <p className="text-[11px] md:text-xs font-bold text-gray-700 line-clamp-2">{p.name}</p>
                      <p className="text-[11px] md:text-xs font-bold text-red-600">€{p.price}</p>
                    </div>

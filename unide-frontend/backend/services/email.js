@@ -80,6 +80,54 @@ const formatDate = (iso) => {
 
 const shortId = (id) => String(id || '').slice(0, 8).toUpperCase();
 
+// =====================================================================
+// Helpers de horario operativo (espejo del cálculo en src/App.jsx)
+// =====================================================================
+// Los valores 9 y 22 DEBEN coincidir con STORE_OPEN_HOUR/STORE_CLOSE_HOUR
+// en src/App.jsx, y con openingHoursSpecification del JSON-LD en
+// index.html. Si cambian, actualizar los tres sitios.
+//
+// Usamos Intl con timeZone: 'Europe/Madrid' para que la decisión sea
+// correcta aunque el servidor esté en otra zona (Railway por defecto
+// es UTC). Esto es relevante porque un pedido creado a las 22:30 hora
+// española sigue siendo "fuera de horario" aunque el `created_at` en
+// UTC dé 20:30.
+// =====================================================================
+const EMAIL_STORE_OPEN_HOUR = 9;
+const EMAIL_STORE_CLOSE_HOUR = 22;
+
+function getMadridHM(dateIso) {
+  try {
+    const d = new Date(dateIso);
+    if (Number.isNaN(d.getTime())) return null;
+    const fmt = new Intl.DateTimeFormat('es-ES', {
+      timeZone: 'Europe/Madrid',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(d);
+    const hh = parts.find(p => p.type === 'hour')?.value || '00';
+    const mm = parts.find(p => p.type === 'minute')?.value || '00';
+    return { hour: parseInt(hh, 10), minute: parseInt(mm, 10) };
+  } catch {
+    return null;
+  }
+}
+
+// True si la fecha del pedido cae FUERA del horario operativo
+// (antes de las 09:00 o desde las 22:00 inclusive). Para fechas
+// no parseables devuelve false: preferimos NO mostrar el aviso a
+// mostrarlo erróneamente.
+function isAfterHoursISO(dateIso) {
+  const hm = getMadridHM(dateIso);
+  if (!hm) return false;
+  const minuteOfDay = hm.hour * 60 + hm.minute;
+  const openMin = EMAIL_STORE_OPEN_HOUR * 60;
+  const closeMin = EMAIL_STORE_CLOSE_HOUR * 60;
+  return minuteOfDay < openMin || minuteOfDay >= closeMin;
+}
+
 // --- Templates ---
 
 const renderItemsHtml = (items = []) => items
@@ -132,6 +180,19 @@ const renderOrderHtml = (order, frontendUrl) => {
   // se interpreta como envío a domicilio.
   const isStorePickup = order.delivery_method === 'store_pickup';
   const deliveryHeading = isStorePickup ? 'Recogida en tienda' : 'Datos de envío';
+
+  // Aviso de "pedido fuera de horario": si created_at cae fuera de
+  // 09:00–22:00 Madrid, el cliente debe saber que su pedido NO se
+  // procesará al instante. Sin este bloque, alguien que pide a las
+  // 03:00 espera entrega "en un par de horas" según la Política de
+  // Envíos, lo cual genera quejas legítimas.
+  const afterHoursBlock = isAfterHoursISO(order.created_at)
+    ? `<div style="font-size:13px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:12px 14px;border-radius:10px;margin:0 0 16px 0;line-height:1.55;">
+        <strong>Pedido fuera de horario.</strong> Ahora mismo estamos cerrados;
+        empezaremos a preparar tu pedido cuando abramos
+        (Lunes a Domingo de 09:00 a 22:00, hora peninsular).
+       </div>`
+    : '';
   const deliveryBlock = isStorePickup
     ? `<div style="font-size:14px;color:#0f172a;line-height:1.6;margin-bottom:8px;">
         <strong>HIPERA</strong><br/>
@@ -167,6 +228,8 @@ const renderOrderHtml = (order, frontendUrl) => {
         <tr><td style="padding:28px;">
           <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#0f172a;">¡Pedido confirmado!</h1>
           <p style="margin:0 0 20px 0;font-size:14px;color:#64748b;">Gracias por confiar en HIPERA. Hemos recibido tu pedido y lo estamos preparando.</p>
+
+          ${afterHoursBlock}
 
           <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;background:#f8fafc;border-radius:12px;padding:16px;">
             <tr>
@@ -239,13 +302,23 @@ const renderOrderText = (order, frontendUrl) => {
     `Fecha: ${formatDate(order.created_at)}`,
     `Estado: ${order.status || 'Procesando'}`,
     '',
+  ];
+  if (isAfterHoursISO(order.created_at)) {
+    lines.push(
+      '** PEDIDO FUERA DE HORARIO **',
+      'Ahora estamos cerrados; empezaremos a preparar tu pedido',
+      'cuando abramos (L-D 09:00-22:00, hora peninsular).',
+      '',
+    );
+  }
+  lines.push(
     'PRODUCTOS',
     '--------',
     renderItemsText(order.items),
     '',
     `TOTAL: ${formatEUR(order.total)}`,
     '',
-  ];
+  );
   // Bloque de entrega adaptado al método. Misma lógica que la versión
   // HTML: store_pickup → instrucciones de recogida en HIPERA; en otro
   // caso (incluido datos antiguos sin delivery_method) → datos de envío.
