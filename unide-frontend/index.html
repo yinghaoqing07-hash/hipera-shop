@@ -107,6 +107,22 @@
          Coordenadas aproximadas centro Meco (referencia, NO usar directamente):
          40.55389°N, -3.32611°W (fuente: Wikipedia).
     -->
+
+    <!-- ===============================================================
+         Cloudflare Turnstile (anti-bot, anti-abuso del checkout)
+         ---------------------------------------------------------------
+         Carga diferida con `defer`. La librería sólo se materializa
+         cuando el frontend monta el widget (componente
+         <TurnstileGate />, ver src/components/TurnstileGate.jsx).
+         Si VITE_TURNSTILE_SITE_KEY no está configurado, el componente
+         no monta el widget y este script se desperdicia (~30 KB),
+         coste asumible para no tener dos versiones del HTML.
+
+         La cabecera Permissions-Policy y CSP no necesitan ajuste:
+         Turnstile sólo se comunica con challenges.cloudflare.com
+         dentro de un iframe gestionado por el propio script.
+         ============================================================ -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   </head>
   <body>
     <div id="root"></div>

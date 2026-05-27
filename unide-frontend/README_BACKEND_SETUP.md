@@ -46,6 +46,15 @@ RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxx
 RESEND_FROM_EMAIL=HIPERA <pedidos@hipera.es>
 # 回复地址（可选；默认与 RESEND_FROM_EMAIL 相同）
 RESEND_REPLY_TO=info@hipera.es
+
+# Cloudflare Turnstile（反机器人，强烈推荐生产配置）
+# 1. 进 https://dash.cloudflare.com → Turnstile → Add site
+# 2. Widget Mode: Invisible（前端组件 TurnstileGate 用 invisible）
+# 3. Domain: hipera.es（开发可加 localhost）
+# 4. 复制 Secret Key 填这里
+# 没设置时 POST /api/orders 不校验 token（仅适合本地开发；生产留空 = 反机器人失效）
+# 测试 secret（永远通过，仅 dev/CI 使用）：1x0000000000000000000000000000000AA
+TURNSTILE_SECRET_KEY=0x4AAAAAAAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 **重要提示：**
@@ -62,6 +71,12 @@ RESEND_REPLY_TO=info@hipera.es
   - 没设置 → 下单不会失败，但**不会发**确认邮件，后端启动时会打印警告
   - 发件域名必须先在 Resend 控制台验证（见下方"Resend 域名验证"）
   - 仅适用于**事务性邮件**（订单确认），不用于营销推送
+- `TURNSTILE_SECRET_KEY`：
+  - 没设置 → 后端**跳过** Turnstile 校验（POST /api/orders 不拒绝缺少 token 的请求）
+  - 设置后 → 没带 token / token 无效都会返回 403 `TURNSTILE_FAILED`
+  - 前端对应变量：`VITE_TURNSTILE_SITE_KEY`（编译时注入，部署到 Vercel 也要配）
+  - **必须同时配前后端**：只配前端会发 token 但后端不校验；只配后端会拒绝所有请求
+  - Domain 限制要包含 `hipera.es`，本地开发可加 `localhost`
 
 ### 1.3 数据库迁移
 
@@ -157,9 +172,53 @@ VITE_API_URL=https://your-backend-domain.com/api
 
 1. **密钥保护**: Supabase service_role 密钥只在后端使用
 2. **认证中间件**: 所有管理操作都需要JWT token验证
-3. **速率限制**: 防止API滥用（15分钟内100次请求）
+3. **速率限制**: 防止API滥用（全局 15 分钟 500 次；下单 1h/5 + 24h/12）
 4. **CORS保护**: 只允许指定域名访问
 5. **输入验证**: 后端验证所有输入数据
+6. **反恶意下单**（2026-05-27）：四层防御，见下节
+
+#### 🛡 反恶意下单（POST /api/orders）
+
+为应对"恶意刷单 + 不来取/不付款"场景（contra_reembolso / store_pickup
+没有预付保障），后端按这个顺序拒绝可疑请求：
+
+| 顺序 | 机制 | 触发条件 | 返回码 | error.code |
+|---|---|---|---|---|
+| 0 | **Cloudflare Turnstile** | token 缺失 / 无效 / 域名不匹配 | 403 | `TURNSTILE_FAILED` |
+| 1 | **IP 限流（小时）** | 同 IP 1h 内 > 5 次下单 | 429 | `RATE_LIMIT_HOURLY` |
+| 2 | **IP 限流（日）** | 同 IP 24h 内 > 12 次下单 | 429 | `RATE_LIMIT_DAILY` |
+| 3 | **强制登录** | 选 `contra_reembolso` 或 `store_pickup` 但没带 `Authorization: Bearer <jwt>` | 401 | `AUTH_REQUIRED` |
+| 4 | **强制登录（token 过期）** | 同上但 Supabase 拒绝 token | 401 | `AUTH_INVALID` |
+| 5 | **同手机限流** | 同 `phone` 在 24h 内已有 ≥2 个 `Procesando`/`Pendiente de Pago` 订单 | 429 | `PHONE_PENDING_LIMIT` |
+
+设计取舍：
+
+- **Bizum 始终允许匿名下单**：Bizum 需要客户主动转账才算下单完成，
+  恶意刷单者拿不到任何价值 → 自动过滤大部分滥用。
+- **Turnstile 是可选的**：没配 `TURNSTILE_SECRET_KEY` 时这一层会跳过
+  （后端启动日志会有 `[anti-abuse] turnstile disabled`，找不到的话
+  搜 `verifyTurnstileToken`）。本地开发可以不配；生产强烈建议配。
+- **限流单位是 IP**：`app.set('trust proxy', true)` 已经打开，所以
+  `req.ip` 是真实客户端 IP（不是 Railway proxy）。
+- **手机号限流容错**：Supabase 查询失败时**不阻止**下单（避免 DB 抖动
+  导致拒绝合法订单），但会打 warning 留痕。
+- **未实现的下一层**：人脸识别 / 银行卡预授权 / 电子身份证。这些都需要
+  额外服务集成（成本 / 复杂度过高，不适合现阶段）。
+
+前端如何反馈：
+
+- `src/App.jsx`（checkout）：
+  - 未登录时 `store_pickup` 卡片显示 `Requiere cuenta` 徽章
+  - 点 "Continuar al Pago" 如果选 `store_pickup` 且未登录 → toast + 跳 `/login`
+- `src/App.jsx`（PaymentModal）：
+  - 未登录时 `contra_reembolso` 按钮变灰 + 显示 `Iniciar sesión` 提示
+  - 点击未登录的 `contra_reembolso` → 跳 `/login`
+- `src/api/client.js`：
+  - 把后端的 `error.code` / `response.status` 挂在 Error 对象上
+- `handleConfirmPayment`（App.jsx）：
+  - 401 → toast + 跳 `/login`
+  - 429 → toast（6 秒可见）+ 关闭支付弹窗
+  - 其他 → 普通 toast.error
 
 #### ⚠️ 需要手动完成：
 
@@ -217,6 +276,7 @@ VITE_API_URL=https://your-backend-domain.com/api
    - `FRONTEND_URL=https://hipera.es`（生产域名；构建链接的 URL 都基于这个）
    - `ADMIN_EMAILS=tu_email@gmail.com`（逗号分隔多个；**没配置就没人能登 /admin**）
    - `RESEND_API_KEY=re_xxxxxxxxxxxx`（域名验证完后从 Resend 控制台拿）
+   - `TURNSTILE_SECRET_KEY=0x4AAAAAAAxxxx`（Cloudflare Turnstile Secret；不配 = 反机器人失效）
    - `RESEND_FROM_EMAIL=HIPERA <pedidos@hipera.es>`（必须是已在 Resend 验证的域）
    - `RESEND_REPLY_TO=info@hipera.es`（可选，默认与 FROM 相同）
 4. 部署完成后记下 **公网 URL**，如 `https://xxx.up.railway.app`

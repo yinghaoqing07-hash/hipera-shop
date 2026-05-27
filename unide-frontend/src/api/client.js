@@ -91,12 +91,28 @@ class ApiClient {
       if (!response.ok) {
         const errMsg = data?.error;
         const str = typeof errMsg === 'string' ? errMsg : (errMsg?.message || JSON.stringify(errMsg) || `Request failed ${response.status}`);
-        throw new Error(str);
+        // Anotamos status HTTP y `code` semántico (si el backend lo
+        // proporciona) en el Error para que los callers puedan
+        // reaccionar de forma específica (p. ej. 401 AUTH_REQUIRED
+        // -> redirigir a /login, 429 RATE_LIMIT_* -> toast distintivo)
+        // sin hacer match por strings traducidas.
+        const apiError = new Error(str);
+        apiError.status = response.status;
+        apiError.code = data?.code;
+        throw apiError;
       }
 
       return data;
     } catch (error) {
       const msg = error.name === 'AbortError' ? 'Tiempo de espera agotado (30 s). Compruebe conexión o reintente.' : (error.message || 'API error');
+      // Si ya es un ApiError nuestro, lo dejamos pasar tal cual para
+      // no perder status/code. Sólo envolvemos errores de red /
+      // parseo / abort que no llevan metadatos.
+      if (error.status || error.code) {
+        console.error('API Error:', msg, '(status:', error.status, ', code:', error.code, ')');
+        console.error('Failed URL:', url);
+        throw error;
+      }
       console.error('API Error:', msg);
       console.error('Failed URL:', url);
       throw new Error(msg);

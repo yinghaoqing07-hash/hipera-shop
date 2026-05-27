@@ -6,6 +6,7 @@ import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保�
 import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
+import { TurnstileGate } from './components/TurnstileGate';
 import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
 import PoliticaDevoluciones from './pages/legal/PoliticaDevoluciones';
@@ -18,12 +19,12 @@ import {
   getLatestAcceptance as getLatestTermsAcceptance,
   needsReacceptance as needsTermsReacceptance,
 } from './utils/termsAcceptance';
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { 
   ShoppingCart, Search, Package, MapPin, Clock, ArrowLeft, ArrowRight,
   Tag, Trash2, ChevronRight, ChevronDown, Home, Gift, Truck, Store, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
-  LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock,
+  LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock, LogIn,
   Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
@@ -384,7 +385,22 @@ const IconByName = ({ name, size=24, className }) => {
 };
 
 // --- 新增：支付方式选择弹窗组件 ---
-const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment, setSelectedPayment, isStorePickup = false }) => {
+const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment, setSelectedPayment, isStorePickup = false, isLoggedIn = false, onLoginNeeded }) => {
+  // Decisión anti-abuso (2026-05-27): contra reembolso y pago en tienda
+  // sólo se ofrecen a usuarios autenticados. Bizum permanece disponible
+  // para anónimos porque implica transferencia previa (fricción real).
+  // En lugar de ocultar el botón, lo dejamos visible con overlay
+  // "Iniciar sesión" para que el cliente vea TODA la oferta y entienda
+  // por qué necesita una cuenta. Mejor UX que ocultar opciones.
+  const contraReembolsoLocked = !isLoggedIn;
+  const handleContraReembolsoClick = () => {
+    if (contraReembolsoLocked) {
+      if (onLoginNeeded) onLoginNeeded();
+      return;
+    }
+    setSelectedPayment('contra_reembolso');
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
@@ -406,27 +422,38 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
 
            {/* 支付方式选择 */}
            <div className="space-y-3">
-              {/* 货到付款 */}
+              {/* 货到付款 / Pago en tienda */}
               <button
-                onClick={() => setSelectedPayment('contra_reembolso')}
-                className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
-                  selectedPayment === 'contra_reembolso'
-                    ? 'border-blue-600 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                onClick={handleContraReembolsoClick}
+                aria-disabled={contraReembolsoLocked}
+                className={`relative w-full p-4 rounded-xl border-2 transition-all text-left ${
+                  contraReembolsoLocked
+                    ? 'border-gray-200 bg-gray-50 cursor-pointer'
+                    : selectedPayment === 'contra_reembolso'
+                      ? 'border-blue-600 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300 bg-white'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${selectedPayment === 'contra_reembolso' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                <div className={`flex items-center gap-3 ${contraReembolsoLocked ? 'opacity-60' : ''}`}>
+                  <div className={`p-2 rounded-lg ${selectedPayment === 'contra_reembolso' && !contraReembolsoLocked ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
                     <Wallet size={20}/>
                   </div>
                   <div className="flex-1">
                     <p className="font-bold text-gray-900">{isStorePickup ? 'Pagar en tienda al recoger' : 'Pago Contra Reembolso'}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{isStorePickup ? 'En efectivo o tarjeta en HIPERA' : 'Paga cuando recibas tu pedido'}</p>
                   </div>
-                  {selectedPayment === 'contra_reembolso' && (
+                  {selectedPayment === 'contra_reembolso' && !contraReembolsoLocked && (
                     <CheckCircle2 size={20} className="text-blue-600"/>
                   )}
                 </div>
+                {contraReembolsoLocked && (
+                  <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                    <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md font-semibold">
+                      <Lock size={12}/> Requiere cuenta
+                    </span>
+                    <span className="text-blue-600 font-semibold underline">Iniciar sesión</span>
+                  </div>
+                )}
               </button>
 
               {/* Bizum */}
@@ -887,6 +914,13 @@ export default function App() {
   const [showPayment, setShowPayment] = useState(false); // 控制弹窗
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // 控制支付Loading
   const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
+  // Cloudflare Turnstile: ref al widget invisible montado en checkout.
+  // Se ejecuta justo antes de POST /api/orders para acompañar al
+  // pedido con un token verificable por el backend. Si la integración
+  // no está configurada (sin VITE_TURNSTILE_SITE_KEY), executeAsync
+  // resuelve a null y el backend lo aceptará si tampoco tiene
+  // TURNSTILE_SECRET_KEY (modo de desarrollo).
+  const turnstileRef = useRef(null);
   const [legalType, setLegalType] = useState("aviso"); // 新增法律页面状态
   const [selectedGift, setSelectedGift] = useState(null); // 选中的免费商品
   const { openSettings: openCookieSettings } = useCookieConsent();
@@ -1173,6 +1207,20 @@ export default function App() {
       toast.error("Debes aceptar la Política de Privacidad y los Términos y Condiciones.");
       return;
     }
+    // Anti-abuso (2026-05-27): la recogida en tienda implica que el
+    // comercio prepara productos sin garantía de pago hasta que el
+    // cliente aparece. Para evitar el escenario de no-shows masivos
+    // exigimos cuenta. Bizum + envío a domicilio sigue disponible para
+    // anónimos (Bizum exige transferencia previa = fricción real).
+    // La misma validación se aplica en backend (POST /api/orders),
+    // pero la replicamos aquí para mejor UX (mensaje claro antes
+    // de abrir el modal de pago).
+    if (!user && checkoutForm.deliveryMethod === 'store_pickup') {
+      toast.error('Para recoger en tienda necesitas una cuenta. Inicia sesión o regístrate.');
+      // Pequeño delay para que el toast sea legible antes del redirect.
+      setTimeout(() => navigate('/login'), 800);
+      return;
+    }
     // Si hay que re-aceptar y el usuario está logueado, registrar la
     // aceptación en segundo plano. IMPORTANTE: NO usar await aquí — el
     // historial de incidencias (2026-05-26) mostró que, cuando el token
@@ -1229,6 +1277,20 @@ export default function App() {
         });
       }
 
+      // Anti-bot (Cloudflare Turnstile): ejecutamos el widget para
+      // obtener un token verificable. Si la integración no está
+      // configurada en el frontend (sin VITE_TURNSTILE_SITE_KEY) o el
+      // script no cargó, executeAsync devuelve null y el backend
+      // decidirá: lo acepta si tampoco tiene TURNSTILE_SECRET_KEY
+      // configurado (entorno de desarrollo), o lo rechazará con 403.
+      // El token expira en 5 min y es de un sólo uso.
+      let turnstileToken = null;
+      try {
+        turnstileToken = (await turnstileRef.current?.executeAsync?.()) || null;
+      } catch {
+        turnstileToken = null;
+      }
+
       // Para recogida en tienda dejamos address en blanco en el payload:
       // el backend (server.js, POST /api/orders) lo normaliza a una
       // etiqueta estable («Recogida en tienda — Paseo del Sol 1, 28880
@@ -1244,7 +1306,8 @@ export default function App() {
         status: selectedPayment === 'contra_reembolso' ? "Pendiente de Pago" : "Procesando",
         payment_method: paymentMethodName,
         delivery_method: checkoutForm.deliveryMethod,
-        items: finalCart
+        items: finalCart,
+        turnstile_token: turnstileToken,
       });
 
       // Mensaje matizado por método de pago + modalidad de entrega.
@@ -1323,7 +1386,24 @@ export default function App() {
       
       navTo("home"); 
     } catch (e) {
-      toast.error(e.message);
+      // Anti-abuso: el backend puede rechazar el pedido por varias
+      // razones específicas que merecen UX dedicada (no un toast
+      // genérico).
+      if (e?.status === 401 && (e?.code === 'AUTH_REQUIRED' || e?.code === 'AUTH_INVALID')) {
+        toast.error(e.message || 'Inicia sesión para continuar');
+        setShowPayment(false);
+        setSelectedPayment('');
+        setTimeout(() => navigate('/login'), 600);
+      } else if (e?.status === 429) {
+        // Rate limit (IP) o limite por teléfono — mensaje servido por
+        // backend, cerramos el modal para que el cliente pueda
+        // revisar/editar el carrito antes de reintentar.
+        toast.error(e.message || 'Demasiados pedidos. Espera unos minutos.', { duration: 6000 });
+        setShowPayment(false);
+        setSelectedPayment('');
+      } else {
+        toast.error(e.message);
+      }
     } finally {
       setIsProcessingPayment(false);
     }
@@ -1400,9 +1480,17 @@ export default function App() {
         <PaymentModal
            total={total}
            isStorePickup={isStorePickup}
-           onClose={() => {
+           isLoggedIn={!!user}
+           onLoginNeeded={() => {
+             // Cerramos el modal y navegamos a /login. Los datos del
+             // checkout (email, address, phone, deliveryMethod) viven
+             // en checkoutForm + localStorage.lastAddress; el cart
+             // también se persiste, así que al volver el cliente
+             // puede continuar sin perder nada.
              setShowPayment(false);
              setSelectedPayment("");
+             toast('Inicia sesión para usar este método de pago', { icon: 'ℹ️' });
+             navigate('/login');
            }}
            onConfirm={handleConfirmPayment}
            isProcessing={isProcessingPayment}
@@ -2194,6 +2282,19 @@ export default function App() {
                       <span className="text-green-700 font-semibold">GRATIS</span> · Sin envío
                     </p>
                     <p className="text-[11px] text-gray-500 mt-1">Listo en 2–4 h en horario comercial.</p>
+                    {/* Anti-abuso (2026-05-27): la recogida en tienda
+                        requiere cuenta. No bloqueamos la selección
+                        aquí (sería confuso desactivar un botón sin
+                        explicar) — al pulsar "Continuar al Pago"
+                        handleInitiateCheckout muestra toast + redirect
+                        a /login. Pero sí avisamos visualmente con un
+                        badge para que el cliente entienda el requisito
+                        antes de llegar a ese punto. */}
+                    {!user && (
+                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-semibold">
+                        <Lock size={10}/> Requiere cuenta
+                      </p>
+                    )}
                   </button>
                 </div>
              </div>
@@ -2273,6 +2374,11 @@ export default function App() {
                 </button>
               );
             })()}
+            {/* Cloudflare Turnstile montado al entrar al checkout para
+                que esté listo cuando el cliente pulse "Confirmar".
+                El widget es invisible salvo que Cloudflare decida
+                desafiar (raro en clientes humanos). */}
+            <TurnstileGate ref={turnstileRef} />
           </div>
         </div>
       )}

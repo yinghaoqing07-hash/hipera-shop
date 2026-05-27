@@ -284,6 +284,112 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // =====================================================================
+// Anti-abuso: rate limits específicos para POST /api/orders
+// =====================================================================
+// El limiter global (500/15min) cubre tráfico normal de navegación
+// (productos, banners, polling del admin). Para la creación de
+// pedidos aplicamos límites mucho más estrictos porque cada pedido:
+//   • Descuenta stock real (denial of inventory para clientes
+//     legítimos si alguien spammea pedidos falsos).
+//   • Reserva esfuerzo operativo del comercio (preparar, llamar,
+//     atender la recogida o entrega).
+//   • Puede involucrar productos perecederos cuya preparación
+//     temprana se traduce en mermas.
+//
+// Dos ventanas en serie para cubrir tanto ráfagas cortas como
+// volumen sostenido. Si una IP se pasa de cualquiera de las dos,
+// los siguientes intentos reciben 429 con un mensaje explícito.
+// El handler de respuesta personalizado evita que express-rate-limit
+// devuelva el string genérico (que el frontend renderizaría como
+// JSON malformado en el toast).
+//
+// IMPORTANTE: usamos `req.ip` derivado de `trust proxy = true`
+// configurado arriba, así que la IP es la del cliente real, no la
+// del proxy de Railway. Sin trust proxy, todas las peticiones
+// vendrían del mismo IP del proxy y colapsaríamos todo el tráfico
+// como si fuera un único atacante.
+const orderHourlyLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 5,                   // máx 5 pedidos por IP por hora
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  validate: { trustProxy: false },
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: 'Demasiados pedidos desde esta IP en poco tiempo. Espera unos minutos e inténtalo de nuevo.',
+      code: 'RATE_LIMIT_HOURLY',
+    });
+  },
+});
+
+const orderDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000, // 24 h
+  max: 12,                       // máx 12 pedidos por IP por día
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  validate: { trustProxy: false },
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: 'Has alcanzado el límite diario de pedidos. Contacta con la tienda si necesitas más.',
+      code: 'RATE_LIMIT_DAILY',
+    });
+  },
+});
+
+// =====================================================================
+// Cloudflare Turnstile — verificación de token
+// =====================================================================
+// Captcha invisible que protege POST /api/orders de bots. El widget se
+// monta en el checkout (src/components/TurnstileGate.jsx) y devuelve
+// un token a Cloudflare. Aquí lo verificamos contra siteverify; si la
+// respuesta no es success=true, rechazamos el pedido con 403.
+//
+// Comportamiento sin configurar:
+//   Si TURNSTILE_SECRET_KEY no está definido, devolvemos true (modo
+//   permisivo) para que el desarrollo local funcione sin claves. En
+//   producción la variable debe estar presente o todos los pedidos
+//   pasarán sin verificación. README_BACKEND_SETUP documenta cómo
+//   obtener las claves desde dash.cloudflare.com/?to=/:account/turnstile.
+//
+// Test secret de Cloudflare (siempre acepta, NO usar en producción):
+//   1x0000000000000000000000000000000AA
+const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET_KEY || '';
+const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
+async function verifyTurnstileToken(token, remoteip) {
+  if (!TURNSTILE_SECRET) {
+    // Modo permisivo: no exigimos token si el backend no tiene secret.
+    return { ok: true, skipped: true };
+  }
+  if (!token || typeof token !== 'string') {
+    return { ok: false, error: 'missing-token' };
+  }
+  try {
+    const params = new URLSearchParams();
+    params.set('secret', TURNSTILE_SECRET);
+    params.set('response', token);
+    if (remoteip) params.set('remoteip', remoteip);
+    const resp = await fetch(TURNSTILE_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+    if (!resp.ok) {
+      return { ok: false, error: `siteverify-http-${resp.status}` };
+    }
+    const data = await resp.json();
+    if (data && data.success) return { ok: true };
+    // Devolvemos los códigos de error de Cloudflare para diagnóstico.
+    // Lista: https://developers.cloudflare.com/turnstile/get-started/server-side-validation/#error-codes
+    return { ok: false, error: (data['error-codes'] || []).join(',') || 'unknown' };
+  } catch (e) {
+    return { ok: false, error: `network: ${e?.message || e}` };
+  }
+}
+
+// =====================================================================
 // Authentication & authorization
 // =====================================================================
 // Historia previa: el middleware authenticateAdmin sólo verificaba que
@@ -449,9 +555,25 @@ app.get('/api/repair-services', async (req, res) => {
 // =====================================================================
 const VALID_DELIVERY_METHODS = ['home_delivery', 'store_pickup'];
 
-app.post('/api/orders', async (req, res) => {
+// =====================================================================
+// Estados que se consideran "no completados" a efectos de anti-abuso.
+// Si el cliente acumula varios pedidos en estos estados con el mismo
+// teléfono en 24 h, el siguiente se rechaza con 429.
+//
+// "Procesando": pedido aceptado (Bizum verificado o por verificar) y
+// pendiente de preparación o entrega/recogida.
+// "Pendiente de Pago": contra reembolso que aún no se ha cobrado.
+//
+// "Entregado" y "Cancelado" NO cuentan: el primero porque el cliente
+// ya cumplió su parte; el segundo porque ya está cerrado (cancelar es
+// una salida válida del flujo).
+// =====================================================================
+const UNCOMPLETED_ORDER_STATUSES = ['Procesando', 'Pendiente de Pago'];
+const MAX_UNCOMPLETED_PER_PHONE_24H = 2;
+
+app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) => {
   try {
-    const {
+    let {
       user_id,
       address,
       phone,
@@ -462,7 +584,28 @@ app.post('/api/orders', async (req, res) => {
       items,
       customer_email,
       delivery_method,
+      turnstile_token,
     } = req.body;
+
+    // =================================================================
+    // Anti-abuso 0: Cloudflare Turnstile (captcha invisible)
+    // =================================================================
+    // Se verifica ANTES que cualquier otra cosa porque es el filtro
+    // más barato (~50 ms) y rechaza bots automatizados de raíz, antes
+    // de tocar Supabase. En modo dev (sin TURNSTILE_SECRET_KEY) la
+    // función verifyTurnstileToken devuelve { ok: true, skipped: true }
+    // y no impacta al flujo.
+    const turnstileResult = await verifyTurnstileToken(
+      turnstile_token,
+      req.ip
+    );
+    if (!turnstileResult.ok) {
+      console.warn('[anti-abuse] turnstile failed:', turnstileResult.error, 'ip:', req.ip);
+      return res.status(403).json({
+        error: 'Verificación de seguridad fallida. Recarga la página e inténtalo otra vez.',
+        code: 'TURNSTILE_FAILED',
+      });
+    }
 
     // Resolución del método de entrega. El default 'home_delivery'
     // garantiza el comportamiento histórico para clientes antiguos que
@@ -481,6 +624,83 @@ app.post('/api/orders', async (req, res) => {
     }
     if (!isStorePickup && !address) {
       return res.status(400).json({ error: 'La dirección de entrega es obligatoria para envío a domicilio.' });
+    }
+
+    // =================================================================
+    // Anti-abuso 1: login obligatorio para métodos sin pago anticipado
+    // =================================================================
+    // Bizum exige al cliente transferir antes de que el comercio
+    // prepare nada (fricción real → poco atractivo para spam). Por el
+    // contrario:
+    //   • Contra reembolso: el cliente nunca paga si no se presenta o
+    //     no recoge. Para abuso masivo es ideal.
+    //   • Store pickup: si nadie recoge, el comercio carga con la
+    //     merma de los perecederos preparados.
+    //
+    // Mitigación: exigir cuenta autenticada para estas dos combinaciones.
+    // El coste de crear cuentas en cadena (email único, captcha del
+    // proveedor de auth) ya filtra el grueso del abuso oportunista.
+    // Un atacante motivado todavía puede crear cuentas, pero deja
+    // huella (email/uid) para baneo posterior.
+    const isContraReembolso = (payment_method || '').toLowerCase().includes('contra');
+    const needsAuth = isContraReembolso || isStorePickup;
+
+    if (needsAuth) {
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      if (!token) {
+        return res.status(401).json({
+          error: 'Para esta forma de entrega o pago necesitas iniciar sesión.',
+          code: 'AUTH_REQUIRED',
+        });
+      }
+      const { data: { user: authUser }, error: authErr } = await supabase.auth.getUser(token);
+      if (authErr || !authUser) {
+        return res.status(401).json({
+          error: 'Tu sesión ha caducado. Vuelve a iniciar sesión y reintenta.',
+          code: 'AUTH_INVALID',
+        });
+      }
+      // Forzamos user_id al del token, ignorando lo que viniera en el
+      // body (defensa contra suplantación: aunque el atacante pase
+      // user_id falsificado, prevalece el del JWT).
+      user_id = authUser.id;
+    }
+
+    // =================================================================
+    // Anti-abuso 2: límite por teléfono en 24 h
+    // =================================================================
+    // Independientemente del IP (que el atacante puede rotar con
+    // proxies / móvil), si el mismo teléfono ya tiene
+    // MAX_UNCOMPLETED_PER_PHONE_24H pedidos sin finalizar, frenamos.
+    // Esto cubre el escenario "alguien crea cuentas para saltarse el
+    // login obligatorio pero usa siempre el mismo número de teléfono".
+    //
+    // Tolerante a fallos: si la consulta falla, NO bloqueamos al cliente
+    // (preferimos permitir un pedido legítimo que colgar la web por un
+    // glitch de Supabase). Solo se bloquea si la consulta tiene éxito
+    // y devuelve recuentos superiores al umbral.
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentSamePhone, error: countErr } = await supabase
+        .from('orders')
+        .select('id, status')
+        .eq('phone', phone)
+        .in('status', UNCOMPLETED_ORDER_STATUSES)
+        .gte('created_at', since);
+      if (!countErr && (recentSamePhone || []).length >= MAX_UNCOMPLETED_PER_PHONE_24H) {
+        return res.status(429).json({
+          error: 'Tienes pedidos pendientes con este teléfono. Espera a completarlos o contacta con la tienda.',
+          code: 'PHONE_PENDING_LIMIT',
+        });
+      }
+      if (countErr) {
+        // No tumbamos el pedido, pero dejamos huella para diagnóstico
+        // si vemos picos de abuso que pasan el filtro.
+        console.warn('[anti-abuse] phone count error:', countErr.message);
+      }
+    } catch (e) {
+      console.warn('[anti-abuse] phone check unexpected:', e?.message || e);
     }
 
     // Para recogida en tienda, normalizamos address a una etiqueta
