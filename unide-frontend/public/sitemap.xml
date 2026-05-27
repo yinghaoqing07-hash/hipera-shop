@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  sitemap.xml — HIPERA (https://hipera.es)
+  ============================================================
+  Lista mínima pero completa de URLs públicas indexables. No
+  incluimos /login, /register ni /admin (bloqueados en robots.txt)
+  ni /?order= (URLs personales por email).
+
+  Las páginas legales son query strings (?legal=…) porque el sitio
+  es SPA; Google las trata como URLs distintas siempre que devuelvan
+  contenido único, lo cual ocurre porque cada policy es un
+  componente React diferente con texto único.
+
+  Mantenimiento:
+    - <lastmod> de cada policy = COOKIES_UPDATED_AT / TERMS_UPDATED_AT
+      en src/config/legal.js. Si cambias la versión legal, sube la
+      fecha aquí también.
+    - Catálogo de productos no se lista item-por-item: los IDs son
+      uuids y el contenido se renderiza tras hidratación, así que no
+      aporta SEO. Si en el futuro se hacen URLs canónicas tipo
+      /producto/<slug>, listarlas aquí.
+
+  Validación: https://www.xml-sitemaps.com/validate-xml-sitemap.html
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://hipera.es/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://hipera.es/?legal=aviso</loc>
+    <lastmod>2026-05-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+  <url>
+    <loc>https://hipera.es/?legal=terminos</loc>
+    <lastmod>2026-05-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://hipera.es/?legal=privacidad</loc>
+    <lastmod>2026-05-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://hipera.es/?legal=cookies</loc>
+    <lastmod>2026-05-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+  <url>
+    <loc>https://hipera.es/?legal=devoluciones</loc>
+    <lastmod>2026-05-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://hipera.es/?legal=envios</loc>
+    <lastmod>2026-05-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>

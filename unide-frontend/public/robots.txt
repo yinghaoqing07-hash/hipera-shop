@@ -1,0 +1,34 @@
+# =====================================================================
+# robots.txt — HIPERA (https://hipera.es)
+# =====================================================================
+# Política: indexación abierta del contenido público, bloqueo del
+# panel de administración y de los flujos transaccionales que no
+# tienen valor SEO (login, registro, query strings de seguimiento).
+# =====================================================================
+
+User-agent: *
+Allow: /
+
+# Panel de administración: contenido no público, prohibido indexar.
+Disallow: /admin
+Disallow: /admin/
+
+# Páginas con fricción de auth o que no aportan valor a búsquedas
+# orgánicas. No bloqueamos /login y /register por seguridad (Google
+# no debería intentar autenticarse), sólo por evitar contenido de
+# baja calidad en el índice.
+Disallow: /login
+Disallow: /register
+
+# Páginas con query strings de seguimiento de pedido individual —
+# son enlaces personales que llegan por email, no contenido público.
+# Los buscadores no deben rastrearlos para no exponer IDs ajenos.
+Disallow: /?order=
+Disallow: /*?order=
+
+# Endpoints técnicos de Cloudflare Turnstile (paranoid: no deberían
+# salir nunca de challenges.cloudflare.com, pero por si acaso).
+Disallow: /cdn-cgi/
+
+# Sitemap: ubicación canónica.
+Sitemap: https://hipera.es/sitemap.xml

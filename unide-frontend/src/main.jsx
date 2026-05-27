@@ -20,6 +20,7 @@ import App from './App';
 const AdminApp = lazy(() => import('./Admin'));
 const Login = lazy(() => import('./Login'));
 const Register = lazy(() => import('./Register'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 // Pantalla de carga genérica para chunks. Color neutro para no chocar
 // con el tema rojo de HIPERA si el chunk pertenece a admin (gris) o
@@ -178,8 +179,10 @@ root.render(
             }
           />
 
-          {/* 404 处理 */}
-          <Route path="*" element={<App />} />
+          {/* Página 404 personalizada (antes era catch-all a <App />,
+              lo que provocaba "soft 404" en Google: cualquier URL
+              desconocida devolvía contenido de home con HTTP 200). */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     </BrowserRouter>
