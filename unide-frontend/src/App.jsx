@@ -506,14 +506,16 @@ const IconByName = ({ name, size=24, className }) => {
   return icons[name] || <Package size={size} className={className}/>;
 };
 
-// --- 新增：支付方式选择弹窗组件 ---
+// --- [OBSOLETO / SIN USO desde 2026-05-29] PaymentModal ---
+// Los métodos de pago se renderizan ahora INLINE en la página de checkout
+// (bloque "Método de pago" dentro de {page === "checkout"}). Este modal ya
+// NO se monta en ningún sitio: se eliminó porque (a) su botón X no
+// respondía con fiabilidad y (b) tras cancelar en Stripe el cliente debe
+// volver a esta misma página para reintentar, no a una ventana flotante.
+// Se conserva temporalmente como referencia; el bundler lo descarta por
+// tree-shaking al no estar referenciado. Eliminar en una limpieza futura.
+// eslint-disable-next-line no-unused-vars
 const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment, setSelectedPayment, isStorePickup = false, isLoggedIn = false, onLoginNeeded }) => {
-  // Decisión anti-abuso (2026-05-27): contra reembolso y pago en tienda
-  // sólo se ofrecen a usuarios autenticados. Bizum permanece disponible
-  // para anónimos porque implica transferencia previa (fricción real).
-  // En lugar de ocultar el botón, lo dejamos visible con overlay
-  // "Iniciar sesión" para que el cliente vea TODA la oferta y entienda
-  // por qué necesita una cuenta. Mejor UX que ocultar opciones.
   const contraReembolsoLocked = !isLoggedIn;
   const handleContraReembolsoClick = () => {
     if (contraReembolsoLocked) {
@@ -800,8 +802,10 @@ export default function App() {
   });
   
   // New Payment States
-  const [showPayment, setShowPayment] = useState(false); // 控制弹窗
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // 控制支付Loading
+  // Aviso de "pago cancelado/incompleto" mostrado en la página de checkout
+  // cuando el cliente vuelve de Stripe sin completar el pago (?pago=cancelado).
+  const [paymentCancelledNotice, setPaymentCancelledNotice] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
   // Cloudflare Turnstile: ref al widget invisible montado en checkout.
   // Se ejecuta justo antes de POST /api/orders para acompañar al
@@ -875,7 +879,13 @@ export default function App() {
       window.history.replaceState({ app: true }, '', window.location.pathname);
     } else if (pago === 'cancelado') {
       try { sessionStorage.removeItem('hipera_pending_stripe'); } catch { /* ignore */ }
-      toast('Pago cancelado. Tu carrito sigue intacto, puedes intentarlo de nuevo.', { icon: 'ℹ️', duration: 6000 });
+      // Volvemos directamente a la página de checkout (no al inicio) con
+      // un aviso persistente para reintentar. El carrito se restaura desde
+      // localStorage y los datos de contacto desde lastAddress (otro
+      // useEffect), así que el cliente puede reintentar sin reescribir nada.
+      setPaymentCancelledNotice(true);
+      setPage('checkout');
+      setHistory(['home', 'cart', 'checkout']);
       window.history.replaceState({ app: true }, '', window.location.pathname);
     }
   }, []);
@@ -1106,6 +1116,8 @@ export default function App() {
   const isEmailFormatOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
 
   const handleInitiateCheckout = async () => {
+    // Si veníamos de un pago cancelado, ocultamos el aviso al reintentar.
+    setPaymentCancelledNotice(false);
     // Validación específica por modalidad: la dirección sólo es
     // obligatoria para envío a domicilio. En recogida en tienda el
     // pedido se entrega físicamente en HIPERA (Paseo del Sol 1) y la
@@ -1126,6 +1138,12 @@ export default function App() {
     }
     if (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted) {
       toast.error("Debes aceptar la Política de Privacidad y los Términos y Condiciones.");
+      return;
+    }
+    // El método de pago ahora se elige en la propia página (sin modal).
+    // Exigimos selección explícita antes de confirmar.
+    if (!selectedPayment) {
+      toast.error("Elige un método de pago para continuar.");
       return;
     }
     // Anti-abuso (2026-05-27): la recogida en tienda implica que el
@@ -1165,8 +1183,9 @@ export default function App() {
         if (!import.meta.env.PROD) console.warn('[checkout] recordAcceptance:', e?.message);
       });
     }
-    setSelectedPayment(""); // 重置支付方式选择
-    setShowPayment(true); // 打开支付弹窗
+    // Pago inline (sin modal): confirmamos directamente con el método ya
+    // seleccionado en la misma página de checkout.
+    await handleConfirmPayment();
   };
 
   // --- Step 2: Simulate Payment & Save Order ---
@@ -1331,7 +1350,6 @@ export default function App() {
       setCart([]);
       setCheckoutForm(prev => ({ ...prev, note: "" }));
       setSelectedPayment(""); // 重置支付方式
-      setShowPayment(false); // 关闭弹窗
       
       // 刷新产品列表（通过API）
       const pData = await apiClient.getProducts();
@@ -1344,15 +1362,13 @@ export default function App() {
       // genérico).
       if (e?.status === 401 && (e?.code === 'AUTH_REQUIRED' || e?.code === 'AUTH_INVALID')) {
         toast.error(e.message || 'Inicia sesión para continuar');
-        setShowPayment(false);
         setSelectedPayment('');
         setTimeout(() => navigate('/login'), 600);
       } else if (e?.status === 429) {
         // Rate limit (IP) o limite por teléfono — mensaje servido por
-        // backend, cerramos el modal para que el cliente pueda
-        // revisar/editar el carrito antes de reintentar.
+        // backend. El cliente puede revisar/editar el carrito antes de
+        // reintentar (los métodos de pago siguen visibles en la página).
         toast.error(e.message || 'Demasiados pedidos. Espera unos minutos.', { duration: 6000 });
-        setShowPayment(false);
         setSelectedPayment('');
       } else {
         toast.error(e.message);
@@ -1429,29 +1445,6 @@ export default function App() {
       <CookieConsent onShowPolicy={() => { setLegalType("cookies"); navTo("legal"); }} />
 
       {/* Payment Modal */}
-      {showPayment && (
-        <PaymentModal
-           total={total}
-           isStorePickup={isStorePickup}
-           isLoggedIn={!!user}
-           onLoginNeeded={() => {
-             // Cerramos el modal y navegamos a /login. Los datos del
-             // checkout (email, address, phone, deliveryMethod) viven
-             // en checkoutForm + localStorage.lastAddress; el cart
-             // también se persiste, así que al volver el cliente
-             // puede continuar sin perder nada.
-             setShowPayment(false);
-             setSelectedPayment("");
-             toast('Inicia sesión para usar este método de pago', { icon: 'ℹ️' });
-             navigate('/login');
-           }}
-           onConfirm={handleConfirmPayment}
-           isProcessing={isProcessingPayment}
-           selectedPayment={selectedPayment}
-           setSelectedPayment={setSelectedPayment}
-        />
-      )}
-
       {/* HEADER */}
       <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-40 transition-all">
         <div className="px-4 py-3">
@@ -2124,6 +2117,16 @@ export default function App() {
           <div className="space-y-6">
              {/* Aviso si el cliente intenta comprar fuera de horario */}
              <AfterHoursNotice context="checkout" />
+             {/* Aviso de pago cancelado/incompleto al volver de Stripe */}
+             {paymentCancelledNotice && (
+               <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 flex items-start gap-3">
+                 <div className="p-2 bg-red-100 text-red-600 rounded-lg flex-shrink-0"><X size={18}/></div>
+                 <div className="text-sm">
+                   <p className="font-bold text-red-800">El pago no se completó</p>
+                   <p className="text-red-700 mt-0.5">Tu carrito y tus datos siguen aquí. Revisa el método de pago y vuelve a intentarlo cuando quieras.</p>
+                 </div>
+               </div>
+             )}
              {/* 免费商品选择 - 当订单 >= 65 欧元时显示 */}
              {subtotal >= 65 && (
                <div className="bg-gradient-to-br from-red-50 to-pink-50 p-5 rounded-2xl shadow-sm border-2 border-red-200">
@@ -2304,31 +2307,167 @@ export default function App() {
                </label>
              )}
 
-            {/* Continuar al Pago.
-                Decisión UX (2026-05-26): NO usamos `disabled` nativo. Si el
-                botón quedaba bloqueado el cliente no veía por qué (sólo un
-                fade visual) y reportaba "no pasa nada al pulsar". En su
-                lugar el botón siempre es clicable y `handleInitiateCheckout`
-                muestra toasts específicos por cada campo faltante (email,
-                dirección, teléfono, casilla de consentimiento). Mantenemos
-                el efecto visual de "no listo" mediante opacidad y cursor
-                para no perder la señal de incompleto. */}
+            {/* =====================================================
+                Método de pago (inline, en la propia página).
+                -----------------------------------------------------
+                Antes vivía en un modal aparte (PaymentModal). Se movió
+                aquí (2026-05-29) por dos motivos de UX reportados:
+                  - El modal tenía una X que no respondía bien.
+                  - Tras cancelar en Stripe, el cliente quería volver a
+                    ESTA página y reintentar, no a un modal/inicio.
+                Disponibilidad por método:
+                  - Stripe: todos (pago anticipado, sin riesgo de abuso).
+                  - Contra reembolso / pago en tienda: requiere cuenta
+                    (sin prepago → riesgo de no-show). Anónimo: al pulsar
+                    redirige a /login.
+                  - Bizum manual: todos (transferencia previa = fricción).*/}
+            <div className="bg-white p-5 rounded-2xl shadow-sm space-y-3 border border-gray-100">
+               <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                 <Wallet size={18} className="text-red-600"/> Método de pago
+               </h3>
+
+               {/* Stripe (tarjeta / Bizum / Apple-Google Pay) */}
+               <button
+                 type="button"
+                 onClick={() => setSelectedPayment('stripe')}
+                 className={`relative w-full p-4 rounded-xl border-2 transition-all text-left ${
+                   selectedPayment === 'stripe'
+                     ? 'border-indigo-600 bg-indigo-50'
+                     : 'border-gray-200 hover:border-gray-300 bg-white'
+                 }`}
+               >
+                 <span className="absolute -top-2 right-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow">Recomendado</span>
+                 <div className="flex items-center gap-3">
+                   <div className={`p-2 rounded-lg ${selectedPayment === 'stripe' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                     <CreditCard size={20}/>
+                   </div>
+                   <div className="flex-1">
+                     <p className="font-bold text-gray-900">Tarjeta, Bizum, Apple/Google Pay</p>
+                     <p className="text-xs text-gray-500 mt-0.5">Pago seguro online · procesado por Stripe</p>
+                   </div>
+                   {selectedPayment === 'stripe' && <CheckCircle2 size={20} className="text-indigo-600"/>}
+                 </div>
+               </button>
+
+               {/* Contra reembolso / pago en tienda (requiere cuenta) */}
+               <button
+                 type="button"
+                 aria-disabled={!user}
+                 onClick={() => {
+                   if (!user) {
+                     toast('Inicia sesión para usar este método de pago', { icon: 'ℹ️' });
+                     setTimeout(() => navigate('/login'), 800);
+                     return;
+                   }
+                   setSelectedPayment('contra_reembolso');
+                 }}
+                 className={`relative w-full p-4 rounded-xl border-2 transition-all text-left ${
+                   !user
+                     ? 'border-gray-200 bg-gray-50 cursor-pointer'
+                     : selectedPayment === 'contra_reembolso'
+                       ? 'border-blue-600 bg-blue-50'
+                       : 'border-gray-200 hover:border-gray-300 bg-white'
+                 }`}
+               >
+                 <div className={`flex items-center gap-3 ${!user ? 'opacity-60' : ''}`}>
+                   <div className={`p-2 rounded-lg ${selectedPayment === 'contra_reembolso' && user ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                     <Wallet size={20}/>
+                   </div>
+                   <div className="flex-1">
+                     <p className="font-bold text-gray-900">{isStorePickup ? 'Pagar en tienda al recoger' : 'Pago Contra Reembolso'}</p>
+                     <p className="text-xs text-gray-500 mt-0.5">{isStorePickup ? 'En efectivo o tarjeta en HIPERA' : 'Paga cuando recibas tu pedido'}</p>
+                   </div>
+                   {selectedPayment === 'contra_reembolso' && user && <CheckCircle2 size={20} className="text-blue-600"/>}
+                 </div>
+                 {!user && (
+                   <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                     <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md font-semibold">
+                       <Lock size={12}/> Requiere cuenta
+                     </span>
+                     <span className="text-blue-600 font-semibold underline">Iniciar sesión</span>
+                   </div>
+                 )}
+               </button>
+
+               {/* Bizum manual */}
+               <button
+                 type="button"
+                 onClick={() => setSelectedPayment('bizum')}
+                 className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
+                   selectedPayment === 'bizum'
+                     ? 'border-green-600 bg-green-50'
+                     : 'border-gray-200 hover:border-gray-300 bg-white'
+                 }`}
+               >
+                 <div className="flex items-center gap-3">
+                   <div className={`p-2 rounded-lg ${selectedPayment === 'bizum' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                     <Smartphone size={20}/>
+                   </div>
+                   <div className="flex-1">
+                     <p className="font-bold text-gray-900">Bizum manual</p>
+                     <p className="text-xs text-gray-500 mt-0.5">Transferencia al número de la tienda</p>
+                   </div>
+                   {selectedPayment === 'bizum' && <CheckCircle2 size={20} className="text-green-600"/>}
+                 </div>
+               </button>
+
+               {selectedPayment === 'bizum' && (
+                 <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs text-green-700">
+                   <p className="font-bold mb-1">📱 Instrucciones Bizum:</p>
+                   <p>Envía el pago al número: <strong>640517893</strong></p>
+                   <p className="mt-1">Concepto: Pedido HIPERA</p>
+                 </div>
+               )}
+               {selectedPayment === 'contra_reembolso' && user && (
+                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+                   <p className="font-bold mb-1">{isStorePickup ? '🏪 Pago en tienda:' : '💵 Pago contra reembolso:'}</p>
+                   <p>
+                     {isStorePickup
+                       ? 'Pagarás el importe total cuando recojas el pedido en HIPERA (Paseo del Sol 1, Meco). Aceptamos efectivo y tarjeta.'
+                       : 'Pagarás el importe total cuando recibas tu pedido en casa.'}
+                   </p>
+                 </div>
+               )}
+            </div>
+
+            {/* Botón de acción.
+                Decisión UX (2026-05-26): NO usamos `disabled` nativo (salvo
+                mientras procesa). Si el botón quedaba bloqueado el cliente no
+                veía por qué; en su lugar `handleInitiateCheckout` muestra
+                toasts específicos por cada requisito faltante (email,
+                dirección, teléfono, consentimiento, método de pago).
+                Mantenemos el efecto visual de "no listo" con opacidad. */}
             {(() => {
-              // En store_pickup no se exige address (el pedido se
-              // recoge en HIPERA y no hay transporte). Mantenemos el
-              // resto de campos como obligatorios.
+              // En store_pickup no se exige address. El resto de campos +
+              // método de pago son obligatorios para considerar "listo".
               const checkoutReady =
                 isEmailFormatOk(checkoutForm.email) &&
                 (isStorePickup || checkoutForm.address) &&
                 checkoutForm.phone &&
-                (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted);
+                (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted) &&
+                !!selectedPayment;
+              const label = isProcessingPayment
+                ? 'Procesando…'
+                : !selectedPayment
+                  ? 'Elige un método de pago'
+                  : selectedPayment === 'stripe'
+                    ? `Pagar €${total.toFixed(2)} de forma segura`
+                    : selectedPayment === 'contra_reembolso'
+                      ? `Confirmar Pedido €${total.toFixed(2)}`
+                      : `Confirmar con Bizum €${total.toFixed(2)}`;
               return (
                 <button
                   onClick={handleInitiateCheckout}
+                  disabled={isProcessingPayment}
                   aria-disabled={!checkoutReady}
-                  className={`w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 active:scale-95 transition-transform flex justify-center items-center gap-2 ${checkoutReady ? '' : 'opacity-50 shadow-none cursor-not-allowed'}`}
+                  className={`w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 active:scale-95 transition-transform flex justify-center items-center gap-2 disabled:active:scale-100 ${checkoutReady && !isProcessingPayment ? '' : 'opacity-50 shadow-none cursor-not-allowed'}`}
                 >
-                  Continuar al Pago <Wallet size={20}/>
+                  {isProcessingPayment
+                    ? <Loader2 size={20} className="animate-spin"/>
+                    : selectedPayment === 'stripe'
+                      ? <Lock size={18}/>
+                      : <Wallet size={20}/>}
+                  {label}
                 </button>
               );
             })()}
