@@ -153,6 +153,17 @@ class ApiClient {
     });
   }
 
+  // Pago con Stripe (tarjeta / Bizum / Apple-Google Pay).
+  // Crea el pedido en 'Esperando pago' (sin descontar stock) y devuelve
+  // { url, order_id } para redirigir a la página de Checkout alojada por
+  // Stripe. La confirmación real llega por webhook, NO por la success_url.
+  async createStripeSession(orderData) {
+    return this.request('/checkout/stripe-session', {
+      method: 'POST',
+      body: JSON.stringify(orderData),
+    });
+  }
+
   async getUserOrders(userId) {
     return this.request(`/orders/user/${userId}`);
   }

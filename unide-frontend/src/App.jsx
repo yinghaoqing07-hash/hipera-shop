@@ -544,6 +544,33 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
 
            {/* 支付方式选择 */}
            <div className="space-y-3">
+              {/* Pago online con Stripe (tarjeta / Bizum / Apple-Google Pay).
+                  Recomendado: pago anticipado y seguro, sin fricción.
+                  Disponible para todos (anónimos incluidos): al cobrarse
+                  por adelantado no hay riesgo de abuso por impago. */}
+              <button
+                onClick={() => setSelectedPayment('stripe')}
+                className={`relative w-full p-4 rounded-xl border-2 transition-all text-left ${
+                  selectedPayment === 'stripe'
+                    ? 'border-indigo-600 bg-indigo-50'
+                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <span className="absolute -top-2 right-3 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow">Recomendado</span>
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${selectedPayment === 'stripe' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                    <CreditCard size={20}/>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-gray-900">Tarjeta, Bizum, Apple/Google Pay</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Pago seguro online · procesado por Stripe</p>
+                  </div>
+                  {selectedPayment === 'stripe' && (
+                    <CheckCircle2 size={20} className="text-indigo-600"/>
+                  )}
+                </div>
+              </button>
+
               {/* 货到付款 / Pago en tienda */}
               <button
                 onClick={handleContraReembolsoClick}
@@ -592,8 +619,8 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
                     <Smartphone size={20}/>
                   </div>
                   <div className="flex-1">
-                    <p className="font-bold text-gray-900">Bizum</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Pago instantáneo desde tu móvil</p>
+                    <p className="font-bold text-gray-900">Bizum manual</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Transferencia al número de la tienda</p>
                   </div>
                   {selectedPayment === 'bizum' && (
                     <CheckCircle2 size={20} className="text-green-600"/>
@@ -631,6 +658,8 @@ const PaymentModal = ({ total, onClose, onConfirm, isProcessing, selectedPayment
            >
              {isProcessing ? (
                <><Loader2 className="animate-spin"/> Procesando pedido...</>
+             ) : selectedPayment === 'stripe' ? (
+               <><Lock size={18}/> Pagar €{total.toFixed(2)} de forma segura</>
              ) : selectedPayment === 'contra_reembolso' ? (
                <>Confirmar Pedido €{total.toFixed(2)}</>
              ) : (
@@ -830,6 +859,24 @@ export default function App() {
       setLegalType(legalParam);
       setPage('legal');
       setHistory(['home', 'legal']);
+    }
+    // 3) Retorno desde Stripe Checkout (?pago=ok | ?pago=cancelado).
+    //    OJO: la success_url NO es prueba de pago (el cliente podría
+    //    manipular la URL). La confirmación real la da el webhook. Aquí
+    //    sólo damos feedback de UX y limpiamos el carrito en éxito.
+    const pago = urlParams.get('pago');
+    if (pago === 'ok') {
+      try { sessionStorage.removeItem('hipera_pending_stripe'); } catch { /* ignore */ }
+      setCart([]);
+      setCheckoutForm((prev) => ({ ...prev, note: '' }));
+      setSelectedGift(null);
+      toast.success('¡Pago recibido! Te hemos enviado la confirmación por email.', { duration: 7000 });
+      // Limpiamos los parámetros de la URL para que recargar no repita el toast.
+      window.history.replaceState({ app: true }, '', window.location.pathname);
+    } else if (pago === 'cancelado') {
+      try { sessionStorage.removeItem('hipera_pending_stripe'); } catch { /* ignore */ }
+      toast('Pago cancelado. Tu carrito sigue intacto, puedes intentarlo de nuevo.', { icon: 'ℹ️', duration: 6000 });
+      window.history.replaceState({ app: true }, '', window.location.pathname);
     }
   }, []);
 
@@ -1163,6 +1210,32 @@ export default function App() {
         turnstileToken = (await turnstileRef.current?.executeAsync?.()) || null;
       } catch {
         turnstileToken = null;
+      }
+
+      // --- Rama Stripe: pago anticipado online (tarjeta/Bizum/wallets) ---
+      // No creamos el pedido aquí: el backend lo crea en 'Esperando pago'
+      // y nos devuelve la URL de Checkout. Redirigimos a Stripe; la
+      // confirmación llega por webhook. NO vaciamos el carrito todavía
+      // (si el cliente cancela en Stripe, lo conserva para reintentar;
+      // el pedido 'Esperando pago' es inofensivo y caduca en 1 h).
+      if (selectedPayment === 'stripe') {
+        const { url } = await apiClient.createStripeSession({
+          user_id: user?.id || null,
+          customer_email: checkoutForm.email,
+          address: isStorePickup ? '' : checkoutForm.address,
+          phone: checkoutForm.phone,
+          note: checkoutForm.note,
+          total: total,
+          delivery_method: checkoutForm.deliveryMethod,
+          items: finalCart,
+          turnstile_token: turnstileToken,
+        });
+        if (!url) throw new Error('No se pudo iniciar el pago. Inténtalo de nuevo.');
+        // Marca para mostrar feedback al volver y limpiar el carrito.
+        try { sessionStorage.setItem('hipera_pending_stripe', '1'); } catch { /* ignore */ }
+        toast.loading('Redirigiendo al pago seguro…', { duration: 4000 });
+        window.location.href = url; // salida de la SPA → Stripe Checkout
+        return; // no seguimos con el flujo de pedido normal
       }
 
       // Para recogida en tienda dejamos address en blanco en el payload:
