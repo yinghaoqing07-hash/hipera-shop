@@ -1,0 +1,15 @@
+{
+  "name": "hipera-print-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agente de impresion de tickets para HIPERA (Xprinter XP-80T, Windows). Sondea el backend y manda ESC/POS al spooler de Windows.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test-ticket": "node index.js --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

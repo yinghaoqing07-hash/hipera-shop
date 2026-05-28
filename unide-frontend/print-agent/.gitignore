@@ -1,0 +1,5 @@
+# Secretos y estado local del agente: NUNCA subir a git.
+.env
+printed.json
+node_modules/
+*.log
