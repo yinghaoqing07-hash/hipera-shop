@@ -14,6 +14,11 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
 import { sendOrderConfirmationEmail } from './services/email.js';
+import {
+  getStripe,
+  buildCheckoutLineItems,
+  resolveStripePaymentLabel,
+} from './services/stripe.js';
 
 dotenv.config();
 
@@ -268,6 +273,59 @@ app.get('/api/health', async (_req, res) => {
 app.use((req, res, next) => {
   res.header('X-Content-Type-Options', 'nosniff');
   next();
+});
+
+// =====================================================================
+// Stripe Webhook — DEBE registrarse ANTES de express.json()
+// =====================================================================
+// La verificación de firma de Stripe (stripe.webhooks.constructEvent)
+// requiere el cuerpo de la petición SIN PARSEAR (raw Buffer). Si
+// express.json() lo parsea primero, la firma deja de coincidir y todos
+// los webhooks fallan con 400. Por eso esta ruta usa express.raw() y se
+// registra aquí, antes del parser JSON global.
+//
+// El handler debe responder 2xx rápido. Separamos:
+//   - Crítico (actualizar pedido a pagado): si falla, devolvemos 500 y
+//     Stripe reintenta (no perdemos la confirmación de pago).
+//   - Best-effort (email, impresión): se capturan internamente; su fallo
+//     NO provoca reintentos en bucle (el pago ya está confirmado).
+//
+// URL a configurar en el panel de Stripe (Developers → Webhooks):
+//   https://hipera-shop-production.up.railway.app/api/stripe/webhook
+// Apuntamos directo a Railway (no a hipera.es) para que el proxy de
+// Vercel no toque el cuerpo y rompa la firma.
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const stripe = getStripe();
+  const whSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripe || !whSecret) {
+    console.warn('[stripe] webhook recibido pero Stripe no está configurado (falta key o webhook secret)');
+    return res.status(503).send('Stripe not configured');
+  }
+
+  let event;
+  try {
+    const sig = req.headers['stripe-signature'];
+    event = stripe.webhooks.constructEvent(req.body, sig, whSecret);
+  } catch (err) {
+    console.error('[stripe] firma de webhook inválida:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      // Puede lanzar si la actualización crítica en BD falla → 500 →
+      // Stripe reintenta. Email/impresión son best-effort internamente.
+      await handleStripeCheckoutCompleted(event.data.object);
+    } else if (event.type === 'checkout.session.expired') {
+      await handleStripeCheckoutExpired(event.data.object);
+    }
+    // Otros eventos: los aceptamos con 200 sin procesar.
+    return res.json({ received: true });
+  } catch (e) {
+    console.error('[stripe] error crítico procesando webhook:', e?.message || e);
+    // 500 → Stripe reintentará el evento (no perdemos la confirmación).
+    return res.status(500).json({ error: 'internal' });
+  }
 });
 
 app.use(express.json());
@@ -571,6 +629,176 @@ const VALID_DELIVERY_METHODS = ['home_delivery', 'store_pickup'];
 const UNCOMPLETED_ORDER_STATUSES = ['Procesando', 'Pendiente de Pago'];
 const MAX_UNCOMPLETED_PER_PHONE_24H = 2;
 
+// =====================================================================
+// deductStockForItems — descuento de stock reutilizable
+// =====================================================================
+// Extraído para que el flujo de Stripe (webhook, tras confirmar pago)
+// pueda descontar stock con la misma lógica que POST /api/orders, pero
+// SIN abortar con 400 (el cliente ya pagó: si falta stock, lo
+// registramos para revisión manual en vez de rechazar). Devuelve la
+// lista de incidencias para que el llamador decida qué hacer.
+//
+// Nota: POST /api/orders mantiene su propio bucle inline (comportamiento
+// histórico: aborta con 400 si falta stock ANTES de cobrar). No lo
+// tocamos para no alterar ese flujo ya probado.
+async function deductStockForItems(items) {
+  const issues = [];
+  for (const item of items || []) {
+    if (item?.isService || item?.isGift) continue;
+    const qty = Number(item?.quantity) || 0;
+    if (qty <= 0) continue;
+
+    const { data: product, error: fetchErr } = await supabase
+      .from('products')
+      .select('stock')
+      .eq('id', item.id)
+      .single();
+
+    if (fetchErr || !product) {
+      console.warn(`[stock] producto no encontrado: id=${item.id}, name=${item.name}`);
+      continue;
+    }
+
+    const stock = Number(product.stock);
+    if (stock < qty) {
+      issues.push({ id: item.id, name: item.name, stock, requested: qty });
+      continue;
+    }
+
+    const newStock = stock - qty;
+    const updatePayload = { stock: newStock };
+    if (newStock === 0) updatePayload.visible = false;
+    await supabase.from('products').update(updatePayload).eq('id', item.id);
+  }
+  return { issues };
+}
+
+// =====================================================================
+// Handlers de webhook de Stripe
+// =====================================================================
+// (Declarados como function → hoisted, usables por la ruta de webhook
+// que se registró más arriba, antes de express.json().)
+
+// checkout.session.completed → confirma el pago de un pedido.
+// Idempotente: si el pedido ya está 'Procesando'/'Entregado' no
+// re-procesa (Stripe puede reenviar el evento). Lanza sólo en fallos
+// críticos de BD para que Stripe reintente.
+async function handleStripeCheckoutCompleted(session) {
+  if (session.payment_status !== 'paid') {
+    console.log('[stripe] checkout completado pero no pagado:', session.id, session.payment_status);
+    return;
+  }
+
+  const orderId = session.metadata?.order_id;
+  if (!orderId) {
+    console.error('[stripe] sesión sin metadata.order_id:', session.id);
+    return; // no podemos reconciliar; no tiene sentido reintentar
+  }
+
+  const { data: order, error: fErr } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .single();
+
+  if (fErr || !order) {
+    console.error('[stripe] pedido no encontrado para sesión:', orderId, fErr?.message);
+    return; // pedido inexistente: reintentar no ayuda
+  }
+
+  // Idempotencia: ya procesado.
+  if (order.status === 'Procesando' || order.status === 'Entregado') {
+    console.log('[stripe] pedido ya procesado (idempotente):', orderId);
+    return;
+  }
+
+  // Resolver el método de pago real (tarjeta / bizum / ...).
+  let paymentLabel = 'Stripe';
+  const stripe = getStripe();
+  try {
+    const piId = typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id;
+    if (stripe && piId) {
+      const pi = await stripe.paymentIntents.retrieve(piId, { expand: ['latest_charge'] });
+      const type = pi?.latest_charge?.payment_method_details?.type;
+      paymentLabel = resolveStripePaymentLabel(type);
+    }
+  } catch (e) {
+    console.warn('[stripe] no se pudo resolver el método de pago:', e?.message);
+  }
+
+  const piIdStr = typeof session.payment_intent === 'string'
+    ? session.payment_intent
+    : (session.payment_intent?.id || null);
+
+  // CRÍTICO: marcar pagado. Si esto falla, lanzamos → webhook 500 →
+  // Stripe reintenta. Hacemos el UPDATE antes de descontar stock para
+  // minimizar la ventana de doble procesamiento.
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'Procesando',
+      payment_method: paymentLabel,
+      stripe_payment_intent: piIdStr,
+      confirmed_at: new Date().toISOString(), // dispara la alerta de nuevos pedidos AHORA
+    })
+    .eq('id', orderId);
+  if (uErr) {
+    throw new Error('No se pudo actualizar el pedido a pagado: ' + uErr.message);
+  }
+
+  // Descontar stock (best-effort: el cliente ya pagó, no podemos
+  // rechazar; las incidencias se registran para revisión manual).
+  try {
+    const { issues } = await deductStockForItems(order.items || []);
+    if (issues.length) {
+      console.warn('[stripe] STOCK INSUFICIENTE tras pago (revisar manualmente) pedido', orderId, JSON.stringify(issues));
+    }
+  } catch (e) {
+    console.error('[stripe] error al descontar stock (pedido pagado):', e?.message);
+  }
+
+  // Objeto del pedido ya confirmado para email/impresión.
+  const fulfilledOrder = { ...order, status: 'Procesando', payment_method: paymentLabel };
+
+  // Email de confirmación (best-effort).
+  if (order.customer_email) {
+    sendOrderConfirmationEmail(fulfilledOrder, order.customer_email).catch((err) => {
+      console.error('[stripe][email] fallo (no bloquea):', err?.message || err);
+    });
+  }
+
+  // Impresión automática del ticket (best-effort).
+  if (process.env.AUTO_PRINT_ENABLED !== 'false') {
+    autoPrintTicket(fulfilledOrder).catch((err) => {
+      console.error('[stripe][print] fallo (no bloquea):', err?.message || err);
+    });
+  }
+
+  console.log('[stripe] pedido confirmado y procesado:', orderId, '·', paymentLabel);
+}
+
+// checkout.session.expired → la sesión caducó sin pagar. Cancelamos el
+// pedido SOLO si sigue 'Esperando pago' (nunca pisamos un pedido que ya
+// se confirmó por otra vía).
+async function handleStripeCheckoutExpired(session) {
+  const orderId = session.metadata?.order_id;
+  if (!orderId) return;
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, status')
+    .eq('id', orderId)
+    .single();
+  if (!order) return;
+
+  if (order.status === 'Esperando pago') {
+    await supabase.from('orders').update({ status: 'Cancelado' }).eq('id', orderId);
+    console.log('[stripe] sesión caducada → pedido cancelado:', orderId);
+  }
+}
+
 app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) => {
   try {
     let {
@@ -754,6 +982,11 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
     }
 
     // Create order
+    // confirmed_at = now: estos pedidos (efectivo/COD/Bizum manual) son
+    // accionables al instante, así que deben disparar la alerta del Admin
+    // de inmediato (comportamiento previo a Stripe). Sólo el flujo Stripe
+    // ('Esperando pago') deja confirmed_at en NULL hasta cobrar.
+    const nowIso = new Date().toISOString();
     const { data, error } = await supabase
       .from('orders')
       .insert([{
@@ -767,7 +1000,8 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
         items,
         customer_email: hasValidEmail ? normalizedEmail : null,
         delivery_method: resolvedDeliveryMethod,
-        created_at: new Date().toISOString()
+        created_at: nowIso,
+        confirmed_at: nowIso
       }])
       .select()
       .single();
@@ -795,6 +1029,178 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================================
+// POST /api/checkout/stripe-session — inicia un pago con Stripe
+// =====================================================================
+// Fase 1 del flujo de pago con tarjeta/Bizum por Stripe:
+//   - Corre las mismas defensas anti-abuso que POST /api/orders
+//     (turnstile + rate limit por IP + límite por teléfono).
+//   - Crea el pedido en estado 'Esperando pago' SIN descontar stock.
+//   - Crea una sesión de Checkout (página alojada por Stripe) con las
+//     line_items del carrito y metadata.order_id.
+//   - Devuelve { url } para que el frontend redirija a Stripe.
+//
+// La confirmación del pago llega DESPUÉS por webhook (fase 2). NO se
+// confía en la success_url como prueba de pago.
+//
+// A diferencia de contra_reembolso/store_pickup, aquí NO exigimos login:
+// el pago es anticipado (la tarjeta se cobra antes de preparar nada),
+// así que el riesgo de abuso por impago es nulo. Si hay sesión, la
+// vinculamos igualmente (user_id) para el historial del cliente.
+app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, async (req, res) => {
+  try {
+    const stripe = getStripe();
+    if (!stripe) {
+      return res.status(503).json({
+        error: 'El pago con tarjeta no está disponible temporalmente. Prueba con Bizum o contacta con la tienda.',
+        code: 'STRIPE_DISABLED',
+      });
+    }
+
+    let {
+      user_id,
+      address,
+      phone,
+      note,
+      total,
+      items,
+      customer_email,
+      delivery_method,
+      turnstile_token,
+    } = req.body;
+
+    // Anti-abuso 0: Turnstile (permisivo si no hay secret configurado).
+    const turnstileResult = await verifyTurnstileToken(turnstile_token, req.ip);
+    if (!turnstileResult.ok) {
+      console.warn('[stripe] turnstile failed:', turnstileResult.error, 'ip:', req.ip);
+      return res.status(403).json({
+        error: 'Verificación de seguridad fallida. Recarga la página e inténtalo otra vez.',
+        code: 'TURNSTILE_FAILED',
+      });
+    }
+
+    const resolvedDeliveryMethod = VALID_DELIVERY_METHODS.includes(delivery_method)
+      ? delivery_method
+      : 'home_delivery';
+    const isStorePickup = resolvedDeliveryMethod === 'store_pickup';
+
+    // Validación de campos.
+    if (!phone || !total || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Faltan datos del pedido.' });
+    }
+    if (!isStorePickup && !address) {
+      return res.status(400).json({ error: 'La dirección de entrega es obligatoria para envío a domicilio.' });
+    }
+
+    const totalCents = Math.round(Number(total) * 100);
+    if (!Number.isFinite(totalCents) || totalCents <= 0) {
+      return res.status(400).json({ error: 'Importe del pedido inválido.' });
+    }
+
+    // Email obligatorio: Stripe lo usa para el recibo y nosotros para la
+    // confirmación transaccional.
+    const normalizedEmail = typeof customer_email === 'string'
+      ? customer_email.trim().toLowerCase()
+      : null;
+    const hasValidEmail = normalizedEmail && normalizedEmail.includes('@');
+    if (!hasValidEmail) {
+      return res.status(400).json({
+        error: 'Necesitamos un email válido para el pago y la confirmación.',
+        code: 'EMAIL_REQUIRED',
+      });
+    }
+
+    // Si viene sesión válida, vinculamos user_id (prevalece sobre el body).
+    const authHeader = req.headers.authorization || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (bearer) {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser(bearer);
+        if (authUser) user_id = authUser.id;
+      } catch { /* sesión inválida: seguimos como invitado */ }
+    }
+
+    // Anti-abuso 2: límite por teléfono (NO contamos 'Esperando pago':
+    // un checkout Stripe abandonado es inofensivo, sin stock descontado).
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentSamePhone, error: countErr } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('phone', phone)
+        .in('status', UNCOMPLETED_ORDER_STATUSES)
+        .gte('created_at', since);
+      if (!countErr && (recentSamePhone || []).length >= MAX_UNCOMPLETED_PER_PHONE_24H) {
+        return res.status(429).json({
+          error: 'Tienes pedidos pendientes con este teléfono. Espera a completarlos o contacta con la tienda.',
+          code: 'PHONE_PENDING_LIMIT',
+        });
+      }
+    } catch (e) {
+      console.warn('[stripe] phone check:', e?.message || e);
+    }
+
+    const finalAddress = isStorePickup
+      ? 'Recogida en tienda — Paseo del Sol 1, 28880 Meco (Madrid)'
+      : address;
+
+    // 1) Crear el pedido en 'Esperando pago' (sin descontar stock).
+    const { data: order, error: insErr } = await supabase
+      .from('orders')
+      .insert([{
+        user_id: user_id || null,
+        address: finalAddress,
+        phone,
+        note,
+        total,
+        status: 'Esperando pago',
+        payment_method: 'Tarjeta (Stripe)', // provisional; el webhook lo afina al método real
+        items,
+        customer_email: normalizedEmail,
+        delivery_method: resolvedDeliveryMethod,
+        created_at: new Date().toISOString(),
+      }])
+      .select()
+      .single();
+    if (insErr) throw insErr;
+
+    // 2) Construir line_items (cuadran exactamente con `total`).
+    const { line_items } = buildCheckoutLineItems(items, total);
+
+    // 3) Crear la sesión de Checkout. No fijamos payment_method_types:
+    //    Stripe muestra los métodos habilitados en el Dashboard
+    //    (tarjeta, Bizum, Apple/Google Pay) según elegibilidad.
+    const frontendUrl = process.env.FRONTEND_URL || 'https://hipera.es';
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items,
+      locale: 'es',
+      customer_email: normalizedEmail,
+      client_reference_id: order.id,
+      metadata: { order_id: order.id },
+      payment_intent_data: { metadata: { order_id: order.id } },
+      success_url: `${frontendUrl}/?pago=ok&pedido=${order.id}`,
+      cancel_url: `${frontendUrl}/?pago=cancelado&pedido=${order.id}`,
+      // Caduca en 1 h (entre el mínimo de 30 min y el máximo de 24 h).
+      expires_at: Math.floor(Date.now() / 1000) + 60 * 60,
+    });
+
+    // 4) Guardar el session_id en el pedido (reconciliación / depuración).
+    await supabase
+      .from('orders')
+      .update({ stripe_session_id: session.id })
+      .eq('id', order.id);
+
+    return res.json({ url: session.url, order_id: order.id });
+  } catch (error) {
+    console.error('[stripe] error creando sesión de checkout:', error?.message || error);
+    return res.status(500).json({
+      error: 'No se pudo iniciar el pago. Inténtalo de nuevo en unos segundos.',
+      code: 'STRIPE_SESSION_FAILED',
+    });
   }
 });
 
@@ -929,11 +1335,16 @@ app.get('/api/admin/orders/new', authenticateAdmin, async (req, res) => {
       return res.json({ orders: [], count: 0, server_time: serverTime });
     }
 
+    // Filtramos por confirmed_at (no created_at): un pedido suena cuando
+    // se vuelve accionable. Para efectivo/COD/Bizum manual confirmed_at =
+    // created_at (instantáneo); para Stripe es el momento del cobro. Así
+    // evitamos beeps por checkouts abandonados y no perdemos pagos reales.
     const { data, error } = await supabase
       .from('orders')
       .select('*')
-      .gt('created_at', new Date(sinceMs).toISOString())
-      .order('created_at', { ascending: false })
+      .not('confirmed_at', 'is', null)
+      .gt('confirmed_at', new Date(sinceMs).toISOString())
+      .order('confirmed_at', { ascending: false })
       .limit(limit);
 
     if (error) throw error;

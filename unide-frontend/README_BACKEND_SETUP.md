@@ -55,6 +55,18 @@ RESEND_REPLY_TO=info@hipera.es
 # 没设置时 POST /api/orders 不校验 token（仅适合本地开发；生产留空 = 反机器人失效）
 # 测试 secret（永远通过，仅 dev/CI 使用）：1x0000000000000000000000000000000AA
 TURNSTILE_SECRET_KEY=0x4AAAAAAAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Stripe（信用卡 / Bizum / Apple Pay / Google Pay）
+# 私钥只放这里（Railway），绝不进代码 / GitHub / 聊天记录。
+# 测试阶段用 test key（sk_test_...），跑通后再换 live key（sk_live_...）。
+# 1. https://dashboard.stripe.com → 右上角切到「测试模式」
+# 2. Developers → API keys → 复制 Secret key（sk_test_...）
+STRIPE_SECRET_KEY=<填你的-stripe-test-secret-key>
+# Webhook 签名密钥（Developers → Webhooks → 你的端点 → Signing secret）
+# 没配 = webhook 全部 503，付款无法确认。
+STRIPE_WEBHOOK_SECRET=<填你的-stripe-webhook-signing-secret>
+# 付款成功 / 取消后跳转回的前端地址（默认 https://hipera.es）
+FRONTEND_URL=https://hipera.es
 ```
 
 **重要提示：**
@@ -77,6 +89,22 @@ TURNSTILE_SECRET_KEY=0x4AAAAAAAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   - 前端对应变量：`VITE_TURNSTILE_SITE_KEY`（编译时注入，部署到 Vercel 也要配）
   - **必须同时配前后端**：只配前端会发 token 但后端不校验；只配后端会拒绝所有请求
   - Domain 限制要包含 `hipera.es`，本地开发可加 `localhost`
+- `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`：
+  - 都没设置 → 后端启动正常，但「信用卡」入口返回 503 `STRIPE_DISABLED`，
+    webhook 返回 503；其他付款方式（现金 / 货到付款 / 手动 Bizum）不受影响
+  - **两条都要配**：只配 `STRIPE_SECRET_KEY` 能创建付款页，但 webhook 收不到
+    签名密钥 → 付款无法确认（订单卡在「Esperando pago」）
+  - 测试用 `sk_test_...` + 对应测试模式的 `whsec_...`；上线换 `sk_live_...` +
+    live 模式的 `whsec_...`（test / live 的 webhook secret 不通用）
+  - 私钥**只**放 Railway 环境变量，绝不进代码 / GitHub
+- Stripe Webhook 设置（Stripe Dashboard → Developers → Webhooks → Add endpoint）：
+  - Endpoint URL：`https://hipera-shop-production.up.railway.app/api/stripe/webhook`
+    （直接指向 Railway，不要走 hipera.es，避免 Vercel 代理改动请求体导致验签失败）
+  - 监听事件：`checkout.session.completed` 和 `checkout.session.expired`
+  - 创建后复制「Signing secret」（`whsec_...`）填到 `STRIPE_WEBHOOK_SECRET`
+  - Stripe 后台开启的付款方式（Settings → Payment methods）决定结账页显示哪些：
+    勾选「卡」「Bizum」「Apple Pay」「Google Pay」即可，无需改代码
+- `FRONTEND_URL`：付款成功 / 取消后跳回的前端地址；没配默认 `https://hipera.es`
 
 ### 1.3 数据库迁移
 
@@ -90,7 +118,8 @@ supabase_migration_user_terms_acceptances.sql
 supabase_migration_user_consents.sql
 supabase_migration_user_consents_view_security.sql
 supabase_migration_orders_customer_email.sql       ← 订单邮件确认
-supabase_migration_orders_delivery_method.sql      ← 新增（到店自取）
+supabase_migration_orders_delivery_method.sql      ← 到店自取
+supabase_migration_orders_stripe.sql               ← 新增（Stripe 付款）
 ```
 
 `orders_customer_email` 添加 `customer_email` 列（nullable）用于：
@@ -104,6 +133,18 @@ supabase_migration_orders_delivery_method.sql      ← 新增（到店自取）
 - 历史订单自动获得 `home_delivery`，不影响读取
 - 后端 `POST /api/orders` 已接受该字段；前端 checkout 已有 UI 选择器
 - 邮件模板会按值切换"送货地址"vs"到店自取地址"
+
+`orders_stripe` 添加 Stripe 付款相关列：
+- `stripe_session_id`：Checkout 会话 ID（创建付款页时写入，用于对账 / 去重）
+- `stripe_payment_intent`：实际扣款的 PaymentIntent（webhook 确认时写入，是
+  「Stripe 付款」区别于「手动 Bizum」的凭据）
+- `confirmed_at`：订单「变为可处理」的时刻（**新订单提醒按它响铃**）
+  - 现金 / 货到付款 / 手动 Bizum：= `created_at`（下单即响，行为不变）
+  - Stripe：下单时为 NULL（不响），webhook 确认扣款后置为当前时间（才响）
+  - 没有这一列的话，按 `created_at` 过滤会导致：被遗弃的 Stripe 结账误响铃，
+    或真实付款的提醒丢失（webhook 晚 1-2 分钟到，`created_at` 已超出轮询窗口）
+- 引入的新状态 `Esperando pago`：Stripe 会话已建、尚未确认付款；webhook
+  `expired` 会把它转成 `Cancelado`；不计入按手机号的反恶意下单限制
 
 ### 1.4 Resend 域名验证（生产环境必做）
 
@@ -279,6 +320,8 @@ VITE_API_URL=https://your-backend-domain.com/api
    - `TURNSTILE_SECRET_KEY=0x4AAAAAAAxxxx`（Cloudflare Turnstile Secret；不配 = 反机器人失效）
    - `RESEND_FROM_EMAIL=HIPERA <pedidos@hipera.es>`（必须是已在 Resend 验证的域）
    - `RESEND_REPLY_TO=info@hipera.es`（可选，默认与 FROM 相同）
+   - `STRIPE_SECRET_KEY`（测试阶段填 test secret key；上线换 live key）
+   - `STRIPE_WEBHOOK_SECRET`（Webhook 端点的 Signing secret；test/live 各一套）
 4. 部署完成后记下 **公网 URL**，如 `https://xxx.up.railway.app`
 5. API 基地址为：`https://xxx.up.railway.app`（若未挂子路径）或 `https://xxx.up.railway.app/api`（若挂在 `/api`，依你配置为准）
 
