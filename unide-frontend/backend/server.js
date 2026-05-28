@@ -533,6 +533,34 @@ const authenticateAdmin = (req, res, next) => {
   });
 };
 
+// =====================================================================
+// Autenticación del AGENTE DE IMPRESIÓN (PC de la tienda)
+// =====================================================================
+// El agente de impresión es un proceso headless en el PC de la tienda;
+// NO puede hacer login interactivo (no hay JWT de Supabase). Se
+// autentica con un token compartido en la cabecera X-Print-Token,
+// comparado contra PRINT_AGENT_TOKEN del entorno (Railway).
+//
+// Por qué un token propio y no el JWT admin:
+//   - El agente corre 24/7 sin persona delante; un JWT caduca.
+//   - Mantiene el secreto del PC de la tienda acotado a SOLO imprimir
+//     (no da acceso al panel admin ni a Supabase directamente).
+//
+// Sin PRINT_AGENT_TOKEN configurado → 503 (las rutas de impresión
+// quedan deshabilitadas; el resto del backend sigue igual).
+const authenticatePrintAgent = (req, res, next) => {
+  const expected = process.env.PRINT_AGENT_TOKEN;
+  if (!expected) {
+    return res.status(503).json({ error: 'Impresión no configurada (falta PRINT_AGENT_TOKEN).' });
+  }
+  const provided = req.headers['x-print-token'];
+  if (!provided || provided !== expected) {
+    console.warn('[print] token inválido o ausente desde IP', req.ip);
+    return res.status(401).json({ error: 'Token de impresión inválido.' });
+  }
+  next();
+};
+
 // ========== PUBLIC ROUTES (Frontend) ==========
 
 // Get products (public) - solo productos visibles en tienda
@@ -1362,6 +1390,63 @@ app.get('/api/admin/orders/new', authenticateAdmin, async (req, res) => {
       server_time: serverTime,
     });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================================
+// Impresión automática de tickets (agente de la tienda)
+// =====================================================================
+// Campos que el ticket necesita. Devolvemos solo lo imprescindible para
+// el ticket (no el email del cliente, etc.). stripe_payment_intent +
+// payment_method + status permiten al agente decidir la etiqueta de
+// "estado de pago" (PAGADO vs COBRAR AL ENTREGAR).
+const PRINT_ORDER_FIELDS =
+  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent';
+
+// GET /api/print/pending — cola de impresión.
+// Devuelve pedidos confirmados (confirmed_at no nulo) y aún no impresos
+// (printed_at nulo), del más antiguo al más nuevo (se imprimen en orden
+// de llegada). El agente los procesa uno a uno y luego llama a
+// /api/print/mark por cada uno.
+app.get('/api/print/pending', authenticatePrintAgent, async (req, res) => {
+  try {
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 && limitRaw <= 50 ? limitRaw : 10;
+    const { data, error } = await supabase
+      .from('orders')
+      .select(PRINT_ORDER_FIELDS)
+      .not('confirmed_at', 'is', null)
+      .is('printed_at', null)
+      .order('confirmed_at', { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    res.json({ orders: data || [], count: (data || []).length });
+  } catch (error) {
+    console.error('[print] pending error:', error?.message || error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/print/mark — marca un pedido como impreso.
+// Idempotente: solo escribe printed_at si aún es nulo (evita pisar la
+// marca si llegan dos confirmaciones). Body: { order_id }.
+app.post('/api/print/mark', authenticatePrintAgent, async (req, res) => {
+  try {
+    const orderId = req.body?.order_id;
+    if (!orderId) return res.status(400).json({ error: 'Falta order_id.' });
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ printed_at: new Date().toISOString() })
+      .eq('id', orderId)
+      .is('printed_at', null)
+      .select('id, printed_at');
+    if (error) throw error;
+    // data vacío = ya estaba marcado (otro intento). Lo tratamos como OK
+    // idempotente para que el agente no reintente en bucle.
+    res.json({ ok: true, already_printed: (data || []).length === 0 });
+  } catch (error) {
+    console.error('[print] mark error:', error?.message || error);
     res.status(500).json({ error: error.message });
   }
 });

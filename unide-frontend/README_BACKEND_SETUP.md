@@ -67,6 +67,12 @@ STRIPE_SECRET_KEY=<填你的-stripe-test-secret-key>
 STRIPE_WEBHOOK_SECRET=<填你的-stripe-webhook-signing-secret>
 # 付款成功 / 取消后跳转回的前端地址（默认 https://hipera.es）
 FRONTEND_URL=https://hipera.es
+
+# 自动打印代理令牌（店里电脑的打印小程序用它鉴权）
+# 自己生成一个长随机串（如 openssl rand -hex 24 或随便敲一长串）。
+# 没配 = 打印接口 /api/print/* 全部返回 503（打印功能关闭，其它不受影响）。
+# 这个令牌要同时填到：Railway（这里）+ 店里电脑的打印代理 .env。
+PRINT_AGENT_TOKEN=pon_aqui_un_secreto_largo_y_aleatorio
 ```
 
 **重要提示：**
@@ -119,7 +125,8 @@ supabase_migration_user_consents.sql
 supabase_migration_user_consents_view_security.sql
 supabase_migration_orders_customer_email.sql       ← 订单邮件确认
 supabase_migration_orders_delivery_method.sql      ← 到店自取
-supabase_migration_orders_stripe.sql               ← 新增（Stripe 付款）
+supabase_migration_orders_stripe.sql               ← Stripe 付款
+supabase_migration_orders_printed.sql              ← 新增（自动打印小票）
 ```
 
 `orders_customer_email` 添加 `customer_email` 列（nullable）用于：
@@ -145,6 +152,12 @@ supabase_migration_orders_stripe.sql               ← 新增（Stripe 付款）
     或真实付款的提醒丢失（webhook 晚 1-2 分钟到，`created_at` 已超出轮询窗口）
 - 引入的新状态 `Esperando pago`：Stripe 会话已建、尚未确认付款；webhook
   `expired` 会把它转成 `Cancelado`；不计入按手机号的反恶意下单限制
+
+`orders_printed` 添加 `printed_at` 列（自动打印小票用）：
+- 店里打印代理只打 `confirmed_at` 非空**且** `printed_at` 为空的订单
+- **迁移里会把所有历史订单回填为已打印**（`printed_at = now()`），否则代理
+  首次启动会把整个历史订单全打出来；上线后只打新确认的单
+- 防重复：打印成功后通过 `POST /api/print/mark` 标记，之后不再出现在队列里
 
 ### 1.4 Resend 域名验证（生产环境必做）
 
@@ -322,6 +335,7 @@ VITE_API_URL=https://your-backend-domain.com/api
    - `RESEND_REPLY_TO=info@hipera.es`（可选，默认与 FROM 相同）
    - `STRIPE_SECRET_KEY`（测试阶段填 test secret key；上线换 live key）
    - `STRIPE_WEBHOOK_SECRET`（Webhook 端点的 Signing secret；test/live 各一套）
+   - `PRINT_AGENT_TOKEN`（自动打印代理令牌；与店里电脑 .env 里的一致）
 4. 部署完成后记下 **公网 URL**，如 `https://xxx.up.railway.app`
 5. API 基地址为：`https://xxx.up.railway.app`（若未挂子路径）或 `https://xxx.up.railway.app/api`（若挂在 `/api`，依你配置为准）
 
