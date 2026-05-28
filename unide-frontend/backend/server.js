@@ -915,6 +915,11 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
         .select('id, status')
         .eq('phone', phone)
         .in('status', UNCOMPLETED_ORDER_STATUSES)
+        // Los pedidos ya cobrados por Stripe (stripe_payment_intent no
+        // nulo) NO cuentan: están pagados, no son riesgo de impago/no-show
+        // aunque su status sea 'Procesando'. Sin esto, el propio cliente
+        // se autobloquearía tras 2 compras legítimas con tarjeta.
+        .is('stripe_payment_intent', null)
         .gte('created_at', since);
       if (!countErr && (recentSamePhone || []).length >= MAX_UNCOMPLETED_PER_PHONE_24H) {
         return res.status(429).json({
@@ -1132,6 +1137,9 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
         .select('id')
         .eq('phone', phone)
         .in('status', UNCOMPLETED_ORDER_STATUSES)
+        // Excluir pedidos ya cobrados por Stripe (pagados, sin riesgo):
+        // de lo contrario 2 compras con tarjeta bloquearían la tercera.
+        .is('stripe_payment_intent', null)
         .gte('created_at', since);
       if (!countErr && (recentSamePhone || []).length >= MAX_UNCOMPLETED_PER_PHONE_24H) {
         return res.status(429).json({
