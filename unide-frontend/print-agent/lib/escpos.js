@@ -199,7 +199,12 @@ export function buildTicket(order, config) {
     const lineTotal = qty * price;
     const name = String(it.name || 'Producto');
     const isGift = it.isGift || price === 0;
-    t.line(name);
+    const idTag = (it.id !== undefined && it.id !== null && it.id !== '') ? '#' + it.id + ' ' : '';
+    if (idTag) {
+      t.bold(true).text(idTag).bold(false).line(name);
+    } else {
+      t.line(name);
+    }
     if (isGift) {
       t.lineLR('  ' + qty + ' x GRATIS', 'GRATIS');
     } else {

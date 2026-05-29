@@ -1064,7 +1064,8 @@ export default function AdminApp() {
     const regular = order.items?.filter(i => !(i.isGift || i.price === 0)) ?? [];
     const gifts = order.items?.filter(i => i.isGift || i.price === 0) ?? [];
     regular.forEach((item) => {
-      doc.text((item.name || '').substring(0, 25), 5, y);
+      const idTag = item.id != null ? `#${item.id} ` : '';
+      doc.text((idTag + (item.name || '')).substring(0, 28), 5, y);
       y += 5;
       doc.text(`${item.quantity} x ${(item.price || 0).toFixed(2)}`.padEnd(20) + `€${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`, 5, y);
       y += 6;
@@ -1078,7 +1079,8 @@ export default function AdminApp() {
       y += 6;
       doc.setFont('helvetica', 'normal');
       gifts.forEach((item) => {
-        doc.text(`${(item.name || '').substring(0, 22)} [REGALO]`, 5, y);
+        const idTag = item.id != null ? `#${item.id} ` : '';
+        doc.text(`${(idTag + (item.name || '')).substring(0, 22)} [REGALO]`, 5, y);
         y += 5;
         doc.text(`${item.quantity} x 0.00`.padEnd(20) + 'GRATIS', 5, y);
         y += 6;
@@ -1804,16 +1806,19 @@ const renderRepairs = () => (
                    <td className="p-4 align-top">
                       {Array.isArray(o.items) && o.items.map((item, idx) => {
                         const isGift = item.isGift || item.price === 0;
+                        const thumb = products.find(p => p.id === item.id)?.image || item.image;
                         return (
                           <div key={idx} className={`flex justify-between items-center text-xs mb-1 border-b border-dashed pb-1 ${isGift ? 'bg-pink-50 border-pink-200 px-2 py-1 rounded' : 'border-gray-100'}`}>
-                              <span className="flex items-center gap-1.5">
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                {thumb && <img src={thumb} alt="" loading="lazy" className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
                                 {isGift && <Gift size={12} className="text-pink-600 flex-shrink-0"/>}
-                                <span className={isGift ? 'font-bold text-pink-700' : ''}>
+                                <span className={`min-w-0 ${isGift ? 'font-bold text-pink-700' : ''}`}>
                                   {item.quantity}x {item.name}
+                                  {item.id != null && <span className="text-gray-400 font-mono ml-1">#{item.id}</span>}
                                 </span>
-                                {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold">GRATIS</span>}
+                                {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold flex-shrink-0">GRATIS</span>}
                               </span>
-                              {!isGift && <span className="text-gray-500">€{(item.price * item.quantity).toFixed(2)}</span>}
+                              {!isGift && <span className="text-gray-500 flex-shrink-0">€{(item.price * item.quantity).toFixed(2)}</span>}
                           </div>
                         );
                       })}
@@ -1883,16 +1888,19 @@ const renderRepairs = () => (
                   <div className="text-xs text-gray-600 mb-2 font-bold">Items:</div>
                   {Array.isArray(o.items) && o.items.map((item, idx) => {
                     const isGift = item.isGift || item.price === 0;
+                    const thumb = products.find(p => p.id === item.id)?.image || item.image;
                     return (
                       <div key={idx} className={`flex justify-between items-center text-xs mb-1 pb-1 border-b border-dashed ${isGift ? 'bg-pink-50 border-pink-200 px-2 py-1.5 rounded' : 'border-gray-100'}`}>
-                        <span className="flex items-center gap-1.5 flex-1">
+                        <span className="flex items-center gap-1.5 flex-1 min-w-0">
+                          {thumb && <img src={thumb} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
                           {isGift && <Gift size={12} className="text-pink-600 flex-shrink-0"/>}
-                          <span className={isGift ? 'font-bold text-pink-700' : ''}>
+                          <span className={`min-w-0 ${isGift ? 'font-bold text-pink-700' : ''}`}>
                             {item.quantity}x {item.name}
+                            {item.id != null && <span className="text-gray-400 font-mono ml-1">#{item.id}</span>}
                           </span>
-                          {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold ml-1">GRATIS</span>}
+                          {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold ml-1 flex-shrink-0">GRATIS</span>}
                         </span>
-                        {!isGift && <span className="text-gray-500">€{(item.price * item.quantity).toFixed(2)}</span>}
+                        {!isGift && <span className="text-gray-500 flex-shrink-0">€{(item.price * item.quantity).toFixed(2)}</span>}
                       </div>
                     );
                   })}
