@@ -119,9 +119,19 @@
 //     se integre Stripe.
 // NO requiere re-aceptación: ningún cambio modifica la base
 // económica, las obligaciones de las partes ni las garantías.
+// 1.3 → 1.4 (2026-05-30): integración real de Stripe como pasarela
+// de pago. §6 reescrito: la tarjeta pasa de "cuando esté disponible"
+// a medio de pago en línea ACTIVO; se nombra a Stripe Payments
+// Europe, Ltd. como procesador; se listan tarjeta/Bizum/Apple Pay/
+// Google Pay en línea y se distingue el "Bizum manual" (transferencia
+// con verificación) del Bizum en línea vía Stripe. Cross-ref a
+// Privacidad §6 y §7 para el tratamiento de los datos de pago.
+// NO requiere re-aceptación (TERMS_VERSION se mantiene): añadir una
+// opción de pago es favorable al usuario y no agrava obligaciones,
+// garantías ni la base económica del contrato.
 export const TERMS_VERSION = 3;
-export const TERMS_DOCUMENT_VERSION = '1.3';
-export const TERMS_UPDATED_AT = '2026-05-26';
+export const TERMS_DOCUMENT_VERSION = '1.4';
+export const TERMS_UPDATED_AT = '2026-05-30';
 
 // --- Política de Privacidad ---
 // 1.2 → 1.3 (2026-05-26): revisión correctiva no material que
@@ -138,9 +148,24 @@ export const TERMS_UPDATED_AT = '2026-05-26';
 // NO requiere re-aceptación: las finalidades, bases jurídicas,
 // destinatarios y garantías del tratamiento son las mismas
 // publicadas en 1.2; sólo se aporta mayor precisión geográfica.
-export const PRIVACY_VERSION = 3;
-export const PRIVACY_DOCUMENT_VERSION = '1.3';
-export const PRIVACY_UPDATED_AT = '2026-05-26';
+// 1.3 → 1.4 (2026-05-30): activación de Stripe como encargado del
+// tratamiento de pagos (deja de figurar "cuando esté disponible") y
+// declaración de transferencia internacional asociada:
+//   • §6.1 Stripe pasa a activo; el hint se corrige de "Sin
+//     transferencia internacional" a procesamiento principal en la
+//     UE (Dublín) con posibles accesos de la matriz Stripe, Inc.
+//     (EE.UU.) amparados por SCC/DPF (cross-ref §7).
+//   • §7.2 incorpora Stripe a los proveedores con matriz en EE.UU.,
+//     precisando la entidad de contratación europea (Stripe Payments
+//     Europe, Ltd.) y la matriz estadounidense (Stripe, Inc.), con
+//     SCC (Decisión UE 2021/914) + EU-U.S. Data Privacy Framework.
+// SÍ requiere re-aceptación (PRIVACY_VERSION 3 → 4): aunque Stripe ya
+// estaba divulgado como encargado desde doc 1.0, esta versión añade
+// una declaración material nueva de TRANSFERENCIA INTERNACIONAL de
+// datos a EE.UU.; por prudencia se renueva el consentimiento informado.
+export const PRIVACY_VERSION = 4;
+export const PRIVACY_DOCUMENT_VERSION = '1.4';
+export const PRIVACY_UPDATED_AT = '2026-05-30';
 
 // --- Política de Devoluciones ---
 // Documento informativo (manual operativo complementario a T&C §8),
@@ -150,9 +175,15 @@ export const PRIVACY_UPDATED_AT = '2026-05-26';
 // total) y nuevo §5.5 (matriz reembolso de envío × umbral 40 € ×
 // tipo de devolución, con 3 ejemplos). Cambio material por afectar
 // al cálculo económico del reembolso.
+// 1.1 → 1.2 (2026-05-30): aclaración no material en §5.3 sobre el
+// método de reembolso de los pagos en línea (tarjeta/Bizum/Apple
+// Pay/Google Pay): se reembolsa por la misma vía y a la cuenta/
+// tarjeta de origen vía Stripe, y los pagos contra reembolso se
+// reembolsan por transferencia o Bizum a la cuenta del cliente.
+// NO cambia plazos ni importes; sólo precisa el canal de devolución.
 export const RETURNS_VERSION = 2;
-export const RETURNS_DOCUMENT_VERSION = '1.1';
-export const RETURNS_UPDATED_AT = '2026-05-25';
+export const RETURNS_DOCUMENT_VERSION = '1.2';
+export const RETURNS_UPDATED_AT = '2026-05-30';
 
 // --- Política de Envíos ---
 // Documento informativo (manual operativo complementario a T&C §7),
@@ -189,6 +220,15 @@ export const SHIPPING_UPDATED_AT = '2026-05-23';
 // de revocación. Re-consent NO necesario al alta porque las
 // categorías efectivamente activas son las estrictamente necesarias
 // y funcionales que ya estaban exentas del consentimiento.
+// ⚠️ RECORDATORIO Stripe + cookies (2026-05-30): el cobro en línea usa
+// actualmente Stripe Checkout ALOJADO (redirección a checkout.stripe.com).
+// En ese modo las cookies de Stripe (__stripe_mid, __stripe_sid, anti-
+// fraude) se fijan en el dominio de Stripe, NO en hipera.es, por lo que
+// la tabla de cookies de PoliticaCookies.jsx NO requiere cambios y
+// COOKIES_VERSION se mantiene. Si en el futuro se integra Stripe.js /
+// Stripe Elements EMBEBIDO en el propio sitio, esas cookies pasarán a
+// fijarse en nuestro dominio y HABRÁ QUE: (1) añadirlas a la tabla de la
+// Política de Cookies, (2) subir COOKIES_VERSION para reactivar el banner.
 export const COOKIES_VERSION = 1;
 export const COOKIES_DOCUMENT_VERSION = '1.0';
 export const COOKIES_UPDATED_AT = '2026-05-27';

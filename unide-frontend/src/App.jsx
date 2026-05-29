@@ -372,9 +372,11 @@ function FaqSection({ onLegalClick, onRepairClick }) {
       q: '¿Qué métodos de pago aceptáis?',
       a: (
         <>
-          Aceptamos pago con tarjeta (Visa, Mastercard) y <strong>Bizum</strong>{' '}
-          a través de pasarela segura. En el establecimiento físico también
-          aceptamos efectivo.
+          Aceptamos pago en línea con <strong>tarjeta</strong> (Visa, Mastercard),{' '}
+          <strong>Bizum</strong>, <strong>Apple Pay</strong> y{' '}
+          <strong>Google Pay</strong> a través de pasarela segura (Stripe). También
+          ofrecemos <strong>contra reembolso</strong>; y en el establecimiento físico
+          aceptamos efectivo y tarjeta.
         </>
       ),
     },

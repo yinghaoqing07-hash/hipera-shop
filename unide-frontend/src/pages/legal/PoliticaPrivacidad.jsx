@@ -18,7 +18,7 @@
 //   §11 Modificaciones de la Política       [Art. 13.3]
 //
 // Stack de encargados del tratamiento: Railway, Vercel, Supabase,
-// Stripe (futuro), Resend (futuro). Mantener sincronizado con la
+// Stripe (activo) y Resend. Mantener sincronizado con la
 // realidad operativa. Cualquier nuevo proveedor obliga a actualizar §6.
 //
 // Coherencia con Política de Cookies (App.jsx → LegalPage.content.cookies):
@@ -429,9 +429,9 @@ export default function PoliticaPrivacidad() {
               hint="Procesamiento en UE — región eu-west-1 (Irlanda). DPA con SCC como salvaguarda adicional."
             />
             <MatrixRow
-              left="Stripe Payments Europe, Ltd. (cuando esté disponible)"
-              right="Procesamiento de pagos con tarjeta y otros medios electrónicos."
-              hint="Entidad UE con sede en Dublín (Irlanda). Certificación PCI-DSS nivel 1. Sin transferencia internacional para clientes europeos."
+              left="Stripe Payments Europe, Ltd."
+              right="Procesamiento de pagos en línea con tarjeta, Bizum, Apple Pay y Google Pay. HIPERA no almacena ni accede al número completo de la tarjeta."
+              hint="Procesamiento principal en la UE (entidad con sede en Dublín, Irlanda; certificación PCI-DSS nivel 1). Su sociedad matriz Stripe, Inc. (EE.UU.) podría tener accesos puntuales, amparados por SCC y EU-U.S. Data Privacy Framework (véase §7)."
             />
             <MatrixRow
               left="Resend Inc."
@@ -552,14 +552,29 @@ export default function PoliticaPrivacidad() {
 
         <Subsection title="7.2. Otros proveedores con matriz en EE.UU.">
           <p>
-            Railway, Vercel y Supabase prestan sus servicios desde regiones del
-            EEE seleccionadas expresamente por HIPERA (Países Bajos, Francia,
+            Railway, Vercel, Supabase y <strong>Stripe</strong> prestan sus
+            servicios desde regiones del EEE seleccionadas expresamente por HIPERA
+            o a través de entidades constituidas en la UE (Países Bajos, Francia,
             Irlanda) y la operación habitual no implica transferencia internacional.
-            No obstante, en la medida en que sus sociedades matrices se encuentren
-            constituidas fuera del EEE y pudieran existir accesos puntuales de
-            soporte técnico desde dichos territorios, los DPA firmados incluyen las
-            SCC de la <Lit>Decisión (UE) 2021/914</Lit> y, cuando proceda, la
-            adhesión al EU-U.S. Data Privacy Framework como salvaguarda adicional.
+            En el caso concreto de <strong>Stripe</strong>, el pago se contrata con
+            la entidad europea <Lit>Stripe Payments Europe, Ltd.</Lit> (Dublín), si
+            bien su sociedad matriz <Lit>Stripe, Inc.</Lit> está constituida en los
+            Estados Unidos. En la medida en que las sociedades matrices de estos
+            proveedores se encuentran fuera del EEE y pudieran existir accesos
+            puntuales de soporte técnico o de prevención del fraude desde dichos
+            territorios, los DPA firmados incluyen las SCC de la{' '}
+            <Lit>Decisión (UE) 2021/914</Lit> y, cuando proceda, la adhesión al{' '}
+            <strong>EU-U.S. Data Privacy Framework</strong> como salvaguarda
+            adicional. La adscripción vigente de cada proveedor puede consultarse en{' '}
+            <a
+              href="https://www.dataprivacyframework.gov"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-red-600 underline hover:text-red-700"
+            >
+              dataprivacyframework.gov
+            </a>
+            .
           </p>
         </Subsection>
 

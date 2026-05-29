@@ -376,6 +376,13 @@ export default function PoliticaDevoluciones() {
             haya dispuesto expresamente otra cosa y siempre que dicho reembolso no le
             suponga ningún gasto adicional (Art. 107.1 del <Lit>RDLeg 1/2007</Lit>).
           </p>
+          <p>
+            En los pagos en línea (tarjeta, Bizum, Apple Pay o Google Pay), el reembolso
+            se realiza <strong>por la misma vía y a la misma cuenta o tarjeta de origen</strong>{' '}
+            a través de la pasarela Stripe; el plazo de abono efectivo puede depender de la
+            entidad bancaria del Cliente. En los pagos contra reembolso, el reembolso se
+            efectuará por transferencia bancaria o Bizum a la cuenta que indique el Cliente.
+          </p>
         </Subsection>
 
         <Subsection title="5.4. Importe reembolsado y gastos de envío (desistimiento total)">

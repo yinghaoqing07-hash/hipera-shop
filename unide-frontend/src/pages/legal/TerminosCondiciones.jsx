@@ -243,14 +243,17 @@ export default function TerminosCondiciones() {
           proceso de compra:
         </p>
         <ul className="list-disc list-inside space-y-1 ml-2">
-          <li><strong>Contra reembolso</strong></li>
-          <li><strong>Bizum</strong> mediante el número operativo facilitado en el proceso de pago; el cliente envía la transferencia desde su aplicación bancaria y HIPERA verifica la recepción antes de preparar el pedido.</li>
-          <li><strong>Tarjeta de crédito o débito</strong> (cuando esté disponible mediante pasarela de pagos certificada PCI-DSS)</li>
+          <li><strong>Contra reembolso</strong> (pago en efectivo o con tarjeta en el momento de la entrega o de la recogida en tienda).</li>
+          <li><strong>Pago en línea mediante tarjeta de crédito o débito (Visa, Mastercard), Bizum, Apple Pay y Google Pay</strong>, procesado a través de la pasarela de pagos <strong>Stripe Payments Europe, Ltd.</strong> (entidad de la Unión Europea con sede en Dublín, Irlanda, certificada PCI-DSS nivel 1). El pago se autoriza en el momento de la compra y el pedido se prepara una vez confirmado el cobro por la pasarela.</li>
+          <li><strong>Bizum manual</strong> mediante el número operativo facilitado en el proceso de pago; el cliente envía la transferencia desde su aplicación bancaria y HIPERA verifica la recepción antes de preparar el pedido. Este medio es complementario al Bizum en línea procesado por Stripe.</li>
         </ul>
         <p>
-          HIPERA no almacena los datos de tarjeta de pago. El procesamiento se delega en
-          proveedores de servicios de pago debidamente certificados (PCI-DSS, autenticación
-          3-D Secure conforme a la PSD2 / Directiva 2015/2366).
+          HIPERA no almacena ni tiene acceso al número completo de la tarjeta de pago. El
+          procesamiento de los pagos en línea se delega íntegramente en la pasarela{' '}
+          <strong>Stripe</strong>, proveedor debidamente certificado (PCI-DSS nivel 1,
+          autenticación reforzada 3-D Secure conforme a la PSD2 / Directiva 2015/2366).
+          El tratamiento de los datos de pago se describe en la{' '}
+          <strong>Política de Privacidad</strong> (§6 y §7).
         </p>
         <p>
           HIPERA se reserva el derecho de cancelar pedidos cuando existan indicios
