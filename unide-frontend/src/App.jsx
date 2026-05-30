@@ -2129,63 +2129,6 @@ export default function App() {
                  </div>
                </div>
              )}
-             {/* 免费商品选择 - 当订单 >= 65 欧元时显示 */}
-             {subtotal >= 65 && (
-               <div className="bg-gradient-to-br from-red-50 to-pink-50 p-5 rounded-2xl shadow-sm border-2 border-red-200">
-                 <div className="flex items-center gap-2 mb-3">
-                   <Gift size={20} className="text-red-600"/>
-                   <h3 className="font-bold text-gray-800">¡Elige un regalo gratis!</h3>
-                 </div>
-                 <p className="text-sm text-gray-600 mb-4">Tu pedido supera €65. Puedes elegir un producto gratis:</p>
-                 {selectedGift ? (
-                   <div className="bg-white p-4 rounded-xl border-2 border-red-500 flex items-center justify-between">
-                     <div className="flex items-center gap-3 flex-1">
-                       <img src={selectedGift.image} alt={selectedGift.name} loading="lazy" decoding="async" className="w-16 h-16 object-cover rounded-lg"/>
-                       <div className="flex-1">
-                         <p className="font-bold text-gray-800 text-sm">{selectedGift.name}</p>
-                         <p className="text-xs text-red-600 font-bold">GRATIS</p>
-                       </div>
-                     </div>
-                     <button 
-                       onClick={() => setSelectedGift(null)}
-                       className="text-gray-400 hover:text-red-600 p-2"
-                       title="Cambiar regalo"
-                     >
-                       <X size={18}/>
-                     </button>
-                   </div>
-                 ) : (
-                   <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                     {(() => {
-                       const giftProducts = products.filter(p => p.giftProduct && p.stock > 0);
-                       console.log('免费商品列表:', giftProducts.length, '个产品');
-                       console.log('所有产品数量:', products.length);
-                       console.log('标记为免费商品的产品:', products.filter(p => p.giftProduct));
-                       
-                       return giftProducts.length > 0 ? (
-                         giftProducts.map(p => (
-                           <button
-                             key={p.id}
-                             onClick={() => setSelectedGift(p)}
-                             className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
-                           >
-                             <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full h-20 object-cover rounded-lg mb-2"/>
-                             <p className="text-xs font-bold text-gray-800 line-clamp-3 mb-1">{p.name}</p>
-                             <p className="text-xs text-red-600 font-bold">GRATIS</p>
-                           </button>
-                         ))
-                       ) : (
-                         <div className="col-span-2 text-center py-4 text-gray-400 text-sm space-y-2">
-                           <p>No hay productos de regalo disponibles</p>
-                           <p className="text-xs text-gray-500">提示：需要在后台将产品标记为"Producto de Regalo"</p>
-                         </div>
-                       );
-                     })()}
-                   </div>
-                 )}
-               </div>
-             )}
-
              {/* =====================================================
                  Selector de modalidad de entrega (Click & Collect)
                  -----------------------------------------------------
@@ -2287,26 +2230,58 @@ export default function App() {
                 <input id="phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
                 <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder={isStorePickup ? "Nota para la recogida (opcional)" : "Nota para repartidor (opcional)"} className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
              </div>
-             {checkoutNeedsTermsCheckbox && (
-               <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-white">
-                 <input
-                   type="checkbox"
-                   checked={checkoutTermsAccepted}
-                   onChange={e => setCheckoutTermsAccepted(e.target.checked)}
-                   className="mt-1 h-4 w-4 accent-red-600 cursor-pointer flex-shrink-0"
-                 />
-                 <span className="text-xs text-gray-600 leading-relaxed">
-                   He leído y acepto la{' '}
-                   <button type="button" onClick={() => { setLegalType('privacidad'); navTo('legal'); }} className="text-red-600 font-medium underline">
-                     Política de Privacidad
-                   </button>{' '}
-                   y los{' '}
-                   <button type="button" onClick={() => { setLegalType('terminos'); navTo('legal'); }} className="text-red-600 font-medium underline">
-                     Términos y Condiciones
-                   </button>
-                   .
-                 </span>
-               </label>
+
+             {/* 免费商品选择 - 当订单 >= 65 欧元时显示 */}
+             {subtotal >= 65 && (
+               <div className="bg-gradient-to-br from-red-50 to-pink-50 p-5 rounded-2xl shadow-sm border-2 border-red-200">
+                 <div className="flex items-center gap-2 mb-3">
+                   <Gift size={20} className="text-red-600"/>
+                   <h3 className="font-bold text-gray-800">¡Elige un regalo gratis!</h3>
+                 </div>
+                 <p className="text-sm text-gray-600 mb-4">Tu pedido supera €65. Puedes elegir un producto gratis:</p>
+                 {selectedGift ? (
+                   <div className="bg-white p-4 rounded-xl border-2 border-red-500 flex items-center justify-between">
+                     <div className="flex items-center gap-3 flex-1">
+                       <img src={selectedGift.image} alt={selectedGift.name} loading="lazy" decoding="async" className="w-16 h-16 object-cover rounded-lg"/>
+                       <div className="flex-1">
+                         <p className="font-bold text-gray-800 text-sm">{selectedGift.name}</p>
+                         <p className="text-xs text-red-600 font-bold">GRATIS</p>
+                       </div>
+                     </div>
+                     <button 
+                       onClick={() => setSelectedGift(null)}
+                       className="text-gray-400 hover:text-red-600 p-2"
+                       title="Cambiar regalo"
+                     >
+                       <X size={18}/>
+                     </button>
+                   </div>
+                 ) : (
+                   <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                     {(() => {
+                       const giftProducts = products.filter(p => p.giftProduct && p.stock > 0);
+                       return giftProducts.length > 0 ? (
+                         giftProducts.map(p => (
+                           <button
+                             key={p.id}
+                             onClick={() => setSelectedGift(p)}
+                             className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
+                           >
+                             <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full h-20 object-cover rounded-lg mb-2"/>
+                             <p className="text-xs font-bold text-gray-800 line-clamp-3 mb-1">{p.name}</p>
+                             <p className="text-xs text-red-600 font-bold">GRATIS</p>
+                           </button>
+                         ))
+                       ) : (
+                         <div className="col-span-2 text-center py-4 text-gray-400 text-sm space-y-2">
+                           <p>No hay productos de regalo disponibles</p>
+                           <p className="text-xs text-gray-500">提示：需要在后台将产品标记为"Producto de Regalo"</p>
+                         </div>
+                       );
+                     })()}
+                   </div>
+                 )}
+               </div>
              )}
 
             {/* =====================================================
@@ -2431,6 +2406,72 @@ export default function App() {
                  </div>
                )}
             </div>
+
+             {checkoutNeedsTermsCheckbox && (
+               <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-white">
+                 <input
+                   type="checkbox"
+                   checked={checkoutTermsAccepted}
+                   onChange={e => setCheckoutTermsAccepted(e.target.checked)}
+                   className="mt-1 h-4 w-4 accent-red-600 cursor-pointer flex-shrink-0"
+                 />
+                 <span className="text-xs text-gray-600 leading-relaxed">
+                   He leído y acepto la{' '}
+                   <button type="button" onClick={() => { setLegalType('privacidad'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                     Política de Privacidad
+                   </button>{' '}
+                   y los{' '}
+                   <button type="button" onClick={() => { setLegalType('terminos'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                     Términos y Condiciones
+                   </button>
+                   .
+                 </span>
+               </label>
+             )}
+
+             {/* Resumen del pedido: visible justo antes de pagar para que
+                 el cliente confirme productos e importe sin volver atrás. */}
+             <div className="bg-white p-5 rounded-2xl shadow-sm space-y-3 border border-gray-100">
+               <h3 className="font-bold flex items-center gap-2 text-gray-800">
+                 <ClipboardList size={18} className="text-red-600"/> Resumen del pedido
+               </h3>
+               <div className="space-y-2">
+                 {cart.map(item => (
+                   <div key={item.id} className="flex items-center gap-3 text-sm">
+                     <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="w-10 h-10 object-cover rounded-lg flex-shrink-0"/>
+                     <div className="flex-1 min-w-0">
+                       <p className="font-medium text-gray-800 truncate">{item.name}</p>
+                       <p className="text-xs text-gray-500">{item.quantity} × €{item.price.toFixed(2)}</p>
+                     </div>
+                     <span className="font-semibold text-gray-800 flex-shrink-0">€{(item.price * item.quantity).toFixed(2)}</span>
+                   </div>
+                 ))}
+                 {selectedGift && (
+                   <div className="flex items-center gap-3 text-sm">
+                     <img src={selectedGift.image} alt={selectedGift.name} loading="lazy" decoding="async" className="w-10 h-10 object-cover rounded-lg flex-shrink-0"/>
+                     <div className="flex-1 min-w-0">
+                       <p className="font-medium text-gray-800 truncate">{selectedGift.name}</p>
+                       <p className="text-xs text-red-600 font-bold">Regalo</p>
+                     </div>
+                     <span className="font-semibold text-red-600 flex-shrink-0">GRATIS</span>
+                   </div>
+                 )}
+               </div>
+               <div className="border-t border-gray-100 pt-3 space-y-1.5 text-sm">
+                 <div className="flex justify-between text-gray-600">
+                   <span>Subtotal</span>
+                   <span className="font-medium text-gray-800">€{subtotal.toFixed(2)}</span>
+                 </div>
+                 <div className="flex justify-between text-gray-600">
+                   <span>{isStorePickup ? 'Recogida en tienda' : 'Envío'}</span>
+                   <span className="font-medium">{shippingFee === 0 ? <span className="text-green-700 font-semibold">GRATIS</span> : `€${shippingFee.toFixed(2)}`}</span>
+                 </div>
+                 <div className="flex justify-between items-center pt-1.5 border-t border-gray-100">
+                   <span className="font-bold text-gray-900">Total</span>
+                   <span className="font-bold text-lg text-red-600">€{total.toFixed(2)}</span>
+                 </div>
+               </div>
+             </div>
 
             {/* Botón de acción.
                 Decisión UX (2026-05-26): NO usamos `disabled` nativo (salvo
