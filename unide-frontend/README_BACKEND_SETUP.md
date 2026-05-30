@@ -106,10 +106,11 @@ PRINT_AGENT_TOKEN=pon_aqui_un_secreto_largo_y_aleatorio
 - Stripe Webhook 设置（Stripe Dashboard → Developers → Webhooks → Add endpoint）：
   - Endpoint URL：`https://hipera-shop-production.up.railway.app/api/stripe/webhook`
     （直接指向 Railway，不要走 hipera.es，避免 Vercel 代理改动请求体导致验签失败）
-  - 监听事件：`checkout.session.completed` 和 `checkout.session.expired`
+  - 监听事件：`checkout.session.completed`、`checkout.session.expired` 和 `charge.refunded`
+    - `charge.refunded`：在 Stripe 后台对一笔订单**全额退款**时触发 → 后端自动把订单状态改成 `Cancelado` 并把库存加回（幂等，重复事件不会重复加库存）。**部分退款不自动处理**（系统无法判断退了哪些商品），需手动。
+    - ⚠️ 如果你的 webhook 端点是在加这个功能之前建的，记得去 Stripe → Developers → Webhooks → 你的端点 → 编辑事件，**补勾 `charge.refunded`**，否则退款不会自动善后。
   - 创建后复制「Signing secret」（`whsec_...`）填到 `STRIPE_WEBHOOK_SECRET`
-  - Stripe 后台开启的付款方式（Settings → Payment methods）决定结账页显示哪些：
-    勾选「卡」「Bizum」「Apple Pay」「Google Pay」即可，无需改代码
+  - 结账页实际显示的付款方式由代码写死 `payment_method_types: ['card', 'bizum']`（`card` 自动含 Apple/Google Pay）；Stripe 后台 Payment methods 里多开的其他方式不会显示
 - `FRONTEND_URL`：付款成功 / 取消后跳回的前端地址；没配默认 `https://hipera.es`
 
 ### 1.3 数据库迁移

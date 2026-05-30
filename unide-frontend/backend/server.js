@@ -318,6 +318,9 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
       await handleStripeCheckoutCompleted(event.data.object);
     } else if (event.type === 'checkout.session.expired') {
       await handleStripeCheckoutExpired(event.data.object);
+    } else if (event.type === 'charge.refunded') {
+      // Reembolso total → cancela el pedido y repone stock (idempotente).
+      await handleStripeChargeRefunded(event.data.object);
     }
     // Otros eventos: los aceptamos con 200 sin procesar.
     return res.json({ received: true });
@@ -702,6 +705,39 @@ async function deductStockForItems(items) {
 }
 
 // =====================================================================
+// restockItems — reposición de stock (inverso de deductStockForItems)
+// =====================================================================
+// Usado al cancelar/reembolsar un pedido: devuelve las unidades de cada
+// artículo al inventario. Best-effort y tolerante: ignora
+// servicios/regalos y productos que ya no existan. Como el stock queda
+// > 0, el producto se vuelve a marcar visible (mismo criterio que el
+// restock manual del panel de administración).
+async function restockItems(items) {
+  for (const item of items || []) {
+    if (item?.isService || item?.isGift) continue;
+    const qty = Number(item?.quantity) || 0;
+    if (qty <= 0) continue;
+
+    const { data: product, error: fetchErr } = await supabase
+      .from('products')
+      .select('stock')
+      .eq('id', item.id)
+      .single();
+
+    if (fetchErr || !product) {
+      console.warn(`[stock] restock: producto no encontrado: id=${item.id}, name=${item.name}`);
+      continue;
+    }
+
+    const newStock = (Number(product.stock) || 0) + qty;
+    await supabase
+      .from('products')
+      .update({ stock: newStock, visible: true })
+      .eq('id', item.id);
+  }
+}
+
+// =====================================================================
 // Handlers de webhook de Stripe
 // =====================================================================
 // (Declarados como function → hoisted, usables por la ruta de webhook
@@ -825,6 +861,62 @@ async function handleStripeCheckoutExpired(session) {
     await supabase.from('orders').update({ status: 'Cancelado' }).eq('id', orderId);
     console.log('[stripe] sesión caducada → pedido cancelado:', orderId);
   }
+}
+
+// charge.refunded → reembolso en Stripe. SOLO actuamos en reembolso
+// TOTAL (charge.refunded === true): marcamos el pedido 'Cancelado' y
+// reponemos el stock. En reembolso PARCIAL no podemos saber qué
+// artículos se devolvieron, así que se deja para gestión manual.
+// Idempotente: si el pedido ya está 'Cancelado' no repone stock dos
+// veces (Stripe puede reenviar el evento).
+async function handleStripeChargeRefunded(charge) {
+  if (!charge.refunded) {
+    console.log('[stripe] reembolso parcial (gestión manual), charge:', charge.id);
+    return;
+  }
+
+  const piId = typeof charge.payment_intent === 'string'
+    ? charge.payment_intent
+    : charge.payment_intent?.id;
+  if (!piId) {
+    console.warn('[stripe] charge.refunded sin payment_intent:', charge.id);
+    return;
+  }
+
+  const { data: order, error: fErr } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('stripe_payment_intent', piId)
+    .single();
+
+  if (fErr || !order) {
+    console.warn('[stripe] reembolso: pedido no encontrado para PI', piId, fErr?.message);
+    return; // no reconciliable; reintentar no ayuda
+  }
+
+  // Idempotencia: ya cancelado → no reponer stock otra vez.
+  if (order.status === 'Cancelado') {
+    console.log('[stripe] reembolso: pedido ya cancelado (idempotente):', order.id);
+    return;
+  }
+
+  // Marcamos cancelado ANTES de reponer stock: si el evento se reenvía,
+  // la guarda de idempotencia evita una doble reposición.
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({ status: 'Cancelado' })
+    .eq('id', order.id);
+  if (uErr) {
+    throw new Error('No se pudo cancelar el pedido reembolsado: ' + uErr.message);
+  }
+
+  try {
+    await restockItems(order.items || []);
+  } catch (e) {
+    console.error('[stripe] error al reponer stock (pedido reembolsado):', e?.message);
+  }
+
+  console.log('[stripe] pedido reembolsado → cancelado y stock repuesto:', order.id);
 }
 
 app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) => {
