@@ -1533,10 +1533,12 @@ export default function AdminApp() {
     const isIdQuery = /^\d+$/.test(searchId);
     const filtered = products.filter(p => {
       if (!searchLower) return true;
+      // id: coincidencia EXACTA (buscar 19 no debe traer 190, 198...).
+      if (isIdQuery && String(p.id) === searchId) return true;
       if ((p.name || '').toLowerCase().includes(searchLower)) return true;
-      if (isIdQuery && String(p.id).includes(searchId)) return true;
       return false;
     });
+    const isSearching = !!searchLower;
     const catFilter = selectedProductCategory === '' ? null : (selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10));
 
     // Estructura: byCategoryAndSub[cid][subId] = [productos]
@@ -1681,6 +1683,29 @@ export default function AdminApp() {
         </form>
 
         <>
+          {isSearching ? (
+            filtered.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-500">
+                No se encontró ningún producto para «{searchTerm}».
+              </div>
+            ) : (
+              <>
+                {/* Resultados de búsqueda: lista plana (sin árbol de categorías) */}
+                <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
+                  <div className="px-4 py-2 text-xs font-bold text-gray-500 bg-gray-50 border-b">{filtered.length} resultado(s)</div>
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead>
+                    <tbody className="divide-y">{filtered.map(p => renderProductRow(p, (p.category != null && p.category !== '' ? Number(p.category) : '__none__'), (p.subCategoryId ?? p.sub_category_id ?? '__none__'), filtered))}</tbody>
+                  </table>
+                </div>
+                <div className="md:hidden space-y-3">
+                  <div className="text-xs font-bold text-gray-500">{filtered.length} resultado(s)</div>
+                  {filtered.map(p => renderProductCard(p, (p.category != null && p.category !== '' ? Number(p.category) : '__none__'), (p.subCategoryId ?? p.sub_category_id ?? '__none__'), filtered))}
+                </div>
+              </>
+            )
+          ) : (
+          <>
           {/* Desktop: Categoría → Subcategorías → Productos */}
             <div className="hidden md:block space-y-2">
               {catOrder.map(cid => {
@@ -1778,6 +1803,8 @@ export default function AdminApp() {
                 );
               })}
             </div>
+          </>
+          )}
         </>
       </div>
     );
