@@ -1206,12 +1206,17 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
     // 2) Construir line_items (cuadran exactamente con `total`).
     const { line_items } = buildCheckoutLineItems(items, total);
 
-    // 3) Crear la sesión de Checkout. No fijamos payment_method_types:
-    //    Stripe muestra los métodos habilitados en el Dashboard
-    //    (tarjeta, Bizum, Apple/Google Pay) según elegibilidad.
+    // 3) Crear la sesión de Checkout. Fijamos payment_method_types a
+    //    ['card'] para evitar que Stripe liste métodos de otros países
+    //    (MB WAY, Satispay, Bancontact, EPS...) en el modo dinámico.
+    //    'card' incluye automáticamente Apple Pay y Google Pay en los
+    //    dispositivos/navegadores compatibles. Cuando Bizum pase de
+    //    "pendiente de aprobación" a activo en el Dashboard, añadir
+    //    'bizum' al array.
     const frontendUrl = process.env.FRONTEND_URL || 'https://hipera.es';
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      payment_method_types: ['card'],
       line_items,
       locale: 'es',
       customer_email: normalizedEmail,
