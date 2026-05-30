@@ -1526,7 +1526,17 @@ export default function AdminApp() {
 
   const renderProducts = () => {
     const searchLower = searchTerm.toLowerCase().trim();
-    const filtered = products.filter(p => !searchLower || (p.name || '').toLowerCase().includes(searchLower));
+    // El nº tras quitar un '#' inicial permite buscar por id (ej. "#42"
+    // o "42") además de por nombre, para casar con el #id que aparece en
+    // pedidos y tickets.
+    const searchId = searchLower.replace(/^#/, '');
+    const isIdQuery = /^\d+$/.test(searchId);
+    const filtered = products.filter(p => {
+      if (!searchLower) return true;
+      if ((p.name || '').toLowerCase().includes(searchLower)) return true;
+      if (isIdQuery && String(p.id).includes(searchId)) return true;
+      return false;
+    });
     const catFilter = selectedProductCategory === '' ? null : (selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10));
 
     // Estructura: byCategoryAndSub[cid][subId] = [productos]
@@ -1565,7 +1575,7 @@ export default function AdminApp() {
         </td>
         <td className="p-4 flex items-center gap-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100"/>
-          <div><div className="font-bold">{p.name}</div>{p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}</div>
+          <div><div className="font-bold">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>{p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}</div>
         </td>
         <td className="p-4">€{p.price}</td>
         <td className="p-4">{p.stock}</td>
@@ -1585,7 +1595,7 @@ export default function AdminApp() {
         <div className="flex items-start gap-3 mb-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-12 h-12 rounded object-cover bg-gray-100 flex-shrink-0"/>
           <div className="flex-1 min-w-0">
-            <div className="font-bold text-gray-800 truncate">{p.name}</div>
+            <div className="font-bold text-gray-800 truncate">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
             {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
             <div className="flex items-center gap-4 mt-2 text-sm">
               <span className="font-bold text-gray-800">€{p.price}</span>
@@ -1604,7 +1614,7 @@ export default function AdminApp() {
     return (
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row gap-3 bg-white p-4 rounded-xl shadow-sm items-stretch sm:items-center">
-          <input id="search-products" name="search-products" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-100"/>
+          <input id="search-products" name="search-products" placeholder="Buscar por nombre o #id (ej. 42)..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-100"/>
           <select value={selectedProductCategory} onChange={e => setSelectedProductCategory(e.target.value)} className="sm:w-48 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-100 bg-white">
             <option value="">Todas las categorías</option>
             {categories.map(c => (
