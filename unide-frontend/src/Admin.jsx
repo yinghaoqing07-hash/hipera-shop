@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
-  Bell, BellOff
+  Bell, BellOff, Download, TrendingUp
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
@@ -104,6 +104,11 @@ export default function AdminApp() {
   const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProductCategory, setSelectedProductCategory] = useState("");
+  // Filtros de la pestaña Pedidos
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState("");
+  const [orderDateFrom, setOrderDateFrom] = useState("");
+  const [orderDateTo, setOrderDateTo] = useState("");
   const [expandedProductCats, setExpandedProductCats] = useState({});
   const [loadError, setLoadError] = useState(false);
   const fetchDataRetryCountRef = useRef(0);
@@ -1026,6 +1031,49 @@ export default function AdminApp() {
     }
   };
 
+  // Exporta la lista de pedidos (ya filtrada) a un CSV compatible con
+  // Excel. Usa ';' como separador (Excel ES) y BOM UTF-8 para que los
+  // acentos y el € se vean bien. Cada campo se escapa entre comillas.
+  const exportOrdersCsv = (list) => {
+    if (!list || list.length === 0) {
+      toast.error("No hay pedidos para exportar");
+      return;
+    }
+    const esc = (v) => {
+      const s = (v === null || v === undefined) ? '' : String(v);
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const headers = [
+      'Nº pedido', 'Fecha', 'Teléfono', 'Email', 'Dirección',
+      'Entrega', 'Estado', 'Pago', 'Total (EUR)', 'Artículos', 'Nota',
+    ];
+    const rows = list.map(o => {
+      const fecha = o.created_at
+        ? new Date(o.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
+      const entrega = o.delivery_method === 'store_pickup' ? 'Recogida' : 'Envío';
+      const articulos = Array.isArray(o.items)
+        ? o.items.map(it => `${it.quantity || 1}x ${it.name || ''}${it.id != null ? ` (#${it.id})` : ''}`).join(' | ')
+        : '';
+      return [
+        o.id || '', fecha, o.phone || '', o.customer_email || '', o.address || '',
+        entrega, o.status || '', o.payment_method || '',
+        (Number(o.total) || 0).toFixed(2), articulos, o.note || '',
+      ].map(esc).join(';');
+    });
+    const csv = '\uFEFF' + [headers.map(esc).join(';'), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pedidos_hipera_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`${list.length} pedido(s) exportado(s)`);
+  };
+
   const buildTicketPdfBlob = async (order) => {
     const isService = order.items?.some(i => i.isService) ?? false;
     const orderQueryUrl = `${window.location.origin.replace(/\/admin.*$/, '')}/?order=${order.id}`;
@@ -1281,23 +1329,126 @@ export default function AdminApp() {
     return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
   });
 
+  // --- Métricas del dashboard ---
+  const LOW_STOCK_THRESHOLD = 5;
+  // Para "ingresos" no contamos pedidos cancelados ni los que aún
+  // esperan pago (no son ventas reales todavía).
+  const REVENUE_EXCLUDED = ['Cancelado', 'Esperando pago'];
+  const validRevenueOrders = orders.filter(o => !REVENUE_EXCLUDED.includes(o.status));
+  const revenueTotal = validRevenueOrders.reduce((a, b) => a + (Number(b.total) || 0), 0);
+  const revenueToday = todayOrders
+    .filter(o => !REVENUE_EXCLUDED.includes(o.status))
+    .reduce((a, b) => a + (Number(b.total) || 0), 0);
+  // "Pendientes": pedidos ya confirmados que faltan por preparar/entregar.
+  const pendingCount = orders.filter(o => o.status === 'Procesando').length;
+  const lowStockProducts = products
+    .filter(p => (p.stock ?? 0) > 0 && (p.stock ?? 0) <= LOW_STOCK_THRESHOLD)
+    .sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0));
+  // Productos más vendidos (suma de unidades en pedidos válidos, sin regalos).
+  const topProducts = (() => {
+    const map = new Map();
+    for (const o of validRevenueOrders) {
+      if (!Array.isArray(o.items)) continue;
+      for (const it of o.items) {
+        if (it?.isGift || it?.price === 0) continue;
+        const key = it.id != null ? `id:${it.id}` : `name:${it.name}`;
+        const prev = map.get(key) || { id: it.id, name: it.name, qty: 0, revenue: 0 };
+        prev.qty += Number(it.quantity) || 0;
+        prev.revenue += (Number(it.price) || 0) * (Number(it.quantity) || 0);
+        map.set(key, prev);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.qty - a.qty).slice(0, 5);
+  })();
+
   const renderDashboard = () => (
     <div className="space-y-6 animate-fade-in">
         <h2 className="text-2xl font-bold text-gray-800">Panel General</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <div><p className="text-gray-500 text-xs uppercase font-bold">Ingresos</p><h3 className="text-2xl font-bold text-gray-800">€{orders.reduce((a,b)=>a+(b.total||0),0).toFixed(2)}</h3></div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+            <p className="text-gray-500 text-xs uppercase font-bold">Ingresos hoy</p>
+            <h3 className="text-2xl font-bold text-green-600">€{revenueToday.toFixed(2)}</h3>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <div><p className="text-gray-500 text-xs uppercase font-bold">Pedidos</p><h3 className="text-2xl font-bold text-gray-800">{orders.length}</h3></div>
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+            <p className="text-gray-500 text-xs uppercase font-bold">Pedidos hoy</p>
+            <h3 className="text-2xl font-bold text-gray-800">{todayOrders.length}</h3>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <div><p className="text-gray-500 text-xs uppercase font-bold">Pedidos hoy</p><h3 className="text-2xl font-bold text-gray-800">{todayOrders.length}</h3></div>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <div><p className="text-gray-500 text-xs uppercase font-bold">Productos</p><h3 className="text-2xl font-bold text-gray-800">{products.length}</h3></div>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('orders'); setOrderStatusFilter('Procesando'); setOrderSearch(''); setOrderDateFrom(''); setOrderDateTo(''); setSidebarOpen(false); }}
+            className={`text-left p-5 rounded-xl shadow-sm border transition-colors ${pendingCount > 0 ? 'bg-orange-50 border-orange-200 hover:bg-orange-100' : 'bg-white border-gray-100'}`}
+            title="Ver pedidos pendientes de preparar"
+          >
+            <p className="text-gray-500 text-xs uppercase font-bold">Pendientes</p>
+            <h3 className={`text-2xl font-bold ${pendingCount > 0 ? 'text-orange-600' : 'text-gray-800'}`}>{pendingCount}</h3>
+          </button>
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+            <p className="text-gray-500 text-xs uppercase font-bold">Ingresos total</p>
+            <h3 className="text-2xl font-bold text-gray-800">€{revenueTotal.toFixed(2)}</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5">{orders.length} pedidos · {products.length} productos</p>
           </div>
         </div>
+        {topProducts.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <h3 className="p-4 font-bold text-gray-800 border-b border-gray-100 flex items-center gap-2">
+              <TrendingUp size={18} className="text-green-600"/> Productos más vendidos
+            </h3>
+            <div className="divide-y">
+              {topProducts.map((p, i) => {
+                const img = products.find(x => x.id === p.id)?.image;
+                return (
+                  <div key={p.id ?? p.name ?? i} className="p-3 px-4 flex items-center gap-3 hover:bg-gray-50">
+                    <span className="text-sm font-bold text-gray-400 w-5 flex-shrink-0">{i + 1}</span>
+                    {img && <img src={img} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50"/>}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-800 truncate">{p.name}{p.id != null && <span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span>}</div>
+                      <div className="text-xs text-gray-500">€{p.revenue.toFixed(2)} en ventas</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-bold text-gray-800">{p.qty}</div>
+                      <div className="text-[11px] text-gray-400 uppercase">uds.</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {lowStockProducts.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden">
+            <h3 className="p-4 font-bold text-amber-700 border-b border-amber-100 bg-amber-50 flex items-center gap-2">
+              <AlertCircle size={18}/> Stock bajo (≤ {LOW_STOCK_THRESHOLD} uds.) — {lowStockProducts.length}
+            </h3>
+            <div className="divide-y max-h-72 overflow-y-auto">
+              {lowStockProducts.map(p => (
+                <div key={p.id} className="p-4 flex flex-wrap items-center gap-3 hover:bg-gray-50">
+                  <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 flex-shrink-0"/>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-gray-800 truncate">{p.name}<span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span></div>
+                    <div className="text-xs text-gray-500">€{p.price?.toFixed(2)} · quedan <span className="font-bold text-amber-600">{p.stock}</span></div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      value={stockEdits[p.id] ?? p.stock ?? 0}
+                      onChange={e => setStockEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      className="w-16 px-2 py-1.5 border rounded text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleQuickStockUpdate(p)}
+                      disabled={updatingStockId === p.id}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {updatingStockId === p.id ? "..." : "Actualizar"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {(() => {
           const soldOut = products.filter(p => (p.stock ?? 0) === 0);
           return soldOut.length > 0 ? (
@@ -1767,9 +1918,80 @@ const renderRepairs = () => (
     </div>
   );
   
-  const renderOrders = () => (
+  const renderOrders = () => {
+     const searchLower = orderSearch.toLowerCase().trim();
+     const fromTs = orderDateFrom ? new Date(orderDateFrom + 'T00:00:00').getTime() : null;
+     const toTs = orderDateTo ? new Date(orderDateTo + 'T23:59:59').getTime() : null;
+     const filteredOrders = orders.filter(o => {
+       if (orderStatusFilter && o.status !== orderStatusFilter) return false;
+       if (searchLower) {
+         const haystack = `${o.id || ''} ${o.phone || ''} ${o.customer_email || ''} ${o.address || ''}`.toLowerCase();
+         if (!haystack.includes(searchLower)) return false;
+       }
+       if (fromTs || toTs) {
+         const t = o.created_at ? new Date(o.created_at).getTime() : 0;
+         if (fromTs && t < fromTs) return false;
+         if (toTs && t > toTs) return false;
+       }
+       return true;
+     });
+     const filtersActive = !!(searchLower || orderStatusFilter || orderDateFrom || orderDateTo);
+     return (
      <div className="space-y-4">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800">Pedidos ({orders.length})</h2>
+        <h2 className="text-xl md:text-2xl font-bold text-gray-800">
+          Pedidos ({filtersActive ? `${filteredOrders.length} de ${orders.length}` : orders.length})
+        </h2>
+        {/* Barra de filtros */}
+        <div className="bg-white rounded-xl shadow-sm border p-3 flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[180px]">
+            <label className="text-xs font-bold text-gray-500 mb-1 block">Buscar (teléfono / nº pedido / email)</label>
+            <input
+              type="text"
+              value={orderSearch}
+              onChange={e => setOrderSearch(e.target.value)}
+              placeholder="Ej. 600123456, a1b2c3, cliente@..."
+              className="w-full border p-2 rounded-lg text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-500 mb-1 block">Estado</label>
+            <select value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)} className="border p-2 rounded-lg text-sm bg-white">
+              <option value="">Todos</option>
+              <option>Esperando pago</option>
+              <option>Procesando</option>
+              <option>Pendiente de Pago</option>
+              <option>Enviado</option>
+              <option>Entregado</option>
+              <option>Cancelado</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-500 mb-1 block">Desde</label>
+            <input type="date" value={orderDateFrom} onChange={e => setOrderDateFrom(e.target.value)} className="border p-2 rounded-lg text-sm" />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-500 mb-1 block">Hasta</label>
+            <input type="date" value={orderDateTo} onChange={e => setOrderDateTo(e.target.value)} className="border p-2 rounded-lg text-sm" />
+          </div>
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={() => { setOrderSearch(''); setOrderStatusFilter(''); setOrderDateFrom(''); setOrderDateTo(''); }}
+              className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium"
+            >
+              Limpiar
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => exportOrdersCsv(filteredOrders)}
+            disabled={filteredOrders.length === 0}
+            className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-1.5"
+            title="Exportar la lista filtrada a CSV (Excel)"
+          >
+            <Download size={16}/> CSV ({filteredOrders.length})
+          </button>
+        </div>
         {/* Desktop table */}
         <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-left text-sm">
@@ -1785,7 +2007,7 @@ const renderRepairs = () => (
                </tr>
              </thead>
              <tbody>
-               {orders.map(o => {
+               {filteredOrders.map(o => {
                  const paymentMethod = o.payment_method || 'No especificado';
                  const paymentColor = paymentMethod === 'Contra Reembolso' 
                    ? 'bg-orange-100 text-orange-700' 
@@ -1858,7 +2080,7 @@ const renderRepairs = () => (
         </div>
         {/* Mobile cards */}
         <div className="md:hidden space-y-4">
-          {orders.map(o => {
+          {filteredOrders.map(o => {
             const paymentMethod = o.payment_method || 'No especificado';
             const paymentColor = paymentMethod === 'Contra Reembolso' 
               ? 'bg-orange-100 text-orange-700' 
@@ -1931,7 +2153,8 @@ const renderRepairs = () => (
           })}
         </div>
      </div>
-  );
+     );
+  };
 
   const renderImportModal = () => (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 backdrop-blur-sm">
