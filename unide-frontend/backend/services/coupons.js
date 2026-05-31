@@ -25,6 +25,8 @@
 //   minSubtotal  : subtotal mínimo (en €) para poder aplicarlo
 //   expiresAt    : fecha/hora límite ISO (con zona). null = sin caducidad
 //   oncePerCustomer : true → un solo uso por usuario/teléfono
+//   requiresAccount : true → solo clientes con sesión iniciada (evita
+//                  que un invitado lo reutilice cambiando de teléfono)
 //   active       : false → el cupón NO funciona (úsalo para tenerlo
 //                  preparado y activarlo el día del lanzamiento)
 //
@@ -39,6 +41,7 @@ export const COUPONS = {
     minSubtotal: 30,
     expiresAt: '2026-08-30T23:59:59+02:00',        // ← p. ej. '2026-06-30T23:59:59+02:00'
     oncePerCustomer: true,
+    requiresAccount: true, // solo usuarios registrados (uso único fiable)
     active: true,          // ← poner true el día del lanzamiento
   },
 };
@@ -112,6 +115,8 @@ export function couponErrorMessage(reason, info = {}) {
       return `Este cupón requiere un mínimo de €${Number(info.minSubtotal || 0).toFixed(2)} en productos.`;
     case 'ALREADY_USED':
       return 'Ya has usado este cupón.';
+    case 'LOGIN_REQUIRED':
+      return 'Inicia sesión o crea una cuenta para usar este cupón.';
     case 'EMPTY':
       return 'Introduce un código de cupón.';
     case 'INVALID':

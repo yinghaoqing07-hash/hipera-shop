@@ -707,12 +707,31 @@ async function couponAlreadyUsed(code, { user_id, phone }) {
   }
 }
 
+// Extrae el user_id VERIFICADO del JWT de la cabecera Authorization, o
+// null si no hay sesión válida. No confía en el user_id del body (que un
+// invitado podría falsificar). Se usa para reglas sensibles de cupón.
+async function getVerifiedUserId(req) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return null;
+  try {
+    const { data: { user } } = await supabase.auth.getUser(token);
+    return user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
 // Resuelve el cupón para un pedido: validación pura + uso único (BD).
 // Devuelve { ok, code, discount } o { ok:false, reason, ... }.
 async function resolveCouponForOrder(rawCode, items, { user_id, phone }) {
   const subtotal = computeSubtotal(items);
   const evald = evaluateCoupon(rawCode, subtotal);
   if (!evald.ok) return evald;
+  // Cupones que exigen cuenta: si no hay user_id (verificado), rechazar.
+  if (evald.coupon.requiresAccount && !user_id) {
+    return { ok: false, reason: 'LOGIN_REQUIRED', code: evald.code };
+  }
   if (evald.coupon.oncePerCustomer) {
     const used = await couponAlreadyUsed(evald.code, { user_id, phone });
     if (used) return { ok: false, reason: 'ALREADY_USED', code: evald.code };
@@ -1193,7 +1212,13 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
     let appliedCoupon = null;
     let discount = 0;
     if (coupon_code) {
-      const couponResult = await resolveCouponForOrder(coupon_code, items, { user_id, phone });
+      // Identidad verificada por token (no el user_id del body) para que
+      // las reglas de cupón (requiresAccount, uso único) no se puedan
+      // falsificar pasando un user_id inventado. El frontend (apiClient)
+      // adjunta el Bearer token cuando hay sesión, así que un usuario
+      // registrado siempre llega identificado aquí.
+      const couponUserId = await getVerifiedUserId(req);
+      const couponResult = await resolveCouponForOrder(coupon_code, items, { user_id: couponUserId, phone });
       if (!couponResult.ok) {
         return res.status(400).json({
           error: couponErrorMessage(couponResult.reason, couponResult),
@@ -1426,7 +1451,9 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
     let appliedCoupon = null;
     let discount = 0;
     if (coupon_code) {
-      const couponResult = await resolveCouponForOrder(coupon_code, items, { user_id, phone });
+      // Identidad verificada por token (ver nota en POST /api/orders).
+      const couponUserId = await getVerifiedUserId(req);
+      const couponResult = await resolveCouponForOrder(coupon_code, items, { user_id: couponUserId, phone });
       if (!couponResult.ok) {
         return res.status(400).json({
           error: couponErrorMessage(couponResult.reason, couponResult),
