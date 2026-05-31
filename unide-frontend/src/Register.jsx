@@ -17,26 +17,70 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [agreedLegal, setAgreedLegal] = useState(false);
   const [loading, setLoading] = useState(false);
-  // Cuando Supabase exige confirmar el email, guardamos aquí la dirección
-  // para mostrar la pantalla "revisa tu correo" en lugar de saltar a login.
+  // Cuando Supabase exige confirmar el email, pasamos a la pantalla de
+  // verificación por código (OTP). `sentEmail` guarda el correo pendiente
+  // de verificar; `otpCode` es el código de 6 dígitos que escribe el
+  // cliente; `verifying` controla el estado del botón.
   const [sentEmail, setSentEmail] = useState(null);
+  const [otpCode, setOtpCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const navigate = useNavigate();
 
   const handleResend = async () => {
     if (!sentEmail) return;
     setResending(true);
+    // resend con type 'signup' reenvía el mismo correo de confirmación,
+    // que (con la plantilla configurada con {{ .Token }}) contiene un
+    // nuevo código de 6 dígitos.
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email: sentEmail,
-      options: { emailRedirectTo: `${window.location.origin}/login` },
     });
     if (error) {
       toast.error('No se pudo reenviar. Espera un momento e inténtalo de nuevo.');
     } else {
-      toast.success('Email de confirmación reenviado.');
+      toast.success('Te hemos enviado un nuevo código.');
     }
     setResending(false);
+  };
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    const token = otpCode.trim();
+    if (!/^\d{6}$/.test(token)) {
+      toast.error('Introduce el código de 6 dígitos que te hemos enviado.');
+      return;
+    }
+    setVerifying(true);
+    // type 'email' es el tipo unificado de Supabase: verifica tanto
+    // códigos de alta (signup) como de inicio de sesión. Si es correcto,
+    // devuelve sesión iniciada.
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: sentEmail,
+      token,
+      type: 'email',
+    });
+    if (error) {
+      toast.error(/expired|invalid|token/i.test(error.message || '')
+        ? 'Código incorrecto o caducado. Pide uno nuevo.'
+        : 'No se pudo verificar. Inténtalo de nuevo.');
+      setVerifying(false);
+      return;
+    }
+    // Verificado y con sesión: registramos la aceptación de términos
+    // (guardada como pendiente al registrarse) y entramos al sitio.
+    const uid = data?.session?.user?.id || data?.user?.id;
+    if (uid) {
+      try {
+        await recordAcceptance({ source: 'register', userId: uid });
+      } catch (err) {
+        if (!import.meta.env.PROD) console.warn('[register] recordAcceptance:', err?.message);
+      }
+    }
+    toast.success('¡Cuenta verificada! Entrando…');
+    navigate('/');
+    setVerifying(false);
   };
 
   const handleRegister = async (e) => {
@@ -64,9 +108,6 @@ export default function Register() {
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      // Si la confirmación de email está activada en Supabase, el enlace
-      // del correo devolverá al cliente a /login ya verificado.
-      options: { emailRedirectTo: `${window.location.origin}/login` },
     });
 
     if (error) {
@@ -111,6 +152,7 @@ export default function Register() {
     } catch { /* ignore quota errors */ }
 
     setSentEmail(email.trim());
+    toast.success('Te hemos enviado un código de 6 dígitos a tu email.', { duration: 6000 });
     setLoading(false);
   };
 
@@ -133,28 +175,44 @@ export default function Register() {
           <div className="w-14 h-14 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <MailCheck size={28} />
           </div>
-          <h2 className="text-2xl font-bold text-gray-800">Revisa tu correo</h2>
+          <h2 className="text-2xl font-bold text-gray-800">Verifica tu cuenta</h2>
           <p className="text-gray-500 text-sm mt-2 leading-relaxed">
-            Hemos enviado un email de confirmación a<br />
+            Hemos enviado un código de 6 dígitos a<br />
             <span className="font-semibold text-gray-800">{sentEmail}</span>.<br />
-            Ábrelo y pulsa el enlace para activar tu cuenta.
+            Introdúcelo aquí para activar tu cuenta.
           </p>
-          <p className="text-xs text-gray-400 mt-3">
-            ¿No lo ves? Revisa la carpeta de spam o correo no deseado.
+          <p className="text-xs text-gray-400 mt-2">
+            ¿No lo ves? Revisa la carpeta de spam.
           </p>
+
+          <form onSubmit={handleVerifyOtp} className="mt-6 space-y-4">
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otpCode}
+              onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="______"
+              className="w-full p-3 border rounded-xl text-center text-2xl font-bold tracking-[0.5em] outline-none focus:border-red-500"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={verifying || otpCode.length !== 6}
+              className="w-full bg-red-600 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              {verifying ? 'Verificando…' : <>Verificar y entrar <ArrowRight size={18} /></>}
+            </button>
+          </form>
+
           <button
             onClick={handleResend}
             disabled={resending}
-            className="mt-6 w-full border border-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            className="mt-3 w-full border border-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
-            {resending ? 'Reenviando…' : 'Volver a enviar el email'}
+            {resending ? 'Reenviando…' : 'Reenviar código'}
           </button>
-          <Link
-            to="/login"
-            className="mt-3 inline-flex items-center justify-center gap-2 w-full bg-red-600 text-white py-3 rounded-xl font-bold hover:bg-red-700 transition-colors"
-          >
-            Ya lo he confirmado, iniciar sesión <ArrowRight size={18} />
-          </Link>
         </div>
       ) : (
       <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden p-8">
