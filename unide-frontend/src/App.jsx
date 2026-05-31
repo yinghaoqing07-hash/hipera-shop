@@ -1738,7 +1738,7 @@ export default function App() {
                                Trabajamos con casi todas las marcas. Contáctanos por WhatsApp para consultar precio.
                             </p>
                             <a 
-                              href="https://wa.me/34646569480?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web.%20Quisiera%20consultar%20precio."
+                              href="https://wa.me/34612466034?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web.%20Quisiera%20consultar%20precio."
                               target="_blank" 
                               rel="noreferrer"
                               className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full"
@@ -1802,7 +1802,7 @@ export default function App() {
                              </>
                            ) : (
                              <a
-                               href={`https://wa.me/34646569480?text=${encodeURIComponent(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}`}
+                               href={`https://wa.me/34612466034?text=${encodeURIComponent(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}`}
                                target="_blank"
                                rel="noreferrer"
                                className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
