@@ -814,6 +814,10 @@ export default function App() {
   // revise de un vistazo antes de cobrar/crear el pedido. Reduce
   // direcciones/teléfonos mal escritos sin añadir fricción real.
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  // Campos del checkout que el cliente ya ha "tocado" (onBlur). Permite
+  // mostrar errores en vivo bajo cada campo sin marcar en rojo lo que
+  // aún no ha rellenado al llegar al formulario.
+  const [checkoutTouched, setCheckoutTouched] = useState({ email: false, address: false, phone: false });
   const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
   // Cloudflare Turnstile: ref al widget invisible montado en checkout.
   // Se ejecuta justo antes de POST /api/orders para acompañar al
@@ -1166,6 +1170,24 @@ export default function App() {
     return v.length >= 6 && /\d/.test(v);
   };
 
+  // Mensajes de error por campo del checkout. Solo se muestran si el
+  // campo ya fue tocado (onBlur), para feedback en vivo sin agresividad.
+  const emailFieldError = checkoutTouched.email
+    ? (!checkoutForm.email
+        ? 'Indica tu email para enviarte la confirmación.'
+        : (!isEmailFormatOk(checkoutForm.email) ? 'Email no válido (ej. nombre@correo.com).' : ''))
+    : '';
+  const phoneFieldError = checkoutTouched.phone
+    ? (!checkoutForm.phone
+        ? 'Indica un teléfono de contacto.'
+        : (!isPhoneFormatOk(checkoutForm.phone) ? 'Teléfono no válido: 9 cifras (móvil o fijo español).' : ''))
+    : '';
+  const addressFieldError = (!isStorePickup && checkoutTouched.address)
+    ? (!checkoutForm.address
+        ? 'Indica la dirección de entrega.'
+        : (!isAddressFormatOk(checkoutForm.address) ? 'Incluye calle y número (mín. 6 caracteres).' : ''))
+    : '';
+
   // Valida el cupón contra el backend y, si es correcto, lo fija. El
   // descuento real se vuelve a calcular/validar en el servidor al pagar;
   // esto es solo previsualización para dar feedback inmediato.
@@ -1206,6 +1228,10 @@ export default function App() {
   const handleInitiateCheckout = async () => {
     // Si veníamos de un pago cancelado, ocultamos el aviso al reintentar.
     setPaymentCancelledNotice(false);
+    // Marcamos todos los campos como "tocados" para que, si el cliente
+    // pulsa el botón con datos incompletos, vea los errores en vivo bajo
+    // cada campo (además del toast), en lugar de solo un aviso fugaz.
+    setCheckoutTouched({ email: true, address: true, phone: true });
     // Validación específica por modalidad: la dirección sólo es
     // obligatoria para envío a domicilio. En recogida en tienda el
     // pedido se entrega físicamente en HIPERA (Paseo del Sol 1) y la
@@ -2328,7 +2354,10 @@ export default function App() {
                   <MapPin size={18} className="text-red-600"/>
                   {isStorePickup ? 'Datos de contacto' : 'Datos de entrega'}
                 </h3>
-                <input id="email" name="email" type="email" autoComplete="email" inputMode="email" value={checkoutForm.email} onChange={e => setCheckoutForm({...checkoutForm, email: e.target.value})} placeholder="Email para la confirmación *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                <div>
+                  <input id="email" name="email" type="email" autoComplete="email" inputMode="email" value={checkoutForm.email} onChange={e => setCheckoutForm({...checkoutForm, email: e.target.value})} onBlur={() => setCheckoutTouched(t => ({...t, email: true}))} placeholder="Email para la confirmación *" className={`w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 transition-all ${emailFieldError ? 'ring-2 ring-red-300 bg-red-50' : 'ring-red-100'}`}/>
+                  {emailFieldError && <p className="text-xs text-red-500 mt-1 px-1">{emailFieldError}</p>}
+                </div>
                 {/* En recogida en tienda no se pide dirección postal: el
                     pedido se entrega físicamente en HIPERA. Mostramos en
                     su lugar una tarjeta informativa con la ubicación
@@ -2343,9 +2372,15 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <input id="address" name="address" autoComplete="street-address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} placeholder="Dirección completa *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                  <div>
+                    <input id="address" name="address" autoComplete="street-address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} onBlur={() => setCheckoutTouched(t => ({...t, address: true}))} placeholder="Dirección completa (calle, número, piso) *" className={`w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 transition-all ${addressFieldError ? 'ring-2 ring-red-300 bg-red-50' : 'ring-red-100'}`}/>
+                    {addressFieldError && <p className="text-xs text-red-500 mt-1 px-1">{addressFieldError}</p>}
+                  </div>
                 )}
-                <input id="phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} placeholder="Teléfono *" className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all"/>
+                <div>
+                  <input id="phone" name="phone" type="tel" autoComplete="tel" inputMode="tel" value={checkoutForm.phone} onChange={e => setCheckoutForm({...checkoutForm, phone: e.target.value})} onBlur={() => setCheckoutTouched(t => ({...t, phone: true}))} placeholder="Teléfono *" className={`w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 transition-all ${phoneFieldError ? 'ring-2 ring-red-300 bg-red-50' : 'ring-red-100'}`}/>
+                  {phoneFieldError && <p className="text-xs text-red-500 mt-1 px-1">{phoneFieldError}</p>}
+                </div>
                 <textarea id="note" name="note" value={checkoutForm.note} onChange={e => setCheckoutForm({...checkoutForm, note: e.target.value})} placeholder={isStorePickup ? "Nota para la recogida (opcional)" : "Nota para repartidor (opcional)"} className="w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 ring-red-100 transition-all" rows={2}/>
              </div>
 
