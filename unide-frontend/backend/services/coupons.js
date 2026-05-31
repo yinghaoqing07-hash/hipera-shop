@@ -37,9 +37,9 @@ export const COUPONS = {
     type: 'percent',
     value: 10,
     minSubtotal: 30,
-    expiresAt: null,        // ← p. ej. '2026-06-30T23:59:59+02:00'
+    expiresAt: '2026-08-30T23:59:59+02:00',        // ← p. ej. '2026-06-30T23:59:59+02:00'
     oncePerCustomer: true,
-    active: false,          // ← poner true el día del lanzamiento
+    active: true,          // ← poner true el día del lanzamiento
   },
 };
 
