@@ -1240,20 +1240,35 @@ export default function AdminApp() {
         });
         startY = doc.lastAutoTable.finalY + 8;
       }
-      const finalY = startY + 2;
+      let finalY = startY + 2;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      const couponDiscount = Number(order.discount) || 0;
+      if (couponDiscount > 0) {
+        const itemsGross = regularItems.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+        doc.text('Subtotal:', 160, finalY, { align: 'right' });
+        doc.text(`€${itemsGross.toFixed(2)}`, 190, finalY, { align: 'right' });
+        finalY += 5;
+        doc.setTextColor(22, 130, 60);
+        doc.text(`Descuento (${order.coupon_code || 'CUPÓN'}):`, 160, finalY, { align: 'right' });
+        doc.text(`-€${couponDiscount.toFixed(2)}`, 190, finalY, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+        finalY += 5;
+      }
       const subTotal = (order.total || 0) / 1.21;
       const iva = (order.total || 0) - subTotal;
-      doc.setFontSize(10);
       doc.text('Base Imponible:', 160, finalY, { align: 'right' });
       doc.text(`€${subTotal.toFixed(2)}`, 190, finalY, { align: 'right' });
-      doc.text('IVA (21%):', 160, finalY + 5, { align: 'right' });
-      doc.text(`€${iva.toFixed(2)}`, 190, finalY + 5, { align: 'right' });
+      finalY += 5;
+      doc.text('IVA (21%):', 160, finalY, { align: 'right' });
+      doc.text(`€${iva.toFixed(2)}`, 190, finalY, { align: 'right' });
+      finalY += 9;
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.text('TOTAL A PAGAR:', 160, finalY + 14, { align: 'right' });
-      doc.text(`€${(order.total || 0).toFixed(2)}`, 190, finalY + 14, { align: 'right' });
+      doc.text('TOTAL A PAGAR:', 160, finalY, { align: 'right' });
+      doc.text(`€${(order.total || 0).toFixed(2)}`, 190, finalY, { align: 'right' });
       if (isService) {
-        const boxY = finalY + 25;
+        const boxY = finalY + 11;
         doc.setDrawColor(200);
         doc.setFillColor(248, 248, 248);
         doc.rect(14, boxY, 182, 50, 'FD');

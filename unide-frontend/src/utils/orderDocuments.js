@@ -23,6 +23,11 @@ import autoTable from 'jspdf-autotable';
 
 export const generateDocuments = async (order, type = 'both') => {
   const isService = order.items.some(i => i.isService);
+  // Descuento de cupón (opcional). order.total ya viene con el descuento
+  // restado; aquí solo lo mostramos como línea informativa para que el
+  // cliente vea reflejado el cupón aplicado.
+  const discount = Number(order.discount) || 0;
+  const couponCode = order.couponCode || order.coupon_code || null;
   const companyData = {
     name: 'QIANG GUO SL',
     address: 'Paseo del Sol 1, 28880 Meco',
@@ -128,25 +133,41 @@ export const generateDocuments = async (order, type = 'both') => {
     }
 
     // 4. Totales
-    const finalY = startY + 2;
+    let finalY = startY + 2;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+
+    if (discount > 0) {
+      const itemsGross = regularItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+      doc.text('Subtotal:', 160, finalY, { align: 'right' });
+      doc.text(`€${itemsGross.toFixed(2)}`, 190, finalY, { align: 'right' });
+      finalY += 5;
+      doc.setTextColor(22, 130, 60);
+      doc.text(`Descuento (${couponCode || 'CUPÓN'}):`, 160, finalY, { align: 'right' });
+      doc.text(`-€${discount.toFixed(2)}`, 190, finalY, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+      finalY += 5;
+    }
+
     const subTotal = order.total / 1.21;
     const iva = order.total - subTotal;
 
-    doc.setFontSize(10);
     doc.text('Base Imponible:', 160, finalY, { align: 'right' });
     doc.text(`€${subTotal.toFixed(2)}`, 190, finalY, { align: 'right' });
+    finalY += 5;
 
-    doc.text('IVA (21%):', 160, finalY + 5, { align: 'right' });
-    doc.text(`€${iva.toFixed(2)}`, 190, finalY + 5, { align: 'right' });
+    doc.text('IVA (21%):', 160, finalY, { align: 'right' });
+    doc.text(`€${iva.toFixed(2)}`, 190, finalY, { align: 'right' });
+    finalY += 9;
 
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL A PAGAR:', 160, finalY + 14, { align: 'right' });
-    doc.text(`€${order.total.toFixed(2)}`, 190, finalY + 14, { align: 'right' });
+    doc.text('TOTAL A PAGAR:', 160, finalY, { align: 'right' });
+    doc.text(`€${order.total.toFixed(2)}`, 190, finalY, { align: 'right' });
 
     // 5. Caja de garantía (sólo reparaciones)
     if (isService) {
-      const boxY = finalY + 25;
+      const boxY = finalY + 11;
       doc.setDrawColor(200);
       doc.setFillColor(248, 248, 248);
       doc.rect(14, boxY, 182, 50, 'FD');
@@ -248,6 +269,16 @@ export const generateDocuments = async (order, type = 'both') => {
     y += 3;
     doc.text('--------------------------------', centerX, y, { align: 'center' });
     y += 6;
+
+    if (discount > 0) {
+      const itemsGrossT = regularForTicket.reduce((s, it) => s + (it.price * it.quantity), 0);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text('Subtotal:'.padEnd(18) + `EUR ${itemsGrossT.toFixed(2)}`, 5, y);
+      y += 5;
+      doc.text(`Dto (${couponCode || 'CUPON'}):`.padEnd(16) + `-EUR ${discount.toFixed(2)}`, 5, y);
+      y += 6;
+    }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);

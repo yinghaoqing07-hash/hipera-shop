@@ -1368,12 +1368,15 @@ export default function App() {
          
          // 如果同时有商品和服务，生成两张发票
          if (productItems.length > 0 && serviceItems.length > 0) {
-            // 商品发票
+            // 商品发票 — el descuento del cupón (sobre el subtotal) se
+            // refleja en la factura de productos.
             const productOrder = {
                id: orderData?.id || Math.random().toString(36).substr(2, 9),
                created_at: orderData?.created_at || new Date().toISOString(),
                items: productItems,
-               total: productTotal,
+               total: Math.max(0, Math.round((productTotal - discount) * 100) / 100),
+               discount,
+               couponCode: appliedCoupon?.code || null,
                address: checkoutForm.address,
                phone: checkoutForm.phone,
                payment_method: paymentMethodName
@@ -1400,7 +1403,9 @@ export default function App() {
                id: orderData?.id || Math.random().toString(36).substr(2, 9),
                created_at: orderData?.created_at || new Date().toISOString(),
                items: finalCart,
-               total: total,
+               total: total, // ya incluye el descuento del cupón
+               discount,
+               couponCode: appliedCoupon?.code || null,
                address: checkoutForm.address,
                phone: checkoutForm.phone,
                payment_method: paymentMethodName
