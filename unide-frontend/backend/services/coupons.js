@@ -35,6 +35,8 @@
 //    y vuelve a desplegar.
 // ---------------------------------------------------------------------
 export const COUPONS = {
+  // Cupón "premium": mayor descuento, SOLO para registrados (uso único
+  // fiable por cuenta). Lo promocionamos como incentivo para crear cuenta.
   BIENVENIDA10: {
     type: 'percent',
     value: 10,
@@ -42,6 +44,19 @@ export const COUPONS = {
     expiresAt: '2026-08-30T23:59:59+02:00',        // ← p. ej. '2026-06-30T23:59:59+02:00'
     oncePerCustomer: true,
     requiresAccount: true, // solo usuarios registrados (uso único fiable)
+    active: true,          // ← poner true el día del lanzamiento
+  },
+  // Cupón "abierto": menor descuento pero válido también para invitados,
+  // para no perder al cliente que no quiere registrarse. El uso único de
+  // invitado solo se puede atar al teléfono (un invitado podría reusarlo
+  // cambiando de número); asumido a cambio de menos fricción.
+  BIENVENIDA5: {
+    type: 'percent',
+    value: 5,
+    minSubtotal: 30,
+    expiresAt: '2026-08-30T23:59:59+02:00',        // ← alinear con la fecha de campaña
+    oncePerCustomer: true,
+    requiresAccount: false,
     active: true,          // ← poner true el día del lanzamiento
   },
 };

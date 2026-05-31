@@ -842,6 +842,9 @@ export default function App() {
   const [couponInput, setCouponInput] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [couponError, setCouponError] = useState("");
+  // Motivo del rechazo del cupón (p. ej. 'LOGIN_REQUIRED') para mostrar
+  // un botón de login cuando el cupón exige cuenta y el cliente es invitado.
+  const [couponErrorReason, setCouponErrorReason] = useState("");
   const [couponLoading, setCouponLoading] = useState(false);
 
   // 新增这两个状态用于筛选
@@ -1196,6 +1199,7 @@ export default function App() {
     if (!code) { setCouponError('Introduce un código de cupón.'); return; }
     setCouponLoading(true);
     setCouponError('');
+    setCouponErrorReason('');
     try {
       const res = await apiClient.validateCoupon({
         code,
@@ -1206,14 +1210,17 @@ export default function App() {
         setAppliedCoupon({ code: res.code, value: res.value, minSubtotal: res.minSubtotal, type: res.type });
         setCouponInput(res.code);
         setCouponError('');
+        setCouponErrorReason('');
         toast.success('¡Cupón aplicado!');
       } else {
         setAppliedCoupon(null);
         setCouponError(res?.message || 'El código no es válido.');
+        setCouponErrorReason(res?.reason || '');
       }
     } catch (e) {
       setAppliedCoupon(null);
       setCouponError(e?.message || 'No se pudo validar el cupón. Inténtalo de nuevo.');
+      setCouponErrorReason('');
     } finally {
       setCouponLoading(false);
     }
@@ -1223,6 +1230,7 @@ export default function App() {
     setAppliedCoupon(null);
     setCouponInput('');
     setCouponError('');
+    setCouponErrorReason('');
   };
 
   const handleInitiateCheckout = async () => {
@@ -2630,8 +2638,8 @@ export default function App() {
                  ) : (
                    <div className="flex items-stretch gap-2">
                      <input
-                       value={couponInput}
-                       onChange={e => { setCouponInput(e.target.value); if (couponError) setCouponError(''); }}
+                      value={couponInput}
+                      onChange={e => { setCouponInput(e.target.value); if (couponError) { setCouponError(''); setCouponErrorReason(''); } }}
                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleApplyCoupon(); } }}
                        placeholder="Código de descuento"
                        autoCapitalize="characters"
@@ -2647,8 +2655,31 @@ export default function App() {
                      </button>
                    </div>
                  )}
-                 {couponError && <p className="text-xs text-red-600 mt-1.5">{couponError}</p>}
-               </div>
+                {couponError && <p className="text-xs text-red-600 mt-1.5">{couponError}</p>}
+                {couponErrorReason === 'LOGIN_REQUIRED' && (
+                  <div className="mt-2 bg-red-50 border border-red-100 rounded-xl p-3">
+                    <p className="text-xs text-gray-600 mb-2">
+                      Inicia sesión para usar este cupón. <span className="font-semibold">Tu carrito se mantiene.</span> ¿Prefieres no registrarte? Prueba el código <span className="font-bold">BIENVENIDA5</span> (5 %, válido sin cuenta).
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/login')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 bg-red-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-red-700 transition-colors"
+                      >
+                        <LogIn size={16}/> Iniciar sesión
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/register')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 border border-red-200 text-red-700 text-sm font-bold py-2 rounded-lg hover:bg-red-50 transition-colors"
+                      >
+                        Crear cuenta
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
                <div className="border-t border-gray-100 pt-3 space-y-1.5 text-sm">
                  <div className="flex justify-between text-gray-600">
