@@ -3,6 +3,10 @@ import React, { useState } from "react";
 import { supabase } from './supabaseClient';
 import { Link } from "react-router-dom";
 import { Lock, Mail, ArrowRight, ShoppingBag } from "lucide-react";
+import toast, { Toaster } from 'react-hot-toast';
+
+// Mismo criterio que el resto de la app: exige arroba y dominio.
+const isEmailFormatOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -11,15 +15,34 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    // Validación previa para dar un mensaje claro antes de llamar a
+    // Supabase (antes el único feedback era un alert() del navegador con
+    // el error técnico del SDK, poco amigable).
+    if (!isEmailFormatOk(email)) {
+      toast.error("Introduce un email válido.");
+      return;
+    }
+    if (!password) {
+      toast.error("Introduce tu contraseña.");
+      return;
+    }
     setLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: email,
+      email: email.trim(),
       password: password,
     });
 
     if (error) {
-      alert("Error: " + error.message);
+      // Mensaje genérico en español: no revelamos si el fallo es por
+      // email inexistente o contraseña incorrecta (buena práctica de
+      // seguridad para no facilitar enumeración de cuentas).
+      const msg = /invalid login credentials/i.test(error.message || '')
+        ? 'Email o contraseña incorrectos.'
+        : (/email not confirmed/i.test(error.message || '')
+            ? 'Debes confirmar tu email antes de entrar. Revisa tu bandeja de entrada.'
+            : 'No se pudo iniciar sesión. Inténtalo de nuevo.');
+      toast.error(msg);
       setLoading(false);
     } else {
       // Forzamos full reload en vez de navigate("/") por dos motivos:
@@ -37,6 +60,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center p-6">
+      <Toaster position="top-center" toastOptions={{ style: { borderRadius: '12px', background: '#333', color: '#fff' } }} />
       <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden">
         
         {/* Header 区域 */}

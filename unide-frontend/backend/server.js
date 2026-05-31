@@ -650,6 +650,19 @@ app.get('/api/repair-services', async (req, res) => {
 const VALID_DELIVERY_METHODS = ['home_delivery', 'store_pickup'];
 
 // =====================================================================
+// Validación de teléfono español (defensa servidor).
+// El frontend ya valida, pero un cliente malicioso puede saltarse el JS
+// y llamar a la API directamente. Normalizamos prefijo internacional
+// opcional (+34 / 0034 / 34) y separadores, y exigimos 9 dígitos que
+// empiecen por 6/7 (móvil) u 8/9 (fijo) — el rango válido en España.
+// =====================================================================
+function isSpanishPhoneOk(raw) {
+  let p = String(raw || '').replace(/[\s.\-()]/g, '');
+  p = p.replace(/^\+?(0034|34)/, '');
+  return /^[6-9]\d{8}$/.test(p);
+}
+
+// =====================================================================
 // Estados que se consideran "no completados" a efectos de anti-abuso.
 // Si el cliente acumula varios pedidos en estos estados con el mismo
 // teléfono en 24 h, el siguiente se rechaza con 429.
@@ -1071,6 +1084,9 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
     if (!phone || !total || !items) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    if (!isSpanishPhoneOk(phone)) {
+      return res.status(400).json({ error: 'Teléfono no válido. Introduce un número español de 9 cifras.' });
+    }
     if (!isStorePickup && !address) {
       return res.status(400).json({ error: 'La dirección de entrega es obligatoria para envío a domicilio.' });
     }
@@ -1341,6 +1357,9 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
     // Validación de campos.
     if (!phone || !total || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Faltan datos del pedido.' });
+    }
+    if (!isSpanishPhoneOk(phone)) {
+      return res.status(400).json({ error: 'Teléfono no válido. Introduce un número español de 9 cifras.' });
     }
     if (!isStorePickup && !address) {
       return res.status(400).json({ error: 'La dirección de entrega es obligatoria para envío a domicilio.' });

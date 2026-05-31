@@ -31,7 +31,7 @@ import {
   Tag, Trash2, ChevronRight, ChevronDown, Home, Gift, Truck, Store, Heart,
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock, LogIn,
-  Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone,
+  Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone, Mail,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
@@ -808,6 +808,12 @@ export default function App() {
   // Aviso de "pago cancelado/incompleto" mostrado en la página de checkout
   // cuando el cliente vuelve de Stripe sin completar el pago (?pago=cancelado).
   const [paymentCancelledNotice, setPaymentCancelledNotice] = useState(false);
+  // Modal de confirmación de datos de entrega: tras pulsar "Confirmar"
+  // y pasar todas las validaciones, mostramos un resumen de los datos
+  // (entrega, dirección, teléfono, email) para que el cliente los
+  // revise de un vistazo antes de cobrar/crear el pedido. Reduce
+  // direcciones/teléfonos mal escritos sin añadir fricción real.
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(""); // 选择的支付方式
   // Cloudflare Turnstile: ref al widget invisible montado en checkout.
   // Se ejecuta justo antes de POST /api/orders para acompañar al
@@ -1138,6 +1144,28 @@ export default function App() {
   // strings claramente inválidas.
   const isEmailFormatOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
 
+  // Validación de teléfono español. Aceptamos prefijo internacional
+  // opcional (+34 / 0034 / 34) y separadores habituales (espacios,
+  // guiones, puntos, paréntesis). Tras normalizar exigimos 9 dígitos
+  // que empiecen por 6/7 (móvil) u 8/9 (fijo) — el rango válido en
+  // España. Antes solo se comprobaba que no estuviera vacío, por lo
+  // que cualquier garabato pasaba. El backend replica esta regla.
+  const isPhoneFormatOk = (raw) => {
+    let p = String(raw || '').replace(/[\s.\-()]/g, '');
+    p = p.replace(/^\+?(0034|34)/, '');
+    return /^[6-9]\d{8}$/.test(p);
+  };
+
+  // Validación mínima de dirección (solo envío a domicilio). Exigimos
+  // longitud razonable y al menos un dígito (número de portal/piso),
+  // lo que descarta entradas tipo "asdf" o "calle". No pretende ser
+  // perfecta: el autocompletado de direcciones (Google Places) llegará
+  // como mejora posterior; esto es la red de seguridad mínima.
+  const isAddressFormatOk = (a) => {
+    const v = String(a || '').trim();
+    return v.length >= 6 && /\d/.test(v);
+  };
+
   // Valida el cupón contra el backend y, si es correcto, lo fija. El
   // descuento real se vuelve a calcular/validar en el servidor al pagar;
   // esto es solo previsualización para dar feedback inmediato.
@@ -1188,8 +1216,16 @@ export default function App() {
       toast.error("Indica un teléfono de contacto para avisarte sobre el pedido.");
       return;
     }
+    if (!isPhoneFormatOk(checkoutForm.phone)) {
+      toast.error("Teléfono no válido — introduce un número español de 9 cifras (móvil o fijo).");
+      return;
+    }
     if (checkoutForm.deliveryMethod === "home_delivery" && !checkoutForm.address) {
       toast.error("Faltan datos de envío — indica la dirección o cambia a recogida en tienda.");
+      return;
+    }
+    if (checkoutForm.deliveryMethod === "home_delivery" && !isAddressFormatOk(checkoutForm.address)) {
+      toast.error("Indica una dirección completa con número (calle, número y piso si procede).");
       return;
     }
     if (!isEmailFormatOk(checkoutForm.email)) {
@@ -1220,18 +1256,28 @@ export default function App() {
       setTimeout(() => navigate('/login'), 800);
       return;
     }
+    // Todas las validaciones han pasado: mostramos el resumen de datos
+    // para que el cliente confirme de un vistazo (dirección/teléfono/
+    // email correctos) antes de cobrar o crear el pedido. El envío real
+    // se dispara en handleConfirmedSubmit al pulsar "Confirmar".
+    setShowConfirmModal(true);
+  };
+
+  // Confirmación final desde el modal de revisión de datos. Aquí
+  // registramos la (re)aceptación de términos si procede y lanzamos el
+  // pago/creación del pedido.
+  const handleConfirmedSubmit = async () => {
+    setShowConfirmModal(false);
     // Si hay que re-aceptar y el usuario está logueado, registrar la
     // aceptación en segundo plano. IMPORTANTE: NO usar await aquí — el
     // historial de incidencias (2026-05-26) mostró que, cuando el token
     // de Supabase queda corrupto en el navegador del cliente, cualquier
     // llamada a supabase se queda colgada hasta el timeout interno (30s).
-    // Si esperásemos a recordTermsAcceptance, el botón "Continuar al
-    // Pago" quedaría sin respuesta visible durante esos 30 s y los
-    // clientes lo interpretan como un fallo total. Lanzamos la
-    // promesa, actualizamos el estado local de forma optimista y
-    // abrimos inmediatamente el modal de pago. Si la persistencia
-    // falla, la próxima sesión simplemente volverá a pedir la
-    // aceptación — coste aceptable frente a bloquear el checkout.
+    // Si esperásemos a recordTermsAcceptance, el botón quedaría sin
+    // respuesta visible durante esos 30 s y los clientes lo interpretan
+    // como un fallo total. Lanzamos la promesa, actualizamos el estado
+    // local de forma optimista y continuamos. Si la persistencia falla,
+    // la próxima sesión simplemente volverá a pedir la aceptación.
     if (user && needsTermsReacceptance(latestTermsAcceptance) && checkoutTermsAccepted) {
       setLatestTermsAcceptance({
         terms_version: TERMS_VERSION,
@@ -1243,8 +1289,6 @@ export default function App() {
         if (!import.meta.env.PROD) console.warn('[checkout] recordAcceptance:', e?.message);
       });
     }
-    // Pago inline (sin modal): confirmamos directamente con el método ya
-    // seleccionado en la misma página de checkout.
     await handleConfirmPayment();
   };
 
@@ -2605,8 +2649,8 @@ export default function App() {
               // método de pago son obligatorios para considerar "listo".
               const checkoutReady =
                 isEmailFormatOk(checkoutForm.email) &&
-                (isStorePickup || checkoutForm.address) &&
-                checkoutForm.phone &&
+                (isStorePickup || isAddressFormatOk(checkoutForm.address)) &&
+                isPhoneFormatOk(checkoutForm.phone) &&
                 (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted) &&
                 !!selectedPayment;
               const label = isProcessingPayment
@@ -2640,6 +2684,109 @@ export default function App() {
                 desafiar (raro en clientes humanos). */}
             <TurnstileGate ref={turnstileRef} />
           </div>
+
+          {/* Modal de confirmación de datos de entrega. Se abre tras pasar
+              todas las validaciones y antes de cobrar/crear el pedido. */}
+          {showConfirmModal && (
+            <div
+              className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+              onClick={() => { if (!isProcessingPayment) setShowConfirmModal(false); }}
+            >
+              <div
+                className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-5 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white">
+                  <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                    <CheckCircle2 size={20} className="text-red-600"/> Revisa tus datos
+                  </h3>
+                  <button
+                    onClick={() => setShowConfirmModal(false)}
+                    disabled={isProcessingPayment}
+                    className="text-gray-400 hover:text-gray-700 p-1 disabled:opacity-40"
+                    aria-label="Cerrar"
+                  >
+                    <X size={22}/>
+                  </button>
+                </div>
+                <div className="p-5 space-y-3 text-sm">
+                  <p className="text-gray-500 text-xs">
+                    Comprueba que todo es correcto antes de confirmar. Si algo está mal, pulsa «Editar».
+                  </p>
+                  <div className="flex items-start gap-3">
+                    {isStorePickup
+                      ? <Store size={18} className="text-red-600 mt-0.5 flex-shrink-0"/>
+                      : <Truck size={18} className="text-red-600 mt-0.5 flex-shrink-0"/>}
+                    <div>
+                      <p className="text-gray-400 text-xs">Entrega</p>
+                      <p className="font-semibold text-gray-800">
+                        {isStorePickup
+                          ? 'Recogida en tienda (HIPERA, Paseo del Sol 1, Meco)'
+                          : 'Envío a domicilio'}
+                      </p>
+                    </div>
+                  </div>
+                  {!isStorePickup && (
+                    <div className="flex items-start gap-3">
+                      <MapPin size={18} className="text-red-600 mt-0.5 flex-shrink-0"/>
+                      <div>
+                        <p className="text-gray-400 text-xs">Dirección</p>
+                        <p className="font-semibold text-gray-800 break-words">{checkoutForm.address}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-start gap-3">
+                    <Phone size={18} className="text-red-600 mt-0.5 flex-shrink-0"/>
+                    <div>
+                      <p className="text-gray-400 text-xs">Teléfono</p>
+                      <p className="font-semibold text-gray-800">{checkoutForm.phone}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Mail size={18} className="text-red-600 mt-0.5 flex-shrink-0"/>
+                    <div>
+                      <p className="text-gray-400 text-xs">Email</p>
+                      <p className="font-semibold text-gray-800 break-words">{checkoutForm.email}</p>
+                    </div>
+                  </div>
+                  {checkoutForm.note?.trim() && (
+                    <div className="flex items-start gap-3">
+                      <FileText size={18} className="text-red-600 mt-0.5 flex-shrink-0"/>
+                      <div>
+                        <p className="text-gray-400 text-xs">Nota</p>
+                        <p className="font-semibold text-gray-800 break-words">{checkoutForm.note}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                    <span className="text-gray-500">Total</span>
+                    <span className="font-bold text-lg text-red-600">€{total.toFixed(2)}</span>
+                  </div>
+                </div>
+                <div className="p-5 pt-0 flex gap-3">
+                  <button
+                    onClick={() => setShowConfirmModal(false)}
+                    disabled={isProcessingPayment}
+                    className="flex-1 py-3 rounded-xl font-bold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={handleConfirmedSubmit}
+                    disabled={isProcessingPayment}
+                    className="flex-1 py-3 rounded-xl font-bold bg-red-600 text-white shadow-lg shadow-red-200 hover:bg-red-700 flex items-center justify-center gap-2 disabled:opacity-60 transition-colors"
+                  >
+                    {isProcessingPayment
+                      ? <Loader2 size={18} className="animate-spin"/>
+                      : (selectedPayment === 'stripe' ? <Lock size={16}/> : <CheckCircle2 size={16}/>)}
+                    {isProcessingPayment
+                      ? 'Procesando…'
+                      : (selectedPayment === 'stripe' ? 'Pagar' : 'Confirmar')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
