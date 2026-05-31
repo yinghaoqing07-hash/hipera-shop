@@ -1374,7 +1374,8 @@ export default function App() {
                id: orderData?.id || Math.random().toString(36).substr(2, 9),
                created_at: orderData?.created_at || new Date().toISOString(),
                items: productItems,
-               total: Math.max(0, Math.round((productTotal - discount) * 100) / 100),
+               // El envío (si lo hay) se factura junto a los productos.
+               total: Math.max(0, Math.round((productTotal - discount + shippingFee) * 100) / 100),
                discount,
                couponCode: appliedCoupon?.code || null,
                address: checkoutForm.address,

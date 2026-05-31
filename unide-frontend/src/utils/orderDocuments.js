@@ -137,16 +137,27 @@ export const generateDocuments = async (order, type = 'both') => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
 
-    if (discount > 0) {
-      const itemsGross = regularItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+    // El envío no se almacena como línea aparte; lo derivamos para que el
+    // desglose cuadre: total = subtotal(items) - descuento + envío.
+    const itemsGross = regularItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+    const shipping = Math.max(0, Math.round((order.total - (itemsGross - discount)) * 100) / 100);
+
+    if (discount > 0 || shipping > 0) {
       doc.text('Subtotal:', 160, finalY, { align: 'right' });
       doc.text(`€${itemsGross.toFixed(2)}`, 190, finalY, { align: 'right' });
       finalY += 5;
-      doc.setTextColor(22, 130, 60);
-      doc.text(`Descuento (${couponCode || 'CUPÓN'}):`, 160, finalY, { align: 'right' });
-      doc.text(`-€${discount.toFixed(2)}`, 190, finalY, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
-      finalY += 5;
+      if (discount > 0) {
+        doc.setTextColor(22, 130, 60);
+        doc.text(`Descuento (${couponCode || 'CUPÓN'}):`, 160, finalY, { align: 'right' });
+        doc.text(`-€${discount.toFixed(2)}`, 190, finalY, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+        finalY += 5;
+      }
+      if (shipping > 0) {
+        doc.text('Envío:', 160, finalY, { align: 'right' });
+        doc.text(`€${shipping.toFixed(2)}`, 190, finalY, { align: 'right' });
+        finalY += 5;
+      }
     }
 
     const subTotal = order.total / 1.21;
@@ -270,14 +281,22 @@ export const generateDocuments = async (order, type = 'both') => {
     doc.text('--------------------------------', centerX, y, { align: 'center' });
     y += 6;
 
-    if (discount > 0) {
-      const itemsGrossT = regularForTicket.reduce((s, it) => s + (it.price * it.quantity), 0);
+    const itemsGrossT = regularForTicket.reduce((s, it) => s + (it.price * it.quantity), 0);
+    const shippingT = Math.max(0, Math.round((order.total - (itemsGrossT - discount)) * 100) / 100);
+    if (discount > 0 || shippingT > 0) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
       doc.text('Subtotal:'.padEnd(18) + `EUR ${itemsGrossT.toFixed(2)}`, 5, y);
       y += 5;
-      doc.text(`Dto (${couponCode || 'CUPON'}):`.padEnd(16) + `-EUR ${discount.toFixed(2)}`, 5, y);
-      y += 6;
+      if (discount > 0) {
+        doc.text(`Dto (${couponCode || 'CUPON'}):`.padEnd(16) + `-EUR ${discount.toFixed(2)}`, 5, y);
+        y += 5;
+      }
+      if (shippingT > 0) {
+        doc.text('Envio:'.padEnd(18) + `EUR ${shippingT.toFixed(2)}`, 5, y);
+        y += 5;
+      }
+      y += 1;
     }
 
     doc.setFont('helvetica', 'bold');

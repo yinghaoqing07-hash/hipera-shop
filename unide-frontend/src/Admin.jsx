@@ -1244,16 +1244,25 @@ export default function AdminApp() {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
       const couponDiscount = Number(order.discount) || 0;
-      if (couponDiscount > 0) {
-        const itemsGross = regularItems.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+      const itemsGross = regularItems.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+      // Envío derivado: total = subtotal(items) - descuento + envío.
+      const shipping = Math.max(0, Math.round(((order.total || 0) - (itemsGross - couponDiscount)) * 100) / 100);
+      if (couponDiscount > 0 || shipping > 0) {
         doc.text('Subtotal:', 160, finalY, { align: 'right' });
         doc.text(`€${itemsGross.toFixed(2)}`, 190, finalY, { align: 'right' });
         finalY += 5;
-        doc.setTextColor(22, 130, 60);
-        doc.text(`Descuento (${order.coupon_code || 'CUPÓN'}):`, 160, finalY, { align: 'right' });
-        doc.text(`-€${couponDiscount.toFixed(2)}`, 190, finalY, { align: 'right' });
-        doc.setTextColor(0, 0, 0);
-        finalY += 5;
+        if (couponDiscount > 0) {
+          doc.setTextColor(22, 130, 60);
+          doc.text(`Descuento (${order.coupon_code || 'CUPÓN'}):`, 160, finalY, { align: 'right' });
+          doc.text(`-€${couponDiscount.toFixed(2)}`, 190, finalY, { align: 'right' });
+          doc.setTextColor(0, 0, 0);
+          finalY += 5;
+        }
+        if (shipping > 0) {
+          doc.text('Envío:', 160, finalY, { align: 'right' });
+          doc.text(`€${shipping.toFixed(2)}`, 190, finalY, { align: 'right' });
+          finalY += 5;
+        }
       }
       const subTotal = (order.total || 0) / 1.21;
       const iva = (order.total || 0) - subTotal;
