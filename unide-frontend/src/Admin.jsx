@@ -1045,7 +1045,7 @@ export default function AdminApp() {
     };
     const headers = [
       'Nº pedido', 'Fecha', 'Teléfono', 'Email', 'Dirección',
-      'Entrega', 'Estado', 'Pago', 'Total (EUR)', 'Artículos', 'Nota',
+      'Entrega', 'Estado', 'Pago', 'Cupón', 'Descuento (EUR)', 'Total (EUR)', 'Artículos', 'Nota',
     ];
     const rows = list.map(o => {
       const fecha = o.created_at
@@ -1058,6 +1058,7 @@ export default function AdminApp() {
       return [
         o.id || '', fecha, o.phone || '', o.customer_email || '', o.address || '',
         entrega, o.status || '', o.payment_method || '',
+        o.coupon_code || '', (Number(o.discount) || 0).toFixed(2),
         (Number(o.total) || 0).toFixed(2), articulos, o.note || '',
       ].map(esc).join(';');
     });
@@ -2082,7 +2083,14 @@ const renderRepairs = () => (
                         );
                       })}
                    </td>
-                   <td className="p-4 align-top font-bold">€{o.total?.toFixed(2)}</td>
+                   <td className="p-4 align-top font-bold">
+                      €{o.total?.toFixed(2)}
+                      {o.coupon_code && (
+                        <div className="mt-1 text-[10px] font-bold text-green-700 whitespace-nowrap">
+                          <span className="bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{o.coupon_code} −€{(Number(o.discount) || 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                   </td>
                    <td className="p-4 align-top">
                       <span className={`px-2 py-1 rounded text-xs font-bold ${paymentColor}`}>
                         {paymentMethod}
@@ -2165,7 +2173,12 @@ const renderRepairs = () => (
                   })}
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
-                  <span className="font-bold text-lg text-gray-800">€{o.total?.toFixed(2)}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-lg text-gray-800">€{o.total?.toFixed(2)}</span>
+                    {o.coupon_code && (
+                      <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{o.coupon_code} −€{(Number(o.discount) || 0).toFixed(2)}</span>
+                    )}
+                  </span>
                   <div className="flex flex-wrap items-center gap-2">
                     <button type="button" onClick={() => openOrderFactura(o)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold">
                       <FileText size={14}/> Factura

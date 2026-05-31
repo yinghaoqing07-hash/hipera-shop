@@ -825,6 +825,15 @@ export default function App() {
   const [latestTermsAcceptance, setLatestTermsAcceptance] = useState(null);
   const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
 
+  // Cupón de descuento (campaña de lanzamiento). `couponInput` es el texto
+  // que el cliente escribe; `appliedCoupon` queda fijado tras validarlo en
+  // el backend ({ code, value }). El descuento se recalcula en vivo sobre
+  // el subtotal actual y SIEMPRE se revalida en el servidor al pagar.
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+
   // 新增这两个状态用于筛选
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
   const [selectedModel, setSelectedModel] = useState("");
@@ -876,6 +885,7 @@ export default function App() {
       setCart([]);
       setCheckoutForm((prev) => ({ ...prev, note: '' }));
       setSelectedGift(null);
+      setAppliedCoupon(null); setCouponInput(''); setCouponError('');
       toast.success('¡Pago recibido! Te hemos enviado la confirmación por email.', { duration: 7000 });
       // Limpiamos los parámetros de la URL para que recargar no repita el toast.
       window.history.replaceState({ app: true }, '', window.location.pathname);
@@ -1101,7 +1111,18 @@ export default function App() {
   const shippingFee = isStorePickup
     ? 0
     : (subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FEE_STANDARD);
-  const total = subtotal + shippingFee;
+  // Importe ANTES del descuento (subtotal + envío). Es lo que enviamos al
+  // backend como `total`; el servidor recalcula y resta el descuento del
+  // cupón de forma autoritativa.
+  const baseTotal = subtotal + shippingFee;
+  // Descuento del cupón, recalculado en vivo sobre el subtotal actual.
+  // Mismo cálculo que el backend (value % del subtotal, a céntimos) para
+  // que el importe mostrado coincida exactamente con el cobrado. Si el
+  // subtotal baja del mínimo del cupón, el descuento deja de aplicarse.
+  const discount = (appliedCoupon && subtotal >= appliedCoupon.minSubtotal)
+    ? Math.min(Math.round(subtotal * appliedCoupon.value) / 100, subtotal)
+    : 0;
+  const total = Math.max(0, Math.round((baseTotal - discount) * 100) / 100);
   const minOrderMet = subtotal >= 20;
   const isFreeShipping = subtotal >= FREE_SHIPPING_THRESHOLD;
   const isGiftEligible = subtotal >= 65;
@@ -1116,6 +1137,43 @@ export default function App() {
   // estricta, pero replicamos aquí para evitar enviar al backend
   // strings claramente inválidas.
   const isEmailFormatOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
+
+  // Valida el cupón contra el backend y, si es correcto, lo fija. El
+  // descuento real se vuelve a calcular/validar en el servidor al pagar;
+  // esto es solo previsualización para dar feedback inmediato.
+  const handleApplyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!code) { setCouponError('Introduce un código de cupón.'); return; }
+    setCouponLoading(true);
+    setCouponError('');
+    try {
+      const res = await apiClient.validateCoupon({
+        code,
+        items: cart,
+        phone: checkoutForm.phone || null,
+      });
+      if (res?.valid) {
+        setAppliedCoupon({ code: res.code, value: res.value, minSubtotal: res.minSubtotal, type: res.type });
+        setCouponInput(res.code);
+        setCouponError('');
+        toast.success('¡Cupón aplicado!');
+      } else {
+        setAppliedCoupon(null);
+        setCouponError(res?.message || 'El código no es válido.');
+      }
+    } catch (e) {
+      setAppliedCoupon(null);
+      setCouponError(e?.message || 'No se pudo validar el cupón. Inténtalo de nuevo.');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponInput('');
+    setCouponError('');
+  };
 
   const handleInitiateCheckout = async () => {
     // Si veníamos de un pago cancelado, ocultamos el aviso al reintentar.
@@ -1246,7 +1304,8 @@ export default function App() {
           address: isStorePickup ? '' : checkoutForm.address,
           phone: checkoutForm.phone,
           note: checkoutForm.note,
-          total: total,
+          total: baseTotal, // SIN descuento: el backend lo resta tras validar el cupón
+          coupon_code: appliedCoupon?.code || null,
           delivery_method: checkoutForm.deliveryMethod,
           items: finalCart,
           turnstile_token: turnstileToken,
@@ -1270,7 +1329,8 @@ export default function App() {
         address: isStorePickup ? '' : checkoutForm.address,
         phone: checkoutForm.phone,
         note: checkoutForm.note,
-        total: total, // 总价不变（免费商品不计入总价）
+        total: baseTotal, // SIN descuento: el backend lo resta tras validar el cupón
+        coupon_code: appliedCoupon?.code || null,
         status: selectedPayment === 'contra_reembolso' ? "Pendiente de Pago" : "Procesando",
         payment_method: paymentMethodName,
         delivery_method: checkoutForm.deliveryMethod,
@@ -1352,6 +1412,7 @@ export default function App() {
       setCart([]);
       setCheckoutForm(prev => ({ ...prev, note: "" }));
       setSelectedPayment(""); // 重置支付方式
+      setAppliedCoupon(null); setCouponInput(""); setCouponError(""); // 重置优惠码
       
       // 刷新产品列表（通过API）
       const pData = await apiClient.getProducts();
@@ -1372,6 +1433,13 @@ export default function App() {
         // reintentar (los métodos de pago siguen visibles en la página).
         toast.error(e.message || 'Demasiados pedidos. Espera unos minutos.', { duration: 6000 });
         setSelectedPayment('');
+      } else if (e?.code === 'COUPON_INVALID') {
+        // El cupón dejó de ser válido entre la previsualización y el pago
+        // (caducó, se usó, o cambió el carrito). Lo quitamos para que el
+        // cliente pueda reintentar sin descuento.
+        toast.error(e.message || 'El cupón ya no es válido.', { duration: 6000 });
+        setAppliedCoupon(null);
+        setCouponError(e.message || 'El cupón ya no es válido.');
       } else {
         toast.error(e.message);
       }
@@ -2457,11 +2525,57 @@ export default function App() {
                    </div>
                  )}
                </div>
+
+               {/* Cupón de descuento */}
+               <div className="border-t border-gray-100 pt-3">
+                 {appliedCoupon ? (
+                   <div className="flex items-center justify-between gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
+                     <span className="inline-flex items-center gap-1.5 text-sm font-bold text-green-700">
+                       <Percent size={14}/> {appliedCoupon.code}
+                       {subtotal < appliedCoupon.minSubtotal && (
+                         <span className="text-[11px] font-medium text-amber-700">
+                           (mín. €{appliedCoupon.minSubtotal.toFixed(2)})
+                         </span>
+                       )}
+                     </span>
+                     <button type="button" onClick={handleRemoveCoupon} className="text-gray-400 hover:text-red-600 p-1" title="Quitar cupón">
+                       <X size={16}/>
+                     </button>
+                   </div>
+                 ) : (
+                   <div className="flex items-stretch gap-2">
+                     <input
+                       value={couponInput}
+                       onChange={e => { setCouponInput(e.target.value); if (couponError) setCouponError(''); }}
+                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleApplyCoupon(); } }}
+                       placeholder="Código de descuento"
+                       autoCapitalize="characters"
+                       className="flex-1 min-w-0 p-2.5 bg-gray-50 rounded-xl text-sm font-medium outline-none focus:ring-2 ring-red-100 uppercase placeholder:normal-case placeholder:font-normal"
+                     />
+                     <button
+                       type="button"
+                       onClick={handleApplyCoupon}
+                       disabled={couponLoading || !couponInput.trim()}
+                       className="px-4 rounded-xl bg-gray-800 text-white text-sm font-bold active:scale-95 transition-transform disabled:opacity-40 disabled:active:scale-100 flex items-center justify-center"
+                     >
+                       {couponLoading ? <Loader2 size={16} className="animate-spin"/> : 'Aplicar'}
+                     </button>
+                   </div>
+                 )}
+                 {couponError && <p className="text-xs text-red-600 mt-1.5">{couponError}</p>}
+               </div>
+
                <div className="border-t border-gray-100 pt-3 space-y-1.5 text-sm">
                  <div className="flex justify-between text-gray-600">
                    <span>Subtotal</span>
                    <span className="font-medium text-gray-800">€{subtotal.toFixed(2)}</span>
                  </div>
+                 {discount > 0 && (
+                   <div className="flex justify-between text-green-700">
+                     <span>Descuento ({appliedCoupon?.code})</span>
+                     <span className="font-semibold">−€{discount.toFixed(2)}</span>
+                   </div>
+                 )}
                  <div className="flex justify-between text-gray-600">
                    <span>{isStorePickup ? 'Recogida en tienda' : 'Envío'}</span>
                    <span className="font-medium">{shippingFee === 0 ? <span className="text-green-700 font-semibold">GRATIS</span> : `€${shippingFee.toFixed(2)}`}</span>

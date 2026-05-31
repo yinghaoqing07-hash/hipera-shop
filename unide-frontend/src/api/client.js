@@ -164,6 +164,16 @@ class ApiClient {
     });
   }
 
+  // Valida un cupón antes de pagar (previsualización). Devuelve
+  // { valid:true, code, discount } o { valid:false, reason, message }.
+  // La validación autoritativa se repite al crear el pedido.
+  async validateCoupon({ code, items, phone }) {
+    return this.request('/coupon/validate', {
+      method: 'POST',
+      body: JSON.stringify({ code, items, phone }),
+    });
+  }
+
   async getUserOrders(userId) {
     return this.request(`/orders/user/${userId}`);
   }

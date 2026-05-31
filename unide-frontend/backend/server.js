@@ -19,6 +19,11 @@ import {
   buildCheckoutLineItems,
   resolveStripePaymentLabel,
 } from './services/stripe.js';
+import {
+  evaluateCoupon,
+  computeSubtotal,
+  couponErrorMessage,
+} from './services/coupons.js';
 
 dotenv.config();
 
@@ -661,6 +666,55 @@ const UNCOMPLETED_ORDER_STATUSES = ['Procesando', 'Pendiente de Pago'];
 const MAX_UNCOMPLETED_PER_PHONE_24H = 2;
 
 // =====================================================================
+// Cupones — uso único por cliente (necesita BD)
+// =====================================================================
+// Un cupón con oncePerCustomer se considera "ya usado" si existe otro
+// pedido del mismo usuario (o, si es invitado, del mismo teléfono) con
+// el mismo coupon_code y un estado que NO sea 'Esperando pago' (checkout
+// Stripe abandonado, no consumió nada) ni 'Cancelado' (pedido anulado).
+// Tolerante a fallos: ante un error de BD devolvemos false (fail-open),
+// preferimos permitir un descuento legítimo a bloquear la compra por un
+// glitch puntual de Supabase.
+async function couponAlreadyUsed(code, { user_id, phone }) {
+  try {
+    let q = supabase.from('orders').select('id, status').eq('coupon_code', code);
+    if (user_id) q = q.eq('user_id', user_id);
+    else if (phone) q = q.eq('phone', phone);
+    else return false; // sin forma de identificar al cliente
+    const { data, error } = await q;
+    if (error) {
+      console.warn('[coupon] used check error:', error.message);
+      return false;
+    }
+    const consumed = ['Esperando pago', 'Cancelado'];
+    return (data || []).some((o) => !consumed.includes(o.status));
+  } catch (e) {
+    console.warn('[coupon] used check unexpected:', e?.message || e);
+    return false;
+  }
+}
+
+// Resuelve el cupón para un pedido: validación pura + uso único (BD).
+// Devuelve { ok, code, discount } o { ok:false, reason, ... }.
+async function resolveCouponForOrder(rawCode, items, { user_id, phone }) {
+  const subtotal = computeSubtotal(items);
+  const evald = evaluateCoupon(rawCode, subtotal);
+  if (!evald.ok) return evald;
+  if (evald.coupon.oncePerCustomer) {
+    const used = await couponAlreadyUsed(evald.code, { user_id, phone });
+    if (used) return { ok: false, reason: 'ALREADY_USED', code: evald.code };
+  }
+  return {
+    ok: true,
+    code: evald.code,
+    discount: evald.discount,
+    type: evald.coupon.type,
+    value: evald.coupon.value,
+    minSubtotal: evald.coupon.minSubtotal,
+  };
+}
+
+// =====================================================================
 // deductStockForItems — descuento de stock reutilizable
 // =====================================================================
 // Extraído para que el flujo de Stripe (webhook, tras confirmar pago)
@@ -919,6 +973,52 @@ async function handleStripeChargeRefunded(charge) {
   console.log('[stripe] pedido reembolsado → cancelado y stock repuesto:', order.id);
 }
 
+// =====================================================================
+// POST /api/coupon/validate — previsualización del cupón en el checkout
+// =====================================================================
+// El frontend llama aquí cuando el cliente pulsa "Aplicar" para dar
+// feedback inmediato (descuento o motivo de rechazo) ANTES de pagar.
+// La validación autoritativa se repite al crear el pedido (POST /orders
+// y /checkout/stripe-session), así que aquí no hay riesgo aunque alguien
+// llame al endpoint directamente.
+app.post('/api/coupon/validate', async (req, res) => {
+  try {
+    const { code, items, phone } = req.body || {};
+
+    // Identidad: si viene sesión válida, mandan el user_id del token; si
+    // no, caemos al teléfono (cliente invitado con tarjeta/Bizum).
+    let userId = null;
+    const authHeader = req.headers.authorization || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (bearer) {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser(bearer);
+        if (authUser) userId = authUser.id;
+      } catch { /* sesión inválida: seguimos como invitado */ }
+    }
+
+    const result = await resolveCouponForOrder(code, items, { user_id: userId, phone });
+    if (!result.ok) {
+      return res.json({
+        valid: false,
+        reason: result.reason,
+        message: couponErrorMessage(result.reason, result),
+      });
+    }
+    return res.json({
+      valid: true,
+      code: result.code,
+      discount: result.discount,
+      type: result.type,
+      value: result.value,
+      minSubtotal: result.minSubtotal,
+    });
+  } catch (e) {
+    console.error('[coupon] validate error:', e?.message || e);
+    return res.status(500).json({ valid: false, message: 'No se pudo validar el cupón.' });
+  }
+});
+
 app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) => {
   try {
     let {
@@ -933,6 +1033,7 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
       customer_email,
       delivery_method,
       turnstile_token,
+      coupon_code,
     } = req.body;
 
     // =================================================================
@@ -1066,6 +1167,28 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
       ? 'Recogida en tienda — Paseo del Sol 1, 28880 Meco (Madrid)'
       : address;
 
+    // =================================================================
+    // Cupón de descuento (validación autoritativa en el servidor)
+    // =================================================================
+    // `total` recibido = importe SIN descuento (subtotal + envío), igual
+    // que siempre. Si hay cupón válido recalculamos el descuento aquí
+    // (nunca confiamos en un descuento enviado por el cliente) y el
+    // pedido se guarda con el total YA descontado.
+    let appliedCoupon = null;
+    let discount = 0;
+    if (coupon_code) {
+      const couponResult = await resolveCouponForOrder(coupon_code, items, { user_id, phone });
+      if (!couponResult.ok) {
+        return res.status(400).json({
+          error: couponErrorMessage(couponResult.reason, couponResult),
+          code: 'COUPON_INVALID',
+        });
+      }
+      appliedCoupon = couponResult.code;
+      discount = couponResult.discount;
+    }
+    const finalTotal = Math.max(0, Math.round((Number(total) - discount) * 100) / 100);
+
     // Normalización defensiva del email (tolerante a typos comunes de
     // mayúsculas/espacios sin romper el pedido si la cadena viene mal).
     const normalizedEmail = typeof customer_email === 'string'
@@ -1119,12 +1242,14 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
         address: finalAddress,
         phone,
         note,
-        total,
+        total: finalTotal,
         status: status || 'Procesando',
         payment_method: payment_method || 'Pendiente',
         items,
         customer_email: hasValidEmail ? normalizedEmail : null,
         delivery_method: resolvedDeliveryMethod,
+        coupon_code: appliedCoupon,
+        discount,
         created_at: nowIso,
         confirmed_at: nowIso
       }])
@@ -1195,6 +1320,7 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
       customer_email,
       delivery_method,
       turnstile_token,
+      coupon_code,
     } = req.body;
 
     // Anti-abuso 0: Turnstile (permisivo si no hay secret configurado).
@@ -1275,6 +1401,24 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
       ? 'Recogida en tienda — Paseo del Sol 1, 28880 Meco (Madrid)'
       : address;
 
+    // Cupón de descuento (validación autoritativa en el servidor). `total`
+    // recibido = importe SIN descuento; recalculamos el descuento aquí y
+    // cobramos/guardamos el total ya descontado.
+    let appliedCoupon = null;
+    let discount = 0;
+    if (coupon_code) {
+      const couponResult = await resolveCouponForOrder(coupon_code, items, { user_id, phone });
+      if (!couponResult.ok) {
+        return res.status(400).json({
+          error: couponErrorMessage(couponResult.reason, couponResult),
+          code: 'COUPON_INVALID',
+        });
+      }
+      appliedCoupon = couponResult.code;
+      discount = couponResult.discount;
+    }
+    const finalTotal = Math.max(0, Math.round((Number(total) - discount) * 100) / 100);
+
     // 1) Crear el pedido en 'Esperando pago' (sin descontar stock).
     const { data: order, error: insErr } = await supabase
       .from('orders')
@@ -1283,20 +1427,23 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
         address: finalAddress,
         phone,
         note,
-        total,
+        total: finalTotal,
         status: 'Esperando pago',
         payment_method: 'Tarjeta (Stripe)', // provisional; el webhook lo afina al método real
         items,
         customer_email: normalizedEmail,
         delivery_method: resolvedDeliveryMethod,
+        coupon_code: appliedCoupon,
+        discount,
         created_at: new Date().toISOString(),
       }])
       .select()
       .single();
     if (insErr) throw insErr;
 
-    // 2) Construir line_items (cuadran exactamente con `total`).
-    const { line_items } = buildCheckoutLineItems(items, total);
+    // 2) Construir line_items (cuadran exactamente con el total final, ya
+    //    con el descuento del cupón aplicado).
+    const { line_items } = buildCheckoutLineItems(items, finalTotal);
 
     // 3) Crear la sesión de Checkout. Fijamos payment_method_types a
     //    ['card', 'bizum'] para mostrar SOLO los métodos que queremos y
