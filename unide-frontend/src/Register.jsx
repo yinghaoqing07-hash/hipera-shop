@@ -48,8 +48,8 @@ export default function Register() {
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     const token = otpCode.trim();
-    if (!/^\d{6}$/.test(token)) {
-      toast.error('Introduce el código de 6 dígitos que te hemos enviado.');
+    if (!/^\d{6,8}$/.test(token)) {
+      toast.error('Introduce el código que te hemos enviado por email.');
       return;
     }
     setVerifying(true);
@@ -177,7 +177,7 @@ export default function Register() {
           </div>
           <h2 className="text-2xl font-bold text-gray-800">Verifica tu cuenta</h2>
           <p className="text-gray-500 text-sm mt-2 leading-relaxed">
-            Hemos enviado un código de 6 dígitos a<br />
+            Hemos enviado un código de verificación a<br />
             <span className="font-semibold text-gray-800">{sentEmail}</span>.<br />
             Introdúcelo aquí para activar tu cuenta.
           </p>
@@ -190,16 +190,16 @@ export default function Register() {
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
+              maxLength={8}
               value={otpCode}
               onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
-              placeholder="______"
-              className="w-full p-3 border rounded-xl text-center text-2xl font-bold tracking-[0.5em] outline-none focus:border-red-500"
+              placeholder="Código"
+              className="w-full p-3 border rounded-xl text-center text-2xl font-bold tracking-[0.3em] outline-none focus:border-red-500"
               autoFocus
             />
             <button
               type="submit"
-              disabled={verifying || otpCode.length !== 6}
+              disabled={verifying || otpCode.length < 6}
               className="w-full bg-red-600 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
               {verifying ? 'Verificando…' : <>Verificar y entrar <ArrowRight size={18} /></>}
