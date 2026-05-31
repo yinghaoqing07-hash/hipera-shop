@@ -153,7 +153,11 @@ export function buildTicket(order, config) {
   const total = Number(order.total) || 0;
   const subtotal = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
   const isStorePickup = order.delivery_method === 'store_pickup';
-  const shipping = Math.max(0, total - subtotal);
+  // Descuento de cupon (si lo hubo). total = subtotal - descuento + envio,
+  // asi que el envio se despeja sumando de nuevo el descuento; de lo
+  // contrario el descuento se "comeria" parte del envio mostrado.
+  const discount = Number(order.discount) || 0;
+  const shipping = Math.max(0, Math.round((total - subtotal + discount) * 100) / 100);
   const pay = resolvePayment(order);
 
   const fmt = (n) => (Number(n) || 0).toFixed(2) + ' EUR';
@@ -216,6 +220,10 @@ export function buildTicket(order, config) {
   // --- Totales ---
   t.align(0);
   t.lineLR('Subtotal:', subtotal.toFixed(2) + ' EUR');
+  if (discount > 0) {
+    const codeTag = order.coupon_code ? ' (' + order.coupon_code + ')' : '';
+    t.lineLR('Descuento' + codeTag + ':', '-' + discount.toFixed(2) + ' EUR');
+  }
   if (isStorePickup) {
     t.lineLR('Recogida:', 'GRATIS');
   } else {

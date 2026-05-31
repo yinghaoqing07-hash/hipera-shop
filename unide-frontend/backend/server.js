@@ -1645,7 +1645,7 @@ app.get('/api/admin/orders/new', authenticateAdmin, async (req, res) => {
 // payment_method + status permiten al agente decidir la etiqueta de
 // "estado de pago" (PAGADO vs COBRAR AL ENTREGAR).
 const PRINT_ORDER_FIELDS =
-  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent';
+  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent, coupon_code, discount';
 
 // GET /api/print/pending — cola de impresión.
 // Devuelve pedidos confirmados (confirmed_at no nulo) y aún no impresos

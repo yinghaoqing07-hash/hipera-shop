@@ -1138,6 +1138,26 @@ export default function AdminApp() {
     y += 3;
     doc.text('--------------------------------', centerX, y, { align: 'center' });
     y += 6;
+    // Desglose: subtotal - descuento + envio = total. El envio se deriva
+    // (no se guarda como linea aparte) para que las cuentas cuadren.
+    const ticketDiscount = Number(order.discount) || 0;
+    const ticketItemsGross = regular.reduce((s, it) => s + ((it.price || 0) * (it.quantity || 0)), 0);
+    const ticketShipping = Math.max(0, Math.round(((order.total || 0) - (ticketItemsGross - ticketDiscount)) * 100) / 100);
+    if (ticketDiscount > 0 || ticketShipping > 0) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text('Subtotal:'.padEnd(18) + `EUR ${ticketItemsGross.toFixed(2)}`, 5, y);
+      y += 5;
+      if (ticketDiscount > 0) {
+        doc.text(`Dto (${order.coupon_code || 'CUPON'}):`.padEnd(16) + `-EUR ${ticketDiscount.toFixed(2)}`, 5, y);
+        y += 5;
+      }
+      if (ticketShipping > 0) {
+        doc.text('Envio:'.padEnd(18) + `EUR ${ticketShipping.toFixed(2)}`, 5, y);
+        y += 5;
+      }
+      y += 1;
+    }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.text(`TOTAL:     EUR ${(order.total || 0).toFixed(2)}`, 5, y);
