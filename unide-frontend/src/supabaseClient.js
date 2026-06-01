@@ -28,6 +28,32 @@ const supabaseKey = 'sb_publishable_1ivi8GXvmMeu0WV6ppcrDA_B9ziqXSL'
 // huérfanas en localStorage y forzaría re-login global).
 const noopLock = async (_name, _acquireTimeout, fn) => fn();
 
+// =====================================================================
+// fetch con timeout para TODAS las llamadas de red de Supabase
+// =====================================================================
+// Problema observado: al pulsar "Pagar", el botón se quedaba colgado
+// minutos enteros (no segundos) hasta tener que refrescar la página. La
+// causa: cuando el access token está caducado, getSession() dispara un
+// refresh contra el endpoint de auth de Supabase mediante fetch SIN
+// timeout. Si ese request se estanca (red móvil inestable, endpoint
+// lento), la promesa nunca resuelve y arrastra a todo lo que la espera
+// (incluido el checkout). El lock ya estaba neutralizado (noopLock), así
+// que el cuelgue venía de la propia petición HTTP.
+//
+// Envolvemos el fetch global con un AbortController de 12 s. Si una
+// llamada de auth/refresh no responde, aborta y el flujo continúa con un
+// error manejable en vez de quedarse zombi. 12 s es holgado para auth.
+const fetchWithTimeout = (input, init = {}) => {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), 12000);
+  // Respetamos cualquier signal externo: si el caller aborta, también.
+  if (init.signal) {
+    if (init.signal.aborted) ctrl.abort();
+    else init.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  }
+  return fetch(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(id));
+};
+
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     persistSession: true,
@@ -35,6 +61,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     detectSessionInUrl: true,
     flowType: 'pkce',
     lock: noopLock,
+  },
+  global: {
+    fetch: fetchWithTimeout,
   },
 })
 
