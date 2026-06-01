@@ -2398,21 +2398,19 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {/* Buscador Google Places: al elegir una dirección real
-                        rellena el campo editable de abajo. Si no hay API key
-                        configurada, no se muestra y el campo manual basta. */}
+                  <div>
+                    {/* El propio campo de dirección muestra sugerencias de
+                        Google Places debajo mientras se escribe. Si no hay API
+                        key, funciona como un input normal. */}
                     <AddressAutocomplete
-                      onSelect={(addr) => {
-                        setCheckoutForm(f => ({ ...f, address: addr }));
-                        setCheckoutTouched(t => ({ ...t, address: true }));
-                      }}
+                      value={checkoutForm.address}
+                      hasError={!!addressFieldError}
+                      onChange={(val) => setCheckoutForm(f => ({ ...f, address: val }))}
+                      onBlur={() => setCheckoutTouched(t => ({ ...t, address: true }))}
+                      onSelect={() => setCheckoutTouched(t => ({ ...t, address: true }))}
                     />
-                    <div>
-                      <input id="address" name="address" autoComplete="street-address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} onBlur={() => setCheckoutTouched(t => ({...t, address: true}))} placeholder="Dirección completa (calle, número, piso) *" className={`w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 transition-all ${addressFieldError ? 'ring-2 ring-red-300 bg-red-50' : 'ring-red-100'}`}/>
-                      {addressFieldError && <p className="text-xs text-red-500 mt-1 px-1">{addressFieldError}</p>}
-                      <p className="text-[11px] text-gray-400 mt-1 px-1">Busca arriba y luego añade piso/puerta si hace falta.</p>
-                    </div>
+                    {addressFieldError && <p className="text-xs text-red-500 mt-1 px-1">{addressFieldError}</p>}
+                    <p className="text-[11px] text-gray-400 mt-1 px-1">Escribe tu calle y elige una opción; luego añade piso/puerta si hace falta.</p>
                   </div>
                 )}
                 <div>
