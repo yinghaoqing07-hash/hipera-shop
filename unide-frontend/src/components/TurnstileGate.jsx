@@ -129,7 +129,7 @@ export const TurnstileGate = forwardRef(function TurnstileGate(_props, ref) {
      *   - No hay SITE_KEY configurada (componente inactivo).
      *   - El script de Turnstile no se cargó (sin red, bloqueado por
      *     adblocker, dominio no autorizado).
-     *   - El timeout interno (15 s) se agota sin respuesta.
+     *   - El timeout interno (8 s) se agota sin respuesta.
      *
      * El caller decide si rechazar la acción (modo estricto) o
      * permitirla con un token vacío (modo permisivo, p. ej. dev).
@@ -156,15 +156,16 @@ export const TurnstileGate = forwardRef(function TurnstileGate(_props, ref) {
         }
         return;
       }
-      // Timeout defensivo: si el widget no responde nada en 15 s,
-      // resolvemos con null. Cloudflare no debería tardar tanto en
-      // condiciones normales, pero protege contra estados zombi.
+      // Timeout defensivo: si el widget no responde nada en 8 s,
+      // resolvemos con null. Cloudflare resuelve en <1s en condiciones
+      // normales; 8 s protege contra estados zombi sin tener al cliente
+      // esperando demasiado tras pulsar "Pagar".
       setTimeout(() => {
         if (resolverRef.current === resolve) {
           resolverRef.current = null;
           resolve(null);
         }
-      }, 15000);
+      }, 8000);
     }),
 
     /** Reset manual (no usado externamente, expuesto por simetría). */

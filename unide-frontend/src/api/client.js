@@ -119,14 +119,47 @@ class ApiClient {
     }
   }
 
+  // Obtiene el access token de Supabase con un TIMEOUT defensivo.
+  //
+  // Por qué el timeout: supabase.auth.getSession() adquiere un lock del
+  // navegador (navigator.locks / LockManager) para leer la sesión. Si ese
+  // lock queda retenido —por otra pestaña, por una operación de auth a
+  // medias, o por un token corrupto— la llamada se queda COLGADA hasta que
+  // el lock se libere, a veces indefinidamente. Ese es el síntoma de "el
+  // botón de pagar se queda pensando y hay que refrescar la página".
+  //
+  // Como el token es OPCIONAL para crear pedidos / sesión de Stripe (el
+  // backend lo usa sólo para verificar la identidad en cupones que la
+  // requieren), si la lectura tarda más de 4 s seguimos sin token (como
+  // invitado) en vez de bloquear el checkout. Para endpoints /admin/ el
+  // caller ya exige token y mostrará "sesión expirada", que es razonable.
   async getToken() {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      return session?.access_token || null;
+      const timeout = new Promise((resolve) =>
+        setTimeout(() => resolve({ __timedOut: true }), 4000)
+      );
+      const result = await Promise.race([supabase.auth.getSession(), timeout]);
+      if (result?.__timedOut) {
+        console.warn('getToken: getSession se demoró (>4s); continúo sin token.');
+        return null;
+      }
+      return result?.data?.session?.access_token || null;
     } catch (e) {
       console.warn('Error getting token:', e);
       return null;
     }
+  }
+
+  // Despierta el backend (Railway puede "dormir" tras inactividad y el
+  // primer request sufre un arranque en frío de varios segundos). Lo
+  // llamamos al abrir el checkout para que, cuando el cliente pulse
+  // "Pagar", el servidor ya esté caliente y la respuesta sea inmediata.
+  // Es fire-and-forget: ignoramos errores y usamos un timeout corto.
+  warmup() {
+    try {
+      const url = this._url('/health');
+      fetchWithTimeout(url, { method: 'GET' }, 8000).catch(() => {});
+    } catch { /* ignore */ }
   }
 
   // Public endpoints (simple GET → no preflight, avoids CORS preflight issues)

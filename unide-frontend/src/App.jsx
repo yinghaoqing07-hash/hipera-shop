@@ -1312,6 +1312,9 @@ export default function App() {
     // para que el cliente confirme de un vistazo (dirección/teléfono/
     // email correctos) antes de cobrar o crear el pedido. El envío real
     // se dispara en handleConfirmedSubmit al pulsar "Confirmar".
+    // Pre-calentamos el backend (Railway) mientras el cliente revisa el
+    // resumen, para que el request de pago no sufra el arranque en frío.
+    apiClient.warmup();
     setShowConfirmModal(true);
   };
 
