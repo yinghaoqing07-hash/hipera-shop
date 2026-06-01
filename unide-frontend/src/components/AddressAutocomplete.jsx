@@ -15,7 +15,7 @@
 // checkout sigue funcionando como hasta ahora).
 
 import React, { useEffect, useRef } from 'react';
-import { Loader } from '@googlemaps/js-api-loader';
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -24,12 +24,14 @@ const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const MECO = { lat: 40.5547, lng: -3.3290 };
 
 // Cargamos la librería 'places' una sola vez para toda la app.
+// La API funcional del loader (setOptions + importLibrary) sustituye a la
+// antigua clase Loader, eliminada en las versiones nuevas del paquete.
 let _placesPromise = null;
 function loadPlaces() {
   if (!apiKey) return Promise.resolve(null);
   if (!_placesPromise) {
-    const loader = new Loader({ apiKey, version: 'weekly' });
-    _placesPromise = loader.importLibrary('places');
+    setOptions({ key: apiKey, v: 'weekly' });
+    _placesPromise = importLibrary('places');
   }
   return _placesPromise;
 }
