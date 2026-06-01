@@ -913,6 +913,23 @@ export default function App() {
       setHistory(['home', 'cart', 'checkout']);
       window.history.replaceState({ app: true }, '', window.location.pathname);
     }
+
+    // 4) Retorno tras login/registro iniciado desde el checkout (cupón que
+    //    exige cuenta). Si el cliente venía a comprar, lo devolvemos al
+    //    checkout en vez de a la home para que pueda pagar de inmediato.
+    //    El carrito ya se restaura solo (persistido en localStorage); solo
+    //    saltamos al checkout si realmente hay productos.
+    try {
+      if (sessionStorage.getItem('hipera_post_auth_redirect') === 'checkout') {
+        sessionStorage.removeItem('hipera_post_auth_redirect');
+        let hasCart = false;
+        try { hasCart = (JSON.parse(localStorage.getItem('cart') || '[]') || []).length > 0; } catch { /* ignore */ }
+        if (hasCart) {
+          setPage('checkout');
+          setHistory(['home', 'cart', 'checkout']);
+        }
+      }
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -2664,14 +2681,14 @@ export default function App() {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => navigate('/login')}
+                        onClick={() => { try { sessionStorage.setItem('hipera_post_auth_redirect', 'checkout'); } catch { /* ignore */ } navigate('/login'); }}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 bg-red-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-red-700 transition-colors"
                       >
                         <LogIn size={16}/> Iniciar sesión
                       </button>
                       <button
                         type="button"
-                        onClick={() => navigate('/register')}
+                        onClick={() => { try { sessionStorage.setItem('hipera_post_auth_redirect', 'checkout'); } catch { /* ignore */ } navigate('/register'); }}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 border border-red-200 text-red-700 text-sm font-bold py-2 rounded-lg hover:bg-red-50 transition-colors"
                       >
                         Crear cuenta
