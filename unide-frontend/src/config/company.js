@@ -33,11 +33,8 @@ export const COMPANY = {
   hours: 'Lunes a Domingo, 09:00 – 22:00',
   activity:
     'Comercio minorista de alimentación, bazar y servicios de reparación de dispositivos móviles',
-  // ⚠️ ATENCIÓN: este campo DEBE estar completo antes del lanzamiento
-  // público del sitio. Subir con [PENDIENTE] es aceptable solo durante
-  // fase de desarrollo y pre-lanzamiento. AEPD podría sancionar el uso
-  // de [PENDIENTE] en producción.
+  // Datos de inscripción registral (facilitados por el titular, 2026-06-02).
   // Consultable en https://www.registradores.org con CIF B86126638.
   registry:
-    'Registro Mercantil de Madrid — [PENDIENTE: usuario debe completar Tomo, Folio, Hoja, Sección]',
+    'Registro Mercantil de Madrid, Tomo 28499, Folio 144, Sección 8, Hoja M-513074, Inscripción 1ª',
 };
