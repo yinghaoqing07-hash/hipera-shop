@@ -45,16 +45,25 @@ import toast, { Toaster } from 'react-hot-toast';
 // este array es la única operación necesaria para añadir/quitar imágenes.
 //
 // Estructura por banner:
-//   - src       Ruta del archivo (relativa a /public).
-//   - alt       Texto alternativo (obligatorio por accesibilidad y SEO).
-//   - headline  Array de líneas que se renderiza como <span/> apiladas.
-//   - badge     Etiqueta superior pequeña (texto en mayúsculas).
-//   - target    Página de destino al hacer clic (acepta cualquier valor
-//               válido para navTo: 'offers', 'main', 'repair', etc.).
+//   - src           Ruta del archivo (relativa a /public).
+//   - alt           Texto alternativo (obligatorio por accesibilidad y SEO).
+//   - headline      Array de líneas que se renderiza como <span/> apiladas.
+//   - badge         Etiqueta superior pequeña (texto en mayúsculas).
+//   - target        Página de destino al hacer clic (acepta cualquier valor
+//                   válido para navTo: 'offers', 'main', 'repair', etc.).
+//   - selfContained Si true, la imagen YA trae su propio texto/diseño, así
+//                   que NO se superpone el overlay (badge + headline +
+//                   degradado oscuro). Se ignoran headline/badge.
 //
-// TODO (post Phase 1): sustituir por fotos reales del establecimiento
-// (estanterías, caja, mostrador de reparación) cuando estén disponibles.
+// TODO (post Phase 1): sustituir las imágenes genéricas por fotos reales
+// del establecimiento (estanterías, caja, mostrador de reparación).
 const BANNERS = [
+  {
+    src: "/banners/banner-bienvenida.png",
+    alt: "Bienvenid@ a HIPERA — usa BIENVENIDA10 (10% clientes registrados) o BIENVENIDA5 (5% todos los clientes) en compras desde 30€, y elige un producto gratis en compras desde 65€",
+    selfContained: true,
+    target: "offers",
+  },
   {
     src: "/banners/banner-1.jpg",
     alt: "Frescura garantizada — productos diarios en HIPERA",
@@ -1682,18 +1691,20 @@ export default function App() {
               decoding="async"
               className="w-full h-full object-cover transition-all duration-700 group-hover:scale-105"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-5">
-              <div>
-                <span className="bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold mb-1 inline-block">
-                  {BANNERS[bannerIndex].badge}
-                </span>
-                <p className="text-white font-bold text-xl leading-tight">
-                  {BANNERS[bannerIndex].headline.map((line, i) => (
-                    <span key={i} className="block">{line}</span>
-                  ))}
-                </p>
+            {!BANNERS[bannerIndex].selfContained && (
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-5">
+                <div>
+                  <span className="bg-red-600 text-white text-[10px] px-2 py-1 rounded font-bold mb-1 inline-block">
+                    {BANNERS[bannerIndex].badge}
+                  </span>
+                  <p className="text-white font-bold text-xl leading-tight">
+                    {BANNERS[bannerIndex].headline.map((line, i) => (
+                      <span key={i} className="block">{line}</span>
+                    ))}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </button>
 
           <div className="grid grid-cols-1 gap-4">
