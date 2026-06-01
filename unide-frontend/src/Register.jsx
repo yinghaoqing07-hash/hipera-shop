@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { supabase } from './supabaseClient';
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { UserPlus, ArrowRight, MailCheck } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { TERMS_VERSION, PRIVACY_VERSION } from './config/legal';
@@ -25,7 +25,6 @@ export default function Register() {
   const [otpCode, setOtpCode] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
-  const navigate = useNavigate();
 
   const handleResend = async () => {
     if (!sentEmail) return;
@@ -79,8 +78,8 @@ export default function Register() {
       }
     }
     toast.success('¡Cuenta verificada! Entrando…');
-    navigate('/');
-    setVerifying(false);
+    // Full reload (igual que Login) para arrancar la sesión limpia.
+    window.location.href = '/';
   };
 
   const handleRegister = async (e) => {
@@ -133,8 +132,10 @@ export default function Register() {
         if (!import.meta.env.PROD) console.warn('[register] recordAcceptance:', err?.message);
       }
       toast.success('¡Cuenta creada! Entrando…');
-      navigate("/");
-      setLoading(false);
+      // Full reload (igual que Login): garantiza un arranque limpio de la
+      // sesión y evita estados pegajosos del SDK / desincronización entre
+      // pestañas tras autenticarse.
+      window.location.href = '/';
       return;
     }
 
