@@ -69,6 +69,24 @@
         "addressRegion": "Madrid",
         "addressCountry": "ES"
       },
+      "geo": {
+        "@type": "GeoCoordinates",
+        "latitude": 40.5499703,
+        "longitude": -3.3241069
+      },
+      "hasMap": "https://www.google.com/maps?q=40.5499703,-3.3241069",
+      "makesOffer": [
+        {
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Service",
+            "name": "Reparación de móviles en Meco",
+            "serviceType": "Reparación de teléfonos móviles",
+            "areaServed": { "@type": "City", "name": "Meco" },
+            "provider": { "@type": "Supermarket", "name": "HIPERA" }
+          }
+        }
+      ],
       "openingHoursSpecification": [
         {
           "@type": "OpeningHoursSpecification",
@@ -96,17 +114,9 @@
       ]
     }
     </script>
-    <!-- TODO geo: añadir coordenadas GPS precisas de Paseo del Sol 1
-         (no las del centro de Meco). Buscar en Google Maps y añadir:
-           "geo": {
-             "@type": "GeoCoordinates",
-             "latitude": <valor>,
-             "longitude": <valor>
-           }
-         dentro del bloque JSON-LD anterior, antes de "openingHoursSpecification".
-         Coordenadas aproximadas centro Meco (referencia, NO usar directamente):
-         40.55389°N, -3.32611°W (fuente: Wikipedia).
-    -->
+    <!-- geo: coordenadas GPS de la entrada de la tienda (Paseo del Sol 1),
+         facilitadas por el titular el 2026-06-02. Verificadas sobre el
+         edificio real en Google Maps (no el centro del municipio). -->
 
     <!-- ===============================================================
          Cloudflare Turnstile (anti-bot, anti-abuso del checkout)
