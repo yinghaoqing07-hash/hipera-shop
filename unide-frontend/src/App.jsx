@@ -13,6 +13,7 @@ import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
 import { TurnstileGate } from './components/TurnstileGate';
+import AddressAutocomplete from './components/AddressAutocomplete';
 import TerminosCondiciones from './pages/legal/TerminosCondiciones';
 import PoliticaPrivacidad from './pages/legal/PoliticaPrivacidad';
 import PoliticaDevoluciones from './pages/legal/PoliticaDevoluciones';
@@ -2397,9 +2398,21 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div>
-                    <input id="address" name="address" autoComplete="street-address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} onBlur={() => setCheckoutTouched(t => ({...t, address: true}))} placeholder="Dirección completa (calle, número, piso) *" className={`w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 transition-all ${addressFieldError ? 'ring-2 ring-red-300 bg-red-50' : 'ring-red-100'}`}/>
-                    {addressFieldError && <p className="text-xs text-red-500 mt-1 px-1">{addressFieldError}</p>}
+                  <div className="space-y-2">
+                    {/* Buscador Google Places: al elegir una dirección real
+                        rellena el campo editable de abajo. Si no hay API key
+                        configurada, no se muestra y el campo manual basta. */}
+                    <AddressAutocomplete
+                      onSelect={(addr) => {
+                        setCheckoutForm(f => ({ ...f, address: addr }));
+                        setCheckoutTouched(t => ({ ...t, address: true }));
+                      }}
+                    />
+                    <div>
+                      <input id="address" name="address" autoComplete="street-address" value={checkoutForm.address} onChange={e => setCheckoutForm({...checkoutForm, address: e.target.value})} onBlur={() => setCheckoutTouched(t => ({...t, address: true}))} placeholder="Dirección completa (calle, número, piso) *" className={`w-full p-3.5 bg-gray-50 rounded-xl font-medium outline-none focus:ring-2 transition-all ${addressFieldError ? 'ring-2 ring-red-300 bg-red-50' : 'ring-red-100'}`}/>
+                      {addressFieldError && <p className="text-xs text-red-500 mt-1 px-1">{addressFieldError}</p>}
+                      <p className="text-[11px] text-gray-400 mt-1 px-1">Busca arriba y luego añade piso/puerta si hace falta.</p>
+                    </div>
                   </div>
                 )}
                 <div>
