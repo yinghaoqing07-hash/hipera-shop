@@ -75,6 +75,17 @@ const BANNERS = [
   // /public/banners por si se quieren reutilizar en el futuro.
 ];
 
+// Aviso legal de la promoción de bienvenida que se muestra bajo el
+// carrusel. Indicar la vigencia es buena práctica (y recomendable
+// legalmente) al anunciar descuentos.
+//
+// ⚠️ La fecha DEBE coincidir con `expiresAt` de BIENVENIDA10/BIENVENIDA5
+// en backend/services/coupons.js. Si cambias la campaña, actualiza AMBOS
+// sitios. Mantener el texto aquí (y no dentro de la imagen) evita rehacer
+// el banner y descarta el riesgo de fecha anunciada ≠ fecha real.
+const PROMO_NOTICE =
+  'Promoción de bienvenida válida hasta el 30/08/2026. Mín. 30€ en productos. BIENVENIDA10 solo para clientes registrados; BIENVENIDA5 para todos. Un solo uso por cliente.';
+
 const ProductSkeleton = () => (
   <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 animate-pulse">
     <div className="w-full aspect-square bg-gray-200 rounded-lg mb-2"></div>
@@ -1701,6 +1712,7 @@ export default function App() {
               </div>
             )}
           </button>
+          <p className="text-[11px] text-gray-400 px-1 leading-snug text-center">{PROMO_NOTICE}</p>
 
           <div className="grid grid-cols-1 gap-4">
              <div onClick={() => navTo("repair")} className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
