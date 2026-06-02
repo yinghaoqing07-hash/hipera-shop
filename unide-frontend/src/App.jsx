@@ -1690,6 +1690,7 @@ export default function App() {
             <button onClick={() => navTo("favorites")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-pink-50 text-pink-600 rounded-full"><Heart size={18} /></div><span className="text-[10px] font-bold text-gray-700">Favs</span></button>
             <button onClick={() => navTo("orders")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-green-50 text-green-600 rounded-full"><ClipboardList size={18} /></div><span className="text-[10px] font-bold text-gray-700">Pedidos</span></button>
           </div>
+          <div className="space-y-2">
           <button
             type="button"
             onClick={() => {
@@ -1755,6 +1756,7 @@ export default function App() {
             </div>
           )}
           <p className="text-[11px] text-gray-400 px-1 leading-snug text-center mt-1">{PROMO_NOTICE}</p>
+          </div>
 
           <div className="grid grid-cols-1 gap-4">
              <div onClick={() => navTo("repair")} className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
