@@ -59,13 +59,13 @@ import toast, { Toaster } from 'react-hot-toast';
 // del establecimiento (estanterías, caja, mostrador de reparación).
 const BANNERS = [
   {
-    src: "/banners/banner-bienvenida.png",
+    src: "/banners/banner-bienvenida.jpg",
     alt: "Bienvenid@ a HIPERA — usa BIENVENIDA10 (10% clientes registrados) o BIENVENIDA5 (5% todos los clientes) en compras desde 30€, y elige un producto gratis en compras desde 65€",
     selfContained: true,
     target: "offers",
   },
   {
-    src: "/banners/banner-reparacion.png",
+    src: "/banners/banner-reparacion.jpg",
     alt: "Reparación de móviles en HIPERA — servicio oficial, cambio de pantalla y batería de todas las marcas, cita previa y consulta de precio por WhatsApp",
     selfContained: true,
     target: "repair",
