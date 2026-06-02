@@ -35,7 +35,8 @@ import {
   Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone, Mail,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
-  Wine, Beer, Salad, Globe, Bone, BriefcaseMedical
+  Wine, Beer, Salad, Globe, Bone, BriefcaseMedical,
+  Snowflake, ShowerHead, SprayCan
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import toast, { Toaster } from 'react-hot-toast';
@@ -493,6 +494,22 @@ function FaqSection({ onLegalClick, onRepairClick }) {
 }
 
 // --- 组件：图标映射 (已扩充全品类) ---
+// Algunas categorías llegan de la base de datos con icon='Package' (genérico)
+// porque aún no se les asignó un icono concreto. Para que no se vean todas
+// como una caja, derivamos el icono por palabras clave del nombre cuando el
+// icon es genérico/ausente.
+const ICON_BY_KEYWORD = [
+  { match: /congelad/i, icon: 'Frozen' },     // Congelados
+  { match: /higiene/i, icon: 'Hygiene' },     // Higiene personal
+  { match: /limpieza/i, icon: 'Cleaning' },   // Limpieza del hogar
+];
+
+const resolveCategoryIcon = (c) => {
+  if (c?.icon && c.icon !== 'Package') return c.icon;
+  const found = ICON_BY_KEYWORD.find(k => k.match.test(c?.name || ''));
+  return found ? found.icon : (c?.icon || 'Package');
+};
+
 const IconByName = ({ name, size=24, className }) => {
   const icons = {
     // 现有图标
@@ -516,6 +533,9 @@ const IconByName = ({ name, size=24, className }) => {
     International: <Globe size={size} className={className}/>, // Internacional (国际)
     Pets: <Bone size={size} className={className}/>,         // Mascotas (宠物)
     Pharmacy: <BriefcaseMedical size={size} className={className}/>, // Farmacia (药房)
+    Frozen: <Snowflake size={size} className={className}/>,  // Congelados (冷冻)
+    Hygiene: <ShowerHead size={size} className={className}/>, // Higiene personal (个人卫生)
+    Cleaning: <SprayCan size={size} className={className}/>,  // Limpieza del hogar (家居清洁)
     
     // 默认
     Package: <Package size={size} className={className}/>,
@@ -1758,18 +1778,28 @@ export default function App() {
           <p className="text-[11px] text-gray-400 px-1 leading-snug text-center mt-1">{PROMO_NOTICE}</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-             <div onClick={() => navTo("repair")} className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
-                <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-red-600 to-transparent opacity-50 group-hover:opacity-80 transition-opacity"></div>
-                <div className="relative z-10 flex justify-between items-center">
-                   <div>
-                      <div className="flex items-center gap-2 mb-2"><Wrench className="text-red-500 animate-pulse" size={20}/><span className="font-bold text-[10px] bg-red-600 px-2 py-0.5 rounded text-white tracking-wider">SERVICIO OFICIAL</span></div>
-                      <h3 className="text-xl font-bold mb-1">Reparación Móvil</h3><p className="text-gray-400 text-xs">Cambio de pantalla, batería...<br/>Por cita · Consulta precio por WhatsApp.</p>
+          {/* Categorías — acceso directo a lo que busca el cliente nada más entrar */}
+          <div>
+             <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
+             <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide">
+               {categories.map(c => (
+                 <button 
+                   key={c.id} 
+                   onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}} 
+                   className="flex flex-col items-center gap-2 group w-24 flex-shrink-0"
+                 >
+                   <div className="w-20 h-20 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-95 transition-transform">
+                     <IconByName name={resolveCategoryIcon(c)} size={32}/>
                    </div>
-                   <Smartphone size={56} className="text-gray-600 group-hover:text-white transition-colors transform group-hover:rotate-12"/>
-                </div>
+                   <span className="text-xs font-bold text-gray-800 text-center leading-tight line-clamp-2 h-8 flex items-start justify-center">
+                     {c.name}
+                   </span>
+                 </button>
+               ))}
              </div>
           </div>
+
+          {/* Ofertas Flash — productos visibles cuanto antes */}
           {(loading || products.filter(p => p.oferta).length > 0) && (
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -1792,25 +1822,21 @@ export default function App() {
               )}
             </div>
           )}
-          <div>
-             <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
-             <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide">
-               {categories.map(c => (
-                 <button 
-                   key={c.id} 
-                   onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}} 
-                   className="flex flex-col items-center gap-2 group w-24 flex-shrink-0"
-                 >
-                   <div className="w-20 h-20 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-95 transition-transform">
-                     <IconByName name={c.icon} size={32}/>
-                   </div>
-                   <span className="text-xs font-bold text-gray-800 text-center leading-tight line-clamp-2 h-8 flex items-start justify-center">
-                     {c.name}
-                   </span>
-                 </button>
-               ))}
-             </div>
-          </div>
+
+          {/* Reparación móvil — entrada compacta (el detalle vive en /repair y en el banner del carrusel) */}
+          <button
+            onClick={() => navTo("repair")}
+            className="w-full bg-gray-900 text-white rounded-2xl shadow-sm px-4 py-3 flex items-center justify-between gap-3 active:scale-95 transition-transform"
+          >
+            <span className="flex items-center gap-3 min-w-0">
+              <span className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0"><Wrench size={18} className="text-red-500"/></span>
+              <span className="text-left min-w-0">
+                <span className="block text-sm font-bold leading-tight">Reparación de móviles</span>
+                <span className="block text-[11px] text-gray-400 leading-tight truncate">Pantalla y batería · Cita previa · WhatsApp</span>
+              </span>
+            </span>
+            <ChevronRight size={18} className="text-gray-400 flex-shrink-0"/>
+          </button>
 
           {/* Preguntas frecuentes (FAQ accordion) — final del Home */}
           <FaqSection
