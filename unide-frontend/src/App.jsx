@@ -65,19 +65,14 @@ const BANNERS = [
     target: "offers",
   },
   {
-    src: "/banners/banner-1.jpg",
-    alt: "Frescura garantizada — productos diarios en HIPERA",
-    headline: ["Frescura", "Garantizada"],
-    badge: "NUEVO",
-    target: "offers",
+    src: "/banners/banner-reparacion.png",
+    alt: "Reparación de móviles en HIPERA — servicio oficial, cambio de pantalla y batería de todas las marcas, cita previa y consulta de precio por WhatsApp",
+    selfContained: true,
+    target: "repair",
   },
-  {
-    src: "/banners/banner-2.jpg",
-    alt: "Ofertas semanales en HIPERA — supermercado en Meco",
-    headline: ["Ofertas", "Semanales"],
-    badge: "PROMO",
-    target: "offers",
-  },
+  // Imágenes genéricas anteriores (banner-1.jpg / banner-2.jpg) retiradas
+  // del carrusel a favor de los banners de marca. Los archivos siguen en
+  // /public/banners por si se quieren reutilizar en el futuro.
 ];
 
 const ProductSkeleton = () => (
