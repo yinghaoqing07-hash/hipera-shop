@@ -75,16 +75,16 @@ const BANNERS = [
   // /public/banners por si se quieren reutilizar en el futuro.
 ];
 
-// Aviso legal de la promoción de bienvenida que se muestra bajo el
-// carrusel. Indicar la vigencia es buena práctica (y recomendable
-// legalmente) al anunciar descuentos.
+// Aviso de vigencia de la promoción bajo el carrusel. El resto de
+// condiciones (mínimo, registro, uso único) ya van impresas en la propia
+// imagen del banner, así que aquí dejamos sólo la fecha límite para no
+// recargar la interfaz.
 //
 // ⚠️ La fecha DEBE coincidir con `expiresAt` de BIENVENIDA10/BIENVENIDA5
 // en backend/services/coupons.js. Si cambias la campaña, actualiza AMBOS
-// sitios. Mantener el texto aquí (y no dentro de la imagen) evita rehacer
+// sitios. Mantener la fecha aquí (y no dentro de la imagen) evita rehacer
 // el banner y descarta el riesgo de fecha anunciada ≠ fecha real.
-const PROMO_NOTICE =
-  'Promoción de bienvenida válida hasta el 30/08/2026. Mín. 30€ en productos. BIENVENIDA10 solo para clientes registrados; BIENVENIDA5 para todos. Un solo uso por cliente.';
+const PROMO_NOTICE = 'Promoción de bienvenida válida hasta el 30/08/2026.';
 
 const ProductSkeleton = () => (
   <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 animate-pulse">
@@ -802,6 +802,10 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [bannerIndex, setBannerIndex] = useState(0);
+  // Seguimiento del gesto de deslizar (swipe) sobre el carrusel. `swiped`
+  // marca que el último toque fue un arrastre, para no disparar la
+  // navegación del onClick al soltar (sólo cambiar de banner).
+  const bannerTouch = useRef({ x: 0, y: 0, swiped: false });
 
   // --- Orders & Payment ---
   const [myOrders, setMyOrders] = useState([]);
@@ -1042,10 +1046,15 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('cart', JSON.stringify(cart)); }, [cart]);
   useEffect(() => { localStorage.setItem('favorites', JSON.stringify(favorites)); }, [favorites]);
+  // Autoavance del carrusel. Depende de bannerIndex para que el contador
+  // se reinicie tras cada cambio (también los manuales por swipe/puntos),
+  // dando los 6,5 s completos para leer cada banner. Sin carrusel si solo
+  // hay una imagen.
   useEffect(() => {
-    const timer = setInterval(() => setBannerIndex(i => (i + 1) % BANNERS.length), 4000);
-    return () => clearInterval(timer);
-  }, []);
+    if (BANNERS.length <= 1) return undefined;
+    const timer = setTimeout(() => setBannerIndex(i => (i + 1) % BANNERS.length), 6500);
+    return () => clearTimeout(timer);
+  }, [bannerIndex]);
 
   useEffect(() => {
     if (page === "orders" && user) {
@@ -1683,7 +1692,27 @@ export default function App() {
           </div>
           <button
             type="button"
-            onClick={() => navTo(BANNERS[bannerIndex].target)}
+            onClick={() => {
+              // Si el gesto fue un swipe, no navegamos: sólo cambiamos de
+              // banner (la navegación se reserva para un toque limpio).
+              if (bannerTouch.current.swiped) { bannerTouch.current.swiped = false; return; }
+              navTo(BANNERS[bannerIndex].target);
+            }}
+            onTouchStart={(e) => {
+              const t = e.changedTouches[0];
+              bannerTouch.current = { x: t.clientX, y: t.clientY, swiped: false };
+            }}
+            onTouchEnd={(e) => {
+              const t = e.changedTouches[0];
+              const dx = t.clientX - bannerTouch.current.x;
+              const dy = t.clientY - bannerTouch.current.y;
+              // Umbral 40px y predominio horizontal para distinguir de un
+              // scroll vertical de la página.
+              if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+                bannerTouch.current.swiped = true;
+                setBannerIndex(i => (i + (dx < 0 ? 1 : -1) + BANNERS.length) % BANNERS.length);
+              }
+            }}
             aria-label={BANNERS[bannerIndex].alt}
             className="relative rounded-2xl overflow-hidden shadow-lg aspect-[2.2/1] w-full block text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
           >
@@ -1712,7 +1741,20 @@ export default function App() {
               </div>
             )}
           </button>
-          <p className="text-[11px] text-gray-400 px-1 leading-snug text-center">{PROMO_NOTICE}</p>
+          {BANNERS.length > 1 && (
+            <div className="flex justify-center gap-1.5 mt-2">
+              {BANNERS.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setBannerIndex(i)}
+                  aria-label={`Ir al banner ${i + 1}`}
+                  className={`h-1.5 rounded-full transition-all ${i === bannerIndex ? 'w-5 bg-red-600' : 'w-1.5 bg-gray-300'}`}
+                />
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 px-1 leading-snug text-center mt-1">{PROMO_NOTICE}</p>
 
           <div className="grid grid-cols-1 gap-4">
              <div onClick={() => navTo("repair")} className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden group cursor-pointer active:scale-95 transition-transform">
