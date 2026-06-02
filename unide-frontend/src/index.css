@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Color de los márgenes laterales cuando la tienda se muestra como una
+   columna centrada (pantallas anchas). En móvil la columna ocupa todo el
+   ancho y este color no se ve. Las rutas /login /register /admin tienen
+   su propio fondo a pantalla completa, así que no se ven afectadas. */
+body {
+  background-color: #e5e7eb;
+}
+
 /* 这是一个自定义样式，用于隐藏横向滚动条，让页面更干净 */
 .scrollbar-hide::-webkit-scrollbar {
     display: none;

@@ -1639,7 +1639,7 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 font-sans selection:bg-red-100">
+    <div className="min-h-screen bg-gray-50 pb-20 font-sans selection:bg-red-100 max-w-md mx-auto relative shadow-2xl">
       <Toaster position="top-center" toastOptions={{style:{borderRadius:'12px', background:'#333', color:'#fff'}}}/>
       <CookieConsent onShowPolicy={() => { setLegalType("cookies"); navTo("legal"); }} />
 
@@ -3068,8 +3068,8 @@ export default function App() {
              </div>
           </div>
           
-          {/* 底部加购栏 */}
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 z-20">
+          {/* 底部加购栏 — centrado y con el ancho de la columna en pantallas anchas */}
+          <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md p-4 bg-white border-t border-gray-100 z-20">
             <button onClick={() => { addToCart(selectedProduct); handleBack(); }} disabled={selectedProduct.stock <= 0} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-300 disabled:bg-gray-300 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
               {selectedProduct.stock > 0 ? <><Plus size={20}/> Añadir a la cesta</> : "Agotado"}
             </button>
