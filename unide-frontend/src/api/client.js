@@ -248,6 +248,13 @@ class ApiClient {
     });
   }
 
+  // Cobra (captura) la autorización de tarjeta de un pedido "Autorizado".
+  async captureOrder(orderId) {
+    return this.request(`/admin/orders/${orderId}/capture`, {
+      method: 'POST',
+    });
+  }
+
   async getAdminProducts() {
     return this.request('/admin/products');
   }

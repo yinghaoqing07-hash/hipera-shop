@@ -1031,6 +1031,18 @@ export default function AdminApp() {
     }
   };
 
+  // Cobra (captura) la retención de tarjeta de un pedido "Autorizado".
+  const captureOrder = async (oid) => {
+    if (!window.confirm('¿Cobrar ahora el importe retenido de este pedido? El cliente verá el cargo definitivo en su tarjeta.')) return;
+    try {
+      const res = await apiClient.captureOrder(oid);
+      toast.success(res?.alreadyCaptured ? 'Este pedido ya estaba cobrado' : 'Pago cobrado correctamente');
+      fetchData();
+    } catch (error) {
+      toast.error('Error al cobrar: ' + error.message);
+    }
+  };
+
   // Exporta la lista de pedidos (ya filtrada) a un CSV compatible con
   // Excel. Usa ';' como separador (Excel ES) y BOM UTF-8 para que los
   // acentos y el € se vean bien. Cada campo se escapa entre comillas.
@@ -1378,7 +1390,9 @@ export default function AdminApp() {
   const LOW_STOCK_THRESHOLD = 5;
   // Para "ingresos" no contamos pedidos cancelados ni los que aún
   // esperan pago (no son ventas reales todavía).
-  const REVENUE_EXCLUDED = ['Cancelado', 'Esperando pago'];
+  // "Autorizado" se excluye de ingresos: el importe sólo está RETENIDO en la
+  // tarjeta, aún no cobrado. Cuenta como ingreso al capturarlo (→ "Procesando").
+  const REVENUE_EXCLUDED = ['Cancelado', 'Esperando pago', 'Autorizado'];
   const validRevenueOrders = orders.filter(o => !REVENUE_EXCLUDED.includes(o.status));
   const revenueTotal = validRevenueOrders.reduce((a, b) => a + (Number(b.total) || 0), 0);
   const revenueToday = todayOrders
@@ -2040,6 +2054,7 @@ const renderRepairs = () => (
             <select value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)} className="border p-2 rounded-lg text-sm bg-white">
               <option value="">Todos</option>
               <option>Esperando pago</option>
+              <option>Autorizado</option>
               <option>Procesando</option>
               <option>Pendiente de Pago</option>
               <option>Enviado</option>
@@ -2141,7 +2156,8 @@ const renderRepairs = () => (
                       </span>
                    </td>
                    <td className="p-4 align-top">
-                      <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-2 py-1 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-2 py-1 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Autorizado' ? 'bg-amber-100 text-amber-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                        <option>Autorizado</option>
                         <option>Procesando</option>
                         <option>Pendiente de Pago</option>
                         <option>Enviado</option>
@@ -2151,6 +2167,11 @@ const renderRepairs = () => (
                    </td>
                    <td className="p-4 align-top">
                       <div className="flex flex-wrap items-center justify-center gap-1">
+                        {o.status === 'Autorizado' && (
+                          <button type="button" onClick={() => captureOrder(o.id)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold" title="Cobrar la retención de tarjeta">
+                            <DollarSign size={14}/> Cobrar
+                          </button>
+                        )}
                         <button type="button" onClick={() => openOrderFactura(o)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold" title="Ver factura">
                           <FileText size={14}/> Factura
                         </button>
@@ -2233,7 +2254,13 @@ const renderRepairs = () => (
                     <button type="button" onClick={() => printOrderTicket(o)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold">
                       <Printer size={14}/> Imprimir
                     </button>
-                    <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {o.status === 'Autorizado' && (
+                      <button type="button" onClick={() => captureOrder(o.id)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold" title="Cobrar la retención de tarjeta">
+                        <DollarSign size={14}/> Cobrar
+                      </button>
+                    )}
+                    <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Autorizado' ? 'bg-amber-100 text-amber-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <option>Autorizado</option>
                       <option>Procesando</option>
                       <option>Pendiente de Pago</option>
                       <option>Enviado</option>

@@ -323,6 +323,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
       await handleStripeCheckoutCompleted(event.data.object);
     } else if (event.type === 'checkout.session.expired') {
       await handleStripeCheckoutExpired(event.data.object);
+    } else if (event.type === 'payment_intent.canceled') {
+      // Autorización de tarjeta cancelada/caducada (a los ~7 días si no se
+      // captura) → cancelamos el pedido y reponemos el stock reservado.
+      await handleStripePaymentIntentCanceled(event.data.object);
     } else if (event.type === 'charge.refunded') {
       // Reembolso total → cancela el pedido y repone stock (idempotente).
       await handleStripeChargeRefunded(event.data.object);
@@ -834,11 +838,6 @@ async function restockItems(items) {
 // re-procesa (Stripe puede reenviar el evento). Lanza sólo en fallos
 // críticos de BD para que Stripe reintente.
 async function handleStripeCheckoutCompleted(session) {
-  if (session.payment_status !== 'paid') {
-    console.log('[stripe] checkout completado pero no pagado:', session.id, session.payment_status);
-    return;
-  }
-
   const orderId = session.metadata?.order_id;
   if (!orderId) {
     console.error('[stripe] sesión sin metadata.order_id:', session.id);
@@ -856,61 +855,81 @@ async function handleStripeCheckoutCompleted(session) {
     return; // pedido inexistente: reintentar no ayuda
   }
 
-  // Idempotencia: ya procesado.
-  if (order.status === 'Procesando' || order.status === 'Entregado') {
-    console.log('[stripe] pedido ya procesado (idempotente):', orderId);
+  // Idempotencia: ya procesado/autorizado (Stripe puede reenviar el evento).
+  if (order.status === 'Autorizado' || order.status === 'Procesando' || order.status === 'Entregado') {
+    console.log('[stripe] pedido ya procesado (idempotente):', orderId, order.status);
     return;
   }
 
-  // Resolver el método de pago real (tarjeta / bizum / ...).
-  let paymentLabel = 'Stripe';
+  // Determinar el estado real del PaymentIntent para distinguir:
+  //   - requires_capture → tarjeta AUTORIZADA (retención), aún sin cobrar.
+  //     El pedido entra como "Autorizado" y se cobra luego desde el panel.
+  //   - succeeded → cobro inmediato (Bizum, o tarjeta en captura automática).
   const stripe = getStripe();
-  try {
-    const piId = typeof session.payment_intent === 'string'
-      ? session.payment_intent
-      : session.payment_intent?.id;
-    if (stripe && piId) {
-      const pi = await stripe.paymentIntents.retrieve(piId, { expand: ['latest_charge'] });
-      const type = pi?.latest_charge?.payment_method_details?.type;
-      paymentLabel = resolveStripePaymentLabel(type);
-    }
-  } catch (e) {
-    console.warn('[stripe] no se pudo resolver el método de pago:', e?.message);
-  }
-
   const piIdStr = typeof session.payment_intent === 'string'
     ? session.payment_intent
     : (session.payment_intent?.id || null);
 
-  // CRÍTICO: marcar pagado. Si esto falla, lanzamos → webhook 500 →
+  let pi = null;
+  let paymentLabel = 'Stripe';
+  try {
+    if (stripe && piIdStr) {
+      pi = await stripe.paymentIntents.retrieve(piIdStr, { expand: ['latest_charge'] });
+      const type = pi?.latest_charge?.payment_method_details?.type;
+      paymentLabel = type ? resolveStripePaymentLabel(type) : paymentLabel;
+    }
+  } catch (e) {
+    console.warn('[stripe] no se pudo resolver el PaymentIntent:', e?.message);
+  }
+
+  const isAuthorizedOnly = pi?.status === 'requires_capture';
+  const isPaid = session.payment_status === 'paid' || pi?.status === 'succeeded';
+
+  if (!isAuthorizedOnly && !isPaid) {
+    // Pago en curso/incompleto (p.ej. método asíncrono pendiente). No
+    // procesamos todavía; un evento posterior lo confirmará.
+    console.log('[stripe] sesión completada sin pago ni autorización capturable:', session.id, 'payment_status=', session.payment_status, 'pi=', pi?.status);
+    return;
+  }
+
+  // Para autorizaciones de tarjeta aún no hay charge: etiquetamos como
+  // tarjeta (la captura manual sólo aplica a 'card').
+  if (isAuthorizedOnly && paymentLabel === 'Stripe') {
+    paymentLabel = 'Tarjeta (Stripe)';
+  }
+
+  const newStatus = isAuthorizedOnly ? 'Autorizado' : 'Procesando';
+
+  // CRÍTICO: persistir el estado. Si falla, lanzamos → webhook 500 →
   // Stripe reintenta. Hacemos el UPDATE antes de descontar stock para
   // minimizar la ventana de doble procesamiento.
   const { error: uErr } = await supabase
     .from('orders')
     .update({
-      status: 'Procesando',
+      status: newStatus,
       payment_method: paymentLabel,
       stripe_payment_intent: piIdStr,
       confirmed_at: new Date().toISOString(), // dispara la alerta de nuevos pedidos AHORA
     })
     .eq('id', orderId);
   if (uErr) {
-    throw new Error('No se pudo actualizar el pedido a pagado: ' + uErr.message);
+    throw new Error('No se pudo actualizar el pedido: ' + uErr.message);
   }
 
-  // Descontar stock (best-effort: el cliente ya pagó, no podemos
-  // rechazar; las incidencias se registran para revisión manual).
+  // Descontar (reservar) stock ya en la autorización, para no sobrevender
+  // entre que se autoriza y se cobra. Si luego se cancela/caduca la
+  // autorización, el stock se repone (ver cancelación / payment_intent.canceled).
   try {
     const { issues } = await deductStockForItems(order.items || []);
     if (issues.length) {
-      console.warn('[stripe] STOCK INSUFICIENTE tras pago (revisar manualmente) pedido', orderId, JSON.stringify(issues));
+      console.warn('[stripe] STOCK INSUFICIENTE tras autorización/pago (revisar manualmente) pedido', orderId, JSON.stringify(issues));
     }
   } catch (e) {
-    console.error('[stripe] error al descontar stock (pedido pagado):', e?.message);
+    console.error('[stripe] error al descontar stock:', e?.message);
   }
 
-  // Objeto del pedido ya confirmado para email/impresión.
-  const fulfilledOrder = { ...order, status: 'Procesando', payment_method: paymentLabel };
+  // Objeto del pedido para email/impresión.
+  const fulfilledOrder = { ...order, status: newStatus, payment_method: paymentLabel };
 
   // Email de confirmación (best-effort).
   if (order.customer_email) {
@@ -926,7 +945,7 @@ async function handleStripeCheckoutCompleted(session) {
     });
   }
 
-  console.log('[stripe] pedido confirmado y procesado:', orderId, '·', paymentLabel);
+  console.log('[stripe] pedido', isAuthorizedOnly ? 'AUTORIZADO (pendiente de cobro)' : 'confirmado y procesado', ':', orderId, '·', paymentLabel);
 }
 
 // checkout.session.expired → la sesión caducó sin pagar. Cancelamos el
@@ -946,6 +965,33 @@ async function handleStripeCheckoutExpired(session) {
   if (order.status === 'Esperando pago') {
     await supabase.from('orders').update({ status: 'Cancelado' }).eq('id', orderId);
     console.log('[stripe] sesión caducada → pedido cancelado:', orderId);
+  }
+}
+
+// payment_intent.canceled → la AUTORIZACIÓN de tarjeta se canceló (manual,
+// desde el panel) o CADUCÓ (Stripe la libera automáticamente a los ~7 días
+// si no se captura). Si el pedido sigue "Autorizado", lo cancelamos y
+// reponemos el stock reservado. Idempotente: si ya no está "Autorizado"
+// (p.ej. ya lo canceló el endpoint del panel) no hace nada.
+async function handleStripePaymentIntentCanceled(pi) {
+  const orderId = pi?.metadata?.order_id;
+  if (!orderId) return;
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, status, items')
+    .eq('id', orderId)
+    .single();
+  if (!order) return;
+
+  if (order.status === 'Autorizado') {
+    await supabase.from('orders').update({ status: 'Cancelado' }).eq('id', orderId);
+    try {
+      await restockItems(order.items || []);
+    } catch (e) {
+      console.error('[stripe] error al reponer stock tras autorización cancelada:', e?.message);
+    }
+    console.log('[stripe] autorización cancelada/caducada → pedido cancelado + stock repuesto:', orderId);
   }
 }
 
@@ -1501,6 +1547,16 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card', 'bizum'],
+      // Captura manual SÓLO para tarjeta: al pagar se AUTORIZA (retiene) el
+      // importe pero no se cobra; el cobro real se hace después desde el
+      // panel ("Cobrar") cuando confirmamos stock/preparamos el pedido.
+      // Bizum NO admite captura manual, así que se mantiene en captura
+      // automática (cobro inmediato) gracias al override por método de pago.
+      // ⚠️ La autorización de tarjeta caduca a los ~7 días: hay que cobrar
+      //    antes o el banco libera la retención.
+      payment_method_options: {
+        card: { capture_method: 'manual' },
+      },
       line_items,
       locale: 'es',
       customer_email: normalizedEmail,
@@ -1745,7 +1801,37 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
+
+    // Si se cancela un pedido AUTORIZADO (retención de tarjeta sin cobrar),
+    // liberamos la autorización en Stripe (no se cobra nada al cliente) y
+    // reponemos el stock que habíamos reservado en la autorización.
+    if (status === 'Cancelado') {
+      const { data: prev } = await supabase
+        .from('orders')
+        .select('status, stripe_payment_intent, items')
+        .eq('id', id)
+        .single();
+      if (prev && prev.status === 'Autorizado' && prev.stripe_payment_intent) {
+        const stripe = getStripe();
+        if (stripe) {
+          try {
+            const pi = await stripe.paymentIntents.retrieve(prev.stripe_payment_intent);
+            if (pi.status === 'requires_capture') {
+              await stripe.paymentIntents.cancel(prev.stripe_payment_intent);
+              console.log('[stripe] autorización liberada al cancelar pedido:', id);
+            }
+          } catch (e) {
+            console.warn('[stripe] no se pudo liberar la autorización al cancelar:', e?.message);
+          }
+        }
+        try {
+          await restockItems(prev.items || []);
+        } catch (e) {
+          console.error('[stock] error al reponer stock al cancelar autorizado:', e?.message);
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from('orders')
       .update({ status })
@@ -1757,6 +1843,58 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/admin/orders/:id/capture — cobra (captura) una autorización de
+// tarjeta de un pedido "Autorizado". Hasta ahora sólo se había RETENIDO el
+// importe; esto lo cobra de verdad y pasa el pedido a "Procesando".
+app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) => {
+  try {
+    const stripe = getStripe();
+    if (!stripe) return res.status(503).json({ error: 'Stripe no está configurado' });
+
+    const { id } = req.params;
+    const { data: order, error: fErr } = await supabase
+      .from('orders')
+      .select('id, status, stripe_payment_intent')
+      .eq('id', id)
+      .single();
+    if (fErr || !order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!order.stripe_payment_intent) {
+      return res.status(400).json({ error: 'Este pedido no tiene un pago de Stripe que cobrar' });
+    }
+
+    const pi = await stripe.paymentIntents.retrieve(order.stripe_payment_intent);
+
+    // Ya cobrado (p.ej. doble clic o reintento): sincronizamos el estado.
+    if (pi.status === 'succeeded') {
+      if (order.status === 'Autorizado') {
+        await supabase.from('orders').update({ status: 'Procesando' }).eq('id', id);
+      }
+      return res.json({ ok: true, alreadyCaptured: true });
+    }
+
+    if (pi.status !== 'requires_capture') {
+      return res.status(400).json({
+        error: `No se puede cobrar: el pago está en estado "${pi.status}". Es posible que la autorización haya caducado (las retenciones de tarjeta caducan a los ~7 días).`,
+      });
+    }
+
+    await stripe.paymentIntents.capture(order.stripe_payment_intent);
+    const { data, error: uErr } = await supabase
+      .from('orders')
+      .update({ status: 'Procesando' })
+      .eq('id', id)
+      .select()
+      .single();
+    if (uErr) throw uErr;
+
+    console.log('[stripe] pago cobrado (capturado) para pedido:', id);
+    return res.json({ ok: true, order: data });
+  } catch (error) {
+    console.error('[stripe] error capturando pago:', error?.message || error);
+    return res.status(500).json({ error: error?.message || 'Error al cobrar el pedido' });
   }
 });
 
