@@ -87,6 +87,22 @@ const BANNERS = [
 // el banner y descarta el riesgo de fecha anunciada ≠ fecha real.
 const PROMO_NOTICE = 'Promoción de bienvenida válida hasta el 30/08/2026.';
 
+// =====================================================================
+// WhatsApp — canal de contacto principal del comercio
+// =====================================================================
+// Número único usado en accesos rápidos, módulo de confianza y entrada
+// de reparación. Mantener sincronizado con los enlaces wa.me de la
+// página /repair. `waLink` codifica el mensaje predefinido para abrir
+// el chat con un texto ya escrito (reduce fricción del cliente).
+const WHATSAPP_NUMBER = '34612466034';
+const waLink = (text) =>
+  `https://wa.me/${WHATSAPP_NUMBER}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+
+// "Más vendidos" en la home: oculto hasta tener datos REALES de ventas.
+// Hoy sólo mostraría "productos sin oferta" etiquetados como populares, lo
+// cual es información inventada. Poner a true cuando exista ranking real.
+const SHOW_MAS_VENDIDOS = false;
+
 const ProductSkeleton = () => (
   <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 animate-pulse">
     <div className="w-full aspect-square bg-gray-200 rounded-lg mb-2"></div>
@@ -324,23 +340,31 @@ function FaqSection({ onLegalClick, onRepairClick }) {
 
   const faqs = [
     {
-      q: '¿Cómo hago un pedido?',
+      q: '¿Cuál es el pedido mínimo?',
       a: (
         <>
-          Navega por las categorías o usa el buscador para encontrar lo que
-          necesitas, añade los productos al carrito y completa el proceso de
-          compra. Recibirás un correo electrónico con la confirmación del
-          pedido y los detalles de entrega.
+          No hay pedido mínimo. La <strong>recogida en tienda es gratuita</strong>{' '}
+          sin importe mínimo. En envío a domicilio la tarifa es de{' '}
+          <strong>4,99 €</strong>, y a partir de <strong>40 €</strong> el envío
+          es <strong>gratis</strong>.
         </>
       ),
     },
     {
-      q: '¿Hasta dónde repartís?',
+      q: '¿Puedo recoger en tienda?',
       a: (
         <>
-          Realizamos envío a domicilio en Meco y poblaciones cercanas dentro
-          de un radio de aproximadamente 10 km. Consulta la lista completa de
-          zonas cubiertas en nuestra{' '}
+          Sí. Recogida <strong>gratuita y sin mínimo</strong> en Paseo del Sol 1,
+          28880 Meco. Te avisamos cuando esté listo, normalmente en 2-4 horas.
+        </>
+      ),
+    },
+    {
+      q: '¿Hacéis entrega a domicilio?',
+      a: (
+        <>
+          Sí, repartimos en Meco y alrededores (radio de ~10 km), normalmente en
+          24-72 horas. Consulta las zonas en nuestra{' '}
           <button
             type="button"
             onClick={() => onLegalClick('envios')}
@@ -353,92 +377,49 @@ function FaqSection({ onLegalClick, onRepairClick }) {
       ),
     },
     {
-      q: '¿Puedo recoger en tienda?',
-      a: (
-        <>
-          Sí. La recogida en tienda es <strong>gratuita y sin importe mínimo</strong>{' '}
-          en Paseo del Sol 1, 28880 Meco. Te avisaremos cuando tu pedido esté
-          listo, normalmente en 2-4 horas desde la confirmación.
-        </>
-      ),
-    },
-    {
-      q: '¿Cuánto cuesta el envío a domicilio?',
-      a: (
-        <>
-          El envío a domicilio tiene una tarifa única de{' '}
-          <strong>4,99 €</strong>. Los pedidos a partir de{' '}
-          <strong>40 €</strong> (antes de aplicar los gastos de envío)
-          disfrutan de <strong>envío gratuito</strong>.
-        </>
-      ),
-    },
-    {
-      q: '¿En cuánto tiempo recibiré mi pedido?',
-      a: (
-        <>
-          <strong>Recogida en tienda:</strong> 2-4 horas tras la confirmación
-          (mismo día si se confirma antes de las 18:00).{' '}
-          <strong>Envío a domicilio:</strong> 24-72 horas en la zona local,
-          sin perjuicio del plazo legal máximo de 30 días naturales (Art. 66
-          bis RDLeg 1/2007).
-        </>
-      ),
-    },
-    {
-      q: '¿Qué métodos de pago aceptáis?',
-      a: (
-        <>
-          Aceptamos pago en línea con <strong>tarjeta</strong> (Visa, Mastercard),{' '}
-          <strong>Bizum</strong>, <strong>Apple Pay</strong> y{' '}
-          <strong>Google Pay</strong> a través de pasarela segura (Stripe). También
-          ofrecemos <strong>contra reembolso</strong>; y en el establecimiento físico
-          aceptamos efectivo y tarjeta.
-        </>
-      ),
-    },
-    {
       q: '¿Cómo funcionan las devoluciones?',
       a: (
         <>
-          <p className="mb-2">
-            <strong>Productos no perecederos</strong> (cereales, conservas,
-            snacks, bebidas envasadas, productos de bazar): puedes ejercer
-            el derecho de desistimiento durante{' '}
-            <strong>14 días naturales</strong> desde la recepción del pedido,
-            sin necesidad de justificar el motivo.
-          </p>
-          <p className="mb-2">
-            <strong>Productos frescos y perecederos</strong> (carne, pescado,
-            lácteos, frutas y verduras, panadería, comida preparada,
-            congelados): <strong>no admiten desistimiento</strong> por su
-            propia naturaleza (Art. 103 <em>RDLeg 1/2007</em>), pero puedes
-            siempre solicitar devolución, sustitución o reembolso si recibes
-            el producto <strong>defectuoso, caducado, dañado durante el
-            transporte o distinto al pedido</strong>.
-          </p>
-          <p>
-            Consulta el detalle completo (incluida la lista de excepciones
-            legales) en nuestra{' '}
-            <button
-              type="button"
-              onClick={() => onLegalClick('devoluciones')}
-              className="text-red-600 underline hover:text-red-700"
-            >
-              Política de Devoluciones
-            </button>
-            .
-          </p>
+          Los productos no perecederos admiten devolución en{' '}
+          <strong>14 días</strong>. Los frescos (carne, pescado, lácteos,
+          congelados…) no admiten desistimiento por su naturaleza, pero
+          siempre te devolvemos el dinero o lo reponemos si llega
+          defectuoso, caducado o equivocado. Detalle completo en la{' '}
+          <button
+            type="button"
+            onClick={() => onLegalClick('devoluciones')}
+            className="text-red-600 underline hover:text-red-700"
+          >
+            Política de Devoluciones
+          </button>
+          .
         </>
       ),
     },
     {
-      q: '¿Ofrecéis reparación de móviles?',
+      q: '¿Cómo contacto por WhatsApp?',
       a: (
         <>
-          Sí. Somos servicio oficial de reparación: cambio de pantalla,
-          batería y otras intervenciones. Selecciona tu modelo y tipo de
-          reparación en el{' '}
+          Escríbenos directamente por{' '}
+          <a
+            href={waLink('Hola, tengo una consulta sobre HIPERA.')}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-red-600 underline hover:text-red-700"
+          >
+            WhatsApp
+          </a>{' '}
+          para dudas sobre tu pedido, disponibilidad o reparaciones. Te
+          respondemos rápido en horario de tienda (09:00 – 22:00).
+        </>
+      ),
+    },
+    {
+      q: '¿También reparáis móviles?',
+      a: (
+        <>
+          Sí, ofrecemos <strong>reparación profesional</strong> de móviles:
+          cambio de pantalla, batería y diagnóstico. Elige tu modelo en el{' '}
           <button
             type="button"
             onClick={onRepairClick}
@@ -446,7 +427,7 @@ function FaqSection({ onLegalClick, onRepairClick }) {
           >
             Centro de Reparación
           </button>{' '}
-          y consulta el precio por WhatsApp.
+          y pide presupuesto por WhatsApp.
         </>
       ),
     },
@@ -1670,9 +1651,9 @@ export default function App() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3" onClick={() => navTo("home")}>
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white font-extrabold shadow-lg shadow-red-200">H</div>
-              <div><h1 className="font-bold text-lg leading-none text-gray-900">HIPERA</h1><p className="text-[10px] text-gray-500 tracking-wider font-medium">MERCADO ONLINE</p></div>
+              <div><h1 className="font-bold text-lg leading-none text-gray-900">HIPERA</h1><p className="text-[10px] text-gray-500 tracking-wider font-medium">SUPERMERCADO EN MECO</p></div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
                {user ? (
                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => navTo("orders")}>
                     <div className="w-9 h-9 bg-gray-900 text-white rounded-full flex items-center justify-center text-sm font-bold border-2 border-transparent hover:border-red-500 transition-colors">{user.email[0].toUpperCase()}</div>
@@ -1680,6 +1661,12 @@ export default function App() {
                ) : (
                  <button onClick={() => navigate("/login")} className="text-xs font-bold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition-colors">Entrar</button>
                )}
+               {/* Favoritos — entrada secundaria en el header (no en accesos rápidos):
+                   pensada para clientes que vuelven, no para el primer visitante. */}
+               <button aria-label="Mis favoritos" className="relative p-1 cursor-pointer transition-transform active:scale-90 text-gray-700 hover:text-red-500" onClick={() => navTo("favorites")}>
+                 <Heart size={23} fill={favorites.length > 0 ? "currentColor" : "none"} className={favorites.length > 0 ? "text-red-500" : ""} />
+                 {favorites.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center border border-white">{favorites.length}</span>}
+               </button>
                <div className="relative p-1 cursor-pointer transition-transform active:scale-90" onClick={() => navTo("cart")}>
                  <ShoppingCart className="text-gray-700" size={24} />
                  {cart.length > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-bounce">{cart.length}</span>}
@@ -1704,11 +1691,13 @@ export default function App() {
       {/* --- HOME PAGE --- */}
       {page === "home" && (
         <div className="p-4 space-y-6 animate-fade-in">
-          <div className="grid grid-cols-4 gap-2">
-            <button onClick={() => navTo("main")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-blue-50 text-blue-600 rounded-full"><LayoutGrid size={18} /></div><span className="text-[10px] font-bold text-gray-700">Todo</span></button>
-            <button onClick={() => navTo("offers")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-red-50 text-red-600 rounded-full"><Percent size={18} /></div><span className="text-[10px] font-bold text-gray-700">Ofertas</span></button>
-            <button onClick={() => navTo("favorites")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-pink-50 text-pink-600 rounded-full"><Heart size={18} /></div><span className="text-[10px] font-bold text-gray-700">Favs</span></button>
-            <button onClick={() => navTo("orders")} className="bg-white p-2 rounded-xl shadow-sm flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform aspect-square"><div className="p-2 bg-green-50 text-green-600 rounded-full"><ClipboardList size={18} /></div><span className="text-[10px] font-bold text-gray-700">Pedidos</span></button>
+          {/* Accesos rápidos — atajos de navegación reales (no scroll-to).
+              Color de marca único (rojo) para no parecer plantilla genérica. */}
+          <div className="grid grid-cols-4 gap-2.5">
+            <button onClick={() => navTo("offers")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><Percent size={20} /></div><span className="text-[11px] font-bold text-gray-700">Ofertas</span></button>
+            <button onClick={() => navTo("main")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><LayoutGrid size={20} /></div><span className="text-[11px] font-bold text-gray-700">Todo</span></button>
+            <button onClick={() => navTo("repair")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><Wrench size={20} /></div><span className="text-[11px] font-bold text-gray-700">Reparación</span></button>
+            <button onClick={() => navTo("orders")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><ClipboardList size={20} /></div><span className="text-[11px] font-bold text-gray-700">Pedidos</span></button>
           </div>
           <div className="space-y-2">
           <button
@@ -1778,20 +1767,29 @@ export default function App() {
           <p className="text-[11px] text-gray-400 px-1 leading-snug text-center mt-1">{PROMO_NOTICE}</p>
           </div>
 
-          {/* Categorías — acceso directo a lo que busca el cliente nada más entrar */}
+          {/* Categorías — entrada de compra principal. Rejilla de 4 columnas
+              para que en móvil se vean 8 categorías de un vistazo (2 filas),
+              y "Ver todas" cuando hay más. Visual de tienda, no de catálogo. */}
           <div>
-             <h4 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-3">Categorías</h4>
-             <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 scrollbar-hide">
-               {categories.map(c => (
-                 <button 
-                   key={c.id} 
-                   onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}} 
-                   className="flex flex-col items-center gap-2 group w-24 flex-shrink-0"
+             <div className="flex items-center justify-between mb-3">
+               <h3 className="font-bold text-lg text-gray-900">Compra por categoría</h3>
+               {categories.length > 8 && (
+                 <button onClick={() => navTo("main")} className="text-xs font-bold text-red-600 flex items-center gap-0.5 active:scale-95 transition-transform">
+                   Ver todas <ChevronRight size={14}/>
+                 </button>
+               )}
+             </div>
+             <div className="grid grid-cols-4 gap-3">
+               {categories.slice(0, 8).map(c => (
+                 <button
+                   key={c.id}
+                   onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}}
+                   className="flex flex-col items-center gap-1.5 group"
                  >
-                   <div className="w-20 h-20 bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-95 transition-transform">
-                     <IconByName name={resolveCategoryIcon(c)} size={32}/>
+                   <div className="w-full aspect-square bg-white rounded-2xl shadow-sm border border-gray-100 flex items-center justify-center text-red-600 group-active:scale-95 transition-transform">
+                     <IconByName name={resolveCategoryIcon(c)} size={28}/>
                    </div>
-                   <span className="text-xs font-bold text-gray-800 text-center leading-tight line-clamp-2 h-8 flex items-start justify-center">
+                   <span className="text-[11px] font-semibold text-gray-700 text-center leading-tight line-clamp-2">
                      {c.name}
                    </span>
                  </button>
@@ -1799,11 +1797,16 @@ export default function App() {
              </div>
           </div>
 
-          {/* Ofertas Flash — productos visibles cuanto antes */}
+          {/* Ofertas Flash — productos y precios visibles cuanto antes */}
           {(loading || products.filter(p => p.oferta).length > 0) && (
             <div>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-xl text-gray-800">Ofertas Flash</h3>
+                <h3 className="font-bold text-xl text-gray-900">Ofertas Flash</h3>
+                {!loading && products.filter(p => p.oferta).length > 6 && (
+                  <button onClick={() => navTo("offers")} className="text-xs font-bold text-red-600 flex items-center gap-0.5 active:scale-95 transition-transform">
+                    Ver más <ChevronRight size={14}/>
+                  </button>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {loading ? (
@@ -1812,31 +1815,59 @@ export default function App() {
                   products.filter(p => p.oferta).slice(0, 6).map(p => renderProductCard(p))
                 )}
               </div>
-              {!loading && products.filter(p => p.oferta).length > 6 && (
-                <button
-                  onClick={() => navTo("offers")}
-                  className="w-full mt-4 bg-red-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2"
-                >
-                  Ver más ofertas <ChevronRight size={18}/>
-                </button>
-              )}
             </div>
           )}
 
-          {/* Reparación móvil — entrada compacta (el detalle vive en /repair y en el banner del carrusel) */}
-          <button
-            onClick={() => navTo("repair")}
-            className="w-full bg-gray-900 text-white rounded-2xl shadow-sm px-4 py-3 flex items-center justify-between gap-3 active:scale-95 transition-transform"
-          >
-            <span className="flex items-center gap-3 min-w-0">
+          {/* Más vendidos — oculto (SHOW_MAS_VENDIDOS) hasta tener ranking
+              real de ventas; evita mostrar datos inventados. */}
+          {SHOW_MAS_VENDIDOS && (() => {
+            const populares = products.filter(p => !p.oferta);
+            const lista = (populares.length > 0 ? populares : products).slice(0, 8);
+            if (!loading && lista.length === 0) return null;
+            return (
+              <div id="mas-vendidos" className="scroll-mt-24">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-xl text-gray-900">Más vendidos</h3>
+                  <button onClick={() => navTo("main")} className="text-xs font-bold text-red-600 flex items-center gap-0.5 active:scale-95 transition-transform">
+                    Ver más <ChevronRight size={14}/>
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {loading
+                    ? [1,2,3,4].map(i => <ProductSkeleton key={i}/>)
+                    : lista.map(p => renderProductCard(p))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Reparación móvil — entrada secundaria y compacta para no robar
+              protagonismo al supermercado. El detalle vive en /repair. */}
+          <div className="bg-gray-900 text-white rounded-2xl shadow-sm p-4">
+            <div className="flex items-center gap-3 mb-3">
               <span className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0"><Wrench size={18} className="text-red-500"/></span>
-              <span className="text-left min-w-0">
-                <span className="block text-sm font-bold leading-tight">Reparación de móviles</span>
-                <span className="block text-[11px] text-gray-400 leading-tight truncate">Pantalla y batería · Cita previa · WhatsApp</span>
-              </span>
-            </span>
-            <ChevronRight size={18} className="text-gray-400 flex-shrink-0"/>
-          </button>
+              <div className="min-w-0">
+                <p className="text-sm font-bold leading-tight">Reparación de móviles en Meco</p>
+                <p className="text-[11px] text-gray-400 leading-tight">Pantalla · Batería · Diagnóstico</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <a
+                href={waLink('Hola, quiero pedir presupuesto para reparar mi móvil.')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+              >
+                <Smartphone size={16}/> Pedir presupuesto
+              </a>
+              <button
+                onClick={() => navTo("repair")}
+                className="px-4 bg-white/10 hover:bg-white/20 text-white text-sm font-bold py-2.5 rounded-xl active:scale-95 transition-all"
+              >
+                Ver
+              </button>
+            </div>
+          </div>
 
           {/* Preguntas frecuentes (FAQ accordion) — final del Home */}
           <FaqSection
@@ -2983,7 +3014,7 @@ export default function App() {
             <h2 className="font-bold text-lg text-gray-800">{page === "offers" && "Todas las Ofertas"}{page === "main" && "Categorías"}{page === "sub" && mainCat?.name}{page === "products" && subCat?.name}</h2>
           </div>
           {page === "main" ? (
-             <div className="grid grid-cols-2 gap-3">{categories.map(c => <button key={c.id} className="bg-white p-4 rounded-xl shadow-sm text-left flex flex-col justify-between h-24 border-l-4 border-red-500 active:scale-95 transition-transform" onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}}><span className="font-bold text-lg text-gray-800">{c.name}</span><ChevronRight size={18} className="text-gray-300 self-end"/></button>)}</div>
+             <div className="grid grid-cols-2 gap-3">{categories.map(c => <button key={c.id} className="bg-white p-4 rounded-xl shadow-sm text-left flex items-center justify-between gap-2 h-24 border-l-4 border-red-500 active:scale-95 transition-transform" onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}}><span className="font-bold text-base text-gray-800 leading-tight line-clamp-3">{c.name}</span><ChevronRight size={20} className="text-gray-300 flex-shrink-0"/></button>)}</div>
           ) : page === "sub" ? (
              <div className="space-y-6">
                {/* 子类别选项 - 固定在顶部 */}
