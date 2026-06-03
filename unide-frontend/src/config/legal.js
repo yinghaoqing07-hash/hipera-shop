@@ -129,9 +129,19 @@
 // NO requiere re-aceptación (TERMS_VERSION se mantiene): añadir una
 // opción de pago es favorable al usuario y no agrava obligaciones,
 // garantías ni la base económica del contrato.
+// 1.4 → 1.5 (2026-06-04): captura manual (cobro diferido) en tarjeta.
+// §6: la tarjeta (incl. Apple Pay/Google Pay) pasa a autorizarse/retenerse
+// en la compra y a COBRARSE cuando HIPERA confirma y prepara el pedido;
+// si no se confirma en ~7 días o se cancela, la retención se libera sin
+// cargo. Bizum (en línea/manual) y contra reembolso mantienen su momento
+// de cobro. Nuevo apartado §6.1 "Autorización y cobro de los pagos".
+// NO requiere re-aceptación (TERMS_VERSION se mantiene): el cobro diferido
+// es favorable/neutral para el Cliente (se le carga más tarde y la
+// retención puede liberarse) y no agrava obligaciones ni garantías; es una
+// aclaración del flujo real de pago, en línea con el criterio de 1.3→1.4.
 export const TERMS_VERSION = 3;
-export const TERMS_DOCUMENT_VERSION = '1.4';
-export const TERMS_UPDATED_AT = '2026-05-30';
+export const TERMS_DOCUMENT_VERSION = '1.5';
+export const TERMS_UPDATED_AT = '2026-06-04';
 
 // --- Política de Privacidad ---
 // 1.2 → 1.3 (2026-05-26): revisión correctiva no material que
@@ -181,9 +191,15 @@ export const PRIVACY_UPDATED_AT = '2026-05-30';
 // tarjeta de origen vía Stripe, y los pagos contra reembolso se
 // reembolsan por transferencia o Bizum a la cuenta del cliente.
 // NO cambia plazos ni importes; sólo precisa el canal de devolución.
+// 1.2 → 1.3 (2026-06-04): aclaración no material en §5.3. Se distingue
+// entre la cancelación de un pedido aún NO cobrado (sólo había
+// autorización/retención de tarjeta → no hay cargo; la retención se libera
+// en 1-7 días, no es propiamente un reembolso, cross-ref T&C §6.1) y el
+// reembolso de un pedido YA cobrado (total o parcial, abono en 5-10 días
+// hábiles). NO cambia plazos legales, importes ni el método de reembolso.
 export const RETURNS_VERSION = 2;
-export const RETURNS_DOCUMENT_VERSION = '1.2';
-export const RETURNS_UPDATED_AT = '2026-05-30';
+export const RETURNS_DOCUMENT_VERSION = '1.3';
+export const RETURNS_UPDATED_AT = '2026-06-04';
 
 // --- Política de Envíos ---
 // Documento informativo (manual operativo complementario a T&C §7),

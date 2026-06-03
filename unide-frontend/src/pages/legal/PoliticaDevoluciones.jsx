@@ -383,6 +383,17 @@ export default function PoliticaDevoluciones() {
             entidad bancaria del Cliente. En los pagos contra reembolso, el reembolso se
             efectuará por transferencia bancaria o Bizum a la cuenta que indique el Cliente.
           </p>
+          <p>
+            <strong>Pedidos aún no cobrados:</strong> cuando un pedido pagado con tarjeta se
+            cancela <strong>antes de su cobro efectivo</strong> (mientras sólo existe una
+            autorización o retención, conforme al apartado §6.1 de los{' '}
+            <strong>Términos y Condiciones</strong>), no llega a producirse ningún cargo y,
+            por tanto, no hay propiamente un reembolso: la retención se libera
+            automáticamente, normalmente en un plazo de <strong>1 a 7 días</strong> según la
+            entidad bancaria. Cuando el pedido <strong>ya había sido cobrado</strong>, HIPERA
+            emite el reembolso (total o parcial) por la misma vía y el abono suele reflejarse
+            en <strong>5-10 días hábiles</strong>, según la entidad.
+          </p>
         </Subsection>
 
         <Subsection title="5.4. Importe reembolsado y gastos de envío (desistimiento total)">

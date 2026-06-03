@@ -244,7 +244,7 @@ export default function TerminosCondiciones() {
         </p>
         <ul className="list-disc list-inside space-y-1 ml-2">
           <li><strong>Contra reembolso</strong> (pago en efectivo o con tarjeta en el momento de la entrega o de la recogida en tienda).</li>
-          <li><strong>Pago en línea mediante tarjeta de crédito o débito (Visa, Mastercard), Bizum, Apple Pay y Google Pay</strong>, procesado a través de la pasarela de pagos <strong>Stripe Payments Europe, Ltd.</strong> (entidad de la Unión Europea con sede en Dublín, Irlanda, certificada PCI-DSS nivel 1). El pago se autoriza en el momento de la compra y el pedido se prepara una vez confirmado el cobro por la pasarela.</li>
+          <li><strong>Pago en línea mediante tarjeta de crédito o débito (Visa, Mastercard), Bizum, Apple Pay y Google Pay</strong>, procesado a través de la pasarela de pagos <strong>Stripe Payments Europe, Ltd.</strong> (entidad de la Unión Europea con sede en Dublín, Irlanda, certificada PCI-DSS nivel 1). El momento en que se autoriza y se cobra cada pago se detalla en el apartado 6.1.</li>
           <li><strong>Bizum manual</strong> mediante el número operativo facilitado en el proceso de pago; el cliente envía la transferencia desde su aplicación bancaria y HIPERA verifica la recepción antes de preparar el pedido. Este medio es complementario al Bizum en línea procesado por Stripe.</li>
         </ul>
         <p>
@@ -264,6 +264,33 @@ export default function TerminosCondiciones() {
           Las facturas se emiten en formato electrónico (PDF), conforme a la Ley 37/1992
           del IVA, y se ponen a disposición del cliente en su cuenta y/o por correo.
         </p>
+        <Subsection title="6.1 Autorización y cobro de los pagos">
+          <p>
+            En los pagos con <strong>tarjeta de crédito o débito</strong> (incluidos{' '}
+            <strong>Apple Pay</strong> y <strong>Google Pay</strong>, que operan sobre
+            tarjeta), en el momento de la compra se realiza únicamente una{' '}
+            <strong>autorización o retención</strong> del importe en el medio de pago del
+            Cliente. El <strong>cobro efectivo</strong> se produce cuando HIPERA confirma y
+            prepara el pedido. Si HIPERA no confirma el pedido dentro del periodo de validez
+            de la autorización (habitualmente unos <strong>7 días</strong>) o lo cancela, la
+            retención se libera automáticamente <strong>sin que se haya cobrado importe
+            alguno</strong>.
+          </p>
+          <p>
+            En los pagos mediante <strong>Bizum</strong> en línea, así como en el{' '}
+            <strong>Bizum manual</strong> y el <strong>contra reembolso</strong>, no existe
+            esta fase de retención previa: el Bizum en línea se cobra de forma{' '}
+            <strong>inmediata</strong> en el momento de la compra; el Bizum manual, cuando el
+            Cliente realiza la transferencia; y el contra reembolso, en el momento de la
+            entrega o recogida.
+          </p>
+          <p className="text-xs text-gray-500">
+            Este modelo de cobro diferido en tarjeta protege al Cliente: el importe sólo se
+            carga cuando el pedido va a ser efectivamente preparado. La liberación de una
+            retención no cobrada puede tardar, según la entidad bancaria del Cliente, entre
+            1 y 7 días en dejar de figurar en su cuenta.
+          </p>
+        </Subsection>
       </Section>
 
       <Section number="7" title="Envío y entrega">
