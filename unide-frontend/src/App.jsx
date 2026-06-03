@@ -1595,7 +1595,10 @@ export default function App() {
     return null;
   };
 
-  const renderProductCard = (p) => (
+  // expanded=true (sólo Ofertas Flash de la home): botón "Añadir" ancho que
+  // se convierte en control de cantidad. Por defecto (resto de listados) se
+  // usa el "+" compacto para no alargar las tarjetas.
+  const renderProductCard = (p, { expanded = false } = {}) => (
     <div key={p.id} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 active:scale-95 transition-transform relative group" onClick={() => {setSelectedProduct(p); navTo("detail");}}>
       <button onClick={(e) => toggleFavorite(e, p.id)} className="absolute top-2 right-2 z-20 bg-white/80 p-1.5 rounded-full shadow-sm backdrop-blur-sm text-gray-400 hover:text-red-500 transition-colors">
         <Heart size={16} fill={favorites.includes(p.id) ? "currentColor" : "none"} className={favorites.includes(p.id) ? "text-red-500" : ""}/>
@@ -1605,13 +1608,54 @@ export default function App() {
         <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square rounded-xl object-cover bg-gray-50" />
       </div>
       <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words">{p.name}</p>
-      <div className="flex justify-between items-end">
-        <div>
-          <p className="font-extrabold text-red-600 text-lg leading-none">€{p.price.toFixed(2)}</p>
-          {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
+      {expanded ? (
+        <>
+          <div className="mb-2">
+            <p className="font-extrabold text-red-600 text-lg leading-none">€{p.price.toFixed(2)}</p>
+            {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
+          </div>
+          {(() => {
+            const inCart = cart.find(i => i.id === p.id && i.name === p.name);
+            if (!inCart) {
+              return (
+                <button
+                  onClick={(e) => { e.stopPropagation(); addToCart(p); }}
+                  className="w-full bg-gray-900 text-white text-sm font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 active:bg-red-600 transition-colors"
+                >
+                  <Plus size={16}/> Añadir
+                </button>
+              );
+            }
+            return (
+              <div className="w-full flex items-center justify-between bg-gray-900 text-white rounded-xl px-1 py-1" onClick={(e) => e.stopPropagation()}>
+                <button
+                  aria-label="Quitar uno"
+                  onClick={(e) => { e.stopPropagation(); inCart.quantity <= 1 ? removeFromCart(p.id, p.name) : updateQty(p.id, p.name, -1); }}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg active:bg-white/20 transition-colors"
+                >
+                  {inCart.quantity <= 1 ? <Trash2 size={15}/> : <Minus size={16}/>}
+                </button>
+                <span className="font-bold text-sm tabular-nums">{inCart.quantity}</span>
+                <button
+                  aria-label="Añadir uno"
+                  onClick={(e) => { e.stopPropagation(); updateQty(p.id, p.name, 1); }}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg active:bg-white/20 transition-colors"
+                >
+                  <Plus size={16}/>
+                </button>
+              </div>
+            );
+          })()}
+        </>
+      ) : (
+        <div className="flex justify-between items-end">
+          <div>
+            <p className="font-extrabold text-red-600 text-lg leading-none">€{p.price.toFixed(2)}</p>
+            {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
+          </div>
+          <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg active:bg-red-600 transition-colors"><Plus size={16}/></button>
         </div>
-        <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg active:bg-red-600 transition-colors"><Plus size={16}/></button>
-      </div>
+      )}
     </div>
   );
 
@@ -1767,6 +1811,29 @@ export default function App() {
           <p className="text-[11px] text-gray-400 px-1 leading-snug text-center mt-1">{PROMO_NOTICE}</p>
           </div>
 
+          {/* Ofertas Flash — productos reales (con foto y precio) justo tras
+              el banner, para romper el "muro de botones" y que la home parezca
+              una tienda nada más entrar. Va ANTES que la rejilla de categorías. */}
+          {(loading || products.filter(p => p.oferta).length > 0) && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-xl text-gray-900">Ofertas Flash</h3>
+                {!loading && products.filter(p => p.oferta).length > 6 && (
+                  <button onClick={() => navTo("offers")} className="text-xs font-bold text-red-600 flex items-center gap-0.5 active:scale-95 transition-transform">
+                    Ver más <ChevronRight size={14}/>
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {loading ? (
+                  [1,2,3,4,5,6].map(i => <ProductSkeleton key={i}/>)
+                ) : (
+                  products.filter(p => p.oferta).slice(0, 6).map(p => renderProductCard(p, { expanded: true }))
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Categorías — entrada de compra principal. Rejilla de 4 columnas
               para que en móvil se vean 8 categorías de un vistazo (2 filas),
               y "Ver todas" cuando hay más. Visual de tienda, no de catálogo. */}
@@ -1796,27 +1863,6 @@ export default function App() {
                ))}
              </div>
           </div>
-
-          {/* Ofertas Flash — productos y precios visibles cuanto antes */}
-          {(loading || products.filter(p => p.oferta).length > 0) && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-xl text-gray-900">Ofertas Flash</h3>
-                {!loading && products.filter(p => p.oferta).length > 6 && (
-                  <button onClick={() => navTo("offers")} className="text-xs font-bold text-red-600 flex items-center gap-0.5 active:scale-95 transition-transform">
-                    Ver más <ChevronRight size={14}/>
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {loading ? (
-                  [1,2,3,4,5,6].map(i => <ProductSkeleton key={i}/>)
-                ) : (
-                  products.filter(p => p.oferta).slice(0, 6).map(p => renderProductCard(p))
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Más vendidos — oculto (SHOW_MAS_VENDIDOS) hasta tener ranking
               real de ventas; evita mostrar datos inventados. */}
