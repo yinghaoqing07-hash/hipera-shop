@@ -255,6 +255,21 @@ class ApiClient {
     });
   }
 
+  // Reembolsa un pedido y avisa al cliente. Para reembolso parcial pasar
+  // opts = { partial: true, items: [{ index, quantity }] }.
+  // Devuelve { ok, refundType, amount?, waLink, emailed }.
+  async refundOrder(orderId, reason, opts = {}) {
+    const body = { reason: reason || '' };
+    if (opts.partial && Array.isArray(opts.items)) {
+      body.partial = true;
+      body.items = opts.items;
+    }
+    return this.request(`/admin/orders/${orderId}/refund`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
   async getAdminProducts() {
     return this.request('/admin/products');
   }

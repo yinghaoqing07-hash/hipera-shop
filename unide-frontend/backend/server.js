@@ -13,7 +13,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
-import { sendOrderConfirmationEmail } from './services/email.js';
+import { sendOrderConfirmationEmail, sendRefundEmail } from './services/email.js';
 import {
   getStripe,
   buildCheckoutLineItems,
@@ -1895,6 +1895,213 @@ app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) =>
   } catch (error) {
     console.error('[stripe] error capturando pago:', error?.message || error);
     return res.status(500).json({ error: error?.message || 'Error al cobrar el pedido' });
+  }
+});
+
+// Construye un enlace wa.me PRE-RELLENADO para avisar al cliente del
+// reembolso con un solo toque (el admin pulsa y se abre WhatsApp con el
+// mensaje y el destinatario ya puestos). No es envío automático: WhatsApp
+// sólo permite mensajes proactivos vía la Cloud API con plantillas
+// aprobadas por Meta. Esto es el término medio sin esa infraestructura.
+// Normaliza el teléfono a formato internacional español. Devuelve null si
+// no hay un teléfono utilizable.
+function buildRefundWhatsappLink(order, reason, refundType, amount = null) {
+  let digits = String(order?.phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('0034')) digits = digits.slice(2);
+  // Teléfono español sin prefijo: 9 dígitos empezando por 6/7/8/9 → +34.
+  if (digits.length === 9 && /^[6789]/.test(digits)) digits = '34' + digits;
+  if (digits.length < 11) return null; // no parece un internacional válido
+
+  const id = String(order?.id || '').slice(0, 8).toUpperCase();
+  const amountStr = Number(amount || 0).toFixed(2).replace('.', ',') + ' €';
+  const money = refundType === 'released'
+    ? 'No te hemos cobrado nada; si veías una retención en tu tarjeta, desaparecerá sola en 1-7 días.'
+    : refundType === 'partial'
+      ? `Te hemos reembolsado ${amountStr} por los artículos devueltos; suele tardar 5-10 días hábiles en aparecer, según tu banco.`
+      : refundType === 'refunded'
+        ? 'Te hemos reembolsado el importe completo; suele tardar 5-10 días hábiles en aparecer, según tu banco.'
+        : 'No se ha realizado ningún cobro online por este pedido.';
+  const intro = refundType === 'partial'
+    ? (reason ? `Hemos gestionado la devolución de parte de tu pedido. Motivo: ${reason}` : 'Hemos gestionado la devolución de parte de tu pedido.')
+    : (reason ? `Hemos tenido que cancelarlo por este motivo: ${reason}` : 'Hemos tenido que cancelar tu pedido.');
+  const lines = [
+    `Hola, te escribimos de HIPERA por tu pedido #${id}.`,
+    '',
+    intro,
+    '',
+    money,
+    '',
+    'Disculpa las molestias. Si tienes cualquier duda, respóndenos por aquí.',
+  ];
+  return `https://wa.me/${digits}?text=${encodeURIComponent(lines.join('\n'))}`;
+}
+
+// POST /api/admin/orders/:id/refund — reembolsa un pedido de Stripe.
+//   • Reembolso TOTAL (por defecto): devuelve todo / libera la retención,
+//     marca "Cancelado" y repone TODO el stock.
+//   • Reembolso PARCIAL (body.partial + body.items): devuelve sólo los
+//     artículos indicados, repone SÓLO ese stock y NO cambia el estado
+//     del pedido (sigue válido salvo lo devuelto).
+// En ambos casos envía email al cliente con el motivo y devuelve un enlace
+// de WhatsApp pre-rellenado para avisar con un toque.
+app.post('/api/admin/orders/:id/refund', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reason = typeof req.body?.reason === 'string'
+      ? req.body.reason.trim().slice(0, 500)
+      : '';
+
+    const { data: order, error: fErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (fErr || !order) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+    if (order.status === 'Cancelado') {
+      return res.status(400).json({ error: 'Este pedido ya está cancelado' });
+    }
+
+    const stripe = getStripe();
+
+    // ---- Reembolso PARCIAL (por artículos devueltos) ----
+    const selItems = Array.isArray(req.body?.items) ? req.body.items : null;
+    const isPartial = req.body?.partial === true && selItems && selItems.length > 0;
+    if (isPartial) {
+      if (!order.stripe_payment_intent) {
+        return res.status(400).json({ error: 'Este pedido no tiene un pago online que reembolsar parcialmente' });
+      }
+      if (!stripe) return res.status(503).json({ error: 'Stripe no está configurado' });
+
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+      let cents = 0;
+      const refundedDetail = [];
+      for (const sel of selItems) {
+        const idx = Number(sel?.index);
+        const qty = Math.floor(Number(sel?.quantity));
+        if (!Number.isInteger(idx) || idx < 0 || idx >= orderItems.length) continue;
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        const item = orderItems[idx];
+        const orderedQty = Math.floor(Number(item?.quantity) || 0);
+        const useQty = Math.min(qty, orderedQty);
+        if (useQty <= 0) continue;
+        const price = Number(item?.price) || 0;
+        cents += Math.round(price * useQty * 100);
+        refundedDetail.push({ ...item, quantity: useQty });
+      }
+      if (cents <= 0 || refundedDetail.length === 0) {
+        return res.status(400).json({ error: 'Selecciona al menos un artículo (con cantidad válida) a devolver' });
+      }
+
+      let pi;
+      try {
+        pi = await stripe.paymentIntents.retrieve(order.stripe_payment_intent, { expand: ['latest_charge'] });
+      } catch (e) {
+        return res.status(502).json({ error: 'No se pudo consultar el pago en Stripe: ' + (e?.message || '') });
+      }
+      if (pi.status !== 'succeeded') {
+        return res.status(400).json({ error: 'El reembolso parcial sólo es posible en pedidos ya cobrados. Cobra primero el pedido o usa el reembolso total.' });
+      }
+      // Stripe es la fuente de verdad del importe reembolsable: evita
+      // sobre-reembolsar aunque se hagan varias devoluciones parciales.
+      const charge = pi.latest_charge && typeof pi.latest_charge === 'object' ? pi.latest_charge : null;
+      const captured = Number(charge?.amount_captured ?? charge?.amount ?? pi.amount_received ?? 0);
+      const already = Number(charge?.amount_refunded ?? 0);
+      const refundable = captured - already;
+      if (cents > refundable) {
+        return res.status(400).json({
+          error: `El importe a reembolsar (${(cents / 100).toFixed(2)} €) supera lo que queda por reembolsar (${(refundable / 100).toFixed(2)} €).`,
+        });
+      }
+
+      try {
+        await stripe.refunds.create({ payment_intent: order.stripe_payment_intent, amount: cents });
+      } catch (e) {
+        console.error('[stripe] error en reembolso parcial:', e?.message || e);
+        return res.status(502).json({ error: 'Stripe rechazó el reembolso parcial: ' + (e?.message || '') });
+      }
+      console.log(`[stripe] reembolso PARCIAL emitido (panel): ${id} · ${(cents / 100).toFixed(2)} €`);
+
+      // Reponer SÓLO los artículos devueltos. El estado del pedido NO
+      // cambia (sigue válido salvo lo devuelto), así que charge.refunded
+      // (parcial) tampoco lo cancela.
+      try {
+        await restockItems(refundedDetail);
+      } catch (e) {
+        console.error('[stock] error al reponer stock (reembolso parcial):', e?.message);
+      }
+
+      const amount = cents / 100;
+      if (order.customer_email) {
+        sendRefundEmail(order, order.customer_email, {
+          reason, refundType: 'partial', refundedItems: refundedDetail, refundedAmount: amount,
+        }).catch((err) => console.warn('[Email] fallo email reembolso parcial:', err?.message || err));
+      }
+      const waLink = buildRefundWhatsappLink(order, reason, 'partial', amount);
+      return res.json({ ok: true, refundType: 'partial', amount, waLink, emailed: !!order.customer_email });
+    }
+
+    // ---- Reembolso TOTAL / liberación de retención ----
+    let refundType = 'cancelled'; // por defecto: pedido sin pago online
+
+    if (order.stripe_payment_intent) {
+      if (!stripe) return res.status(503).json({ error: 'Stripe no está configurado' });
+      try {
+        const pi = await stripe.paymentIntents.retrieve(order.stripe_payment_intent);
+        if (pi.status === 'requires_capture') {
+          // Sólo autorizado, nunca cobrado → cancelar libera la retención.
+          await stripe.paymentIntents.cancel(order.stripe_payment_intent);
+          refundType = 'released';
+          console.log('[stripe] retención liberada (reembolso desde panel):', id);
+        } else if (pi.status === 'succeeded') {
+          await stripe.refunds.create({ payment_intent: order.stripe_payment_intent });
+          refundType = 'refunded';
+          console.log('[stripe] reembolso total emitido (panel):', id);
+        } else if (pi.status === 'canceled') {
+          refundType = 'released'; // ya estaba liberado en Stripe
+        } else {
+          return res.status(400).json({
+            error: `No se puede reembolsar: el pago está en estado "${pi.status}".`,
+          });
+        }
+      } catch (e) {
+        console.error('[stripe] error al reembolsar:', e?.message || e);
+        return res.status(502).json({
+          error: 'Stripe rechazó la operación: ' + (e?.message || 'error desconocido'),
+        });
+      }
+    }
+
+    // Marcar "Cancelado" ANTES de reponer stock: los webhooks
+    // (charge.refunded / payment_intent.canceled) comprueban el estado y,
+    // al verlo ya "Cancelado", NO repondrán stock por segunda vez.
+    const { data: updated, error: uErr } = await supabase
+      .from('orders')
+      .update({ status: 'Cancelado' })
+      .eq('id', id)
+      .select()
+      .single();
+    if (uErr) throw uErr;
+
+    try {
+      await restockItems(order.items || []);
+    } catch (e) {
+      console.error('[stock] error al reponer stock tras reembolso:', e?.message);
+    }
+
+    // Email al cliente con el motivo + qué esperar del dinero (best-effort).
+    if (order.customer_email) {
+      sendRefundEmail(updated, order.customer_email, { reason, refundType }).catch((err) => {
+        console.warn('[Email] fallo enviando email de reembolso:', err?.message || err);
+      });
+    }
+
+    const waLink = buildRefundWhatsappLink(order, reason, refundType);
+    return res.json({ ok: true, order: updated, refundType, waLink, emailed: !!order.customer_email });
+  } catch (error) {
+    console.error('[refund] error:', error?.message || error);
+    return res.status(500).json({ error: error?.message || 'Error al reembolsar el pedido' });
   }
 });
 

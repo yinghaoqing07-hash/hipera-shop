@@ -6,7 +6,7 @@ import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保�
 import { apiClient } from './api/client'; // 新增：API客户端
 import { 
   LayoutDashboard, Package, List, ShoppingBag, 
-  Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw,
+  Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw, Undo2, MessageCircle,
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
   Bell, BellOff, Download, TrendingUp
@@ -15,6 +15,15 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
+
+// Motivos de reembolso más habituales (se pueden editar/ampliar en el modal).
+const REFUND_REASONS = [
+  "Producto agotado sin stock",
+  "Producto en mal estado o caducado",
+  "Error en el pedido",
+  "No podemos entregar a tiempo",
+  "A petición del cliente",
+];
 
 const COMPANY_DATA = {
   name: "QIANG GUO SL",
@@ -109,6 +118,14 @@ export default function AdminApp() {
   const [orderStatusFilter, setOrderStatusFilter] = useState("");
   const [orderDateFrom, setOrderDateFrom] = useState("");
   const [orderDateTo, setOrderDateTo] = useState("");
+  // Reembolso: pedido en proceso de reembolso (modal), motivo y estado.
+  const [refundTarget, setRefundTarget] = useState(null); // objeto order o null
+  const [refundReason, setRefundReason] = useState("");
+  const [refundBusy, setRefundBusy] = useState(false);
+  const [refundMode, setRefundMode] = useState("total"); // 'total' | 'partial'
+  const [refundQtys, setRefundQtys] = useState({}); // { [itemIndex]: cantidad a devolver }
+  // Tras reembolsar: aviso al cliente por WhatsApp con un toque.
+  const [refundWaModal, setRefundWaModal] = useState(null); // { waLink, emailed, refundType } o null
   const [expandedProductCats, setExpandedProductCats] = useState({});
   const [loadError, setLoadError] = useState(false);
   const fetchDataRetryCountRef = useRef(0);
@@ -1040,6 +1057,46 @@ export default function AdminApp() {
       fetchData();
     } catch (error) {
       toast.error('Error al cobrar: ' + error.message);
+    }
+  };
+
+  // Confirma el reembolso del pedido del modal: llama al backend, que
+  // reembolsa/libera en Stripe, repone stock, marca Cancelado y envía
+  // email al cliente. Luego ofrecemos avisar por WhatsApp con un toque.
+  const confirmRefund = async () => {
+    if (!refundTarget) return;
+    // En modo parcial: construir la lista de artículos devueltos.
+    let opts;
+    if (refundMode === 'partial') {
+      const items = Object.entries(refundQtys)
+        .map(([index, quantity]) => ({ index: Number(index), quantity: Number(quantity) }))
+        .filter(it => it.quantity > 0);
+      if (items.length === 0) {
+        toast.error('Selecciona al menos un artículo a devolver');
+        return;
+      }
+      opts = { partial: true, items };
+    }
+    setRefundBusy(true);
+    try {
+      const res = await apiClient.refundOrder(refundTarget.id, refundReason.trim(), opts);
+      const msgByType = {
+        refunded: 'Reembolso emitido al cliente',
+        partial: `Reembolso parcial emitido (€${Number(res?.amount || 0).toFixed(2)})`,
+        released: 'Retención liberada (no se cobró nada)',
+        cancelled: 'Pedido cancelado',
+      };
+      toast.success(msgByType[res?.refundType] || 'Pedido reembolsado');
+      setRefundTarget(null);
+      setRefundReason("");
+      setRefundQtys({});
+      setRefundMode('total');
+      setRefundWaModal({ waLink: res?.waLink || null, emailed: !!res?.emailed, refundType: res?.refundType });
+      fetchData();
+    } catch (error) {
+      toast.error('Error al reembolsar: ' + error.message);
+    } finally {
+      setRefundBusy(false);
     }
   };
 
@@ -2172,6 +2229,11 @@ const renderRepairs = () => (
                             <DollarSign size={14}/> Cobrar
                           </button>
                         )}
+                        {o.stripe_payment_intent && o.status !== 'Cancelado' && (
+                          <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold" title="Reembolsar y avisar al cliente">
+                            <Undo2 size={14}/> Reembolsar
+                          </button>
+                        )}
                         <button type="button" onClick={() => openOrderFactura(o)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold" title="Ver factura">
                           <FileText size={14}/> Factura
                         </button>
@@ -2259,6 +2321,11 @@ const renderRepairs = () => (
                         <DollarSign size={14}/> Cobrar
                       </button>
                     )}
+                    {o.stripe_payment_intent && o.status !== 'Cancelado' && (
+                      <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold" title="Reembolsar y avisar al cliente">
+                        <Undo2 size={14}/> Reembolsar
+                      </button>
+                    )}
                     <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Autorizado' ? 'bg-amber-100 text-amber-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
                       <option>Autorizado</option>
                       <option>Procesando</option>
@@ -2275,6 +2342,141 @@ const renderRepairs = () => (
         </div>
      </div>
      );
+  };
+
+  // Modal de reembolso: total (todo el pedido) o parcial (por artículos
+  // devueltos), motivo (presets + texto libre) y confirmación.
+  const renderRefundModal = () => {
+    if (!refundTarget) return null;
+    const o = refundTarget;
+    const sid = String(o.id || '').slice(0, 8).toUpperCase();
+    const isHoldOnly = o.status === 'Autorizado'; // sólo retenido, aún no cobrado
+    const items = Array.isArray(o.items) ? o.items : [];
+    // El reembolso parcial sólo aplica a pedidos ya cobrados (no a una
+    // simple retención) y que tengan artículos.
+    const canPartial = !isHoldOnly && items.length > 0;
+    const isPartial = refundMode === 'partial' && canPartial;
+
+    const setQty = (idx, q) => {
+      const ordered = Math.floor(Number(items[idx]?.quantity) || 0);
+      const next = Math.max(0, Math.min(ordered, q));
+      setRefundQtys(prev => ({ ...prev, [idx]: next }));
+    };
+    const partialAmount = items.reduce((sum, it, idx) => {
+      const q = Number(refundQtys[idx]) || 0;
+      return sum + (Number(it?.price) || 0) * q;
+    }, 0);
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-hidden flex flex-col">
+          <div className="flex justify-between items-center p-4 sm:p-5 border-b">
+            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Undo2 size={20} className="text-rose-600"/> Reembolsar pedido</h3>
+            <button type="button" onClick={() => { if (!refundBusy) setRefundTarget(null); }} className="p-2 hover:bg-gray-100 rounded-full" disabled={refundBusy}>
+              <X className="text-gray-500" size={20}/>
+            </button>
+          </div>
+          <div className="p-4 sm:p-5 overflow-y-auto space-y-4">
+            <div className="bg-gray-50 rounded-xl p-3 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Pedido</span><span className="font-bold text-gray-800">#{sid}</span></div>
+              <div className="flex justify-between mt-1"><span className="text-gray-500">Importe del pedido</span><span className="font-bold text-gray-800">€{Number(o.total || 0).toFixed(2)}</span></div>
+              {o.customer_email && <div className="flex justify-between mt-1"><span className="text-gray-500">Email</span><span className="font-medium text-gray-700 truncate ml-2">{o.customer_email}</span></div>}
+            </div>
+
+            {/* Selector total / parcial (parcial sólo si está cobrado) */}
+            {canPartial && (
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setRefundMode('total')} className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${!isPartial ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300'}`}>Reembolso total</button>
+                <button type="button" onClick={() => setRefundMode('partial')} className={`px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${isPartial ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300'}`}>Parcial (por artículos)</button>
+              </div>
+            )}
+
+            {isPartial ? (
+              <div>
+                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Artículos a devolver</label>
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {items.map((it, idx) => {
+                    const ordered = Math.floor(Number(it?.quantity) || 0);
+                    const sel = Number(refundQtys[idx]) || 0;
+                    return (
+                      <div key={idx} className={`flex items-center gap-2 rounded-lg border p-2 ${sel > 0 ? 'border-rose-300 bg-rose-50' : 'border-gray-200'}`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-800 truncate">{it?.name || 'Producto'}</div>
+                          <div className="text-xs text-gray-500">€{Number(it?.price || 0).toFixed(2)} · pedidos: {ordered}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button type="button" onClick={() => setQty(idx, sel - 1)} disabled={sel <= 0} className="w-7 h-7 rounded-md border border-gray-300 text-gray-600 font-bold disabled:opacity-40">−</button>
+                          <span className="w-6 text-center text-sm font-bold text-gray-800">{sel}</span>
+                          <button type="button" onClick={() => setQty(idx, sel + 1)} disabled={sel >= ordered} className="w-7 h-7 rounded-md border border-gray-300 text-gray-600 font-bold disabled:opacity-40">+</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between items-center mt-3 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                  <span className="text-sm font-bold text-rose-800">A reembolsar</span>
+                  <span className="text-lg font-extrabold text-rose-700">€{partialAmount.toFixed(2)}</span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">Se devolverá ese importe y sólo se repondrá el stock de los artículos seleccionados. El pedido sigue activo.</p>
+              </div>
+            ) : (
+              <div className={`rounded-xl p-3 text-xs leading-relaxed ${isHoldOnly ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                {isHoldOnly
+                  ? 'Este pedido sólo está AUTORIZADO (retención sin cobrar). Al confirmar se liberará la retención: el cliente nunca llega a pagar.'
+                  : 'Se emitirá un reembolso TOTAL en Stripe al método de pago del cliente. El pedido pasará a Cancelado y se repondrá todo el stock.'}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Motivo (se enviará al cliente)</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {REFUND_REASONS.map(r => (
+                  <button key={r} type="button" onClick={() => setRefundReason(r)} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${refundReason === r ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-rose-300'}`}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+              <textarea value={refundReason} onChange={(e) => setRefundReason(e.target.value)} rows={3} maxLength={500} placeholder="Escribe o ajusta el motivo que verá el cliente…" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-rose-200 focus:border-rose-400 outline-none"/>
+              <p className="text-[11px] text-gray-400 mt-1">El cliente recibirá un email con este motivo y las instrucciones de devolución del dinero.</p>
+            </div>
+          </div>
+          <div className="p-4 sm:p-5 border-t flex gap-2 justify-end">
+            <button type="button" onClick={() => setRefundTarget(null)} disabled={refundBusy} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
+            <button type="button" onClick={confirmRefund} disabled={refundBusy || (isPartial && partialAmount <= 0)} className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold inline-flex items-center gap-2 disabled:opacity-50">
+              {refundBusy ? <RefreshCw size={16} className="animate-spin"/> : <Undo2 size={16}/>}
+              {refundBusy ? 'Procesando…' : isPartial ? `Reembolsar €${partialAmount.toFixed(2)}` : (isHoldOnly ? 'Liberar y avisar' : 'Reembolsar y avisar')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Modal post-reembolso: avisar al cliente por WhatsApp con un toque.
+  const renderRefundWaModal = () => {
+    if (!refundWaModal) return null;
+    const { waLink, emailed } = refundWaModal;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div className="p-5 text-center">
+            <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-3"><CheckCircle size={26}/></div>
+            <h3 className="text-lg font-bold text-gray-800 mb-1">Reembolso realizado</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              {emailed ? 'Hemos enviado un email al cliente con el motivo y las instrucciones.' : 'Este pedido no tenía email. Avisa al cliente por WhatsApp.'}
+            </p>
+            {waLink ? (
+              <a href={waLink} target="_blank" rel="noopener noreferrer" onClick={() => setRefundWaModal(null)} className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold mb-2">
+                <MessageCircle size={18}/> Avisar por WhatsApp
+              </a>
+            ) : (
+              <p className="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 mb-2">No hay un teléfono válido para abrir WhatsApp en este pedido.</p>
+            )}
+            <button type="button" onClick={() => setRefundWaModal(null)} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const renderImportModal = () => (
@@ -2697,6 +2899,8 @@ const renderRepairs = () => (
       {isEditing && renderProductModal()}
       {importModalOpen && renderImportModal()}
       {bulkResultModal.open && renderBulkResultModal()}
+      {refundTarget && renderRefundModal()}
+      {refundWaModal && renderRefundWaModal()}
 
       {/* Bulk AI: barra fija abajo cuando hay selección en Productos */}
       {activeTab === 'products' && (selectedProductIds.size > 0 || bulkProcessing.active) && (

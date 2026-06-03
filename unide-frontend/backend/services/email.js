@@ -396,3 +396,230 @@ export async function sendOrderConfirmationEmail(order, email) {
     return { error: e?.message || 'unknown' };
   }
 }
+
+// =====================================================================
+// Email de REEMBOLSO / CANCELACIÓN
+// =====================================================================
+// Se envía cuando el admin reembolsa o cancela un pedido desde el panel.
+// Comunica el MOTIVO (texto libre del admin) y QUÉ esperar según el caso:
+//   - 'refunded' : el importe ya se había cobrado y se ha devuelto.
+//   - 'released' : sólo había una retención (tarjeta autorizada, sin
+//                  cobro); se libera y nunca se llega a cargar.
+//   - 'cancelled': pedido sin cobro online (efectivo / contra reembolso);
+//                  simplemente se cancela.
+// Igual que la confirmación, es best-effort y no propaga errores.
+// =====================================================================
+
+// Devuelve el bloque (HTML, texto) que explica al cliente qué pasa con su
+// dinero según el tipo de reembolso.
+function refundOutcomeCopy(refundType, amount) {
+  if (refundType === 'released') {
+    return {
+      heading: 'Pedido cancelado — sin cargo',
+      lead: 'Hemos cancelado tu pedido. No te hemos cobrado nada.',
+      money: `Si en tu app del banco veías una <strong>retención temporal</strong> de ${formatEUR(amount)}, desaparecerá por sí sola en 1–7 días hábiles. No tienes que hacer nada.`,
+      moneyText: `Si veías una retención temporal de ${formatEUR(amount)} en tu tarjeta, desaparecerá sola en 1-7 días hábiles. No tienes que hacer nada.`,
+    };
+  }
+  if (refundType === 'cancelled') {
+    return {
+      heading: 'Pedido cancelado',
+      lead: 'Hemos cancelado tu pedido.',
+      money: 'No se ha realizado ningún cobro online por este pedido.',
+      moneyText: 'No se ha realizado ningún cobro online por este pedido.',
+    };
+  }
+  if (refundType === 'partial') {
+    return {
+      heading: 'Reembolso parcial realizado',
+      lead: 'Hemos gestionado la devolución de parte de tu pedido.',
+      money: `Hemos reembolsado <strong>${formatEUR(amount)}</strong> por los artículos devueltos a tu método de pago original. El abono suele aparecer en <strong>5–10 días hábiles</strong>, según tu banco. El resto de tu pedido sigue su curso con normalidad.`,
+      moneyText: `Hemos reembolsado ${formatEUR(amount)} por los artículos devueltos a tu método de pago. El abono suele aparecer en 5-10 dias habiles, segun tu banco. El resto del pedido sigue su curso.`,
+    };
+  }
+  return {
+    heading: 'Reembolso realizado',
+    lead: 'Hemos cancelado tu pedido y te hemos devuelto el importe.',
+    money: `Hemos reembolsado <strong>${formatEUR(amount)}</strong> a tu método de pago original. El abono suele aparecer en <strong>5–10 días hábiles</strong>, según tu banco.`,
+    moneyText: `Hemos reembolsado ${formatEUR(amount)} a tu método de pago original. El abono suele aparecer en 5-10 dias habiles, segun tu banco.`,
+  };
+}
+
+const renderRefundHtml = (order, frontendUrl, reason, refundType, refundedItems, refundedAmount) => {
+  const id = shortId(order.id);
+  const trackingUrl = `${frontendUrl}/?order=${encodeURIComponent(order.id)}`;
+  const isPartial = refundType === 'partial';
+  const displayItems = isPartial ? (refundedItems || []) : (order.items || []);
+  const displayTotal = isPartial ? refundedAmount : order.total;
+  const itemsHeading = isPartial ? 'Artículos devueltos' : 'Productos del pedido';
+  const totalLabel = isPartial ? 'Importe reembolsado' : 'Total';
+  const copy = refundOutcomeCopy(refundType, displayTotal);
+  const reasonBlock = reason
+    ? `<div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em;margin:20px 0 8px 0;">Motivo</div>
+       <div style="font-size:14px;color:#475569;background:#f8fafc;border:1px solid #e2e8f0;padding:12px 14px;border-radius:10px;margin-bottom:8px;line-height:1.55;">${escapeHtml(reason)}</div>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>${escapeHtml(copy.heading)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;">
+    <tr><td align="center" style="padding:24px 16px;">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
+
+        <tr><td style="background:#dc2626;padding:24px 28px;">
+          <div style="color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.02em;">HIPERA</div>
+          <div style="color:#fecaca;font-size:13px;margin-top:2px;">Alimentación · Bazar · Reparación móvil</div>
+        </td></tr>
+
+        <tr><td style="padding:28px;">
+          <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#0f172a;">${escapeHtml(copy.heading)}</h1>
+          <p style="margin:0 0 20px 0;font-size:14px;color:#64748b;">${escapeHtml(copy.lead)}</p>
+
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;background:#f8fafc;border-radius:12px;">
+            <tr>
+              <td style="padding:14px 16px;">
+                <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Nº de pedido</div>
+                <div style="font-size:18px;font-weight:700;color:#0f172a;margin-top:2px;">#${id}</div>
+                <div style="font-size:12px;color:#64748b;margin-top:6px;">${escapeHtml(formatDate(order.created_at))}</div>
+              </td>
+            </tr>
+          </table>
+
+          <div style="font-size:14px;color:#0f172a;line-height:1.6;background:#ecfdf5;border:1px solid #a7f3d0;padding:14px 16px;border-radius:10px;">
+            ${copy.money}
+          </div>
+
+          ${reasonBlock}
+
+          <div style="font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em;margin:20px 0 8px 0;">${itemsHeading}</div>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px 0;border-top:1px solid #e2e8f0;">
+            ${renderItemsHtml(displayItems)}
+            <tr>
+              <td colspan="2" style="padding:14px 6px 0 6px;text-align:right;font-size:14px;font-weight:700;color:#0f172a;">${totalLabel}</td>
+              <td style="padding:14px 6px 0 6px;text-align:right;font-size:18px;font-weight:800;color:#dc2626;white-space:nowrap;">${formatEUR(displayTotal)}</td>
+            </tr>
+          </table>
+
+          <div style="margin:24px 0 12px 0;text-align:center;">
+            <a href="${trackingUrl}" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:14px 28px;border-radius:12px;">Ver detalle del pedido</a>
+          </div>
+
+          <p style="margin:24px 0 0 0;font-size:12px;color:#94a3b8;line-height:1.6;">
+            ¿Tienes alguna duda sobre este reembolso? Responde a este email o escríbenos por WhatsApp y te ayudamos.
+            Más información en nuestra
+            <a href="${frontendUrl}/?legal=devoluciones" style="color:#64748b;">Política de Devoluciones</a>.
+          </p>
+        </td></tr>
+
+        <tr><td style="background:#f8fafc;padding:18px 28px;border-top:1px solid #e2e8f0;">
+          <div style="font-size:12px;color:#94a3b8;line-height:1.6;">
+            HIPERA · Paseo del Sol 1, 28880 Meco, Madrid<br/>
+            Comunicación transaccional relativa a tu pedido (LSSI-CE Art. 27).
+          </div>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+};
+
+const renderRefundText = (order, frontendUrl, reason, refundType, refundedItems, refundedAmount) => {
+  const id = shortId(order.id);
+  const trackingUrl = `${frontendUrl}/?order=${encodeURIComponent(order.id)}`;
+  const isPartial = refundType === 'partial';
+  const displayItems = isPartial ? (refundedItems || []) : (order.items || []);
+  const displayTotal = isPartial ? refundedAmount : order.total;
+  const copy = refundOutcomeCopy(refundType, displayTotal);
+  const lines = [
+    copy.heading,
+    '',
+    copy.lead,
+    '',
+    `Nº de pedido: #${id}`,
+    `Fecha: ${formatDate(order.created_at)}`,
+    '',
+    copy.moneyText,
+    '',
+  ];
+  if (reason) {
+    lines.push('MOTIVO', '------', reason, '');
+  }
+  lines.push(
+    isPartial ? 'ARTÍCULOS DEVUELTOS' : 'PRODUCTOS',
+    '--------',
+    renderItemsText(displayItems),
+    '',
+    `${isPartial ? 'IMPORTE REEMBOLSADO' : 'TOTAL'}: ${formatEUR(displayTotal)}`,
+    '',
+    `Ver detalle: ${trackingUrl}`,
+    '',
+    '¿Dudas sobre el reembolso? Responde a este email o escríbenos por WhatsApp.',
+    '',
+    '---',
+    'HIPERA · Paseo del Sol 1, 28880 Meco, Madrid',
+    'Comunicación transaccional (LSSI-CE Art. 27).',
+  );
+  return lines.join('\n');
+};
+
+/**
+ * Envía un email de reembolso / cancelación. Best-effort (no propaga
+ * errores). Incluye el motivo dado por el admin y qué esperar respecto
+ * al dinero según `refundType`.
+ *
+ * @param {Object} order Fila de la tabla orders (con items y total).
+ * @param {string} email Destinatario.
+ * @param {Object} opts
+ * @param {string} [opts.reason] Motivo legible (mostrado al cliente).
+ * @param {'refunded'|'released'|'cancelled'} [opts.refundType] Tipo.
+ * @returns {Promise<{id?:string, skipped?:boolean, error?:string}>}
+ */
+export async function sendRefundEmail(order, email, { reason = '', refundType = 'refunded', refundedItems = null, refundedAmount = null } = {}) {
+  const client = getClient();
+  if (!client) {
+    return { skipped: true, reason: 'RESEND_API_KEY missing' };
+  }
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return { skipped: true, reason: 'invalid recipient email' };
+  }
+  if (!order || !order.id) {
+    return { skipped: true, reason: 'invalid order object' };
+  }
+
+  const from = process.env.RESEND_FROM_EMAIL || FROM_DEFAULT;
+  const replyTo = process.env.RESEND_REPLY_TO || undefined;
+  const frontendUrl = (process.env.FRONTEND_URL || FRONTEND_DEFAULT).replace(/\/$/, '');
+
+  try {
+    const subjectByType = {
+      refunded: `Reembolso de tu pedido #${shortId(order.id)} · HIPERA`,
+      partial: `Reembolso parcial de tu pedido #${shortId(order.id)} · HIPERA`,
+      released: `Pedido #${shortId(order.id)} cancelado (sin cargo) · HIPERA`,
+      cancelled: `Pedido #${shortId(order.id)} cancelado · HIPERA`,
+    };
+    const subject = subjectByType[refundType] || subjectByType.refunded;
+    const html = renderRefundHtml(order, frontendUrl, reason, refundType, refundedItems, refundedAmount);
+    const text = renderRefundText(order, frontendUrl, reason, refundType, refundedItems, refundedAmount);
+
+    const payload = { from, to: email, subject, html, text };
+    if (replyTo) payload.reply_to = replyTo;
+
+    const { data, error } = await client.emails.send(payload);
+    if (error) {
+      console.error('[Email] Resend error (refund):', error?.message || error);
+      return { error: error?.message || 'Resend error' };
+    }
+    console.log(`[Email] ✉️  Reembolso enviado — pedido=${shortId(order.id)} → ${email} (tipo=${refundType}, id=${data?.id || 'n/a'})`);
+    return { id: data?.id };
+  } catch (e) {
+    console.error('[Email] Exception sending refund email:', e?.message || e);
+    return { error: e?.message || 'unknown' };
+  }
+}
