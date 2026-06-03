@@ -254,7 +254,9 @@ export default function PoliticaEnvios() {
                   </td>
                   <td className="p-2 border-b border-gray-100">
                     Mismo día si el pedido se confirma antes de las 18:00 dentro del
-                    horario comercial.
+                    horario comercial. Los pedidos confirmados a partir de las{' '}
+                    <strong>20:00</strong> o fuera del horario comercial se preparan
+                    al día hábil siguiente.
                   </td>
                 </tr>
                 <tr>

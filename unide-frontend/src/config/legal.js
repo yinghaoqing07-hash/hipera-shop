@@ -207,9 +207,16 @@ export const RETURNS_UPDATED_AT = '2026-06-04';
 // mantiene por si futuros cambios materiales (ampliación de zona,
 // nueva tarifa, contratación de operador logístico concreto, etc.)
 // obligan a notificar.
+// 1.0 → 1.1 (2026-06-04): aclaración operativa en §3.2 (plazos de
+// recogida en tienda). Se añade que los pedidos confirmados a partir de
+// las 20:00 o fuera del horario comercial se preparan al día hábil
+// siguiente (coherente con el "mismo día antes de las 18:00" ya
+// existente). Cambio menor/informativo: no altera tarifas, zonas, el
+// plazo legal máximo de 30 días ni los derechos del Cliente; no requiere
+// re-aceptación (SHIPPING_VERSION se mantiene).
 export const SHIPPING_VERSION = 1;
-export const SHIPPING_DOCUMENT_VERSION = '1.0';
-export const SHIPPING_UPDATED_AT = '2026-05-23';
+export const SHIPPING_DOCUMENT_VERSION = '1.1';
+export const SHIPPING_UPDATED_AT = '2026-06-04';
 
 // --- Política de Cookies ---
 // Documento independiente exigido por el Art. 22.2 LSSI-CE y la Guía
