@@ -3155,7 +3155,7 @@ export default function App() {
         <footer className="bg-white mt-10 p-8 border-t border-gray-100 text-center">
           <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center text-white font-bold mx-auto mb-4 shadow-lg">H</div>
           <h3 className="font-bold text-gray-900 mb-1">HIPERA</h3>
-          <p className="text-gray-400 text-xs mb-6">Tu mercado de confianza desde 2024</p>
+          <p className="text-gray-400 text-xs mb-6">Tu mercado de confianza desde 2011</p>
           <div className="mb-8 space-y-2 border-b border-gray-50 pb-6 mx-auto max-w-xs">
              <a
                href="https://www.google.com/maps/search/?api=1&query=Paseo+del+Sol+1%2C+28880+Meco%2C+Madrid"
