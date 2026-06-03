@@ -1605,7 +1605,7 @@ export default function App() {
       </button>
       <div className="relative mb-2">
         {renderDiscountTag(p)}
-        <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square rounded-xl object-cover bg-gray-50" />
+        <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square rounded-xl object-contain bg-gray-50 p-2" />
       </div>
       <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words">{p.name}</p>
       {expanded ? (
@@ -3132,12 +3132,12 @@ export default function App() {
 {/* --- DETAIL PAGE (已修正：显示真实描述) --- */}
       {page === "detail" && selectedProduct && (
         <div className="bg-white min-h-screen pb-24">
-          {/* 顶部商品图：完整展示，下拉可看全图 */}
-          <div className="relative bg-gray-50">
+          {/* 顶部商品图：用更克制的画布展示，避免高瓶身商品被过度放大 */}
+          <div className="relative bg-gray-50 h-[46vh] min-h-[300px] max-h-[430px] flex items-center justify-center overflow-hidden px-10 pt-8 pb-16">
             <img
               src={selectedProduct.image}
               alt={selectedProduct.name}
-              className="w-full h-auto max-h-[85vh] object-contain object-center block"
+              className="max-w-[78%] max-h-full object-contain object-center block drop-shadow-sm"
             />
             <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/25 to-transparent pointer-events-none" aria-hidden="true" />
             <button onClick={handleBack} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/40"><ArrowLeft size={24}/></button>
@@ -3178,7 +3178,7 @@ export default function App() {
                <div className="flex gap-2 md:gap-3 overflow-x-auto pb-4 -mx-1 px-1 scrollbar-hide snap-x snap-mandatory">
                  {products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (
                    <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[100px] sm:min-w-[120px] md:min-w-[140px] w-[100px] sm:w-[120px] md:w-[140px] flex-shrink-0 snap-start bg-gray-50 p-1.5 md:p-2 rounded-xl border border-gray-100 cursor-pointer active:scale-95 transition-transform">
-                     <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square object-cover rounded-lg mb-1.5 md:mb-2"/>
+                     <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square object-contain rounded-lg bg-gray-50 p-1 mb-1.5 md:mb-2"/>
                      <p className="text-[11px] md:text-xs font-bold text-gray-700 line-clamp-2">{p.name}</p>
                      <p className="text-[11px] md:text-xs font-bold text-red-600">€{p.price}</p>
                    </div>
