@@ -3014,7 +3014,21 @@ export default function App() {
             <h2 className="font-bold text-lg text-gray-800">{page === "offers" && "Todas las Ofertas"}{page === "main" && "Categorías"}{page === "sub" && mainCat?.name}{page === "products" && subCat?.name}</h2>
           </div>
           {page === "main" ? (
-             <div className="grid grid-cols-2 gap-3">{categories.map(c => <button key={c.id} className="bg-white p-4 rounded-xl shadow-sm text-left flex items-center justify-between gap-2 h-24 border-l-4 border-red-500 active:scale-95 transition-transform" onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}}><span className="font-bold text-base text-gray-800 leading-tight line-clamp-3">{c.name}</span><ChevronRight size={20} className="text-gray-300 flex-shrink-0"/></button>)}</div>
+             <div className="grid grid-cols-2 gap-3">{categories.map(c => (
+               <button
+                 key={c.id}
+                 className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 text-left flex flex-col gap-2.5 active:scale-95 hover:shadow-md transition-all"
+                 onClick={() => {setMainCat(c); setSubCat(null); navTo("sub");}}
+               >
+                 <div className="flex items-start justify-between">
+                   <span className="w-11 h-11 rounded-full bg-red-50 text-red-600 flex items-center justify-center">
+                     <IconByName name={resolveCategoryIcon(c)} size={24}/>
+                   </span>
+                   <ChevronRight size={18} className="text-gray-300 mt-1 flex-shrink-0"/>
+                 </div>
+                 <span className="font-bold text-sm text-gray-800 leading-tight line-clamp-2">{c.name}</span>
+               </button>
+             ))}</div>
           ) : page === "sub" ? (
              <div className="space-y-6">
                {/* 子类别选项 - 固定在顶部 */}
