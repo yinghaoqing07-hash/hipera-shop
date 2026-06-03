@@ -168,6 +168,20 @@ function getMadridHM(date) {
   return { hour: parseInt(hh, 10), minute: parseInt(mm, 10) };
 }
 
+// Hora de corte para la preparación EN EL DÍA de los pedidos de recogida
+// en tienda. DEBE coincidir con Política de Envíos §3.2: los pedidos
+// confirmados a partir de esta hora (hora peninsular) se preparan al día
+// hábil siguiente.
+const PICKUP_SAMEDAY_CUTOFF_HOUR = 20; // 20:00
+
+// True si un pedido de recogida confirmado AHORA quedaría fuera de la
+// franja de preparación del mismo día (a partir de las 20:00, Madrid) y,
+// por tanto, se prepararía al día hábil siguiente.
+function isPickupAfterSameDayCutoff(now = new Date()) {
+  const { hour, minute } = getMadridHM(now);
+  return hour * 60 + minute >= PICKUP_SAMEDAY_CUTOFF_HOUR * 60;
+}
+
 // =====================================================================
 // Tarifas operativas de envío — single source of truth
 // =====================================================================
@@ -2541,6 +2555,20 @@ export default function App() {
                     )}
                   </button>
                 </div>
+                {/* Aviso de corte de preparación para hoy (Política de
+                    Envíos §3.2): si el cliente elige recoger y ya pasan
+                    de las 20:00, su pedido se preparará al día hábil
+                    siguiente. Informativo, no bloquea la compra. */}
+                {isStorePickup && isPickupAfterSameDayCutoff() && (
+                  <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <Clock size={14} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                    <span>
+                      Ya pasan de las 20:00. Tu pedido para recoger se preparará el{' '}
+                      <strong>día hábil siguiente</strong>; te avisaremos por email en
+                      cuanto esté listo.
+                    </span>
+                  </div>
+                )}
              </div>
 
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
