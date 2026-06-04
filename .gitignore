@@ -1,6 +1,6 @@
-# Artefactos locales de auditoría de producto (no versionar)
-.codex-product-audit/
+# Artefactos locales de Codex/herramientas (no versionar)
+.codex-*
+**/.codex-*
 
 # Logs locales del dev server
-.codex-vite.err.log
 *.log

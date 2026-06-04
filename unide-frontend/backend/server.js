@@ -5,8 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { createClient } from '@supabase/supabase-js';
 import { Blob } from 'buffer';
 import sharp from 'sharp';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { jsPDF } from 'jspdf'; // named import: el default es un objeto, no el constructor (rompe `new jsPDF`)
 import QRCode from 'qrcode';
 import printer from 'pdf-to-printer';
 import { writeFile, unlink } from 'fs/promises';

@@ -2130,6 +2130,16 @@ const renderRepairs = () => (
     </>
   );
 
+  // Antigüedad de la retención de tarjeta (autorización Stripe). Las
+  // autorizaciones caducan a los ~7 días: si no se cobra antes, se pierde.
+  const STRIPE_AUTH_VALID_DAYS = 7;
+  const authHoldInfo = (o) => {
+    const createdMs = o.created_at ? new Date(o.created_at).getTime() : Date.now();
+    const days = Math.floor((Date.now() - createdMs) / 86400000);
+    const daysLeft = STRIPE_AUTH_VALID_DAYS - days;
+    return { days, daysLeft, urgent: daysLeft <= 2, expired: daysLeft <= 0 };
+  };
+
   // Miniaturas apiladas + recuento de artículos (resumen compacto).
   const renderItemsSummary = (o) => {
     const items = Array.isArray(o.items) ? o.items : [];
@@ -2173,11 +2183,32 @@ const renderRepairs = () => (
        return true;
      });
      const filtersActive = !!(searchLower || orderStatusFilter || orderDateFrom || orderDateTo);
+     const authorizedOrders = orders.filter(o => o.status === 'Autorizado');
+     const urgentAuth = authorizedOrders.filter(o => authHoldInfo(o).urgent).length;
      return (
      <div className="space-y-4">
         <h2 className="text-xl md:text-2xl font-bold text-gray-800">
           Pedidos ({filtersActive ? `${filteredOrders.length} de ${orders.length}` : orders.length})
         </h2>
+        {/* Aviso de pedidos autorizados pendientes de cobro. La retención de
+            tarjeta caduca a los ~7 días: si no se cobra antes, se pierde. */}
+        {authorizedOrders.length > 0 && (
+          <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${urgentAuth > 0 ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+            <AlertCircle size={20} className={`flex-shrink-0 ${urgentAuth > 0 ? 'text-red-600' : 'text-amber-600'}`} />
+            <div className={`flex-1 min-w-[200px] text-sm ${urgentAuth > 0 ? 'text-red-800' : 'text-amber-800'}`}>
+              <strong>{authorizedOrders.length}</strong> {authorizedOrders.length === 1 ? 'pedido autorizado pendiente de cobro' : 'pedidos autorizados pendientes de cobro'}.
+              {urgentAuth > 0 && <> <strong>{urgentAuth}</strong> a punto de caducar (≤2 días).</>}
+              <span className="block text-xs opacity-80 mt-0.5">La retención de tarjeta caduca a los ~7 días; cóbralos o reembólsalos antes.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOrderStatusFilter(orderStatusFilter === 'Autorizado' ? '' : 'Autorizado')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${urgentAuth > 0 ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}
+            >
+              {orderStatusFilter === 'Autorizado' ? 'Quitar filtro' : 'Ver solo autorizados'}
+            </button>
+          </div>
+        )}
         {/* Barra de filtros */}
         <div className="bg-white rounded-xl shadow-sm border p-3 flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[180px]">
@@ -2251,12 +2282,19 @@ const renderRepairs = () => (
                  const orderDate = o.created_at ? new Date(o.created_at) : null;
                  const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
                  const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
+                 const isAuth = o.status === 'Autorizado';
+                 const hold = isAuth ? authHoldInfo(o) : null;
                  return (
-                 <tr key={o.id} onClick={() => setDetailOrder(o)} className="border-b hover:bg-blue-50/40 cursor-pointer transition-colors">
+                 <tr key={o.id} onClick={() => setDetailOrder(o)} className={`border-b cursor-pointer transition-colors ${isAuth ? (hold.urgent ? 'bg-red-50/70 hover:bg-red-100/70 border-l-4 border-l-red-400' : 'bg-amber-50/60 hover:bg-amber-100/60 border-l-4 border-l-amber-400') : 'hover:bg-blue-50/40'}`}>
                    <td className="px-4 py-3 align-middle">
                       <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
                       <div className="font-bold text-gray-800 text-sm">{o.phone || '—'}</div>
                       <div className="text-[11px] text-gray-500 truncate max-w-[200px]">{isPickup ? '🏬 Recogida en tienda' : `🚚 ${o.address || ''}`}</div>
+                      {isAuth && (
+                        <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${hold.urgent ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}`}>
+                          <DollarSign size={10}/> {hold.expired ? 'Retención caducada' : `Cobrar · quedan ${hold.daysLeft}d`}
+                        </span>
+                      )}
                    </td>
                    <td className="px-4 py-3 align-middle text-xs text-gray-600 whitespace-nowrap">{dateStr}</td>
                    <td className="px-4 py-3 align-middle">{renderItemsSummary(o)}</td>
@@ -2290,13 +2328,20 @@ const renderRepairs = () => (
             const orderDate = o.created_at ? new Date(o.created_at) : null;
             const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
             const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
+            const isAuth = o.status === 'Autorizado';
+            const hold = isAuth ? authHoldInfo(o) : null;
             return (
-              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className="w-full text-left bg-white rounded-xl shadow-sm border p-3 active:bg-gray-50">
+              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className={`w-full text-left rounded-xl shadow-sm border p-3 active:bg-gray-50 ${isAuth ? (hold.urgent ? 'bg-red-50 border-l-4 border-l-red-400' : 'bg-amber-50 border-l-4 border-l-amber-400') : 'bg-white'}`}>
                 <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
                     <div className="font-bold text-gray-800 truncate">{o.phone || '—'}</div>
                     <div className="text-[11px] text-gray-500 truncate">{isPickup ? '🏬 Recogida en tienda' : `🚚 ${o.address || ''}`}</div>
+                    {isAuth && (
+                      <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${hold.urgent ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}`}>
+                        <DollarSign size={10}/> {hold.expired ? 'Retención caducada' : `Cobrar · quedan ${hold.daysLeft}d`}
+                      </span>
+                    )}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <div className="font-bold text-gray-800">€{o.total?.toFixed(2)}</div>
@@ -2350,6 +2395,22 @@ const renderRepairs = () => (
           </div>
           {/* Cuerpo */}
           <div className="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+            {o.status === 'Autorizado' && (() => {
+              const hold = authHoldInfo(o);
+              return (
+                <div className={`flex items-start gap-2 rounded-lg p-3 border ${hold.urgent ? 'bg-red-50 border-red-200 text-red-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                  <DollarSign size={16} className="mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="font-bold">Pago autorizado, pendiente de cobro</div>
+                    <div className="text-xs opacity-90 mt-0.5">
+                      {hold.expired
+                        ? 'La retención puede haber caducado. Verifica en Stripe antes de cobrar.'
+                        : `Quedan ~${hold.daysLeft} día(s) antes de que caduque la retención. Pulsa “Cobrar” para capturar el importe o “Reembolsar” para liberarla.`}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase"><Clock size={12}/> Fecha</div>
