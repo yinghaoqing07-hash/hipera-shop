@@ -2309,7 +2309,21 @@ const renderRepairs = () => (
                    <td className="px-4 py-3 align-middle">
                       <span className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span>
                    </td>
-                   <td className="px-4 py-3 align-middle">{renderStatusSelect(o)}</td>
+                   <td className="px-4 py-3 align-middle">
+                      <div className="flex items-center gap-2">
+                        {renderStatusSelect(o)}
+                        {o.status === 'Autorizado' && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); captureOrder(o.id); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold whitespace-nowrap"
+                            title="Cobrar la retención de tarjeta"
+                          >
+                            <DollarSign size={13}/> Cobrar
+                          </button>
+                        )}
+                      </div>
+                   </td>
                    <td className="px-4 py-3 align-middle text-gray-300">
                       <ChevronRight size={18}/>
                    </td>
@@ -2352,7 +2366,19 @@ const renderRepairs = () => (
                   <span className="text-[11px] text-gray-500">📅 {dateStr}</span>
                   <div className="flex items-center gap-2">
                     {renderItemsSummary(o)}
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${orderStatusSelectClass(o.status)}`}>{o.status}</span>
+                    {o.status === 'Autorizado' ? (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); captureOrder(o.id); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); captureOrder(o.id); } }}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-green-600 text-white text-[11px] font-bold"
+                      >
+                        <DollarSign size={12}/> Cobrar
+                      </span>
+                    ) : (
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${orderStatusSelectClass(o.status)}`}>{o.status}</span>
+                    )}
                   </div>
                 </div>
               </button>
