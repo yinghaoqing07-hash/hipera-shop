@@ -9,7 +9,7 @@ import {
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw, Undo2, MessageCircle,
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
-  Bell, BellOff, Download, TrendingUp
+  Bell, BellOff, Download, TrendingUp, Eye, MapPin, Phone, Mail, CreditCard, StickyNote
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
@@ -126,6 +126,8 @@ export default function AdminApp() {
   const [refundQtys, setRefundQtys] = useState({}); // { [itemIndex]: cantidad a devolver }
   // Tras reembolsar: aviso al cliente por WhatsApp con un toque.
   const [refundWaModal, setRefundWaModal] = useState(null); // { waLink, emailed, refundType } o null
+  // Detalle de pedido: pedido abierto en el panel lateral, o null.
+  const [detailOrder, setDetailOrder] = useState(null);
   const [expandedProductCats, setExpandedProductCats] = useState({});
   const [loadError, setLoadError] = useState(false);
   const fetchDataRetryCountRef = useRef(0);
@@ -2070,7 +2072,89 @@ const renderRepairs = () => (
       </div>
     </div>
   );
-  
+
+  // Color del <select> de estado según el estado actual.
+  const orderStatusSelectClass = (status) =>
+    status === 'Entregado' ? 'bg-green-100 text-green-700'
+    : status === 'Autorizado' ? 'bg-amber-100 text-amber-700'
+    : status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700'
+    : status === 'Cancelado' ? 'bg-gray-100 text-gray-600'
+    : 'bg-blue-100 text-blue-700';
+
+  // Color del badge de método de pago.
+  const orderPaymentBadgeClass = (method) =>
+    method === 'Contra Reembolso' ? 'bg-orange-100 text-orange-700'
+    : method === 'Bizum' ? 'bg-green-100 text-green-700'
+    : 'bg-gray-100 text-gray-600';
+
+  // <select> de estado reutilizable (tabla, tarjeta y detalle).
+  const renderStatusSelect = (o, sizeClass = 'px-2 py-1 text-xs') => (
+    <select
+      value={o.status}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+      className={`border rounded font-bold cursor-pointer ${sizeClass} ${orderStatusSelectClass(o.status)}`}
+    >
+      <option>Autorizado</option>
+      <option>Procesando</option>
+      <option>Pendiente de Pago</option>
+      <option>Enviado</option>
+      <option>Entregado</option>
+      <option>Cancelado</option>
+    </select>
+  );
+
+  // Botonera de acciones de un pedido (Cobrar / Reembolsar / Factura /
+  // Ticket / Imprimir). Reutilizada en el detalle del pedido.
+  const renderOrderActions = (o, btn = 'px-3 py-1.5 text-xs') => (
+    <>
+      {o.status === 'Autorizado' && (
+        <button type="button" onClick={() => captureOrder(o.id)} className={`inline-flex items-center gap-1 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold ${btn}`} title="Cobrar la retención de tarjeta">
+          <DollarSign size={14}/> Cobrar
+        </button>
+      )}
+      {o.stripe_payment_intent && o.status !== 'Cancelado' && (
+        <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className={`inline-flex items-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold ${btn}`} title="Reembolsar y avisar al cliente">
+          <Undo2 size={14}/> Reembolsar
+        </button>
+      )}
+      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold ${btn}`} title="Ver factura">
+        <FileText size={14}/> Factura
+      </button>
+      <button type="button" onClick={() => openOrderTicket(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Ver ticket">
+        <FileText size={14}/> Ticket
+      </button>
+      <button type="button" onClick={() => printOrderTicket(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Imprimir ticket">
+        <Printer size={14}/> Imprimir
+      </button>
+    </>
+  );
+
+  // Miniaturas apiladas + recuento de artículos (resumen compacto).
+  const renderItemsSummary = (o) => {
+    const items = Array.isArray(o.items) ? o.items : [];
+    const units = items.reduce((n, it) => n + (Number(it.quantity) || 0), 0);
+    const thumbs = items
+      .map(it => products.find(p => p.id === it.id)?.image || it.image)
+      .filter(Boolean)
+      .slice(0, 3);
+    return (
+      <div className="flex items-center gap-2">
+        {thumbs.length > 0 && (
+          <div className="flex -space-x-2">
+            {thumbs.map((src, i) => (
+              <img key={i} src={src} alt="" loading="lazy" className="w-8 h-8 rounded-lg object-cover border-2 border-white bg-gray-50 shadow-sm" />
+            ))}
+          </div>
+        )}
+        <span className="text-xs text-gray-600 whitespace-nowrap">
+          {units} {units === 1 ? 'art.' : 'arts.'}
+          {items.length > 1 && <span className="text-gray-400"> · {items.length} líneas</span>}
+        </span>
+      </div>
+    );
+  };
+
   const renderOrders = () => {
      const searchLower = orderSearch.toLowerCase().trim();
      const fromTs = orderDateFrom ? new Date(orderDateFrom + 'T00:00:00').getTime() : null;
@@ -2146,202 +2230,182 @@ const renderRepairs = () => (
             <Download size={16}/> CSV ({filteredOrders.length})
           </button>
         </div>
-        {/* Desktop table */}
+        <p className="text-xs text-gray-400 px-1">Haz clic en un pedido para ver el detalle, items y acciones.</p>
+        {/* Desktop table (compacta) */}
         <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-left text-sm">
              <thead className="bg-gray-50 font-bold text-gray-500">
                <tr>
-                 <th className="p-4">Info</th>
-                 <th className="p-4">Fecha</th>
-                 <th className="p-4">Items</th>
-                 <th className="p-4">Total</th>
-                 <th className="p-4">Pago</th>
-                 <th className="p-4">Estado</th>
-                 <th className="p-4 text-center">Factura / Ticket</th>
+                 <th className="px-4 py-3">Pedido</th>
+                 <th className="px-4 py-3">Fecha</th>
+                 <th className="px-4 py-3">Artículos</th>
+                 <th className="px-4 py-3">Total</th>
+                 <th className="px-4 py-3">Pago</th>
+                 <th className="px-4 py-3">Estado</th>
+                 <th className="px-4 py-3 w-10"></th>
                </tr>
              </thead>
              <tbody>
                {filteredOrders.map(o => {
                  const paymentMethod = o.payment_method || 'No especificado';
-                 const paymentColor = paymentMethod === 'Contra Reembolso' 
-                   ? 'bg-orange-100 text-orange-700' 
-                   : paymentMethod === 'Bizum' 
-                   ? 'bg-green-100 text-green-700' 
-                   : 'bg-gray-100 text-gray-600';
                  const orderDate = o.created_at ? new Date(o.created_at) : null;
-                 const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                 const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+                 const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
                  return (
-                 <tr key={o.id} className="border-b hover:bg-gray-50">
-                   <td className="p-4 align-top">
-                      <div className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</div>
-                      <div className="font-bold text-gray-800 mt-1">{o.phone}</div>
-                      <div className="text-xs text-gray-500">{o.address}</div>
-                      {o.note && <div className="text-xs bg-yellow-50 p-1 mt-1 rounded text-yellow-700">Nota: {o.note}</div>}
+                 <tr key={o.id} onClick={() => setDetailOrder(o)} className="border-b hover:bg-blue-50/40 cursor-pointer transition-colors">
+                   <td className="px-4 py-3 align-middle">
+                      <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
+                      <div className="font-bold text-gray-800 text-sm">{o.phone || '—'}</div>
+                      <div className="text-[11px] text-gray-500 truncate max-w-[200px]">{isPickup ? '🏬 Recogida en tienda' : `🚚 ${o.address || ''}`}</div>
                    </td>
-                   <td className="p-4 align-top text-xs text-gray-600 whitespace-nowrap">{dateStr}</td>
-                   <td className="p-4 align-top">
-                      {Array.isArray(o.items) && o.items.map((item, idx) => {
-                        const isGift = item.isGift || item.price === 0;
-                        const thumb = products.find(p => p.id === item.id)?.image || item.image;
-                        return (
-                          <div key={idx} className={`flex justify-between items-center text-xs mb-1 border-b border-dashed pb-1 ${isGift ? 'bg-pink-50 border-pink-200 px-2 py-1 rounded' : 'border-gray-100'}`}>
-                              <span className="flex items-center gap-1.5 min-w-0">
-                                {thumb && <img src={thumb} alt="" loading="lazy" className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
-                                {isGift && <Gift size={12} className="text-pink-600 flex-shrink-0"/>}
-                                <span className={`min-w-0 ${isGift ? 'font-bold text-pink-700' : ''}`}>
-                                  {item.quantity}x {item.name}
-                                  {item.id != null && <span className="text-gray-400 font-mono ml-1">#{item.id}</span>}
-                                </span>
-                                {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold flex-shrink-0">GRATIS</span>}
-                              </span>
-                              {!isGift && <span className="text-gray-500 flex-shrink-0">€{(item.price * item.quantity).toFixed(2)}</span>}
-                          </div>
-                        );
-                      })}
-                   </td>
-                   <td className="p-4 align-top font-bold">
+                   <td className="px-4 py-3 align-middle text-xs text-gray-600 whitespace-nowrap">{dateStr}</td>
+                   <td className="px-4 py-3 align-middle">{renderItemsSummary(o)}</td>
+                   <td className="px-4 py-3 align-middle font-bold whitespace-nowrap">
                       €{o.total?.toFixed(2)}
                       {o.coupon_code && (
-                        <div className="mt-1 text-[10px] font-bold text-green-700 whitespace-nowrap">
-                          <span className="bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{o.coupon_code} −€{(Number(o.discount) || 0).toFixed(2)}</span>
+                        <div className="mt-0.5 text-[10px] font-bold text-green-700">
+                          <span className="bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">−€{(Number(o.discount) || 0).toFixed(2)}</span>
                         </div>
                       )}
                    </td>
-                   <td className="p-4 align-top">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${paymentColor}`}>
-                        {paymentMethod}
-                      </span>
+                   <td className="px-4 py-3 align-middle">
+                      <span className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span>
                    </td>
-                   <td className="p-4 align-top">
-                      <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-2 py-1 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Autorizado' ? 'bg-amber-100 text-amber-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                        <option>Autorizado</option>
-                        <option>Procesando</option>
-                        <option>Pendiente de Pago</option>
-                        <option>Enviado</option>
-                        <option>Entregado</option>
-                        <option>Cancelado</option>
-                      </select>
-                   </td>
-                   <td className="p-4 align-top">
-                      <div className="flex flex-wrap items-center justify-center gap-1">
-                        {o.status === 'Autorizado' && (
-                          <button type="button" onClick={() => captureOrder(o.id)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold" title="Cobrar la retención de tarjeta">
-                            <DollarSign size={14}/> Cobrar
-                          </button>
-                        )}
-                        {o.stripe_payment_intent && o.status !== 'Cancelado' && (
-                          <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold" title="Reembolsar y avisar al cliente">
-                            <Undo2 size={14}/> Reembolsar
-                          </button>
-                        )}
-                        <button type="button" onClick={() => openOrderFactura(o)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold" title="Ver factura">
-                          <FileText size={14}/> Factura
-                        </button>
-                        <button type="button" onClick={() => openOrderTicket(o)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold" title="Ver ticket">
-                          <FileText size={14}/> Ticket
-                        </button>
-                        <button type="button" onClick={() => printOrderTicket(o)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold" title="Imprimir ticket">
-                          <Printer size={14}/> Imprimir
-                        </button>
-                      </div>
+                   <td className="px-4 py-3 align-middle">{renderStatusSelect(o)}</td>
+                   <td className="px-4 py-3 align-middle text-gray-300">
+                      <ChevronRight size={18}/>
                    </td>
                  </tr>
                )})}
              </tbody>
           </table>
+          {filteredOrders.length === 0 && (
+            <div className="p-8 text-center text-gray-400 text-sm">No hay pedidos que coincidan con los filtros.</div>
+          )}
         </div>
-        {/* Mobile cards */}
-        <div className="md:hidden space-y-4">
+        {/* Mobile cards (compactas) */}
+        <div className="md:hidden space-y-3">
           {filteredOrders.map(o => {
             const paymentMethod = o.payment_method || 'No especificado';
-            const paymentColor = paymentMethod === 'Contra Reembolso' 
-              ? 'bg-orange-100 text-orange-700' 
-              : paymentMethod === 'Bizum' 
-              ? 'bg-green-100 text-green-700' 
-              : 'bg-gray-100 text-gray-600';
-            
             const orderDate = o.created_at ? new Date(o.created_at) : null;
-            const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+            const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+            const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
             return (
-              <div key={o.id} className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</div>
-                    <div className="text-xs text-gray-600 font-medium mt-0.5">📅 {dateStr}</div>
+              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className="w-full text-left bg-white rounded-xl shadow-sm border p-3 active:bg-gray-50">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
+                    <div className="font-bold text-gray-800 truncate">{o.phone || '—'}</div>
+                    <div className="text-[11px] text-gray-500 truncate">{isPickup ? '🏬 Recogida en tienda' : `🚚 ${o.address || ''}`}</div>
                   </div>
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${paymentColor}`}>
-                    {paymentMethod}
-                  </span>
-                </div>
-                <div>
-                  <div className="font-bold text-gray-800">{o.phone}</div>
-                  <div className="text-xs text-gray-500 mt-1">{o.address}</div>
-                  {o.note && <div className="text-xs bg-yellow-50 p-2 mt-2 rounded text-yellow-700">Nota: {o.note}</div>}
-                </div>
-                <div className="border-t pt-3">
-                  <div className="text-xs text-gray-600 mb-2 font-bold">Items:</div>
-                  {Array.isArray(o.items) && o.items.map((item, idx) => {
-                    const isGift = item.isGift || item.price === 0;
-                    const thumb = products.find(p => p.id === item.id)?.image || item.image;
-                    return (
-                      <div key={idx} className={`flex justify-between items-center text-xs mb-1 pb-1 border-b border-dashed ${isGift ? 'bg-pink-50 border-pink-200 px-2 py-1.5 rounded' : 'border-gray-100'}`}>
-                        <span className="flex items-center gap-1.5 flex-1 min-w-0">
-                          {thumb && <img src={thumb} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
-                          {isGift && <Gift size={12} className="text-pink-600 flex-shrink-0"/>}
-                          <span className={`min-w-0 ${isGift ? 'font-bold text-pink-700' : ''}`}>
-                            {item.quantity}x {item.name}
-                            {item.id != null && <span className="text-gray-400 font-mono ml-1">#{item.id}</span>}
-                          </span>
-                          {isGift && <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold ml-1 flex-shrink-0">GRATIS</span>}
-                        </span>
-                        {!isGift && <span className="text-gray-500 flex-shrink-0">€{(item.price * item.quantity).toFixed(2)}</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
-                  <span className="flex items-center gap-2">
-                    <span className="font-bold text-lg text-gray-800">€{o.total?.toFixed(2)}</span>
-                    {o.coupon_code && (
-                      <span className="text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{o.coupon_code} −€{(Number(o.discount) || 0).toFixed(2)}</span>
-                    )}
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={() => openOrderFactura(o)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold">
-                      <FileText size={14}/> Factura
-                    </button>
-                    <button type="button" onClick={() => openOrderTicket(o)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold">
-                      <FileText size={14}/> Ticket
-                    </button>
-                    <button type="button" onClick={() => printOrderTicket(o)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold">
-                      <Printer size={14}/> Imprimir
-                    </button>
-                    {o.status === 'Autorizado' && (
-                      <button type="button" onClick={() => captureOrder(o.id)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold" title="Cobrar la retención de tarjeta">
-                        <DollarSign size={14}/> Cobrar
-                      </button>
-                    )}
-                    {o.stripe_payment_intent && o.status !== 'Cancelado' && (
-                      <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold" title="Reembolsar y avisar al cliente">
-                        <Undo2 size={14}/> Reembolsar
-                      </button>
-                    )}
-                    <select value={o.status} onChange={(e) => updateOrderStatus(o.id, e.target.value)} className={`border rounded px-3 py-1.5 text-xs font-bold cursor-pointer ${o.status === 'Entregado' ? 'bg-green-100 text-green-700' : o.status === 'Autorizado' ? 'bg-amber-100 text-amber-700' : o.status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                      <option>Autorizado</option>
-                      <option>Procesando</option>
-                      <option>Pendiente de Pago</option>
-                      <option>Enviado</option>
-                      <option>Entregado</option>
-                      <option>Cancelado</option>
-                    </select>
+                  <div className="text-right flex-shrink-0">
+                    <div className="font-bold text-gray-800">€{o.total?.toFixed(2)}</div>
+                    <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span>
                   </div>
                 </div>
-              </div>
+                <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t">
+                  <span className="text-[11px] text-gray-500">📅 {dateStr}</span>
+                  <div className="flex items-center gap-2">
+                    {renderItemsSummary(o)}
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${orderStatusSelectClass(o.status)}`}>{o.status}</span>
+                  </div>
+                </div>
+              </button>
             );
           })}
+          {filteredOrders.length === 0 && (
+            <div className="p-8 text-center text-gray-400 text-sm bg-white rounded-xl border">No hay pedidos que coincidan con los filtros.</div>
+          )}
         </div>
      </div>
      );
+  };
+
+  // Panel de detalle de un pedido (al hacer clic en una fila/tarjeta).
+  // Muestra contacto, entrega, items completos, totales y todas las
+  // acciones. Lee la versión viva del pedido desde `orders` para reflejar
+  // cambios de estado/reembolso sin cerrar el panel.
+  const renderOrderDetailModal = () => {
+    if (!detailOrder) return null;
+    const o = orders.find(x => x.id === detailOrder.id) || detailOrder;
+    const paymentMethod = o.payment_method || 'No especificado';
+    const orderDate = o.created_at ? new Date(o.created_at) : null;
+    const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+    const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
+    const items = Array.isArray(o.items) ? o.items : [];
+    const itemsTotal = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
+    return (
+      <div className="fixed inset-0 z-[60] flex justify-end bg-black/40" onClick={() => setDetailOrder(null)}>
+        <div className="w-full max-w-md h-full bg-white shadow-2xl flex flex-col animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+          {/* Cabecera */}
+          <div className="flex items-center justify-between px-5 py-4 border-b">
+            <div>
+              <div className="font-mono text-xs font-bold text-gray-400">#{o.id.slice(0,8)}</div>
+              <div className="text-lg font-bold text-gray-800">Pedido</div>
+            </div>
+            <div className="flex items-center gap-2">
+              {renderStatusSelect(o, 'px-3 py-1.5 text-xs')}
+              <button type="button" onClick={() => setDetailOrder(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18}/></button>
+            </div>
+          </div>
+          {/* Cuerpo */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase"><Clock size={12}/> Fecha</div>
+                <div className="mt-1 text-gray-800">{dateStr}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase"><CreditCard size={12}/> Pago</div>
+                <div className="mt-1"><span className={`px-2 py-0.5 rounded text-xs font-bold ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span></div>
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase">{isPickup ? <><MapPin size={12}/> Recogida en tienda</> : <><MapPin size={12}/> Envío a domicilio</>}</div>
+              {o.phone && <div className="flex items-center gap-1.5 text-gray-800"><Phone size={13} className="text-gray-400"/> {o.phone}</div>}
+              {o.customer_email && <div className="flex items-center gap-1.5 text-gray-800 break-all"><Mail size={13} className="text-gray-400"/> {o.customer_email}</div>}
+              {o.address && <div className="flex items-start gap-1.5 text-gray-600"><MapPin size={13} className="text-gray-400 mt-0.5 flex-shrink-0"/> {o.address}</div>}
+              {o.note && <div className="flex items-start gap-1.5 text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2 mt-1"><StickyNote size={13} className="mt-0.5 flex-shrink-0"/> {o.note}</div>}
+            </div>
+            <div>
+              <div className="text-[11px] font-bold text-gray-400 uppercase mb-2">Artículos</div>
+              <div className="space-y-1">
+                {items.map((item, idx) => {
+                  const isGift = item.isGift || item.price === 0;
+                  const thumb = products.find(p => p.id === item.id)?.image || item.image;
+                  return (
+                    <div key={idx} className={`flex justify-between items-center gap-2 py-1.5 ${isGift ? 'bg-pink-50 border border-pink-200 px-2 rounded' : 'border-b border-dashed border-gray-100'}`}>
+                      <span className="flex items-center gap-2 min-w-0">
+                        {thumb && <img src={thumb} alt="" loading="lazy" className="w-10 h-10 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
+                        {isGift && <Gift size={13} className="text-pink-600 flex-shrink-0"/>}
+                        <span className={`min-w-0 ${isGift ? 'font-bold text-pink-700' : 'text-gray-700'}`}>
+                          <span className="font-bold">{item.quantity}x</span> {item.name}
+                          {item.id != null && <span className="text-gray-400 font-mono ml-1 text-xs">#{item.id}</span>}
+                        </span>
+                      </span>
+                      {isGift
+                        ? <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold flex-shrink-0">GRATIS</span>
+                        : <span className="text-gray-600 flex-shrink-0 font-medium">€{((Number(item.price)||0) * (Number(item.quantity)||0)).toFixed(2)}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="border-t pt-3 space-y-1">
+              <div className="flex justify-between text-gray-600"><span>Subtotal artículos</span><span>€{itemsTotal.toFixed(2)}</span></div>
+              {o.coupon_code && (
+                <div className="flex justify-between text-green-700 font-medium"><span>Cupón {o.coupon_code}</span><span>−€{(Number(o.discount) || 0).toFixed(2)}</span></div>
+              )}
+              <div className="flex justify-between text-lg font-bold text-gray-800 pt-1"><span>Total</span><span>€{o.total?.toFixed(2)}</span></div>
+            </div>
+          </div>
+          {/* Pie: acciones */}
+          <div className="border-t p-4 flex flex-wrap gap-2 bg-gray-50">
+            {renderOrderActions(o, 'px-3 py-2 text-xs')}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Modal de reembolso: total (todo el pedido) o parcial (por artículos
@@ -2899,6 +2963,7 @@ const renderRepairs = () => (
       {isEditing && renderProductModal()}
       {importModalOpen && renderImportModal()}
       {bulkResultModal.open && renderBulkResultModal()}
+      {detailOrder && renderOrderDetailModal()}
       {refundTarget && renderRefundModal()}
       {refundWaModal && renderRefundWaModal()}
 
