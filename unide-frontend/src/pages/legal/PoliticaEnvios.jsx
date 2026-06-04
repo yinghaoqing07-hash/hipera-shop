@@ -253,10 +253,11 @@ export default function PoliticaEnvios() {
                     2–4 horas hábiles
                   </td>
                   <td className="p-2 border-b border-gray-100">
-                    Mismo día si el pedido se confirma antes de las 18:00 dentro del
-                    horario comercial. Los pedidos confirmados a partir de las{' '}
-                    <strong>20:00</strong> o fuera del horario comercial se preparan
-                    al día hábil siguiente.
+                    Preparación el mismo día para los pedidos confirmados antes de las{' '}
+                    <strong>20:00</strong> dentro del horario comercial. Los pedidos
+                    confirmados a partir de las <strong>20:00</strong> se preparan al
+                    día hábil siguiente; los confirmados antes de la apertura se
+                    preparan el mismo día en cuanto la tienda abre.
                   </td>
                 </tr>
                 <tr>

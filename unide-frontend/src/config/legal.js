@@ -214,8 +214,14 @@ export const RETURNS_UPDATED_AT = '2026-06-04';
 // existente). Cambio menor/informativo: no altera tarifas, zonas, el
 // plazo legal máximo de 30 días ni los derechos del Cliente; no requiere
 // re-aceptación (SHIPPING_VERSION se mantiene).
+// 1.1 → 1.2 (2026-06-04): se afina §3.2 para evitar contradicción con el
+// aviso del checkout. Franja de preparación del mismo día = 09:00–20:00;
+// a partir de las 20:00 → día hábil siguiente; antes de la apertura →
+// mismo día al abrir (en lugar de "fuera del horario → día siguiente",
+// que era inexacto de madrugada). Cambio menor/informativo: no requiere
+// re-aceptación (SHIPPING_VERSION se mantiene).
 export const SHIPPING_VERSION = 1;
-export const SHIPPING_DOCUMENT_VERSION = '1.1';
+export const SHIPPING_DOCUMENT_VERSION = '1.2';
 export const SHIPPING_UPDATED_AT = '2026-06-04';
 
 // --- Política de Cookies ---

@@ -174,12 +174,20 @@ function getMadridHM(date) {
 // hábil siguiente.
 const PICKUP_SAMEDAY_CUTOFF_HOUR = 20; // 20:00
 
-// True si un pedido de recogida confirmado AHORA quedaría fuera de la
-// franja de preparación del mismo día (a partir de las 20:00, Madrid) y,
-// por tanto, se prepararía al día hábil siguiente.
-function isPickupAfterSameDayCutoff(now = new Date()) {
+// Devuelve un aviso sobre cuándo estará listo un pedido de RECOGIDA
+// confirmado AHORA, o null si cae dentro de la franja de preparación del
+// mismo día (09:00–20:00, hora de Madrid). Coherente con Política de
+// Envíos §3.2. Dos casos fuera de franja:
+//   • Antes de la apertura (< 09:00): se prepara hoy al abrir.
+//   • A partir de las 20:00: se prepara el día hábil siguiente.
+function getPickupReadinessNote(now = new Date()) {
   const { hour, minute } = getMadridHM(now);
-  return hour * 60 + minute >= PICKUP_SAMEDAY_CUTOFF_HOUR * 60;
+  const m = hour * 60 + minute;
+  if (m >= STORE_OPEN_HOUR * 60 && m < PICKUP_SAMEDAY_CUTOFF_HOUR * 60) return null;
+  if (m < STORE_OPEN_HOUR * 60) {
+    return 'Ahora estamos cerrados. Tu pedido para recoger se preparará hoy en cuanto abramos (09:00); te avisaremos por email cuando esté listo.';
+  }
+  return 'Ya pasan de las 20:00. Tu pedido para recoger se preparará el día hábil siguiente; te avisaremos por email cuando esté listo.';
 }
 
 // =====================================================================
@@ -2555,20 +2563,19 @@ export default function App() {
                     )}
                   </button>
                 </div>
-                {/* Aviso de corte de preparación para hoy (Política de
-                    Envíos §3.2): si el cliente elige recoger y ya pasan
-                    de las 20:00, su pedido se preparará al día hábil
-                    siguiente. Informativo, no bloquea la compra. */}
-                {isStorePickup && isPickupAfterSameDayCutoff() && (
-                  <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                    <Clock size={14} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
-                    <span>
-                      Ya pasan de las 20:00. Tu pedido para recoger se preparará el{' '}
-                      <strong>día hábil siguiente</strong>; te avisaremos por email en
-                      cuanto esté listo.
-                    </span>
-                  </div>
-                )}
+                {/* Aviso de disponibilidad de la recogida (Política de
+                    Envíos §3.2): fuera de la franja de preparación del
+                    mismo día (09:00–20:00) informamos de cuándo estará
+                    listo. Informativo, no bloquea la compra. */}
+                {isStorePickup && (() => {
+                  const note = getPickupReadinessNote();
+                  return note ? (
+                    <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <Clock size={14} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                      <span>{note}</span>
+                    </div>
+                  ) : null;
+                })()}
              </div>
 
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border border-gray-100">
