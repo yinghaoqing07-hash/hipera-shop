@@ -761,6 +761,50 @@ async function resolveCouponForOrder(rawCode, items, { user_id, phone }) {
 // Nota: POST /api/orders mantiene su propio bucle inline (comportamiento
 // histórico: aborta con 400 si falta stock ANTES de cobrar). No lo
 // tocamos para no alterar ese flujo ya probado.
+// adjustStockCas — ajuste de stock ATÓMICO por compare-and-swap.
+// ---------------------------------------------------------------------
+// Sin migración de BD: lee el stock actual y aplica el UPDATE SÓLO si el
+// valor no ha cambiado (`.eq('stock', actual)`). Si otra operación lo
+// modificó entre el SELECT y el UPDATE, éste afecta 0 filas y se
+// reintenta con el valor fresco. Esto elimina los "lost updates" y, por
+// tanto, la SOBREVENTA por pedidos/webhooks concurrentes (que con el
+// patrón leer-luego-escribir anterior sí podía ocurrir).
+//   delta < 0 → descuento (rechaza si dejaría el stock negativo, salvo allowNegative)
+//   delta > 0 → reposición
+// Devuelve { ok, stock, reason }.
+async function adjustStockCas(productId, delta, { allowNegative = false } = {}) {
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const { data: product, error: fetchErr } = await supabase
+      .from('products')
+      .select('stock')
+      .eq('id', productId)
+      .single();
+    if (fetchErr || !product) return { ok: false, reason: 'NOT_FOUND' };
+
+    const current = Number(product.stock) || 0;
+    const next = current + delta;
+    if (!allowNegative && next < 0) {
+      return { ok: false, reason: 'INSUFFICIENT', stock: current };
+    }
+
+    const payload = { stock: next };
+    if (next <= 0) payload.visible = false;
+    else if (delta > 0) payload.visible = true; // reposición → vuelve a ser visible
+
+    const { data: updated, error: uErr } = await supabase
+      .from('products')
+      .update(payload)
+      .eq('id', productId)
+      .eq('stock', current) // CAS: sólo si nadie cambió el stock entre medias
+      .select('stock');
+    if (uErr) return { ok: false, reason: 'DB_ERROR', error: uErr.message };
+    if (updated && updated.length === 1) return { ok: true, stock: next };
+    // 0 filas → el stock cambió (carrera) → reintentar con el valor fresco
+  }
+  return { ok: false, reason: 'CONFLICT' };
+}
+
 async function deductStockForItems(items) {
   const issues = [];
   for (const item of items || []) {
@@ -768,27 +812,14 @@ async function deductStockForItems(items) {
     const qty = Number(item?.quantity) || 0;
     if (qty <= 0) continue;
 
-    const { data: product, error: fetchErr } = await supabase
-      .from('products')
-      .select('stock')
-      .eq('id', item.id)
-      .single();
-
-    if (fetchErr || !product) {
+    const r = await adjustStockCas(item.id, -qty, { allowNegative: false });
+    if (r.reason === 'NOT_FOUND') {
       console.warn(`[stock] producto no encontrado: id=${item.id}, name=${item.name}`);
       continue;
     }
-
-    const stock = Number(product.stock);
-    if (stock < qty) {
-      issues.push({ id: item.id, name: item.name, stock, requested: qty });
-      continue;
+    if (!r.ok) {
+      issues.push({ id: item.id, name: item.name, stock: r.stock ?? null, requested: qty, reason: r.reason });
     }
-
-    const newStock = stock - qty;
-    const updatePayload = { stock: newStock };
-    if (newStock === 0) updatePayload.visible = false;
-    await supabase.from('products').update(updatePayload).eq('id', item.id);
   }
   return { issues };
 }
@@ -807,22 +838,12 @@ async function restockItems(items) {
     const qty = Number(item?.quantity) || 0;
     if (qty <= 0) continue;
 
-    const { data: product, error: fetchErr } = await supabase
-      .from('products')
-      .select('stock')
-      .eq('id', item.id)
-      .single();
-
-    if (fetchErr || !product) {
+    const r = await adjustStockCas(item.id, qty, { allowNegative: true });
+    if (r.reason === 'NOT_FOUND') {
       console.warn(`[stock] restock: producto no encontrado: id=${item.id}, name=${item.name}`);
-      continue;
+    } else if (!r.ok) {
+      console.error(`[stock] restock falló id=${item.id}: ${r.reason}`);
     }
-
-    const newStock = (Number(product.stock) || 0) + qty;
-    await supabase
-      .from('products')
-      .update({ stock: newStock, visible: true })
-      .eq('id', item.id);
   }
 }
 
@@ -899,10 +920,13 @@ async function handleStripeCheckoutCompleted(session) {
 
   const newStatus = isAuthorizedOnly ? 'Autorizado' : 'Procesando';
 
-  // CRÍTICO: persistir el estado. Si falla, lanzamos → webhook 500 →
-  // Stripe reintenta. Hacemos el UPDATE antes de descontar stock para
-  // minimizar la ventana de doble procesamiento.
-  const { error: uErr } = await supabase
+  // CRÍTICO: persistir el estado con un CLAIM ATÓMICO. El UPDATE sólo se
+  // aplica si el pedido sigue 'Esperando pago' (.eq('status', ...)). Así,
+  // si Stripe reenvía el evento o llegan dos en paralelo, sólo UNA
+  // ejecución gana el claim y descuenta stock — el resto afecta 0 filas y
+  // sale sin tocar el inventario. Si falla, lanzamos → webhook 500 →
+  // Stripe reintenta.
+  const { data: claimed, error: uErr } = await supabase
     .from('orders')
     .update({
       status: newStatus,
@@ -910,9 +934,17 @@ async function handleStripeCheckoutCompleted(session) {
       stripe_payment_intent: piIdStr,
       confirmed_at: new Date().toISOString(), // dispara la alerta de nuevos pedidos AHORA
     })
-    .eq('id', orderId);
+    .eq('id', orderId)
+    .eq('status', 'Esperando pago')
+    .select();
   if (uErr) {
     throw new Error('No se pudo actualizar el pedido: ' + uErr.message);
+  }
+  if (!claimed || claimed.length === 0) {
+    // Otra ejecución (reintento/evento paralelo) ya transicionó el pedido,
+    // o caducó a 'Cancelado'. No descontamos stock por segunda vez.
+    console.log('[stripe] pedido ya reclamado/transicionado por otra vía (idempotente):', orderId);
+    return;
   }
 
   // Descontar (reservar) stock ya en la autorización, para no sobrevender
@@ -983,8 +1015,16 @@ async function handleStripePaymentIntentCanceled(pi) {
     .single();
   if (!order) return;
 
-  if (order.status === 'Autorizado') {
-    await supabase.from('orders').update({ status: 'Cancelado' }).eq('id', orderId);
+  // Claim atómico: sólo reponemos stock si ESTA ejecución es la que
+  // transiciona Autorizado → Cancelado (evita doble reposición si el
+  // panel ya canceló o si el evento se reenvía).
+  const { data: claimed } = await supabase
+    .from('orders')
+    .update({ status: 'Cancelado' })
+    .eq('id', orderId)
+    .eq('status', 'Autorizado')
+    .select();
+  if (claimed && claimed.length === 1) {
     try {
       await restockItems(order.items || []);
     } catch (e) {
@@ -1031,14 +1071,23 @@ async function handleStripeChargeRefunded(charge) {
     return;
   }
 
-  // Marcamos cancelado ANTES de reponer stock: si el evento se reenvía,
-  // la guarda de idempotencia evita una doble reposición.
-  const { error: uErr } = await supabase
+  // Claim atómico: marcamos Cancelado SÓLO si aún no lo está
+  // (.neq('status','Cancelado')) y reponemos stock únicamente si esta
+  // ejecución ganó el claim. Cierra la carrera con el reembolso del panel
+  // (que también repone) y los reenvíos del evento → exactamente UNA
+  // reposición.
+  const { data: claimed, error: uErr } = await supabase
     .from('orders')
     .update({ status: 'Cancelado' })
-    .eq('id', order.id);
+    .eq('id', order.id)
+    .neq('status', 'Cancelado')
+    .select();
   if (uErr) {
     throw new Error('No se pudo cancelar el pedido reembolsado: ' + uErr.message);
+  }
+  if (!claimed || claimed.length === 0) {
+    console.log('[stripe] reembolso: pedido ya cancelado por otra vía (idempotente):', order.id);
+    return;
   }
 
   try {
@@ -1282,37 +1331,29 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
       : null;
     const hasValidEmail = normalizedEmail && normalizedEmail.includes('@');
 
-    // Deduct stock for products (skip services and gift items)
+    // Deduct stock for products (skip services and gift items).
+    // Descuento ATÓMICO (compare-and-swap) para evitar sobreventa cuando
+    // dos clientes compran la última unidad casi a la vez.
     for (const item of items) {
       if (item.isService) continue;
       if (item.isGift) continue; // 礼品不扣库存，由后台单独管理
-      
+
       const qty = Number(item.quantity) || 0;
       if (qty <= 0) continue;
 
-      const { data: product, error: fetchErr } = await supabase
-        .from('products')
-        .select('stock')
-        .eq('id', item.id)
-        .single();
-      
-      if (fetchErr || !product) {
+      const r = await adjustStockCas(item.id, -qty, { allowNegative: false });
+      if (r.reason === 'NOT_FOUND') {
         console.warn(`[Orders] Product not found: id=${item.id}, name=${item.name}`);
         continue; // 找不到商品时跳过，不阻塞下单
       }
-      
-      const stock = Number(product.stock);
-      if (stock < qty) {
-        console.warn(`[Orders] Insufficient stock: id=${item.id}, name=${item.name}, stock=${stock}, requested=${qty}`);
-        return res.status(400).json({ error: `Stock insuficiente para "${item.name}". Disponible: ${stock}, solicitado: ${qty}.` });
+      if (r.reason === 'INSUFFICIENT') {
+        console.warn(`[Orders] Insufficient stock: id=${item.id}, name=${item.name}, stock=${r.stock}, requested=${qty}`);
+        return res.status(400).json({ error: `Stock insuficiente para "${item.name}". Disponible: ${r.stock}, solicitado: ${qty}.` });
       }
-      const newStock = stock - qty;
-      const updatePayload = { stock: newStock };
-      if (newStock === 0) updatePayload.visible = false;
-      await supabase
-        .from('products')
-        .update(updatePayload)
-        .eq('id', item.id);
+      if (!r.ok) {
+        console.error(`[Orders] no se pudo reservar stock (concurrencia) id=${item.id}: ${r.reason}`);
+        return res.status(409).json({ error: `No se pudo reservar "${item.name}" por mucha concurrencia. Vuelve a intentarlo.` });
+      }
     }
 
     // Create order
@@ -2072,21 +2113,28 @@ app.post('/api/admin/orders/:id/refund', authenticateAdmin, async (req, res) => 
       }
     }
 
-    // Marcar "Cancelado" ANTES de reponer stock: los webhooks
-    // (charge.refunded / payment_intent.canceled) comprueban el estado y,
-    // al verlo ya "Cancelado", NO repondrán stock por segunda vez.
-    const { data: updated, error: uErr } = await supabase
+    // Marcar "Cancelado" con CLAIM ATÓMICO (.neq('status','Cancelado')):
+    // reponemos stock SÓLO si esta petición es la que transiciona el
+    // pedido. Si el webhook (charge.refunded / payment_intent.canceled) ya
+    // lo canceló y repuso en la carrera, aquí afecta 0 filas y NO
+    // reponemos otra vez.
+    const { data: claimedRows, error: uErr } = await supabase
       .from('orders')
       .update({ status: 'Cancelado' })
       .eq('id', id)
-      .select()
-      .single();
+      .neq('status', 'Cancelado')
+      .select();
     if (uErr) throw uErr;
+    const updated = (claimedRows && claimedRows[0]) || { ...order, status: 'Cancelado' };
 
-    try {
-      await restockItems(order.items || []);
-    } catch (e) {
-      console.error('[stock] error al reponer stock tras reembolso:', e?.message);
+    if (claimedRows && claimedRows.length === 1) {
+      try {
+        await restockItems(order.items || []);
+      } catch (e) {
+        console.error('[stock] error al reponer stock tras reembolso:', e?.message);
+      }
+    } else {
+      console.log('[refund] pedido ya cancelado por webhook (no se repone stock de nuevo):', id);
     }
 
     // Email al cliente con el motivo + qué esperar del dinero (best-effort).
