@@ -128,6 +128,8 @@ export default function AdminApp() {
   const [refundWaModal, setRefundWaModal] = useState(null); // { waLink, emailed, refundType } o null
   // Detalle de pedido: pedido abierto en el panel lateral, o null.
   const [detailOrder, setDetailOrder] = useState(null);
+  // Overlay de ayuda de atajos de teclado.
+  const [helpOpen, setHelpOpen] = useState(false);
   const [expandedProductCats, setExpandedProductCats] = useState({});
   const [loadError, setLoadError] = useState(false);
   const fetchDataRetryCountRef = useRef(0);
@@ -159,6 +161,104 @@ export default function AdminApp() {
   });
 
   useEffect(() => { fetchData(); }, []);
+
+  // =================================================================
+  // Atajos de teclado globales del panel
+  // =================================================================
+  // Objetivo: agilizar el trabajo diario sin tocar acciones de riesgo
+  // (Cobrar, Reembolsar, Eliminar, IA en lote, Importar CSV NO tienen
+  // atajo de confirmación; sólo se permite cerrarlos con Escape).
+  //   1-5            cambiar de sección
+  //   /              enfocar el buscador de la sección
+  //   n              crear (enfocar el formulario de alta)
+  //   c              limpiar filtros/búsqueda
+  //   r              recargar datos
+  //   f / t / p      (en detalle de pedido) factura / ticket / imprimir
+  //   Ctrl/Cmd+Enter (en modal de producto) guardar
+  //   ? / Escape     ayuda de atajos / cerrar lo que esté abierto
+  useEffect(() => {
+    const isTyping = (el) => {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    };
+    const focusEl = (id) => {
+      const el = document.getElementById(id);
+      if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); }
+    };
+    const anyModalOpen = !!(detailOrder || refundTarget || refundWaModal || isEditing || importModalOpen || bulkResultModal.open || helpOpen);
+
+    const handler = (e) => {
+      // Guardar producto con Ctrl/Cmd+Enter (acción segura, no destructiva).
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (isEditing && !uploading && !removingBg && !generatingDesc && !centeringProduct) {
+          e.preventDefault();
+          handleSaveProduct({ preventDefault() {} });
+        }
+        return;
+      }
+      // No secuestramos otros combos con modificador (atajos del navegador).
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      // Escape: cierra el overlay superior, o desenfoca el campo activo.
+      if (e.key === 'Escape') {
+        if (isTyping(document.activeElement)) { document.activeElement.blur(); return; }
+        if (helpOpen) { setHelpOpen(false); return; }
+        if (refundWaModal) { setRefundWaModal(null); return; }
+        if (refundTarget) { setRefundTarget(null); return; }
+        if (isEditing) { setIsEditing(false); return; }
+        if (importModalOpen) { setImportModalOpen(false); return; }
+        if (bulkResultModal.open) { setBulkResultModal(prev => ({ ...prev, open: false })); return; }
+        if (detailOrder) { setDetailOrder(null); return; }
+        if (sidebarOpen) { setSidebarOpen(false); return; }
+        return;
+      }
+
+      // Mientras se escribe en un campo, no disparamos atajos de letra/número.
+      if (isTyping(document.activeElement)) return;
+
+      // Ayuda de atajos (Shift + / → '?').
+      if (e.key === '?') { e.preventDefault(); setHelpOpen(o => !o); return; }
+
+      // Atajos del detalle de pedido (sólo acciones seguras).
+      if (detailOrder && !refundTarget && !refundWaModal) {
+        const o = orders.find(x => x.id === detailOrder.id) || detailOrder;
+        if (e.key === 'f') { e.preventDefault(); openOrderFactura(o); return; }
+        if (e.key === 't') { e.preventDefault(); openOrderTicket(o); return; }
+        if (e.key === 'p') { e.preventDefault(); printOrderTicket(o); return; }
+        return; // dentro del detalle no corren los atajos globales de página
+      }
+
+      // Con cualquier otro modal abierto, no corren los atajos de página.
+      if (anyModalOpen) return;
+
+      // ---- Atajos globales (sin modal, sin foco en campo) ----
+      switch (e.key) {
+        case '1': setActiveTab('dashboard'); return;
+        case '2': setActiveTab('products'); return;
+        case '3': setActiveTab('categories'); return;
+        case '4': setActiveTab('repairs'); return;
+        case '5': setActiveTab('orders'); return;
+        case 'r': e.preventDefault(); fetchData(); toast.success('Datos actualizados'); return;
+        default: break;
+      }
+      if (e.key === '/') {
+        if (activeTab === 'products') { e.preventDefault(); focusEl('search-products'); return; }
+        if (activeTab === 'orders') { e.preventDefault(); focusEl('search-orders'); return; }
+      }
+      if (e.key === 'n') {
+        if (activeTab === 'products') { e.preventDefault(); focusEl('new-product-name'); return; }
+        if (activeTab === 'categories') { e.preventDefault(); focusEl('category-name'); return; }
+        if (activeTab === 'repairs') { e.preventDefault(); focusEl('repair-brand'); return; }
+      }
+      if (e.key === 'c') {
+        if (activeTab === 'orders') { e.preventDefault(); setOrderSearch(''); setOrderStatusFilter(''); setOrderDateFrom(''); setOrderDateTo(''); return; }
+        if (activeTab === 'products') { e.preventDefault(); setSearchTerm(''); setSelectedProductCategory(''); return; }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeTab, detailOrder, refundTarget, refundWaModal, isEditing, importModalOpen, bulkResultModal.open, sidebarOpen, helpOpen, uploading, removingBg, generatingDesc, centeringProduct, orders]);
 
   // =================================================================
   // Alerta de pedidos nuevos (sonido + badge + notificación)
@@ -1753,7 +1853,7 @@ export default function AdminApp() {
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
           <h3 className="font-bold text-gray-800 text-lg">Añadir producto nuevo</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="lg:col-span-2"><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><textarea required rows={2} value={newProduct.name} onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo del producto" className="w-full border p-2 rounded-lg text-sm resize-y min-h-[2.5rem]"/></div>
+            <div className="lg:col-span-2"><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><textarea id="new-product-name" name="new-product-name" required rows={2} value={newProduct.name} onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo del producto" className="w-full border p-2 rounded-lg text-sm resize-y min-h-[2.5rem]"/></div>
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio €</label><input required type="number" step="0.01" value={newProduct.price || ''} onChange={e => setNewProduct(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className="w-full border p-2 rounded-lg text-sm"/></div>
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input required type="number" value={newProduct.stock ?? ''} onChange={e => setNewProduct(p => ({ ...p, stock: parseInt(e.target.value, 10) || 0 }))} className="w-full border p-2 rounded-lg text-sm"/></div>
             <div className="sm:col-span-2 lg:col-span-1 flex flex-col justify-end"><label className="text-xs font-bold text-gray-500 mb-1 block">Categoría</label><select required value={newProduct.category || ''} onChange={e => { const v = e.target.value; setNewProduct(p => ({ ...p, category: v ? parseInt(v, 10) : '', subCategoryId: '' })); }} className="w-full border p-2 rounded-lg text-sm bg-white"><option value="">—</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
@@ -2214,6 +2314,8 @@ const renderRepairs = () => (
           <div className="flex-1 min-w-[180px]">
             <label className="text-xs font-bold text-gray-500 mb-1 block">Buscar (teléfono / nº pedido / email)</label>
             <input
+              id="search-orders"
+              name="search-orders"
               type="text"
               value={orderSearch}
               onChange={e => setOrderSearch(e.target.value)}
@@ -2273,7 +2375,7 @@ const renderRepairs = () => (
                  <th className="px-4 py-3">Total</th>
                  <th className="px-4 py-3">Pago</th>
                  <th className="px-4 py-3">Estado</th>
-                 <th className="px-4 py-3 w-10"></th>
+                 <th className="px-4 py-3 w-28 text-right">Detalle</th>
                </tr>
              </thead>
              <tbody>
@@ -2324,8 +2426,16 @@ const renderRepairs = () => (
                         )}
                       </div>
                    </td>
-                   <td className="px-4 py-3 align-middle text-gray-300">
-                      <ChevronRight size={18}/>
+                   <td className="px-4 py-3 align-middle text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setDetailOrder(o); }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold whitespace-nowrap"
+                        title="Ver detalle del pedido"
+                        aria-label={`Ver detalle del pedido ${String(o.id || '').slice(0, 8)}`}
+                      >
+                        Ver detalle <ChevronRight size={14}/>
+                      </button>
                    </td>
                  </tr>
                )})}
@@ -2380,6 +2490,9 @@ const renderRepairs = () => (
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${orderStatusSelectClass(o.status)}`}>{o.status}</span>
                     )}
                   </div>
+                </div>
+                <div className="mt-2 flex items-center justify-end gap-1 text-[11px] font-bold text-blue-600">
+                  Ver detalle <ChevronRight size={13}/>
                 </div>
               </button>
             );
@@ -2624,6 +2737,66 @@ const renderRepairs = () => (
               <p className="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 mb-2">No hay un teléfono válido para abrir WhatsApp en este pedido.</p>
             )}
             <button type="button" onClick={() => setRefundWaModal(null)} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Overlay con la lista de atajos de teclado. Las acciones de riesgo
+  // (Cobrar, Reembolsar, Eliminar, IA en lote, Importar CSV) NO tienen
+  // atajo a propósito y se indica abajo.
+  const renderShortcutsHelp = () => {
+    const Kbd = ({ children }) => (
+      <kbd className="inline-flex items-center justify-center min-w-[22px] px-1.5 py-0.5 rounded border border-gray-300 bg-gray-50 text-gray-700 text-[11px] font-mono font-bold shadow-sm">{children}</kbd>
+    );
+    const Group = ({ title, rows }) => (
+      <div>
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">{title}</p>
+        <div className="space-y-1.5">
+          {rows.map(([keys, desc]) => (
+            <div key={desc} className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-gray-700">{desc}</span>
+              <span className="flex items-center gap-1 flex-shrink-0">{keys}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => setHelpOpen(false)}>
+        <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-white rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0 bg-white">
+            <h3 className="text-lg font-bold text-gray-800">Atajos de teclado</h3>
+            <button type="button" onClick={() => setHelpOpen(false)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18}/></button>
+          </div>
+          <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <Group title="Navegación" rows={[
+              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos'],
+            ]}/>
+            <Group title="En cada sección" rows={[
+              [<Kbd>/</Kbd>, 'Enfocar el buscador'],
+              [<Kbd>n</Kbd>, 'Crear / enfocar el alta'],
+              [<Kbd>c</Kbd>, 'Limpiar filtros / búsqueda'],
+              [<Kbd>r</Kbd>, 'Recargar datos'],
+            ]}/>
+            <Group title="Detalle de pedido" rows={[
+              [<Kbd>f</Kbd>, 'Abrir factura'],
+              [<Kbd>t</Kbd>, 'Abrir ticket'],
+              [<Kbd>p</Kbd>, 'Imprimir ticket'],
+            ]}/>
+            <Group title="Modal de producto" rows={[
+              [<><Kbd>Ctrl</Kbd><span className="text-gray-400 text-xs">/</span><Kbd>⌘</Kbd><Kbd>↵</Kbd></>, 'Guardar producto'],
+            ]}/>
+            <Group title="General" rows={[
+              [<Kbd>?</Kbd>, 'Mostrar / ocultar esta ayuda'],
+              [<Kbd>Esc</Kbd>, 'Cerrar ventana o quitar el foco'],
+            ]}/>
+          </div>
+          <div className="px-5 pb-5">
+            <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3">
+              Por seguridad, <strong>Cobrar, Reembolsar, Eliminar, IA en lote e Importar CSV</strong> no tienen atajo: hay que pulsarlos a mano.
+            </div>
           </div>
         </div>
       </div>
@@ -2967,6 +3140,7 @@ const renderRepairs = () => (
               Activar avisos del navegador
             </button>
           )}
+          <button onClick={() => setHelpOpen(true)} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><span className="w-5 text-center font-mono font-bold">?</span><span>Atajos de teclado</span></button>
           <button onClick={handleLogout} className="w-full p-3 flex items-center gap-3 text-gray-400 hover:text-white rounded-xl"><LogOut size={20}/><span>Salir</span></button>
         </div>
       </aside>
@@ -3053,6 +3227,7 @@ const renderRepairs = () => (
       {detailOrder && renderOrderDetailModal()}
       {refundTarget && renderRefundModal()}
       {refundWaModal && renderRefundWaModal()}
+      {helpOpen && renderShortcutsHelp()}
 
       {/* Bulk AI: barra fija abajo cuando hay selección en Productos */}
       {activeTab === 'products' && (selectedProductIds.size > 0 || bulkProcessing.active) && (
