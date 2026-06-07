@@ -175,6 +175,8 @@ export function buildTicket(order, config) {
   // --- Datos del pedido ---
   t.align(0).bold(true).line('Pedido: #' + shortId).bold(false);
   t.line('Fecha: ' + when);
+  t.align(1).bold(true).line('JUSTIFICANTE DE PEDIDO').bold(false);
+  t.line('No valido como factura fiscal');
 
   // --- Modalidad de entrega (grande, para verlo de un vistazo) ---
   t.hr('=');

@@ -241,10 +241,12 @@ class ApiClient {
     return this.request(`/admin/orders/new?${params.toString()}`);
   }
 
-  async updateOrderStatus(orderId, status) {
+  async updateOrderStatus(orderId, status, paymentMethod = null) {
+    const body = { status };
+    if (paymentMethod) body.payment_method = paymentMethod;
     return this.request(`/admin/orders/${orderId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -267,6 +269,15 @@ class ApiClient {
     return this.request(`/admin/orders/${orderId}/refund`, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  }
+
+  // Marca un pedido de recogida como "Listo para recoger" y avisa al
+  // cliente por email con el código de recogida. Devuelve { ok, code,
+  // waLink, emailed } para ofrecer el aviso por WhatsApp con un toque.
+  async notifyOrderReady(orderId) {
+    return this.request(`/admin/orders/${orderId}/notify-ready`, {
+      method: 'POST',
     });
   }
 

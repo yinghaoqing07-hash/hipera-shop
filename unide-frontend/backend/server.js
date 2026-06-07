@@ -12,7 +12,20 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
-import { sendOrderConfirmationEmail, sendRefundEmail } from './services/email.js';
+import { randomInt } from 'crypto';
+import { sendOrderConfirmationEmail, sendRefundEmail, sendPickupReadyEmail, pickupCode } from './services/email.js';
+
+// Código de recogida ALEATORIO de 6 dígitos (independiente del id del
+// pedido). Se almacena en orders.pickup_code para pedidos de recogida en
+// tienda. Es el comprobante que el cliente presenta en el mostrador.
+// Para pedidos antiguos sin este valor, el código cae al cálculo
+// determinista pickupCode(id) como fallback (ver email.js).
+const generatePickupCode = () => String(randomInt(0, 1000000)).padStart(6, '0');
+
+// Devuelve el código de recogida efectivo de un pedido: el aleatorio
+// almacenado si existe, o el determinista a partir del id como fallback
+// (compatibilidad con pedidos previos a la columna pickup_code).
+const resolvePickupCode = (order) => order?.pickup_code || pickupCode(order?.id);
 import {
   getStripe,
   buildCheckoutLineItems,
@@ -88,12 +101,12 @@ const generateTicketPDF = async (order) => {
   // Order Info
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(isService ? "RESGUARDO REPARACION" : "TICKET DE CAJA", centerX, y, { align: 'center' });
+  doc.text(isService ? "RESGUARDO REPARACION" : "JUSTIFICANTE DE PEDIDO", centerX, y, { align: 'center' });
   y += 5;
   
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text(`Núm: ${order.id.slice(0, 8).toUpperCase()}`, centerX, y, { align: 'center' });
+  doc.text(`Pedido: ${order.id.slice(0, 8).toUpperCase()}`, centerX, y, { align: 'center' });
   y += 4;
   doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString('es-ES')}`, centerX, y, { align: 'center' });
   y += 4;
@@ -147,13 +160,59 @@ const generateTicketPDF = async (order) => {
   y += 5;
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text(`(IVA Incluido)`, centerX, y, { align: 'center' });
+  doc.text(`Precios con impuestos incluidos si corresponde.`, centerX, y, { align: 'center' });
+  y += 4;
+  doc.text(`No valido como factura fiscal.`, centerX, y, { align: 'center' });
   y += 5;
 
   // Payment Method
   doc.setFontSize(8);
   doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'Efectivo/Bizum'}`, centerX, y, { align: 'center' });
   y += 6;
+
+  // Aviso de COBRO PENDIENTE: los pedidos de pago en tienda / contra
+  // reembolso aún NO están pagados (status "Pendiente de Pago"). Se
+  // destaca para que el personal cobre antes de entregar la mercancía.
+  const isUnpaidCounter = order.status === 'Pendiente de Pago'
+    || /contra\s*reembolso/i.test(order.payment_method || '');
+  if (isUnpaidCounter) {
+    doc.setLineWidth(0.8);
+    doc.rect(5, y - 1, 70, 13);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("PENDIENTE DE COBRO", centerX, y + 3, { align: 'center' });
+    doc.setFontSize(11);
+    doc.text(`COBRAR: €${order.total?.toFixed(2) || '0.00'}`, centerX, y + 9, { align: 'center' });
+    doc.setLineWidth(0.5);
+    y += 16;
+    doc.setFont("helvetica", "normal");
+  }
+
+  // Código de recogida (solo pedidos de recogida en tienda). Destacado
+  // para que el personal de mostrador lo compare con el que enseña el
+  // cliente (mismo número que recibe por email/WhatsApp).
+  if (order.delivery_method === 'store_pickup') {
+    doc.line(5, y, 75, y);
+    y += 5;
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("RECOGIDA EN TIENDA", centerX, y, { align: 'center' });
+    y += 4;
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.text("Codigo de recogida:", centerX, y, { align: 'center' });
+    y += 6;
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text(resolvePickupCode(order), centerX, y, { align: 'center' });
+    y += 6;
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    doc.text("Verificar: pedir tel./nombre del cliente", centerX, y, { align: 'center' });
+    y += 5;
+    doc.line(5, y, 75, y);
+    y += 5;
+  }
 
   // Warranty Note (for services)
   if (isService) {
@@ -1375,6 +1434,7 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
         items,
         customer_email: hasValidEmail ? normalizedEmail : null,
         delivery_method: resolvedDeliveryMethod,
+        ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
         coupon_code: appliedCoupon,
         discount,
         created_at: nowIso,
@@ -1565,6 +1625,7 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
         items,
         customer_email: normalizedEmail,
         delivery_method: resolvedDeliveryMethod,
+        ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
         coupon_code: appliedCoupon,
         discount,
         created_at: new Date().toISOString(),
@@ -1841,6 +1902,12 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+    // payment_method opcional: permite registrar cómo se cobró un pedido
+    // de "pago en tienda" al entregarlo (efectivo / tarjeta TPV), útil
+    // para la contabilidad y el CSV. Se acota a una etiqueta corta.
+    const paymentMethod = typeof req.body?.payment_method === 'string'
+      ? req.body.payment_method.trim().slice(0, 60)
+      : null;
 
     // Si se cancela un pedido AUTORIZADO (retención de tarjeta sin cobrar),
     // liberamos la autorización en Stripe (no se cobra nada al cliente) y
@@ -1872,9 +1939,11 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
       }
     }
 
+    const updateFields = { status };
+    if (paymentMethod) updateFields.payment_method = paymentMethod;
     const { data, error } = await supabase
       .from('orders')
-      .update({ status })
+      .update(updateFields)
       .eq('id', id)
       .select()
       .single();
@@ -2149,6 +2218,93 @@ app.post('/api/admin/orders/:id/refund', authenticateAdmin, async (req, res) => 
   } catch (error) {
     console.error('[refund] error:', error?.message || error);
     return res.status(500).json({ error: error?.message || 'Error al reembolsar el pedido' });
+  }
+});
+
+// Construye un enlace wa.me PRE-RELLENADO para avisar al cliente de que su
+// pedido de recogida está listo, incluyendo el código de recogida como
+// comprobante. Mismo enfoque que buildRefundWhatsappLink (un solo toque,
+// no es envío automático). Devuelve null si no hay teléfono utilizable.
+function buildPickupReadyWhatsappLink(order, code) {
+  let digits = String(order?.phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('0034')) digits = digits.slice(2);
+  if (digits.length === 9 && /^[6789]/.test(digits)) digits = '34' + digits;
+  if (digits.length < 11) return null;
+
+  const id = String(order?.id || '').slice(0, 8).toUpperCase();
+  const lines = [
+    `Hola, te escribimos de HIPERA. ¡Tu pedido #${id} ya está listo para recoger! 🛍️`,
+    '',
+    `Tu código de recogida es: ${code}`,
+    'Enséñalo (o este mensaje) y di tu nombre en el mostrador para retirarlo.',
+    '',
+    'Estamos en Paseo del Sol 1, 28880 Meco (Madrid), de 09:00 a 22:00.',
+    '¡Te esperamos!',
+  ];
+  return `https://wa.me/${digits}?text=${encodeURIComponent(lines.join('\n'))}`;
+}
+
+// POST /api/admin/orders/:id/notify-ready — avisa al cliente de que su
+// pedido de RECOGIDA EN TIENDA está preparado. Marca el pedido como
+// "Listo para recoger", envía email con el código de recogida (comprobante
+// para identificarse en el mostrador) y devuelve un enlace de WhatsApp
+// pre-rellenado para avisar con un toque.
+app.post('/api/admin/orders/:id/notify-ready', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: order, error: fErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (fErr || !order) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+    if (order.delivery_method !== 'store_pickup') {
+      return res.status(400).json({ error: 'Solo los pedidos de recogida en tienda se pueden marcar como listos' });
+    }
+    if (order.status === 'Cancelado') {
+      return res.status(400).json({ error: 'Este pedido está cancelado' });
+    }
+
+    // Si por algún motivo un pedido de recogida no tiene código aún
+    // (datos previos a la columna pickup_code), genera y persiste uno
+    // aleatorio para que el aviso y el ticket sean coherentes en adelante.
+    let code = order.pickup_code;
+    if (!code) {
+      code = generatePickupCode();
+      const { error: codeErr } = await supabase.from('orders').update({ pickup_code: code }).eq('id', id);
+      if (codeErr) { code = resolvePickupCode(order); } // fallback determinista si la columna no existe
+      else { order.pickup_code = code; }
+    }
+
+    // Marca como "Listo para recoger" (salvo que ya esté entregado/cancelado).
+    let updated = order;
+    if (order.status !== 'Entregado') {
+      const { data, error: uErr } = await supabase
+        .from('orders')
+        .update({ status: 'Listo para recoger' })
+        .eq('id', id)
+        .neq('status', 'Cancelado')
+        .select()
+        .single();
+      if (!uErr && data) updated = data;
+    }
+
+    // Email best-effort con el código de recogida.
+    let emailed = false;
+    if (order.customer_email) {
+      emailed = true;
+      sendPickupReadyEmail(updated, order.customer_email, { code }).catch((err) => {
+        console.warn('[Email] fallo enviando aviso "listo para recoger":', err?.message || err);
+      });
+    }
+
+    const waLink = buildPickupReadyWhatsappLink(order, code);
+    return res.json({ ok: true, order: updated, code, waLink, emailed });
+  } catch (error) {
+    console.error('[notify-ready] error:', error?.message || error);
+    return res.status(500).json({ error: error?.message || 'Error al avisar al cliente' });
   }
 });
 

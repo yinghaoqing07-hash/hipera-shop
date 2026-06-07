@@ -348,10 +348,9 @@ export default function PoliticaEnvios() {
         <Subsection title="4.4. IVA y desglose">
           <p>
             Todas las tarifas indicadas en esta Política se expresan{' '}
-            <strong>con IVA incluido</strong> al tipo legal vigente. El desglose
-            detallado de la base imponible, el tipo aplicable y la cuota repercutida
-            figurará en la factura electrónica emitida conforme a la{' '}
-            <Lit>Ley 37/1992</Lit> del IVA.
+            <strong>con IVA incluido</strong> cuando resulte aplicable. El desglose
+            fiscal detallado se reflejará en la factura oficial que se emita, cuando
+            proceda, a través del canal de facturación habilitado por HIPERA.
           </p>
         </Subsection>
 
@@ -479,6 +478,26 @@ export default function PoliticaEnvios() {
             los avisos, HIPERA contactará nuevamente con el Cliente para acordar una
             solución o, en su defecto, cancelar el pedido reembolsando los productos
             no perecederos.
+          </p>
+          <p>
+            Cuando el pedido esté preparado, HIPERA enviará al Cliente un aviso de
+            disponibilidad que incluye un <strong>código de recogida</strong>. Dicho
+            código, junto con la indicación del nombre o teléfono asociados al
+            pedido, sirve para <strong>acreditar la titularidad</strong> del mismo en
+            el mostrador. HIPERA entregará el pedido a quien presente un código de
+            recogida válido, pudiendo solicitar adicionalmente un documento
+            identificativo cuando lo considere necesario (por ejemplo, en pedidos de
+            importe elevado).
+          </p>
+          <p>
+            El código de recogida es <strong>personal y confidencial</strong>. El
+            Cliente es responsable de su custodia y de no divulgarlo a terceros. Al
+            tratarse de la credencial acordada para la entrega, HIPERA no se hace
+            responsable de la entrega del pedido a un tercero que presente un código
+            de recogida válido cuando dicho código haya sido divulgado, extraviado o
+            sustraído por causas ajenas a HIPERA. Si el Cliente sospecha que su código
+            ha sido comprometido, debe comunicarlo a HIPERA lo antes posible y antes
+            de la recogida para que se anule y se emita uno nuevo.
           </p>
         </Subsection>
       </Section>

@@ -32,7 +32,40 @@ const COMPANY_DATA = {
   phone: "+34 918 782 602",
 };
 
-const CSV_IMPORT_FIELDS = ['name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description', 'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible'];
+const TAX_RATE_OPTIONS = [
+  { value: '', label: 'Pendiente' },
+  { value: '4', label: '4% · Superreducido' },
+  { value: '10', label: '10% · Reducido' },
+  { value: '21', label: '21% · General' },
+];
+
+const TAX_CATEGORY_OPTIONS = [
+  { value: '', label: 'Sin clasificar' },
+  { value: 'food_basic', label: 'Alimento básico · 4%' },
+  { value: 'food_general', label: 'Alimento general · 10%' },
+  { value: 'water', label: 'Agua · 10%' },
+  { value: 'alcohol', label: 'Alcohol · 21%' },
+  { value: 'sugary_drink', label: 'Bebida azucarada/edulcorada · 21%' },
+  { value: 'hygiene', label: 'Higiene/cosmética · revisar' },
+  { value: 'cleaning', label: 'Limpieza/hogar · 21%' },
+  { value: 'electronics', label: 'Electrónica/accesorios · 21%' },
+  { value: 'repair_service', label: 'Servicio reparación · 21%' },
+  { value: 'other_21', label: 'Otros · 21%' },
+  { value: 'ask_gestor', label: 'Consultar gestor' },
+];
+
+const TAX_REVIEW_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'needs_review', label: 'Revisar' },
+  { value: 'ask_gestor', label: 'Preguntar gestor' },
+  { value: 'reviewed', label: 'Confirmado' },
+];
+
+const CSV_IMPORT_FIELDS = [
+  'name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description',
+  'tax_rate', 'tax_category', 'tax_review_status', 'tax_note',
+  'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible',
+];
 const CSV_HEADER_ALIASES = {
   name: ['name', 'nombre', 'nombre del producto', 'producto'],
   price: ['price', 'precio', 'precio €'],
@@ -41,6 +74,10 @@ const CSV_HEADER_ALIASES = {
   category: ['category', 'categoria', 'categoría', 'categoria_id'],
   sub_category_id: ['sub_category_id', 'subcategory_id', 'subcategoria', 'sub_category', 'subcategoría'],
   description: ['description', 'descripcion', 'descripción', 'desc'],
+  tax_rate: ['tax_rate', 'iva', 'iva_rate', 'tipo_iva', 'tipo iva', 'vat', 'vat_rate'],
+  tax_category: ['tax_category', 'categoria_iva', 'categoría iva', 'iva_category', 'categoria fiscal'],
+  tax_review_status: ['tax_review_status', 'estado_iva', 'iva_status', 'revision_iva', 'revisión iva'],
+  tax_note: ['tax_note', 'nota_iva', 'iva_note', 'nota fiscal'],
   oferta: ['oferta', 'offer', 'promo', 'en_oferta'],
   oferta_type: ['oferta_type', 'oferta type', 'tipo oferta', 'tipo_oferta'],
   oferta_value: ['oferta_value', 'oferta value', 'valor', 'valor_oferta'],
@@ -48,9 +85,99 @@ const CSV_HEADER_ALIASES = {
   visible: ['visible', 'mostrar', 'show', 'en_tienda', 'visible_en_tienda'],
 };
 
+function normalizeTaxRate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(String(value).replace(',', '.'));
+  return [4, 10, 21].includes(n) ? n : null;
+}
+
+function normalizeTaxStatus(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  const aliases = {
+    pendiente: 'pending',
+    pending: 'pending',
+    revisar: 'needs_review',
+    needs_review: 'needs_review',
+    revision: 'needs_review',
+    revisión: 'needs_review',
+    gestor: 'ask_gestor',
+    ask_gestor: 'ask_gestor',
+    consultar_gestor: 'ask_gestor',
+    confirmado: 'reviewed',
+    confirmada: 'reviewed',
+    reviewed: 'reviewed',
+    revisado: 'reviewed',
+    revisada: 'reviewed',
+  };
+  const v = aliases[raw] || String(value || '').trim();
+  return TAX_REVIEW_STATUS_OPTIONS.some((o) => o.value === v) ? v : 'pending';
+}
+
+function normalizeProductForState(product, fallbackImages = null) {
+  const images = fallbackImages || product.images || (product.image ? [product.image] : []);
+  return {
+    ...product,
+    ofertaType: product.oferta_type,
+    ofertaValue: product.oferta_value,
+    subCategoryId: product.sub_category_id,
+    images,
+    image: images[0] || product.image || '',
+    giftProduct: product.gift_product || false,
+    taxRate: product.tax_rate ?? '',
+    taxCategory: product.tax_category || '',
+    taxReviewStatus: product.tax_review_status || 'pending',
+    taxNote: product.tax_note || '',
+  };
+}
+
+function taxStatusLabel(value) {
+  return TAX_REVIEW_STATUS_OPTIONS.find((o) => o.value === value)?.label || 'Pendiente';
+}
+
+function taxRateLabel(product) {
+  const rate = product?.taxRate ?? product?.tax_rate;
+  return rate === null || rate === undefined || rate === '' ? 'IVA pendiente' : `IVA ${rate}%`;
+}
+
+function taxStatusClass(value) {
+  if (value === 'reviewed') return 'bg-green-50 text-green-700 border-green-200';
+  if (value === 'ask_gestor') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (value === 'needs_review') return 'bg-orange-50 text-orange-700 border-orange-200';
+  return 'bg-gray-50 text-gray-600 border-gray-200';
+}
+
+function isProductReviewed(product) {
+  const hasTaxRate = product?.taxRate !== '' && product?.taxRate !== null && product?.taxRate !== undefined
+    || product?.tax_rate !== '' && product?.tax_rate !== null && product?.tax_rate !== undefined;
+  return hasTaxRate && (product?.taxReviewStatus || product?.tax_review_status) === 'reviewed';
+}
+
+function productNeedsReview(product) {
+  return !isProductReviewed(product);
+}
+
+function productRiskScore(product, orderItemsCount = 0) {
+  let score = 0;
+  if (productNeedsReview(product)) score += 1000;
+  const stock = Number(product?.stock ?? 0);
+  if (stock <= 0) score += 90;
+  else if (stock <= 2) score += 80;
+  else if (stock <= 5) score += 45;
+  if (product?.visible === false) score += 20;
+  if (!product?.taxRate && !product?.tax_rate) score += 80;
+  if (!product?.image && !(product?.images || [])[0]) score += 50;
+  if (!product?.category) score += 40;
+  if (product?.oferta) score += 35;
+  if (product?.giftProduct || product?.gift_product) score += 25;
+  if (orderItemsCount > 0) score += Math.min(120, orderItemsCount * 12);
+  return score;
+}
+
 function parseCSV(text) {
   const raw = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   const lines = raw.split('\n').filter((l) => l.length > 0);
+  const first = lines[0] || '';
+  const delimiter = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : ',';
   const rows = [];
   for (const line of lines) {
     const out = [];
@@ -63,7 +190,7 @@ function parseCSV(text) {
         inQ = !inQ;
         continue;
       }
-      if (!inQ && c === ',') { out.push(cur.trim()); cur = ''; continue; }
+      if (!inQ && c === delimiter) { out.push(cur.trim()); cur = ''; continue; }
       cur += c;
     }
     out.push(cur.trim());
@@ -105,7 +232,7 @@ export default function AdminApp() {
   const [newProduct, setNewProduct] = useState({
     name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
     description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false,
-    visible: true
+    visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: ""
   });
   const [uploading, setUploading] = useState(false);
   const [removingBg, setRemovingBg] = useState(false);
@@ -113,6 +240,7 @@ export default function AdminApp() {
   const [centeringProduct, setCenteringProduct] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProductCategory, setSelectedProductCategory] = useState("");
+  const [productReviewMode, setProductReviewMode] = useState(false);
   // Filtros de la pestaña Pedidos
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("");
@@ -126,6 +254,12 @@ export default function AdminApp() {
   const [refundQtys, setRefundQtys] = useState({}); // { [itemIndex]: cantidad a devolver }
   // Tras reembolsar: aviso al cliente por WhatsApp con un toque.
   const [refundWaModal, setRefundWaModal] = useState(null); // { waLink, emailed, refundType } o null
+  // Tras avisar "listo para recoger": aviso por WhatsApp + código de recogida.
+  const [pickupWaModal, setPickupWaModal] = useState(null); // { waLink, emailed, code } o null
+  const [notifyingId, setNotifyingId] = useState(null); // id del pedido cuyo aviso se está enviando
+  // Cobro en tienda al entregar (pago en tienda / contra reembolso).
+  const [collectTarget, setCollectTarget] = useState(null); // pedido a cobrar+entregar, o null
+  const [collectBusy, setCollectBusy] = useState(false);
   // Detalle de pedido: pedido abierto en el panel lateral, o null.
   const [detailOrder, setDetailOrder] = useState(null);
   // Overlay de ayuda de atajos de teclado.
@@ -173,7 +307,7 @@ export default function AdminApp() {
   //   n              crear (enfocar el formulario de alta)
   //   c              limpiar filtros/búsqueda
   //   r              recargar datos
-  //   f / t / p      (en detalle de pedido) factura / ticket / imprimir
+  //   f / t / p      (en detalle de pedido) justificante / ticket / imprimir
   //   Ctrl/Cmd+Enter (en modal de producto) guardar
   //   ? / Escape     ayuda de atajos / cerrar lo que esté abierto
   useEffect(() => {
@@ -186,7 +320,7 @@ export default function AdminApp() {
       const el = document.getElementById(id);
       if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus(); }
     };
-    const anyModalOpen = !!(detailOrder || refundTarget || refundWaModal || isEditing || importModalOpen || bulkResultModal.open || helpOpen);
+    const anyModalOpen = !!(detailOrder || refundTarget || refundWaModal || pickupWaModal || collectTarget || isEditing || importModalOpen || bulkResultModal.open || helpOpen);
 
     const handler = (e) => {
       // Guardar producto con Ctrl/Cmd+Enter (acción segura, no destructiva).
@@ -204,6 +338,8 @@ export default function AdminApp() {
       if (e.key === 'Escape') {
         if (isTyping(document.activeElement)) { document.activeElement.blur(); return; }
         if (helpOpen) { setHelpOpen(false); return; }
+        if (collectTarget) { if (!collectBusy) setCollectTarget(null); return; }
+        if (pickupWaModal) { setPickupWaModal(null); return; }
         if (refundWaModal) { setRefundWaModal(null); return; }
         if (refundTarget) { setRefundTarget(null); return; }
         if (isEditing) { setIsEditing(false); return; }
@@ -221,7 +357,7 @@ export default function AdminApp() {
       if (e.key === '?') { e.preventDefault(); setHelpOpen(o => !o); return; }
 
       // Atajos del detalle de pedido (sólo acciones seguras).
-      if (detailOrder && !refundTarget && !refundWaModal) {
+      if (detailOrder && !refundTarget && !refundWaModal && !pickupWaModal && !collectTarget) {
         const o = orders.find(x => x.id === detailOrder.id) || detailOrder;
         if (e.key === 'f') { e.preventDefault(); openOrderFactura(o); return; }
         if (e.key === 't') { e.preventDefault(); openOrderTicket(o); return; }
@@ -258,7 +394,7 @@ export default function AdminApp() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTab, detailOrder, refundTarget, refundWaModal, isEditing, importModalOpen, bulkResultModal.open, sidebarOpen, helpOpen, uploading, removingBg, generatingDesc, centeringProduct, orders]);
+  }, [activeTab, detailOrder, refundTarget, refundWaModal, pickupWaModal, collectTarget, collectBusy, isEditing, importModalOpen, bulkResultModal.open, sidebarOpen, helpOpen, uploading, removingBg, generatingDesc, centeringProduct, orders]);
 
   // =================================================================
   // Alerta de pedidos nuevos (sonido + badge + notificación)
@@ -347,15 +483,7 @@ export default function AdminApp() {
             images = [p.image];
           }
           
-          return {
-            ...p, 
-            ofertaType: p.oferta_type, 
-            ofertaValue: p.oferta_value, 
-            subCategoryId: p.sub_category_id,
-            images: images,
-            image: images[0] || p.image || '',
-            giftProduct: p.gift_product || false
-          };
+          return normalizeProductForState(p, images);
         }));
       } else if (pResult.status === 'rejected') {
         console.error("Products error:", pResult.reason);
@@ -543,9 +671,16 @@ export default function AdminApp() {
     }
   };
   
-  const handleSaveProduct = async (e) => {
+  const handleSaveProduct = async (e, options = {}) => {
     e.preventDefault();
     const images = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
+    const shouldSaveAndNext = !!options.saveAndNext;
+    const normalizedTaxRate = normalizeTaxRate(currentProduct.taxRate ?? currentProduct.tax_rate);
+    if (shouldSaveAndNext && normalizedTaxRate === null) {
+      toast.error("Selecciona el IVA antes de marcar el producto como revisado.");
+      return;
+    }
+    const finalTaxStatus = shouldSaveAndNext ? 'reviewed' : normalizeTaxStatus(currentProduct.taxReviewStatus ?? currentProduct.tax_review_status);
     const dbPayload = { 
       name: currentProduct.name, 
       price: currentProduct.price, 
@@ -560,7 +695,13 @@ export default function AdminApp() {
       oferta_type: currentProduct.oferta_type || 'percent', 
       oferta_value: currentProduct.oferta_value || 0,
       gift_product: currentProduct.giftProduct || false,
-      visible: currentProduct.visible !== false
+      visible: currentProduct.visible !== false,
+      tax_rate: normalizedTaxRate,
+      tax_category: currentProduct.taxCategory ?? currentProduct.tax_category ?? '',
+      tax_review_status: finalTaxStatus,
+      tax_note: shouldSaveAndNext && !(currentProduct.taxNote ?? currentProduct.tax_note)
+        ? 'manual pre-launch review'
+        : (currentProduct.taxNote ?? currentProduct.tax_note ?? '')
     };
     
     try {
@@ -568,51 +709,56 @@ export default function AdminApp() {
       if (currentProduct.id) {
         // 更新现有商品
         savedProduct = await apiClient.updateProduct(currentProduct.id, dbPayload);
-        toast.success("Producto actualizado");
         // 直接更新状态中的商品
-        if (savedProduct) {
+        if (savedProduct && !shouldSaveAndNext) {
           setProducts(prev => prev.map(p => {
             if (p.id === currentProduct.id) {
               // 更新商品数据，保持 images 数组
-              return {
-                ...savedProduct,
-                ofertaType: savedProduct.oferta_type,
-                ofertaValue: savedProduct.oferta_value,
-                subCategoryId: savedProduct.sub_category_id,
-                images: images, // 保持前端的多图数组
-                image: images[0] || savedProduct.image || '',
-                giftProduct: savedProduct.gift_product || false
-              };
+              return normalizeProductForState(savedProduct, images);
             }
             return p;
           }));
+          toast.success("Producto actualizado");
         } else {
           // 如果返回数据不完整，重新获取
-          fetchData();
+          if (!shouldSaveAndNext) fetchData();
         }
       } else {
         // 创建新商品
         savedProduct = await apiClient.createProduct(dbPayload);
-        toast.success("Producto creado");
         // 直接添加到状态
-        if (savedProduct) {
-          const newProduct = {
-            ...savedProduct,
-            ofertaType: savedProduct.oferta_type,
-            ofertaValue: savedProduct.oferta_value,
-            subCategoryId: savedProduct.sub_category_id,
-            images: images, // 保持前端的多图数组
-            image: images[0] || savedProduct.image || '',
-            giftProduct: savedProduct.gift_product || false
-          };
-          setProducts(prev => [...prev, newProduct]);
+        if (savedProduct && !shouldSaveAndNext) {
+          setProducts(prev => [...prev, normalizeProductForState(savedProduct, images)]);
+          toast.success("Producto creado");
         } else {
           // 如果返回数据不完整，重新获取
-          fetchData();
+          if (!shouldSaveAndNext) fetchData();
         }
       }
-      setIsEditing(false); 
-      setCurrentProduct(null);
+      if (shouldSaveAndNext) {
+        const normalized = savedProduct
+          ? normalizeProductForState(savedProduct, images)
+          : normalizeProductForState({ ...currentProduct, ...dbPayload }, images);
+        const updated = currentProduct.id
+          ? products.map(p => p.id === currentProduct.id ? normalized : p)
+          : [...products, normalized];
+        setProducts(updated);
+        const baseList = productReviewMode ? updated.filter(productNeedsReview) : updated;
+        const ordered = [...baseList].sort((a, b) => productRiskScore(b) - productRiskScore(a) || Number(a.id || 0) - Number(b.id || 0));
+        const next = ordered.find(p => p.id !== currentProduct.id);
+        if (next) {
+          setCurrentProduct(next);
+          setIsEditing(true);
+          toast.success(`Guardado. Siguiente: #${next.id}`);
+        } else {
+          setCurrentProduct(null);
+          setIsEditing(false);
+          toast.success("Producto guardado. No quedan productos pendientes.");
+        }
+      } else {
+        setIsEditing(false); 
+        setCurrentProduct(null);
+      }
     } catch (error) {
       toast.error("Error al guardar: " + error.message);
       console.error("Error saving product:", error);
@@ -810,6 +956,10 @@ export default function AdminApp() {
               sub_category_id: p.subCategoryId ?? p.sub_category_id, description: p.description || '',
               oferta: p.oferta, oferta_type: p.oferta_type || 'percent', oferta_value: p.oferta_value || 0,
               gift_product: p.giftProduct || false, visible: p.visible !== false,
+              tax_rate: normalizeTaxRate(p.taxRate ?? p.tax_rate),
+              tax_category: p.taxCategory ?? p.tax_category ?? '',
+              tax_review_status: normalizeTaxStatus(p.taxReviewStatus ?? p.tax_review_status),
+              tax_note: p.taxNote ?? p.tax_note ?? '',
               image: newImages[0]
             });
             setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image: newImages[0], images: newImages } : x));
@@ -854,31 +1004,27 @@ export default function AdminApp() {
       oferta_type: newProduct.oferta_type || 'percent',
       oferta_value: newProduct.oferta_value || 0,
       gift_product: newProduct.giftProduct || false,
-      visible: newProduct.visible !== false
+      visible: newProduct.visible !== false,
+      tax_rate: normalizeTaxRate(newProduct.taxRate),
+      tax_category: newProduct.taxCategory || '',
+      tax_review_status: normalizeTaxStatus(newProduct.taxReviewStatus),
+      tax_note: newProduct.taxNote || ''
     };
     try {
       const saved = await apiClient.createProduct(payload);
       toast.success("Producto creado");
       if (saved) {
-        setProducts(prev => [...prev, {
-          ...saved,
-          ofertaType: saved.oferta_type,
-          ofertaValue: saved.oferta_value,
-          subCategoryId: saved.sub_category_id,
-          images: imgs,
-          image: imgs[0] || saved.image || '',
-          giftProduct: saved.gift_product || false
-        }]);
+        setProducts(prev => [...prev, normalizeProductForState(saved, imgs)]);
       } else fetchData();
-      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true });
+      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "" });
     } catch (err) {
       toast.error("Error al crear: " + (err.message || "Error"));
     }
   };
 
   const downloadImportTemplate = () => {
-    const headers = ['name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description', 'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible'];
-    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', 'false', 'percent', '0', 'false', 'true'];
+    const headers = CSV_IMPORT_FIELDS;
+    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', '10', 'food_general', 'pending', 'IVA pendiente de confirmar', 'false', 'percent', '0', 'false', 'true'];
     const lines = [headers.join(','), example.map((v) => (v.includes(',') ? `"${v}"` : v)).join(',')];
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -955,6 +1101,13 @@ export default function AdminApp() {
         setImportProgress({ done: i + 1, total: rows.length, errors });
         continue;
       }
+      const rawTaxRate = get('tax_rate');
+      const taxRate = normalizeTaxRate(rawTaxRate);
+      if (rawTaxRate && taxRate === null) {
+        errors.push({ row: i + 2, msg: 'IVA inválido: usa 4, 10 o 21' });
+        setImportProgress({ done: i + 1, total: rows.length, errors });
+        continue;
+      }
       const payload = {
         name,
         price,
@@ -963,6 +1116,10 @@ export default function AdminApp() {
         category: resolveCategory(get('category')),
         sub_category_id: (() => { const v = get('sub_category_id'); const n = parseInt(v, 10); return (v && !Number.isNaN(n)) ? n : null; })(),
         description: get('description') || '',
+        tax_rate: taxRate,
+        tax_category: get('tax_category') || '',
+        tax_review_status: normalizeTaxStatus(get('tax_review_status')),
+        tax_note: get('tax_note') || '',
         oferta: bool(get('oferta')),
         oferta_type: (get('oferta_type') || 'percent').toLowerCase().replace(/[^a-z]/g, '') === 'second' ? 'second' : (get('oferta_type') || '').toLowerCase().replace(/[^a-z]/g, '') === 'gift' ? 'gift' : 'percent',
         oferta_value: parseFloat((get('oferta_value') || '0').replace(',', '.')) || 0,
@@ -1150,6 +1307,31 @@ export default function AdminApp() {
     }
   };
 
+  // ¿Pedido de pago en tienda / contra reembolso aún sin cobrar?
+  // Detectamos por método de pago (no por estado), para que el botón
+  // "Cobrar y entregar" siga disponible aunque el pedido haya pasado a
+  // "Listo para recoger". Al cobrarlo, payment_method pasa a
+  // "Efectivo/Tarjeta (en tienda)" y el regex deja de coincidir.
+  const isUnpaidCounter = (o) =>
+    /contra\s*reembolso/i.test(o?.payment_method || '') && !['Entregado', 'Cancelado'].includes(o?.status);
+
+  // Marca un pedido de pago en tienda como cobrado + entregado,
+  // registrando el método real (efectivo / tarjeta TPV) para contabilidad.
+  const confirmCollect = async (method) => {
+    if (!collectTarget) return;
+    setCollectBusy(true);
+    try {
+      await apiClient.updateOrderStatus(collectTarget.id, 'Entregado', method);
+      toast.success(`Cobrado (${method}) y entregado`);
+      setCollectTarget(null);
+      fetchData();
+    } catch (error) {
+      toast.error('Error: ' + error.message);
+    } finally {
+      setCollectBusy(false);
+    }
+  };
+
   // Cobra (captura) la retención de tarjeta de un pedido "Autorizado".
   const captureOrder = async (oid) => {
     if (!window.confirm('¿Cobrar ahora el importe retenido de este pedido? El cliente verá el cargo definitivo en su tarjeta.')) return;
@@ -1159,6 +1341,40 @@ export default function AdminApp() {
       fetchData();
     } catch (error) {
       toast.error('Error al cobrar: ' + error.message);
+    }
+  };
+
+  // Código de recogida determinista de 6 dígitos a partir del id del
+  // pedido. DEBE coincidir byte a byte con pickupCode() en
+  // backend/services/email.js para que el número que ve el personal en el
+  // panel sea el mismo que recibe el cliente en su aviso.
+  const pickupCode = (id) => {
+    const s = String(id || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+      h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return String(h % 1000000).padStart(6, '0');
+  };
+
+  // True si el pedido es de recogida en tienda (valor canónico
+  // 'store_pickup'; /recog/ cubre datos antiguos sin delivery_method).
+  const isPickupOrder = (o) => o?.delivery_method === 'store_pickup' || /recog/i.test(o?.address || '');
+
+  // Avisa al cliente de que su pedido de recogida está listo: marca
+  // "Listo para recoger", envía email con el código de recogida y ofrece
+  // avisar por WhatsApp con un toque.
+  const notifyOrderReady = async (oid) => {
+    setNotifyingId(oid);
+    try {
+      const res = await apiClient.notifyOrderReady(oid);
+      toast.success(res?.emailed ? 'Cliente avisado por email · pedido listo' : 'Pedido marcado como listo');
+      setPickupWaModal({ waLink: res?.waLink || null, emailed: !!res?.emailed, code: res?.code || null });
+      fetchData();
+    } catch (error) {
+      toast.error('Error al avisar: ' + error.message);
+    } finally {
+      setNotifyingId(null);
     }
   };
 
@@ -1272,7 +1488,7 @@ export default function AdminApp() {
     y += 5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text(isService ? 'RESGUARDO REPARACION' : 'TICKET DE CAJA', centerX, y, { align: 'center' });
+    doc.text(isService ? 'RESGUARDO REPARACION' : 'JUSTIFICANTE DE PEDIDO', centerX, y, { align: 'center' });
     y += 5;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
@@ -1335,7 +1551,9 @@ export default function AdminApp() {
     y += 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text('(IVA Incluido)', 5, y);
+    doc.text('Precios con impuestos incluidos si corresponde.', 5, y);
+    y += 6;
+    doc.text('No valido como factura fiscal.', 5, y);
     y += 6;
     doc.setFontSize(10);
     doc.text(`Pago: ${(order.payment_method || 'Efectivo/Bizum').toUpperCase()}`, 5, y);
@@ -1380,11 +1598,16 @@ export default function AdminApp() {
       doc.text(order.address || 'Cliente General', 14, 62);
       doc.text(order.phone || '', 14, 67);
       doc.setFont('helvetica', 'bold');
-      doc.text(isService ? 'FACTURA DE SERVICIO' : 'FACTURA SIMPLIFICADA', 140, 55);
+      doc.text('JUSTIFICANTE DE PEDIDO', 140, 55);
       doc.setFont('helvetica', 'normal');
-      doc.text(`Núm: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
+      doc.text(`Pedido: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
       doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString('es-ES')}`, 140, 67);
       doc.text(`Forma de Pago: ${(order.payment_method || 'CONTADO').toUpperCase()}`, 140, 72);
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text('Documento no válido como factura fiscal.', 140, 77);
+      doc.text('Si necesita factura oficial, solicítela con sus datos fiscales.', 140, 81);
+      doc.setTextColor(0, 0, 0);
       const regularItems = (order.items || []).filter(i => !(i.isGift || i.price === 0));
       const giftItems = (order.items || []).filter(i => i.isGift || i.price === 0);
       let startY = 80;
@@ -1392,13 +1615,12 @@ export default function AdminApp() {
         const tableRows = regularItems.map(item => [
           item.name || '',
           item.quantity,
-          `${((item.price || 0) / 1.21).toFixed(2)}`,
-          '21%',
+          `€${(item.price || 0).toFixed(2)}`,
           `€${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`
         ]);
         autoTable(doc, {
           startY,
-          head: [['Descripción', 'Cant.', 'Precio Base', 'IVA', 'TOTAL']],
+          head: [['Descripción', 'Cant.', 'Precio', 'TOTAL']],
           body: tableRows,
           theme: 'grid',
           headStyles: { fillColor: [31, 41, 55] },
@@ -1418,12 +1640,11 @@ export default function AdminApp() {
           `${(item.name || '')} [REGALO]`,
           item.quantity,
           '0.00',
-          '—',
           '€0.00'
         ]);
         autoTable(doc, {
           startY,
-          head: [['Descripción', 'Cant.', 'Precio Base', 'IVA', 'TOTAL']],
+          head: [['Descripción', 'Cant.', 'Precio', 'TOTAL']],
           body: giftRows,
           theme: 'grid',
           headStyles: { fillColor: [180, 80, 120] },
@@ -1455,14 +1676,10 @@ export default function AdminApp() {
           finalY += 5;
         }
       }
-      const subTotal = (order.total || 0) / 1.21;
-      const iva = (order.total || 0) - subTotal;
-      doc.text('Base Imponible:', 160, finalY, { align: 'right' });
-      doc.text(`€${subTotal.toFixed(2)}`, 190, finalY, { align: 'right' });
-      finalY += 5;
-      doc.text('IVA (21%):', 160, finalY, { align: 'right' });
-      doc.text(`€${iva.toFixed(2)}`, 190, finalY, { align: 'right' });
+      doc.setTextColor(120);
+      doc.text('Precios con impuestos incluidos cuando corresponda.', 190, finalY, { align: 'right' });
       finalY += 9;
+      doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
       doc.text('TOTAL A PAGAR:', 160, finalY, { align: 'right' });
@@ -1492,9 +1709,9 @@ export default function AdminApp() {
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      toast.success('Factura abierta');
+      toast.success('Justificante abierto');
     } catch (e) {
-      toast.error('Error al abrir factura: ' + (e.message || 'Error'));
+      toast.error('Error al abrir justificante: ' + (e.message || 'Error'));
     }
   };
 
@@ -1722,7 +1939,7 @@ export default function AdminApp() {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className="font-bold text-gray-800">€{o.total?.toFixed(2)}</span>
-                      <button type="button" onClick={() => openOrderFactura(o)} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600" title="Ver factura">
+                      <button type="button" onClick={() => openOrderFactura(o)} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600" title="Ver justificante">
                         <FileText size={16}/>
                       </button>
                       <button type="button" onClick={() => openOrderTicket(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Ver ticket">
@@ -1744,18 +1961,39 @@ export default function AdminApp() {
 
   const renderProducts = () => {
     const searchLower = searchTerm.toLowerCase().trim();
+    const orderItemCounts = new Map();
+    orders.forEach(o => {
+      (o.items || []).forEach(item => {
+        if (item?.id === undefined || item?.id === null) return;
+        const key = String(item.id);
+        orderItemCounts.set(key, (orderItemCounts.get(key) || 0) + (Number(item.quantity) || 1));
+      });
+    });
+    const reviewStats = {
+      total: products.length,
+      pending: products.filter(productNeedsReview).length,
+      reviewed: products.filter(isProductReviewed).length,
+      noTax: products.filter(p => !p.taxRate && !p.tax_rate).length,
+      lowStock: products.filter(p => Number(p.stock || 0) <= LOW_STOCK_THRESHOLD).length,
+      noImage: products.filter(p => !p.image && !(p.images || [])[0]).length,
+    };
     // El nº tras quitar un '#' inicial permite buscar por id (ej. "#42"
     // o "42") además de por nombre, para casar con el #id que aparece en
     // pedidos y tickets.
     const searchId = searchLower.replace(/^#/, '');
     const isIdQuery = /^\d+$/.test(searchId);
-    const filtered = products.filter(p => {
+    let filtered = products.filter(p => {
       if (!searchLower) return true;
       // id: coincidencia EXACTA (buscar 19 no debe traer 190, 198...).
       if (isIdQuery && String(p.id) === searchId) return true;
       if ((p.name || '').toLowerCase().includes(searchLower)) return true;
       return false;
     });
+    if (productReviewMode) {
+      filtered = filtered
+        .filter(productNeedsReview)
+        .sort((a, b) => productRiskScore(b, orderItemCounts.get(String(b.id)) || 0) - productRiskScore(a, orderItemCounts.get(String(a.id)) || 0) || Number(a.id || 0) - Number(b.id || 0));
+    }
     const isSearching = !!searchLower;
     const catFilter = selectedProductCategory === '' ? null : (selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10));
 
@@ -1785,6 +2023,22 @@ export default function AdminApp() {
       handleReorderProducts(buildProductReorder(cid, subId, ids));
     };
 
+    const openProductForReview = (product) => {
+      if (!product) {
+        toast("No quedan productos pendientes");
+        return;
+      }
+      setCurrentProduct(product);
+      setIsEditing(true);
+    };
+
+    const openNextReviewProduct = () => {
+      const candidates = [...filtered]
+        .filter(productNeedsReview)
+        .sort((a, b) => productRiskScore(b, orderItemCounts.get(String(b.id)) || 0) - productRiskScore(a, orderItemCounts.get(String(a.id)) || 0) || Number(a.id || 0) - Number(b.id || 0));
+      openProductForReview(candidates[0]);
+    };
+
     const renderProductRow = (p, cid, subId, list) => (
       <tr key={p.id} draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
         <td className="p-2 w-10">
@@ -1799,7 +2053,13 @@ export default function AdminApp() {
         </td>
         <td className="p-4">€{p.price}</td>
         <td className="p-4">{p.stock}</td>
-        <td className="p-4 text-right"><button type="button" onClick={() => { setCurrentProduct(p); setIsEditing(true); }} className="text-blue-600 mr-2"><Edit2 size={18}/></button><button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-red-600"><Trash2 size={18}/></button></td>
+        <td className="p-4">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-bold text-gray-800">{taxRateLabel(p)}</span>
+            <span className={`w-fit px-2 py-0.5 rounded-full border text-[11px] font-semibold ${taxStatusClass(p.taxReviewStatus || p.tax_review_status)}`}>{taxStatusLabel(p.taxReviewStatus || p.tax_review_status)}</span>
+          </div>
+        </td>
+        <td className="p-4 text-right"><button type="button" onClick={() => openProductForReview(p)} className="text-blue-600 mr-2"><Edit2 size={18}/></button><button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-red-600"><Trash2 size={18}/></button></td>
       </tr>
     );
 
@@ -1821,15 +2081,58 @@ export default function AdminApp() {
               <span className="font-bold text-gray-800">€{p.price}</span>
               <span className="text-gray-500">Stock: {p.stock}</span>
             </div>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-xs font-bold text-gray-800">{taxRateLabel(p)}</span>
+              <span className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${taxStatusClass(p.taxReviewStatus || p.tax_review_status)}`}>{taxStatusLabel(p.taxReviewStatus || p.tax_review_status)}</span>
+            </div>
           </div>
         </div>
         <div className="flex gap-2 justify-end">
-          <button type="button" onClick={() => { setCurrentProduct(p); setIsEditing(true); }} className="text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 flex items-center gap-1"><Edit2 size={16}/><span className="text-xs">Editar</span></button>
+          <button type="button" onClick={() => openProductForReview(p)} className="text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 flex items-center gap-1"><Edit2 size={16}/><span className="text-xs">Editar</span></button>
           <button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 flex items-center gap-1"><Trash2 size={16}/><span className="text-xs">Eliminar</span></button>
         </div>
         </div>
       </div>
     );
+
+    const exportProductsCsv = () => {
+      const exportRows = filtered.filter(p => {
+        if (catFilter === null) return true;
+        const cid = (p.category != null && p.category !== '') ? Number(p.category) : '__none__';
+        return cid === catFilter;
+      });
+      const headers = ['id', ...CSV_IMPORT_FIELDS];
+      const esc = (v) => {
+        const s = String(v ?? '');
+        return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const rows = exportRows.map(p => [
+        p.id,
+        p.name,
+        p.price,
+        p.stock,
+        p.image || '',
+        p.category ?? '',
+        p.subCategoryId ?? p.sub_category_id ?? '',
+        p.description || '',
+        p.taxRate ?? p.tax_rate ?? '',
+        p.taxCategory ?? p.tax_category ?? '',
+        p.taxReviewStatus ?? p.tax_review_status ?? 'pending',
+        p.taxNote ?? p.tax_note ?? '',
+        p.oferta || false,
+        p.oferta_type || 'percent',
+        p.oferta_value || 0,
+        p.giftProduct || p.gift_product || false,
+        p.visible !== false,
+      ]);
+      const csv = '\uFEFF' + [headers.map(esc).join(';'), ...rows.map(r => r.map(esc).join(';'))].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `productos_iva_hipera_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
 
     return (
       <div className="space-y-4">
@@ -1842,13 +2145,36 @@ export default function AdminApp() {
             ))}
             <option value="_none">Sin categoría</option>
           </select>
+          <button type="button" onClick={() => setProductReviewMode(v => !v)} className={`px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center justify-center gap-2 ${productReviewMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'border border-amber-200 text-amber-700 hover:bg-amber-50'}`}>
+            <CheckCircle size={18}/>
+            {productReviewMode ? 'Modo revisión ON' : 'Modo revisión'}
+          </button>
+          {productReviewMode && (
+            <button type="button" onClick={openNextReviewProduct} className="px-4 py-2 rounded-lg bg-gray-900 text-white font-medium text-sm inline-flex items-center justify-center gap-2 hover:bg-gray-800">
+              <ChevronRight size={18}/>
+              Abrir siguiente
+            </button>
+          )}
           <button type="button" onClick={() => { setImportModalOpen(true); setImportPreview(null); setImportProgress({ done: 0, total: 0, errors: [] }); }} className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium text-sm inline-flex items-center justify-center gap-2 hover:bg-emerald-700">
             <FileSpreadsheet size={18}/>
             Importar CSV
           </button>
+          <button type="button" onClick={exportProductsCsv} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm inline-flex items-center justify-center gap-2 hover:bg-gray-50">
+            <Download size={18}/>
+            Exportar IVA
+          </button>
         </div>
 
-        <p className="text-xs text-gray-500">Arrastra productos (⋮⋮) para cambiar orden en la tienda</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Productos</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.total}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Pendientes</div><div className="text-xl font-extrabold text-amber-700">{reviewStats.pending}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Revisados</div><div className="text-xl font-extrabold text-green-700">{reviewStats.reviewed}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin IVA</div><div className="text-xl font-extrabold text-red-700">{reviewStats.noTax}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Stock bajo</div><div className="text-xl font-extrabold text-orange-700">{reviewStats.lowStock}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin imagen</div><div className="text-xl font-extrabold text-gray-700">{reviewStats.noImage}</div></div>
+        </div>
+
+        <p className="text-xs text-gray-500">{productReviewMode ? 'Modo revisión: se muestran productos pendientes ordenados por riesgo. Revisa precio, stock, imagen, categoría, visibilidad e IVA; luego usa Guardar y siguiente.' : 'Arrastra productos (⋮⋮) para cambiar orden en la tienda'}</p>
         {/* Inline: Añadir producto (form above categories) */}
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
           <h3 className="font-bold text-gray-800 text-lg">Añadir producto nuevo</h3>
@@ -1861,6 +2187,30 @@ export default function AdminApp() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Subcategoría</label><select value={newProduct.subCategoryId || ''} onChange={e => setNewProduct(p => ({ ...p, subCategoryId: e.target.value ? parseInt(e.target.value, 10) : '' }))} disabled={!newProduct.category} className="w-full border p-2 rounded-lg text-sm bg-white"><option value="">—</option>{subCategories.filter(s => s.parent_id === (Number(newProduct.category) || null)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Descripción</label><textarea rows={5} value={newProduct.description || ''} onChange={e => setNewProduct(p => ({ ...p, description: e.target.value }))} placeholder="Opcional. AI puede rellenar con «Extraer información»." className="w-full border p-2 rounded-lg text-sm resize-y min-h-[5rem]"/></div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 rounded-xl border border-amber-100 bg-amber-50/60 p-4">
+            <div>
+              <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
+              <select value={newProduct.taxRate ?? ''} onChange={e => setNewProduct(p => ({ ...p, taxRate: e.target.value }))} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-amber-800 mb-1 block">Categoría fiscal</label>
+              <select value={newProduct.taxCategory || ''} onChange={e => setNewProduct(p => ({ ...p, taxCategory: e.target.value }))} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                {TAX_CATEGORY_OPTIONS.map(o => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-amber-800 mb-1 block">Revisión IVA</label>
+              <select value={newProduct.taxReviewStatus || 'pending'} onChange={e => setNewProduct(p => ({ ...p, taxReviewStatus: e.target.value }))} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                {TAX_REVIEW_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-amber-800 mb-1 block">Nota fiscal</label>
+              <input value={newProduct.taxNote || ''} onChange={e => setNewProduct(p => ({ ...p, taxNote: e.target.value }))} placeholder="Ej: revisar con factura proveedor" className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white"/>
+            </div>
           </div>
           <div className="flex flex-wrap gap-4 items-center">
             <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={newProduct.oferta || false} onChange={e => setNewProduct(p => ({ ...p, oferta: e.target.checked }))} className="rounded"/> <span className="text-sm font-medium">Oferta</span></label>
@@ -1912,7 +2262,7 @@ export default function AdminApp() {
                 <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-hidden">
                   <div className="px-4 py-2 text-xs font-bold text-gray-500 bg-gray-50 border-b">{filtered.length} resultado(s)</div>
                   <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead>
+                    <thead className="bg-gray-50 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead>
                     <tbody className="divide-y">{filtered.map(p => renderProductRow(p, (p.category != null && p.category !== '' ? Number(p.category) : '__none__'), (p.subCategoryId ?? p.sub_category_id ?? '__none__'), filtered))}</tbody>
                   </table>
                 </div>
@@ -1952,7 +2302,7 @@ export default function AdminApp() {
                           (() => {
                             const list = (byCategoryAndSub[cid] || {})['__none__'] || [];
                             return list.length === 0 ? <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos sin categoría.</div> : (
-                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>
+                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>
                             );
                           })()
                         ) : (
@@ -1967,7 +2317,7 @@ export default function AdminApp() {
                                   <span className="flex items-center gap-2 text-sm font-medium text-gray-700"><span className="text-gray-400">{subExpanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</span>{subName}</span>
                                   <span className="text-xs text-gray-500">{list.length} producto{list.length !== 1 ? 's' : ''}</span>
                                 </button>
-                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>)}
+                                {subExpanded && (list.length === 0 ? <div className="px-8 py-6 text-center text-gray-500 text-sm">No hay productos en esta subcategoría.</div> : <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4 pl-8">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>)}
                               </div>
                             );
                           })
@@ -2178,6 +2528,7 @@ const renderRepairs = () => (
     status === 'Entregado' ? 'bg-green-100 text-green-700'
     : status === 'Autorizado' ? 'bg-amber-100 text-amber-700'
     : status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700'
+    : status === 'Listo para recoger' ? 'bg-teal-100 text-teal-700'
     : status === 'Cancelado' ? 'bg-gray-100 text-gray-600'
     : 'bg-blue-100 text-blue-700';
 
@@ -2197,6 +2548,7 @@ const renderRepairs = () => (
     >
       <option>Autorizado</option>
       <option>Procesando</option>
+      <option>Listo para recoger</option>
       <option>Pendiente de Pago</option>
       <option>Enviado</option>
       <option>Entregado</option>
@@ -2204,8 +2556,14 @@ const renderRepairs = () => (
     </select>
   );
 
-  // Botonera de acciones de un pedido (Cobrar / Reembolsar / Factura /
+  // Botonera de acciones de un pedido (Cobrar / Reembolsar / Justificante /
   // Ticket / Imprimir). Reutilizada en el detalle del pedido.
+  // ¿Se puede avisar de que el pedido de recogida está listo? Solo
+  // recogida en tienda y en un estado en el que ya está pagado/preparándose
+  // (no autorizado pendiente de cobro, no cancelado/entregado).
+  const canNotifyReady = (o) =>
+    isPickupOrder(o) && !['Cancelado', 'Autorizado', 'Esperando pago', 'Entregado'].includes(o.status);
+
   const renderOrderActions = (o, btn = 'px-3 py-1.5 text-xs') => (
     <>
       {o.status === 'Autorizado' && (
@@ -2213,13 +2571,23 @@ const renderRepairs = () => (
           <DollarSign size={14}/> Cobrar
         </button>
       )}
+      {canNotifyReady(o) && (
+        <button type="button" onClick={() => notifyOrderReady(o.id)} disabled={notifyingId === o.id} className={`inline-flex items-center gap-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold disabled:opacity-50 ${btn}`} title="Avisar al cliente de que su pedido está listo para recoger">
+          <Bell size={14}/> {notifyingId === o.id ? 'Avisando…' : o.status === 'Listo para recoger' ? 'Reenviar aviso' : 'Avisar: listo'}
+        </button>
+      )}
+      {isUnpaidCounter(o) && (
+        <button type="button" onClick={() => setCollectTarget(o)} className={`inline-flex items-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold ${btn}`} title="Registrar cobro en tienda y marcar entregado">
+          <DollarSign size={14}/> Cobrar y entregar
+        </button>
+      )}
       {o.stripe_payment_intent && o.status !== 'Cancelado' && (
         <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className={`inline-flex items-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold ${btn}`} title="Reembolsar y avisar al cliente">
           <Undo2 size={14}/> Reembolsar
         </button>
       )}
-      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold ${btn}`} title="Ver factura">
-        <FileText size={14}/> Factura
+      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold ${btn}`} title="Ver justificante">
+        <FileText size={14}/> Justificante
       </button>
       <button type="button" onClick={() => openOrderTicket(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Ver ticket">
         <FileText size={14}/> Ticket
@@ -2330,6 +2698,7 @@ const renderRepairs = () => (
               <option>Esperando pago</option>
               <option>Autorizado</option>
               <option>Procesando</option>
+              <option>Listo para recoger</option>
               <option>Pendiente de Pago</option>
               <option>Enviado</option>
               <option>Entregado</option>
@@ -2383,7 +2752,7 @@ const renderRepairs = () => (
                  const paymentMethod = o.payment_method || 'No especificado';
                  const orderDate = o.created_at ? new Date(o.created_at) : null;
                  const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-                 const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
+                 const isPickup = isPickupOrder(o);
                  const isAuth = o.status === 'Autorizado';
                  const hold = isAuth ? authHoldInfo(o) : null;
                  return (
@@ -2412,7 +2781,7 @@ const renderRepairs = () => (
                       <span className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span>
                    </td>
                    <td className="px-4 py-3 align-middle">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {renderStatusSelect(o)}
                         {o.status === 'Autorizado' && (
                           <button
@@ -2422,6 +2791,16 @@ const renderRepairs = () => (
                             title="Cobrar la retención de tarjeta"
                           >
                             <DollarSign size={13}/> Cobrar
+                          </button>
+                        )}
+                        {isUnpaidCounter(o) && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setCollectTarget(o); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold whitespace-nowrap"
+                            title="Registrar cobro en tienda y marcar entregado"
+                          >
+                            <DollarSign size={13}/> Cobrar y entregar
                           </button>
                         )}
                       </div>
@@ -2451,7 +2830,7 @@ const renderRepairs = () => (
             const paymentMethod = o.payment_method || 'No especificado';
             const orderDate = o.created_at ? new Date(o.created_at) : null;
             const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-            const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
+            const isPickup = isPickupOrder(o);
             const isAuth = o.status === 'Autorizado';
             const hold = isAuth ? authHoldInfo(o) : null;
             return (
@@ -2515,7 +2894,7 @@ const renderRepairs = () => (
     const paymentMethod = o.payment_method || 'No especificado';
     const orderDate = o.created_at ? new Date(o.created_at) : null;
     const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-    const isPickup = /recog/i.test(o.address || '') || o.delivery_method === 'pickup';
+    const isPickup = isPickupOrder(o);
     const items = Array.isArray(o.items) ? o.items : [];
     const itemsTotal = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
     return (
@@ -2567,6 +2946,18 @@ const renderRepairs = () => (
               {o.address && <div className="flex items-start gap-1.5 text-gray-600"><MapPin size={13} className="text-gray-400 mt-0.5 flex-shrink-0"/> {o.address}</div>}
               {o.note && <div className="flex items-start gap-1.5 text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2 mt-1"><StickyNote size={13} className="mt-0.5 flex-shrink-0"/> {o.note}</div>}
             </div>
+            {isPickup && (
+              <div className="rounded-lg p-3 bg-teal-50 border border-teal-200">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-teal-700 uppercase"><Bell size={12}/> Código de recogida</div>
+                <div className="mt-1 font-mono text-2xl font-extrabold text-teal-800 tracking-widest">{o.pickup_code || pickupCode(o.id)}</div>
+                <div className="text-xs text-teal-700 mt-1">El cliente debe enseñar este código (va en su aviso) para identificarse al recoger.</div>
+                <div className="flex items-start gap-1.5 mt-2 text-[11px] text-teal-900 bg-teal-100/70 rounded p-2 font-semibold">
+                  <AlertCircle size={13} className="mt-0.5 flex-shrink-0"/>
+                  <span>Antes de entregar: pide también el <strong>teléfono o nombre</strong> y compáralo con el pedido{o.phone ? ` (tel. ${o.phone})` : ''}.</span>
+                </div>
+                {o.status === 'Listo para recoger' && <div className="text-[11px] text-teal-600 mt-1 font-semibold">✓ Cliente ya avisado de que está listo.</div>}
+              </div>
+            )}
             <div>
               <div className="text-[11px] font-bold text-gray-400 uppercase mb-2">Artículos</div>
               <div className="space-y-1">
@@ -2743,6 +3134,76 @@ const renderRepairs = () => (
     );
   };
 
+  // Modal post-aviso "listo para recoger": muestra el código de recogida y
+  // ofrece avisar al cliente por WhatsApp con un toque.
+  const renderPickupWaModal = () => {
+    if (!pickupWaModal) return null;
+    const { waLink, emailed, code } = pickupWaModal;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div className="p-5 text-center">
+            <div className="w-12 h-12 rounded-full bg-teal-100 text-teal-600 flex items-center justify-center mx-auto mb-3"><CheckCircle size={26}/></div>
+            <h3 className="text-lg font-bold text-gray-800 mb-1">Pedido marcado como listo</h3>
+            <p className="text-sm text-gray-500 mb-3">
+              {emailed ? 'Hemos enviado un email al cliente con el código de recogida.' : 'Este pedido no tenía email. Avisa al cliente por WhatsApp.'}
+            </p>
+            {code && (
+              <div className="rounded-xl bg-teal-50 border border-teal-200 p-3 mb-4">
+                <div className="text-[11px] font-bold text-teal-700 uppercase tracking-wide">Código de recogida</div>
+                <div className="font-mono text-2xl font-extrabold text-teal-800 tracking-widest mt-0.5">{code}</div>
+              </div>
+            )}
+            {waLink ? (
+              <a href={waLink} target="_blank" rel="noopener noreferrer" onClick={() => setPickupWaModal(null)} className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-bold mb-2">
+                <MessageCircle size={18}/> Avisar por WhatsApp
+              </a>
+            ) : (
+              <p className="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 mb-2">No hay un teléfono válido para abrir WhatsApp en este pedido.</p>
+            )}
+            <button type="button" onClick={() => setPickupWaModal(null)} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Modal de cobro en tienda: registra cómo se cobró (efectivo / tarjeta)
+  // y marca el pedido como Entregado. Para pedidos de pago en tienda /
+  // contra reembolso (aún sin cobrar).
+  const renderCollectModal = () => {
+    if (!collectTarget) return null;
+    const o = collectTarget;
+    const sid = String(o.id || '').slice(0, 8).toUpperCase();
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div className="flex justify-between items-center p-4 border-b">
+            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><DollarSign size={20} className="text-indigo-600"/> Cobrar y entregar</h3>
+            <button type="button" onClick={() => { if (!collectBusy) setCollectTarget(null); }} className="p-2 hover:bg-gray-100 rounded-full" disabled={collectBusy}><X className="text-gray-500" size={20}/></button>
+          </div>
+          <div className="p-5">
+            <div className="bg-gray-50 rounded-xl p-3 text-sm mb-4">
+              <div className="flex justify-between"><span className="text-gray-500">Pedido</span><span className="font-bold text-gray-800">#{sid}</span></div>
+              <div className="flex justify-between mt-1"><span className="text-gray-500">A cobrar</span><span className="font-extrabold text-indigo-700 text-lg">€{Number(o.total || 0).toFixed(2)}</span></div>
+            </div>
+            <p className="text-sm text-gray-500 mb-3">¿Cómo ha pagado el cliente? Se registrará y el pedido pasará a <strong>Entregado</strong>.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button type="button" disabled={collectBusy} onClick={() => confirmCollect('Efectivo (en tienda)')} className="flex flex-col items-center gap-1 px-4 py-4 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold disabled:opacity-50">
+                <span className="text-2xl">💵</span> Efectivo
+              </button>
+              <button type="button" disabled={collectBusy} onClick={() => confirmCollect('Tarjeta TPV (en tienda)')} className="flex flex-col items-center gap-1 px-4 py-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-50">
+                <CreditCard size={24}/> Tarjeta (TPV)
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-3 text-center">La tarjeta se cobra en el datáfono físico de la tienda; el sitio web no interviene.</p>
+            <button type="button" onClick={() => { if (!collectBusy) setCollectTarget(null); }} disabled={collectBusy} className="w-full mt-3 px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Overlay con la lista de atajos de teclado. Las acciones de riesgo
   // (Cobrar, Reembolsar, Eliminar, IA en lote, Importar CSV) NO tienen
   // atajo a propósito y se indica abajo.
@@ -2781,7 +3242,7 @@ const renderRepairs = () => (
               [<Kbd>r</Kbd>, 'Recargar datos'],
             ]}/>
             <Group title="Detalle de pedido" rows={[
-              [<Kbd>f</Kbd>, 'Abrir factura'],
+              [<Kbd>f</Kbd>, 'Abrir justificante'],
               [<Kbd>t</Kbd>, 'Abrir ticket'],
               [<Kbd>p</Kbd>, 'Imprimir ticket'],
             ]}/>
@@ -2824,7 +3285,7 @@ const renderRepairs = () => (
               <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFileSelect}/>
             </label>
           </div>
-          <p className="text-xs text-gray-500">Cabeceras admitidas: name/nombre, price/precio, stock, image, category, sub_category_id, description, oferta, oferta_type, oferta_value, gift_product. category puede ser ID o nombre.</p>
+          <p className="text-xs text-gray-500">Cabeceras admitidas: name/nombre, price/precio, stock, image, category, sub_category_id, description, tax_rate/iva, tax_category, tax_review_status, tax_note, oferta, oferta_type, oferta_value, gift_product, visible. category puede ser ID o nombre.</p>
           {importPreview && (
             <>
               <div className="font-bold text-gray-800">Vista previa · {importPreview.rows.length} fila{importPreview.rows.length !== 1 ? 's' : ''}</div>
@@ -2953,6 +3414,40 @@ const renderRepairs = () => (
                />
             </div>
 
+            <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-sm text-amber-900">IVA y revisión fiscal</h4>
+                  <p className="text-[11px] text-amber-700">Fase 2: clasificar antes de emitir facturas oficiales.</p>
+                </div>
+                <span className={`px-2 py-1 rounded-full border text-[11px] font-semibold ${taxStatusClass(currentProduct.taxReviewStatus || currentProduct.tax_review_status)}`}>{taxStatusLabel(currentProduct.taxReviewStatus || currentProduct.tax_review_status)}</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
+                  <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                    {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-amber-800 mb-1 block">Categoría fiscal</label>
+                  <select id="product-tax-category" name="product-tax-category" value={currentProduct.taxCategory ?? currentProduct.tax_category ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxCategory: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                    {TAX_CATEGORY_OPTIONS.map(o => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-amber-800 mb-1 block">Estado</label>
+                  <select id="product-tax-review-status" name="product-tax-review-status" value={currentProduct.taxReviewStatus ?? currentProduct.tax_review_status ?? 'pending'} onChange={e => setCurrentProduct({...currentProduct, taxReviewStatus: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                    {TAX_REVIEW_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-amber-800 mb-1 block">Nota fiscal</label>
+                  <input id="product-tax-note" name="product-tax-note" value={currentProduct.taxNote ?? currentProduct.tax_note ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxNote: e.target.value})} placeholder="Motivo, duda o referencia proveedor" className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white"/>
+                </div>
+              </div>
+            </div>
+
             {/* 👇 Mostrar en tienda */}
             <div className="flex items-center gap-2 p-4 rounded-xl border border-gray-200 bg-gray-50">
                 <input type="checkbox" id="product-visible" checked={currentProduct.visible !== false} onChange={e => setCurrentProduct({...currentProduct, visible: e.target.checked})} className="w-4 h-4 rounded"/>
@@ -3068,7 +3563,14 @@ const renderRepairs = () => (
                 <select id="product-subcategory" name="product-subcategory" value={currentProduct.subCategoryId || ""} onChange={e => setCurrentProduct({...currentProduct, subCategoryId: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg" disabled={!currentProduct.category}><option value="">Subcategoría</option>{filteredSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
             </div>
 
-            <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
+              {productReviewMode && currentProduct.id && (
+                <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">
+                  Guardar y siguiente
+                </button>
+              )}
+            </div>
           </form>
         </div>
       </div>
@@ -3227,6 +3729,8 @@ const renderRepairs = () => (
       {detailOrder && renderOrderDetailModal()}
       {refundTarget && renderRefundModal()}
       {refundWaModal && renderRefundWaModal()}
+      {pickupWaModal && renderPickupWaModal()}
+      {collectTarget && renderCollectModal()}
       {helpOpen && renderShortcutsHelp()}
 
       {/* Bulk AI: barra fija abajo cuando hay selección en Productos */}

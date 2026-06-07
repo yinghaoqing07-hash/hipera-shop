@@ -261,8 +261,10 @@ export default function TerminosCondiciones() {
           ello genere responsabilidad alguna frente al usuario.
         </p>
         <p>
-          Las facturas se emiten en formato electrónico (PDF), conforme a la Ley 37/1992
-          del IVA, y se ponen a disposición del cliente en su cuenta y/o por correo.
+          El documento descargable desde la web es un justificante de pedido. Si el
+          Cliente necesita factura oficial, deberá solicitarla aportando sus datos
+          fiscales completos; HIPERA la emitirá, cuando proceda, a través del canal
+          de facturación oficial habilitado para ello.
         </p>
         <Subsection title="6.1 Autorización y cobro de los pagos">
           <p>

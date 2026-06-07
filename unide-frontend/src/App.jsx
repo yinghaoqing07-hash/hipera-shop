@@ -1,6 +1,6 @@
 // jsPDF + jspdf-autotable + qrcode ahora se cargan a demanda desde
 // src/utils/orderDocuments.js (dynamic import) cuando el cliente pulsa
-// "Descargar factura/ticket". Mantener estos imports estáticos antes
+// "Descargar justificante/ticket". Mantener estos imports estáticos antes
 // metía ~700 KB de PDF tooling en el bundle inicial de la home, pese
 // a que la mayoría de visitantes no descarga ningún PDF.
 //
@@ -1159,11 +1159,11 @@ export default function App() {
     }));
   };
 
-  // generateInvoice — descarga factura A4 + ticket 80mm
+  // generateInvoice — descarga justificante A4 + ticket no fiscal 80mm
   // ----------------------------------------------------
   // Dynamic import de jsPDF + QRCode + autoTable: estas librerías
   // pesan ~700 KB en conjunto y la mayoría de clientes nunca pulsa
-  // "Descargar factura". Las cargamos sólo cuando se necesita.
+  // "Descargar justificante". Las cargamos sólo cuando se necesita.
   // El import es muy rápido en segundas llamadas (cacheado por el
   // browser). El toast informativo es opcional pero útil porque
   // en conexiones lentas la primera descarga puede tardar ~1s en
@@ -1497,8 +1497,8 @@ export default function App() {
       // 重置免费商品选择
       setSelectedGift(null);
       
-      // 询问用户是否下载票据
-      if(window.confirm("Pago completado. ¿Quieres descargar los recibos?")) {
+      // 询问用户是否下载订单凭证
+      if(window.confirm("Pago completado. ¿Quieres descargar los justificantes de pedido?")) {
          // Cargamos el módulo de generación de PDFs UNA SOLA VEZ
          // aquí; las llamadas siguientes a generateDocuments en este
          // bloque ya tienen el chunk cacheado. Esto evita downloads
@@ -1512,15 +1512,15 @@ export default function App() {
          const productTotal = productItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
          const serviceTotal = serviceItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
          
-         // 如果同时有商品和服务，生成两张发票
-         if (productItems.length > 0 && serviceItems.length > 0) {
-            // 商品发票 — el descuento del cupón (sobre el subtotal) se
-            // refleja en la factura de productos.
+          // 如果同时有商品和服务，生成两张订单凭证
+          if (productItems.length > 0 && serviceItems.length > 0) {
+             // Justificante de productos — el descuento del cupón (sobre el subtotal) se
+            // refleja en el justificante de productos.
             const productOrder = {
                id: orderData?.id || Math.random().toString(36).substr(2, 9),
                created_at: orderData?.created_at || new Date().toISOString(),
                items: productItems,
-               // El envío (si lo hay) se factura junto a los productos.
+               // El envío (si lo hay) se muestra junto a los productos.
                total: Math.max(0, Math.round((productTotal - discount + shippingFee) * 100) / 100),
                discount,
                couponCode: appliedCoupon?.code || null,
@@ -1533,7 +1533,7 @@ export default function App() {
             // 稍等片刻，避免浏览器阻止多个下载
             await new Promise(resolve => setTimeout(resolve, 500));
             
-            // 维修服务发票
+            // Justificante de servicio de reparación
             const serviceOrder = {
                id: (orderData?.id || Math.random().toString(36).substr(2, 9)) + '-SERV',
                created_at: orderData?.created_at || new Date().toISOString(),
@@ -1545,7 +1545,7 @@ export default function App() {
             };
             await generateDocuments(serviceOrder, 'both');
          } else {
-            // 只有一种类型，生成一张发票（必须用 finalCart 才能包含礼品）
+             // 只有一种类型，生成一张订单凭证（必须用 finalCart 才能包含礼品）
             const orderForDocuments = {
                id: orderData?.id || Math.random().toString(36).substr(2, 9),
                created_at: orderData?.created_at || new Date().toISOString(),
@@ -2235,7 +2235,7 @@ export default function App() {
                   onClick={() => generateInvoice(queryOrder)} 
                   className="mt-4 w-full border-2 border-red-600 text-red-600 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 hover:bg-red-50 transition-colors"
                 >
-                  <Download size={18}/> Descargar Factura / Ticket
+                  <Download size={18}/> Descargar justificante de pedido
                 </button>
               </div>
             </div>
@@ -2315,7 +2315,7 @@ export default function App() {
                       onClick={() => generateInvoice(order)} 
                       className="mt-4 w-full border border-gray-200 py-2 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
                     >
-                      <Download size={16}/> Descargar Factura / Ticket
+                      <Download size={16}/> Descargar justificante de pedido
                     </button>
                   </div>
                 ))}

@@ -1,8 +1,8 @@
 // =====================================================================
-// orderDocuments — Generación de Factura A4 + Ticket 80 mm en PDF
+// orderDocuments — Generación de justificante A4 + ticket 80 mm en PDF
 // =====================================================================
 // Aislado en un módulo aparte para que jsPDF + jspdf-autotable + qrcode
-// se carguen únicamente cuando un cliente descarga su factura/ticket.
+// se carguen únicamente cuando un cliente descarga su justificante/ticket.
 // Antes vivía dentro de src/App.jsx con `import jsPDF from 'jspdf'`
 // (estático), lo que metía ~700 KB de dependencias en el bundle
 // principal de la home y bloqueaba el primer paint para todos los
@@ -45,8 +45,8 @@ export const generateDocuments = async (order, type = 'both') => {
     margin: 2,
   });
 
-  // --- Plantilla A: Factura A4 ---
-  const createA4Invoice = () => {
+  // --- Plantilla A: justificante A4 (no fiscal) ---
+  const createA4Justificante = () => {
     const doc = new jsPDF();
 
     // 1. Header
@@ -75,11 +75,16 @@ export const generateDocuments = async (order, type = 'both') => {
     doc.text(order.phone || '', 14, 67);
 
     doc.setFont('helvetica', 'bold');
-    doc.text(isService ? 'FACTURA DE SERVICIO' : 'FACTURA SIMPLIFICADA', 140, 55);
+    doc.text('JUSTIFICANTE DE PEDIDO', 140, 55);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Núm: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
+    doc.text(`Pedido: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
     doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 67);
     doc.text(`Forma de Pago: ${order.payment_method?.toUpperCase() || 'CONTADO'}`, 140, 72);
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text('Documento no válido como factura fiscal.', 140, 77);
+    doc.text('Si necesita factura oficial, solicítela con sus datos fiscales.', 140, 81);
+    doc.setTextColor(0, 0, 0);
 
     // 3. Tablas: productos y regalos por separado
     const regularItems = order.items.filter(item => !(item.isGift || item.price === 0));
@@ -91,13 +96,12 @@ export const generateDocuments = async (order, type = 'both') => {
       const tableRows = regularItems.map(item => [
         item.name,
         item.quantity,
-        `${(item.price / 1.21).toFixed(2)}`,
-        '21%',
+        `€${item.price.toFixed(2)}`,
         `€${(item.price * item.quantity).toFixed(2)}`,
       ]);
       autoTable(doc, {
         startY,
-        head: [['Descripción', 'Cant.', 'Precio Base', 'IVA', 'TOTAL']],
+        head: [['Descripción', 'Cant.', 'Precio', 'TOTAL']],
         body: tableRows,
         theme: 'grid',
         headStyles: { fillColor: [31, 41, 55] },
@@ -118,12 +122,11 @@ export const generateDocuments = async (order, type = 'both') => {
         `${item.name} [REGALO]`,
         item.quantity,
         '0.00',
-        '—',
         '€0.00',
       ]);
       autoTable(doc, {
         startY,
-        head: [['Descripción', 'Cant.', 'Precio Base', 'IVA', 'TOTAL']],
+        head: [['Descripción', 'Cant.', 'Precio', 'TOTAL']],
         body: giftRows,
         theme: 'grid',
         headStyles: { fillColor: [180, 80, 120] },
@@ -160,16 +163,10 @@ export const generateDocuments = async (order, type = 'both') => {
       }
     }
 
-    const subTotal = order.total / 1.21;
-    const iva = order.total - subTotal;
-
-    doc.text('Base Imponible:', 160, finalY, { align: 'right' });
-    doc.text(`€${subTotal.toFixed(2)}`, 190, finalY, { align: 'right' });
-    finalY += 5;
-
-    doc.text('IVA (21%):', 160, finalY, { align: 'right' });
-    doc.text(`€${iva.toFixed(2)}`, 190, finalY, { align: 'right' });
+    doc.setTextColor(120);
+    doc.text('Precios con impuestos incluidos cuando corresponda.', 190, finalY, { align: 'right' });
     finalY += 9;
+    doc.setTextColor(0, 0, 0);
 
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
@@ -206,7 +203,7 @@ export const generateDocuments = async (order, type = 'both') => {
     doc.text('Escanea para ver tu pedido online', 42, 260);
     doc.text('Gracias por su visita.', 42, 265);
 
-    doc.save(`Factura_${order.id.slice(0, 8)}.pdf`);
+    doc.save(`Justificante_${order.id.slice(0, 8)}.pdf`);
   };
 
   // --- Plantilla B: Ticket térmico 80 mm ---
@@ -240,7 +237,7 @@ export const generateDocuments = async (order, type = 'both') => {
     y += 5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text(isService ? 'RESGUARDO REPARACION' : 'TICKET DE CAJA', centerX, y, { align: 'center' });
+    doc.text(isService ? 'RESGUARDO REPARACION' : 'JUSTIFICANTE DE PEDIDO', centerX, y, { align: 'center' });
     y += 5;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
@@ -305,7 +302,9 @@ export const generateDocuments = async (order, type = 'both') => {
     y += 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text('(IVA Incluido)', 5, y);
+    doc.text('Precios con impuestos incluidos si corresponde.', 5, y);
+    y += 6;
+    doc.text('No valido como factura fiscal.', 5, y);
     y += 6;
     doc.setFontSize(10);
     doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'Efectivo/Bizum'}`, 5, y);
@@ -329,7 +328,7 @@ export const generateDocuments = async (order, type = 'both') => {
   };
 
   // Ejecutar descarga(s)
-  if (type === 'invoice' || type === 'both') createA4Invoice();
+  if (type === 'invoice' || type === 'both') createA4Justificante();
   if (type === 'ticket' || type === 'both') {
     // Pequeño delay para evitar que el navegador bloquee el segundo
     // diálogo de descarga (algunos popup blockers lo cuentan como

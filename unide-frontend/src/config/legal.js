@@ -220,9 +220,15 @@ export const RETURNS_UPDATED_AT = '2026-06-04';
 // mismo día al abrir (en lugar de "fuera del horario → día siguiente",
 // que era inexacto de madrugada). Cambio menor/informativo: no requiere
 // re-aceptación (SHIPPING_VERSION se mantiene).
+// 1.2 → 1.3 (2026-06-06): se amplía §5.6 (recogida en tienda) para
+// describir el código de recogida como credencial de entrega, la posible
+// solicitud de documento identificativo y la responsabilidad del Cliente
+// en la custodia y confidencialidad del código. Cambio menor/aclaratorio:
+// no altera derechos del Cliente ni el procedimiento esencial; no requiere
+// re-aceptación (SHIPPING_VERSION se mantiene).
 export const SHIPPING_VERSION = 1;
-export const SHIPPING_DOCUMENT_VERSION = '1.2';
-export const SHIPPING_UPDATED_AT = '2026-06-04';
+export const SHIPPING_DOCUMENT_VERSION = '1.3';
+export const SHIPPING_UPDATED_AT = '2026-06-06';
 
 // --- Política de Cookies ---
 // Documento independiente exigido por el Art. 22.2 LSSI-CE y la Guía

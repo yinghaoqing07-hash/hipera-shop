@@ -1,0 +1,32 @@
+-- =====================================================================
+-- Migración: orders.pickup_code
+-- =====================================================================
+-- Añade la columna pickup_code a la tabla `orders`.
+--
+-- Es el "código de recogida" que el cliente debe presentar en el
+-- mostrador para retirar un pedido de recogida en tienda. Sirve de
+-- comprobante de que el pedido es suyo.
+--
+-- Por qué una columna (y no derivarlo del id):
+--   El esquema anterior calculaba el código de forma DETERMINISTA a
+--   partir del id del pedido (un UUID). Como el UUID aparece en el
+--   enlace de seguimiento del email (?order=...), "filtrar el enlace"
+--   equivalía a poder deducir el código. Con un valor ALEATORIO
+--   almacenado, el código es independiente del id: filtrar el enlace ya
+--   no compromete el código.
+--
+-- La columna es NULLABLE: los pedidos antiguos (sin código almacenado)
+-- siguen funcionando porque el backend cae al cálculo determinista como
+-- fallback. Sólo los pedidos NUEVOS de recogida en tienda reciben un
+-- código aleatorio persistido.
+--
+-- Seguridad: el código NO se expone en el endpoint público de
+-- seguimiento (GET /api/orders/:id), sólo en el panel admin, el email y
+-- el ticket. Mantener así.
+--
+-- Ejecutar en Supabase → SQL Editor ANTES de desplegar el backend que
+-- escribe esta columna (de lo contrario los INSERT fallarían).
+-- =====================================================================
+
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS pickup_code text;
