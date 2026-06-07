@@ -2,5 +2,17 @@
 .codex-*
 **/.codex-*
 
+# Documentación interna / orquestación multi-agente (no versionar)
+.hipera-ops/
+HIPERA_MULTI_AGENT_WORKFLOW.md
+HIPERA_OPERATIONS.md
+HIPERA_TAX_COMPLIANCE_ROADMAP.md
+**/HIPERA_TAX_COMPLIANCE_ROADMAP.md
+tools/codex-mobile-mode/
+**/tools/codex-mobile-mode/
+
+# Capturas locales del TPV / material de trabajo
+pos.png/
+
 # Logs locales del dev server
 *.log
