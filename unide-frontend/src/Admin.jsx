@@ -64,7 +64,7 @@ const TAX_REVIEW_STATUS_OPTIONS = [
 const CSV_IMPORT_FIELDS = [
   'name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description',
   'tax_rate', 'tax_category', 'tax_review_status', 'tax_note',
-  'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible',
+  'image_needs_optimization', 'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible',
 ];
 const CSV_HEADER_ALIASES = {
   name: ['name', 'nombre', 'nombre del producto', 'producto'],
@@ -78,6 +78,7 @@ const CSV_HEADER_ALIASES = {
   tax_category: ['tax_category', 'categoria_iva', 'categoría iva', 'iva_category', 'categoria fiscal'],
   tax_review_status: ['tax_review_status', 'estado_iva', 'iva_status', 'revision_iva', 'revisión iva'],
   tax_note: ['tax_note', 'nota_iva', 'iva_note', 'nota fiscal'],
+  image_needs_optimization: ['image_needs_optimization', 'foto_revisar', 'foto optimizar', 'imagen_revisar', 'image_review'],
   oferta: ['oferta', 'offer', 'promo', 'en_oferta'],
   oferta_type: ['oferta_type', 'oferta type', 'tipo oferta', 'tipo_oferta'],
   oferta_value: ['oferta_value', 'oferta value', 'valor', 'valor_oferta'],
@@ -115,6 +116,7 @@ function normalizeTaxStatus(value) {
 
 function normalizeProductForState(product, fallbackImages = null) {
   const images = fallbackImages || product.images || (product.image ? [product.image] : []);
+  const hasImageReviewField = Object.prototype.hasOwnProperty.call(product || {}, 'image_needs_optimization');
   return {
     ...product,
     ofertaType: product.oferta_type,
@@ -127,6 +129,8 @@ function normalizeProductForState(product, fallbackImages = null) {
     taxCategory: product.tax_category || '',
     taxReviewStatus: product.tax_review_status || 'pending',
     taxNote: product.tax_note || '',
+    imageNeedsOptimization: Boolean(product.image_needs_optimization),
+    hasImageReviewField,
   };
 }
 
@@ -154,6 +158,10 @@ function isProductReviewed(product) {
 
 function productNeedsReview(product) {
   return !isProductReviewed(product);
+}
+
+function productHasImageReviewField(product) {
+  return !!product?.hasImageReviewField || Object.prototype.hasOwnProperty.call(product || {}, 'image_needs_optimization');
 }
 
 function parseCSV(text) {
@@ -215,7 +223,7 @@ export default function AdminApp() {
   const [newProduct, setNewProduct] = useState({
     name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
     description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false,
-    visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: ""
+    visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "", imageNeedsOptimization: false
   });
   const [uploading, setUploading] = useState(false);
   const [removingBg, setRemovingBg] = useState(false);
@@ -224,6 +232,7 @@ export default function AdminApp() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProductCategory, setSelectedProductCategory] = useState("");
   const [productReviewMode, setProductReviewMode] = useState(false);
+  const [imageOptimizationOnly, setImageOptimizationOnly] = useState(false);
   // Filtros de la pestaña Pedidos
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("");
@@ -372,7 +381,7 @@ export default function AdminApp() {
       }
       if (e.key === 'c') {
         if (activeTab === 'orders') { e.preventDefault(); setOrderSearch(''); setOrderStatusFilter(''); setOrderDateFrom(''); setOrderDateTo(''); return; }
-        if (activeTab === 'products') { e.preventDefault(); setSearchTerm(''); setSelectedProductCategory(''); return; }
+        if (activeTab === 'products') { e.preventDefault(); setSearchTerm(''); setSelectedProductCategory(''); setImageOptimizationOnly(false); return; }
       }
     };
     window.addEventListener('keydown', handler);
@@ -717,6 +726,10 @@ export default function AdminApp() {
       toast.error("Selecciona el IVA antes de marcar el producto como revisado.");
       return;
     }
+    if (currentProduct.imageNeedsOptimization && !productHasImageReviewField(currentProduct)) {
+      toast.error("Primero ejecuta la migración image_needs_optimization en Supabase.");
+      return;
+    }
     const finalTaxStatus = shouldSaveAndNext ? 'reviewed' : normalizeTaxStatus(currentProduct.taxReviewStatus ?? currentProduct.tax_review_status);
     const dbPayload = { 
       name: currentProduct.name, 
@@ -740,6 +753,9 @@ export default function AdminApp() {
         ? 'manual pre-launch review'
         : (currentProduct.taxNote ?? currentProduct.tax_note ?? '')
     };
+    if (productHasImageReviewField(currentProduct)) {
+      dbPayload.image_needs_optimization = !!currentProduct.imageNeedsOptimization;
+    }
     
     try {
       let savedProduct;
@@ -1047,13 +1063,16 @@ export default function AdminApp() {
       tax_review_status: normalizeTaxStatus(newProduct.taxReviewStatus),
       tax_note: newProduct.taxNote || ''
     };
+    if (newProduct.imageNeedsOptimization) {
+      payload.image_needs_optimization = true;
+    }
     try {
       const saved = await apiClient.createProduct(payload);
       toast.success("Producto creado");
       if (saved) {
         setProducts(prev => [...prev, normalizeProductForState(saved, imgs)]);
       } else fetchData();
-      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "" });
+      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "", imageNeedsOptimization: false });
     } catch (err) {
       toast.error("Error al crear: " + (err.message || "Error"));
     }
@@ -1061,7 +1080,7 @@ export default function AdminApp() {
 
   const downloadImportTemplate = () => {
     const headers = CSV_IMPORT_FIELDS;
-    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', '10', 'food_general', 'pending', 'IVA pendiente de confirmar', 'false', 'percent', '0', 'false', 'true'];
+    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', '10', 'food_general', 'pending', 'IVA pendiente de confirmar', 'false', 'false', 'percent', '0', 'false', 'true'];
     const lines = [headers.join(','), example.map((v) => (v.includes(',') ? `"${v}"` : v)).join(',')];
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -1157,6 +1176,7 @@ export default function AdminApp() {
         tax_category: get('tax_category') || '',
         tax_review_status: normalizeTaxStatus(get('tax_review_status')),
         tax_note: get('tax_note') || '',
+        image_needs_optimization: bool(get('image_needs_optimization')),
         oferta: bool(get('oferta')),
         oferta_type: (get('oferta_type') || 'percent').toLowerCase().replace(/[^a-z]/g, '') === 'second' ? 'second' : (get('oferta_type') || '').toLowerCase().replace(/[^a-z]/g, '') === 'gift' ? 'gift' : 'percent',
         oferta_value: parseFloat((get('oferta_value') || '0').replace(',', '.')) || 0,
@@ -2005,6 +2025,7 @@ export default function AdminApp() {
       noTax: products.filter(p => !p.taxRate && !p.tax_rate).length,
       lowStock: products.filter(p => Number(p.stock || 0) <= LOW_STOCK_THRESHOLD).length,
       noImage: products.filter(p => !p.image && !(p.images || [])[0]).length,
+      imageNeedsOptimization: products.filter(p => p.imageNeedsOptimization || p.image_needs_optimization).length,
     };
     // El nº tras quitar un '#' inicial permite buscar por id (ej. "#42"
     // o "42") además de por nombre, para casar con el #id que aparece en
@@ -2020,6 +2041,9 @@ export default function AdminApp() {
     });
     if (productReviewMode) {
       filtered = getManualReviewOrderedProducts(filtered.filter(productNeedsReview));
+    }
+    if (imageOptimizationOnly) {
+      filtered = filtered.filter(p => p.imageNeedsOptimization || p.image_needs_optimization);
     }
     const isSearching = !!searchLower;
     const catFilter = selectedProductCategory === '' ? null : (selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10));
@@ -2079,7 +2103,13 @@ export default function AdminApp() {
         </td>
         <td className="p-4 flex items-center gap-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100"/>
-          <div><div className="font-bold">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>{p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}</div>
+          <div>
+            <div className="font-bold">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
+              {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="text-purple-700 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
+            </div>
+          </div>
         </td>
         <td className="p-4">€{p.price}</td>
         <td className="p-4">{p.stock}</td>
@@ -2106,7 +2136,10 @@ export default function AdminApp() {
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-12 h-12 rounded object-cover bg-gray-100 flex-shrink-0"/>
           <div className="flex-1 min-w-0">
             <div className="font-bold text-gray-800 truncate">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
-            {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
+            <div className="flex flex-wrap gap-1 mt-1">
+              {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
+              {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="text-purple-700 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
+            </div>
             <div className="flex items-center gap-4 mt-2 text-sm">
               <span className="font-bold text-gray-800">€{p.price}</span>
               <span className="text-gray-500">Stock: {p.stock}</span>
@@ -2149,6 +2182,7 @@ export default function AdminApp() {
         p.taxCategory ?? p.tax_category ?? '',
         p.taxReviewStatus ?? p.tax_review_status ?? 'pending',
         p.taxNote ?? p.tax_note ?? '',
+        p.imageNeedsOptimization ?? p.image_needs_optimization ?? false,
         p.oferta || false,
         p.oferta_type || 'percent',
         p.oferta_value || 0,
@@ -2185,6 +2219,10 @@ export default function AdminApp() {
               Abrir siguiente
             </button>
           )}
+          <button type="button" onClick={() => setImageOptimizationOnly(v => !v)} className={`px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center justify-center gap-2 ${imageOptimizationOnly ? 'bg-purple-600 text-white hover:bg-purple-700' : 'border border-purple-200 text-purple-700 hover:bg-purple-50'}`}>
+            <ImageIcon size={18}/>
+            Fotos marcadas
+          </button>
           <button type="button" onClick={() => { setImportModalOpen(true); setImportPreview(null); setImportProgress({ done: 0, total: 0, errors: [] }); }} className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium text-sm inline-flex items-center justify-center gap-2 hover:bg-emerald-700">
             <FileSpreadsheet size={18}/>
             Importar CSV
@@ -2195,13 +2233,14 @@ export default function AdminApp() {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Productos</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.total}</div></div>
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Pendientes</div><div className="text-xl font-extrabold text-amber-700">{reviewStats.pending}</div></div>
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Revisados</div><div className="text-xl font-extrabold text-green-700">{reviewStats.reviewed}</div></div>
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin IVA</div><div className="text-xl font-extrabold text-red-700">{reviewStats.noTax}</div></div>
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Stock bajo</div><div className="text-xl font-extrabold text-orange-700">{reviewStats.lowStock}</div></div>
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin imagen</div><div className="text-xl font-extrabold text-gray-700">{reviewStats.noImage}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Foto revisar</div><div className="text-xl font-extrabold text-purple-700">{reviewStats.imageNeedsOptimization}</div></div>
         </div>
 
         <p className="text-xs text-gray-500">{productReviewMode ? 'Modo revisión: se muestran productos pendientes por orden de categoría/subcategoría. Si filtras una categoría, Abrir siguiente y Guardar y siguiente continúan dentro de esa categoría.' : 'Arrastra productos (⋮⋮) para cambiar orden en la tienda'}</p>
@@ -3315,7 +3354,7 @@ const renderRepairs = () => (
               <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFileSelect}/>
             </label>
           </div>
-          <p className="text-xs text-gray-500">Cabeceras admitidas: name/nombre, price/precio, stock, image, category, sub_category_id, description, tax_rate/iva, tax_category, tax_review_status, tax_note, oferta, oferta_type, oferta_value, gift_product, visible. category puede ser ID o nombre.</p>
+          <p className="text-xs text-gray-500">Cabeceras admitidas: name/nombre, price/precio, stock, image, category, sub_category_id, description, tax_rate/iva, tax_category, tax_review_status, tax_note, image_needs_optimization, oferta, oferta_type, oferta_value, gift_product, visible. category puede ser ID o nombre.</p>
           {importPreview && (
             <>
               <div className="font-bold text-gray-800">Vista previa · {importPreview.rows.length} fila{importPreview.rows.length !== 1 ? 's' : ''}</div>
@@ -3414,14 +3453,78 @@ const renderRepairs = () => (
       ? currentProduct.images
       : (currentProduct?.image ? [currentProduct.image] : []);
     const primaryProductImage = productImages[0];
+    const isReviewModal = productReviewMode && !!currentProduct?.id;
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 backdrop-blur-sm animate-fade-in">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-4 sm:p-6 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-center mb-6">
+        <div className={`bg-white rounded-2xl shadow-2xl w-full ${isReviewModal ? 'max-w-5xl p-3 sm:p-4' : 'max-w-2xl p-4 sm:p-6'} max-h-[95vh] sm:max-h-[90vh] overflow-y-auto`}>
+          <div className={`flex justify-between items-center ${isReviewModal ? 'mb-3' : 'mb-6'}`}>
             <h3 className="text-xl font-bold text-gray-800">{currentProduct.id ? 'Editar' : 'Nuevo'} Producto</h3>
             <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="text-gray-500" size={20}/></button>
           </div>
-          <form onSubmit={handleSaveProduct} className="space-y-4">
+          <form onSubmit={handleSaveProduct} className={isReviewModal ? 'space-y-0' : 'space-y-4'}>
+            {isReviewModal ? (
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] gap-3 lg:gap-4">
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden min-h-0">
+                  <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-gray-200 bg-white">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-gray-500 uppercase">Imagen principal</div>
+                      <div className="text-sm font-semibold text-gray-800 truncate">{currentProduct.name || 'Producto sin nombre'}</div>
+                    </div>
+                    <span className="text-xs font-mono text-gray-400 flex-shrink-0">#{currentProduct.id}</span>
+                  </div>
+                  <div className="h-56 sm:h-72 lg:h-[430px] flex items-center justify-center bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]">
+                    {primaryProductImage ? (
+                      <img src={primaryProductImage} alt={currentProduct.name || 'Producto'} className="max-h-full max-w-full object-contain p-2"/>
+                    ) : (
+                      <div className="text-center text-gray-400">
+                        <ImageIcon size={44} className="mx-auto mb-2 opacity-60"/>
+                        <div className="text-sm font-medium">Sin imagen principal</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label>
+                    <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm resize-none min-h-[4.5rem]" placeholder="Nombre completo del producto"/>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
+                    <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
+                    <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                      {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+
+                  <label className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer">
+                    <input type="checkbox" id="product-visible" checked={currentProduct.visible !== false} onChange={e => setCurrentProduct({...currentProduct, visible: e.target.checked})} className="w-4 h-4 rounded"/>
+                    <span className="font-bold text-sm text-gray-800">Mostrar en tienda</span>
+                  </label>
+
+                  <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'}`}>
+                    <input type="checkbox" checked={!!currentProduct.imageNeedsOptimization} onChange={e => setCurrentProduct({...currentProduct, imageNeedsOptimization: e.target.checked})} className="w-4 h-4 rounded text-purple-600"/>
+                    <span>
+                      <span className="block font-bold text-sm text-gray-800">Foto pendiente de optimizar</span>
+                      <span className="block text-xs text-gray-500">Márcalo para arreglarla luego en lote.</span>
+                    </span>
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
+                    <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">
+                      Guardar y siguiente
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+            <>
             <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-gray-200 bg-white">
                 <div className="min-w-0">
@@ -3628,6 +3731,8 @@ const renderRepairs = () => (
                 </button>
               )}
             </div>
+            </>
+            )}
           </form>
         </div>
       </div>
