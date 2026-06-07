@@ -3453,19 +3453,20 @@ const renderRepairs = () => (
               <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
             </div>
 
-            {/* 👇 商品描述：多行可见 AI 生成内容 */}
-            <div>
-               <label className="text-xs font-bold text-gray-500 mb-1 block">Descripción</label>
-               <textarea 
-                 id="product-description"
-                 name="product-description"
-                 rows={6}
-                 value={currentProduct.description || ""} 
-                 onChange={e => setCurrentProduct({...currentProduct, description: e.target.value})} 
-                 className="w-full border p-2 rounded-lg text-sm resize-y min-h-[6rem]"
-                 placeholder="Escribe detalles del producto. AI puede rellenar con «Extraer información»."
-               />
-            </div>
+            {!productReviewMode && (
+              <div>
+                 <label className="text-xs font-bold text-gray-500 mb-1 block">Descripción</label>
+                 <textarea 
+                   id="product-description"
+                   name="product-description"
+                   rows={6}
+                   value={currentProduct.description || ""} 
+                   onChange={e => setCurrentProduct({...currentProduct, description: e.target.value})} 
+                   className="w-full border p-2 rounded-lg text-sm resize-y min-h-[6rem]"
+                   placeholder="Escribe detalles del producto. AI puede rellenar con «Extraer información»."
+                 />
+              </div>
+            )}
 
             <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -3507,59 +3508,60 @@ const renderRepairs = () => (
                 <label htmlFor="product-visible" className="font-bold text-sm text-gray-800">Mostrar en tienda (visible para clientes)</label>
             </div>
 
-            {/* 👇 新增：免费商品标记 */}
-            <div className="bg-pink-50 p-4 rounded-xl border border-pink-100">
-                <div className="flex items-center gap-2">
-                   <input 
-                     type="checkbox" 
-                     id="isGiftProduct" 
-                     checked={currentProduct.giftProduct || false} 
-                     onChange={e => setCurrentProduct({...currentProduct, giftProduct: e.target.checked})} 
-                     className="w-4 h-4 text-pink-600 rounded"
-                   />
-                   <label htmlFor="isGiftProduct" className="font-bold text-sm text-pink-800">Producto de Regalo (订单满€65可选)</label>
-                </div>
-            </div>
-
-            {/* 👇 新增：促销设置 */}
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                <div className="flex items-center gap-2 mb-3">
-                   <input 
-                     type="checkbox" 
-                     id="isOferta" 
-                     checked={currentProduct.oferta || false} 
-                     onChange={e => setCurrentProduct({...currentProduct, oferta: e.target.checked})} 
-                     className="w-4 h-4 text-blue-600 rounded"
-                   />
-                   <label htmlFor="isOferta" className="font-bold text-sm text-blue-800">¿Activar Oferta?</label>
-                </div>
-                
-                {/* 只有勾选了才显示详细设置 */}
-                {currentProduct.oferta && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
-                     <div>
-                       <label className="text-xs font-bold text-gray-500 mb-1 block">Tipo</label>
-                       <select id="oferta-type" name="oferta-type" value={currentProduct.oferta_type || "percent"} onChange={e => setCurrentProduct({...currentProduct, oferta_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
-                         <option value="percent">Descuento %</option>
-                         <option value="second">2ª unidad -50%</option>
-                         <option value="gift">2x1 (Regalo)</option>
-                       </select>
-                     </div>
-                     <div>
-                       <label className="text-xs font-bold text-gray-500 mb-1 block">Valor</label>
+            {!productReviewMode && (
+              <>
+                <div className="bg-pink-50 p-4 rounded-xl border border-pink-100">
+                    <div className="flex items-center gap-2">
                        <input 
-                         id="oferta-value"
-                         name="oferta-value"
-                         type="number" 
-                         placeholder={currentProduct.oferta_type === "percent" ? "% (ej: 20)" : "Valor"} 
-                         value={currentProduct.oferta_value || 0} 
-                         onChange={e => setCurrentProduct({...currentProduct, oferta_value: parseFloat(e.target.value)})} 
-                         className="w-full p-2 border rounded-lg text-sm"
+                         type="checkbox" 
+                         id="isGiftProduct" 
+                         checked={currentProduct.giftProduct || false} 
+                         onChange={e => setCurrentProduct({...currentProduct, giftProduct: e.target.checked})} 
+                         className="w-4 h-4 text-pink-600 rounded"
                        />
-                     </div>
-                  </div>
-                )}
-            </div>
+                       <label htmlFor="isGiftProduct" className="font-bold text-sm text-pink-800">Producto de Regalo (订单满€65可选)</label>
+                    </div>
+                </div>
+
+                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                    <div className="flex items-center gap-2 mb-3">
+                       <input 
+                         type="checkbox" 
+                         id="isOferta" 
+                         checked={currentProduct.oferta || false} 
+                         onChange={e => setCurrentProduct({...currentProduct, oferta: e.target.checked})} 
+                         className="w-4 h-4 text-blue-600 rounded"
+                       />
+                       <label htmlFor="isOferta" className="font-bold text-sm text-blue-800">¿Activar Oferta?</label>
+                    </div>
+                    
+                    {currentProduct.oferta && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
+                         <div>
+                           <label className="text-xs font-bold text-gray-500 mb-1 block">Tipo</label>
+                           <select id="oferta-type" name="oferta-type" value={currentProduct.oferta_type || "percent"} onChange={e => setCurrentProduct({...currentProduct, oferta_type: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
+                             <option value="percent">Descuento %</option>
+                             <option value="second">2ª unidad -50%</option>
+                             <option value="gift">2x1 (Regalo)</option>
+                           </select>
+                         </div>
+                         <div>
+                           <label className="text-xs font-bold text-gray-500 mb-1 block">Valor</label>
+                           <input 
+                             id="oferta-value"
+                             name="oferta-value"
+                             type="number" 
+                             placeholder={currentProduct.oferta_type === "percent" ? "% (ej: 20)" : "Valor"} 
+                             value={currentProduct.oferta_value || 0} 
+                             onChange={e => setCurrentProduct({...currentProduct, oferta_value: parseFloat(e.target.value)})} 
+                             className="w-full p-2 border rounded-lg text-sm"
+                           />
+                         </div>
+                      </div>
+                    )}
+                </div>
+              </>
+            )}
 
             {/* 图片上传 - 支持多图 */}
             <div>
@@ -3603,9 +3605,11 @@ const renderRepairs = () => (
                   <button type="button" onClick={handleCenterProduct} disabled={centeringProduct || removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 disabled:opacity-50">
                     {centeringProduct ? "..." : "Centrar producto (AI)"}
                   </button>
-                  <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
-                    {generatingDesc ? "..." : `Extraer información (AI) ${currentProduct?.images?.length > 1 ? `(${currentProduct.images.length} imágenes)` : ''}`}
-                  </button>
+                  {!productReviewMode && (
+                    <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
+                      {generatingDesc ? "..." : `Extraer información (AI) ${currentProduct?.images?.length > 1 ? `(${currentProduct.images.length} imágenes)` : ''}`}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
