@@ -3454,6 +3454,84 @@ const renderRepairs = () => (
       : (currentProduct?.image ? [currentProduct.image] : []);
     const primaryProductImage = productImages[0];
     const isReviewModal = productReviewMode && !!currentProduct?.id;
+    if (isReviewModal) {
+      return (
+        <div className="fixed inset-0 bg-white z-50 flex flex-col animate-fade-in">
+          <div className="h-12 flex items-center justify-between px-3 border-b border-gray-200 bg-white flex-shrink-0">
+            <div className="min-w-0">
+              <h3 className="text-base font-bold text-gray-900 truncate">Revisión producto <span className="text-gray-400 font-mono text-xs">#{currentProduct.id}</span></h3>
+              <p className="text-[11px] text-gray-500 truncate">Imagen, precio, stock, IVA y visibilidad</p>
+            </div>
+            <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full flex-shrink-0"><X className="text-gray-500" size={20}/></button>
+          </div>
+
+          <form onSubmit={handleSaveProduct} className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] gap-3 p-3 overflow-hidden">
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden min-h-0 flex flex-col">
+                <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-gray-200 bg-white flex-shrink-0">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-gray-500 uppercase">Imagen principal</div>
+                    <div className="text-sm font-semibold text-gray-800 truncate">{currentProduct.name || 'Producto sin nombre'}</div>
+                  </div>
+                  {(currentProduct.imageNeedsOptimization || currentProduct.image_needs_optimization) && <span className="text-purple-700 bg-purple-50 border border-purple-100 rounded px-2 py-0.5 text-[10px] font-bold flex-shrink-0">FOTO</span>}
+                </div>
+                <div className="flex-1 min-h-0 flex items-center justify-center bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]">
+                  {primaryProductImage ? (
+                    <img src={primaryProductImage} alt={currentProduct.name || 'Producto'} className="max-h-full max-w-full object-contain p-2"/>
+                  ) : (
+                    <div className="text-center text-gray-400">
+                      <ImageIcon size={44} className="mx-auto mb-2 opacity-60"/>
+                      <div className="text-sm font-medium">Sin imagen principal</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="min-h-0 overflow-y-auto sm:overflow-visible space-y-2 pr-1">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label>
+                  <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-1.5 rounded-lg text-sm resize-none min-h-[3.75rem]" placeholder="Nombre completo del producto"/>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-1.5 rounded-lg"/></div>
+                  <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-1.5 rounded-lg"/></div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
+                  <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-1.5 rounded-lg text-sm bg-white">
+                    {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer">
+                  <input type="checkbox" id="product-visible" checked={currentProduct.visible !== false} onChange={e => setCurrentProduct({...currentProduct, visible: e.target.checked})} className="w-4 h-4 rounded"/>
+                  <span className="font-bold text-sm text-gray-800">Mostrar en tienda</span>
+                </label>
+
+                <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'}`}>
+                  <input type="checkbox" checked={!!currentProduct.imageNeedsOptimization} onChange={e => setCurrentProduct({...currentProduct, imageNeedsOptimization: e.target.checked})} className="w-4 h-4 rounded text-purple-600"/>
+                  <span>
+                    <span className="block font-bold text-sm text-gray-800">Foto pendiente de optimizar</span>
+                    <span className="block text-xs text-gray-500">Para arreglarla luego.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 bg-white p-2.5 flex-shrink-0">
+              <div className="grid grid-cols-2 gap-2 max-w-xl ml-auto">
+                <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar</button>
+                <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-colors">
+                  Guardar y siguiente
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      );
+    }
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 backdrop-blur-sm animate-fade-in">
         <div className={`bg-white rounded-2xl shadow-2xl w-full ${isReviewModal ? 'max-w-6xl p-2.5 sm:p-3' : 'max-w-2xl p-4 sm:p-6'} max-h-[95vh] sm:max-h-[90vh] overflow-y-auto`}>
