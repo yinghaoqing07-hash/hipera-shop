@@ -3410,14 +3410,37 @@ const renderRepairs = () => (
   // ... Product Modal ... (保持原样，为了简洁我这里没改动)
   const renderProductModal = () => {
     const filteredSubs = subCategories.filter(s => s.parent_id === parseInt(currentProduct.category));
+    const productImages = currentProduct?.images?.length
+      ? currentProduct.images
+      : (currentProduct?.image ? [currentProduct.image] : []);
+    const primaryProductImage = productImages[0];
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 backdrop-blur-sm animate-fade-in">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-4 sm:p-6 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-4 sm:p-6 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-bold text-gray-800">{currentProduct.id ? 'Editar' : 'Nuevo'} Producto</h3>
             <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="text-gray-500" size={20}/></button>
           </div>
           <form onSubmit={handleSaveProduct} className="space-y-4">
+            <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-gray-200 bg-white">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-gray-500 uppercase">Imagen principal</div>
+                  <div className="text-sm font-semibold text-gray-800 truncate">{currentProduct.name || 'Producto sin nombre'}</div>
+                </div>
+                {currentProduct.id && <span className="text-xs font-mono text-gray-400 flex-shrink-0">#{currentProduct.id}</span>}
+              </div>
+              <div className="h-72 sm:h-96 flex items-center justify-center bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]">
+                {primaryProductImage ? (
+                  <img src={primaryProductImage} alt={currentProduct.name || 'Producto'} className="max-h-full max-w-full object-contain p-3"/>
+                ) : (
+                  <div className="text-center text-gray-400">
+                    <ImageIcon size={44} className="mx-auto mb-2 opacity-60"/>
+                    <div className="text-sm font-medium">Sin imagen principal</div>
+                  </div>
+                )}
+              </div>
+            </div>
             
             {/* 基本信息 */}
             <div>
