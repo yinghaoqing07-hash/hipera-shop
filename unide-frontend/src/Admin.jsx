@@ -156,23 +156,6 @@ function productNeedsReview(product) {
   return !isProductReviewed(product);
 }
 
-function productRiskScore(product, orderItemsCount = 0) {
-  let score = 0;
-  if (productNeedsReview(product)) score += 1000;
-  const stock = Number(product?.stock ?? 0);
-  if (stock <= 0) score += 90;
-  else if (stock <= 2) score += 80;
-  else if (stock <= 5) score += 45;
-  if (product?.visible === false) score += 20;
-  if (!product?.taxRate && !product?.tax_rate) score += 80;
-  if (!product?.image && !(product?.images || [])[0]) score += 50;
-  if (!product?.category) score += 40;
-  if (product?.oferta) score += 35;
-  if (product?.giftProduct || product?.gift_product) score += 25;
-  if (orderItemsCount > 0) score += Math.min(120, orderItemsCount * 12);
-  return score;
-}
-
 function parseCSV(text) {
   const raw = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   const lines = raw.split('\n').filter((l) => l.length > 0);
@@ -647,6 +630,60 @@ export default function AdminApp() {
     return result.map(x => x.id);
   };
 
+  const getProductCategoryKey = (product) => {
+    const raw = product?.category;
+    return raw !== null && raw !== undefined && raw !== '' ? Number(raw) : '__none__';
+  };
+
+  const getProductSubCategoryKey = (product) => {
+    const raw = product?.subCategoryId ?? product?.sub_category_id;
+    return raw !== null && raw !== undefined && raw !== '' ? Number(raw) : '__none__';
+  };
+
+  const getSelectedProductCategoryKey = () => {
+    if (selectedProductCategory === '') return null;
+    return selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10);
+  };
+
+  const getManualReviewOrderedProducts = (list) => {
+    const categoryOrder = new Map(categories.map((c, idx) => [Number(c.id), c.sort_order ?? idx]));
+    const subCategoryOrder = new Map(subCategories.map((s, idx) => [`${Number(s.parent_id)}:${Number(s.id)}`, s.sort_order ?? idx]));
+    const productOrder = new Map(products.map((p, idx) => [String(p.id), idx]));
+    const rankCategory = (key) => key === '__none__' ? Number.MAX_SAFE_INTEGER : (categoryOrder.get(Number(key)) ?? Number.MAX_SAFE_INTEGER - 1);
+    const rankSubCategory = (catKey, subKey) => subKey === '__none__' ? Number.MAX_SAFE_INTEGER : (subCategoryOrder.get(`${Number(catKey)}:${Number(subKey)}`) ?? Number.MAX_SAFE_INTEGER - 1);
+
+    return [...list].sort((a, b) => {
+      const ac = getProductCategoryKey(a);
+      const bc = getProductCategoryKey(b);
+      const catDiff = rankCategory(ac) - rankCategory(bc);
+      if (catDiff) return catDiff;
+
+      const as = getProductSubCategoryKey(a);
+      const bs = getProductSubCategoryKey(b);
+      const subDiff = rankSubCategory(ac, as) - rankSubCategory(bc, bs);
+      if (subDiff) return subDiff;
+
+      return (productOrder.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (productOrder.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER);
+    });
+  };
+
+  const getNextProductInReviewCategory = (updatedProducts, current) => {
+    const selectedCategoryKey = getSelectedProductCategoryKey();
+    const scopeCategory = selectedCategoryKey !== null ? selectedCategoryKey : getProductCategoryKey(current);
+    const productOrder = new Map(products.map((p, idx) => [String(p.id), idx]));
+    const currentOrder = productOrder.get(String(current?.id)) ?? -1;
+    const candidates = getManualReviewOrderedProducts(
+      updatedProducts
+        .filter(productNeedsReview)
+        .filter(p => getProductCategoryKey(p) === scopeCategory)
+        .filter(p => p.id !== current?.id)
+    );
+
+    return candidates.find(p => (productOrder.get(String(p.id)) ?? Number.MAX_SAFE_INTEGER) > currentOrder)
+      || candidates[0]
+      || null;
+  };
+
   const [stockEdits, setStockEdits] = useState({});
   const [reordering, setReordering] = useState(false);
   const [updatingStockId, setUpdatingStockId] = useState(null);
@@ -743,9 +780,9 @@ export default function AdminApp() {
           ? products.map(p => p.id === currentProduct.id ? normalized : p)
           : [...products, normalized];
         setProducts(updated);
-        const baseList = productReviewMode ? updated.filter(productNeedsReview) : updated;
-        const ordered = [...baseList].sort((a, b) => productRiskScore(b) - productRiskScore(a) || Number(a.id || 0) - Number(b.id || 0));
-        const next = ordered.find(p => p.id !== currentProduct.id);
+        const next = productReviewMode
+          ? getNextProductInReviewCategory(updated, currentProduct)
+          : getManualReviewOrderedProducts(updated.filter(p => p.id !== currentProduct.id))[0];
         if (next) {
           setCurrentProduct(next);
           setIsEditing(true);
@@ -753,7 +790,7 @@ export default function AdminApp() {
         } else {
           setCurrentProduct(null);
           setIsEditing(false);
-          toast.success("Producto guardado. No quedan productos pendientes.");
+          toast.success(productReviewMode ? "Categoría revisada. No quedan productos pendientes aquí." : "Producto guardado.");
         }
       } else {
         setIsEditing(false); 
@@ -1961,14 +1998,6 @@ export default function AdminApp() {
 
   const renderProducts = () => {
     const searchLower = searchTerm.toLowerCase().trim();
-    const orderItemCounts = new Map();
-    orders.forEach(o => {
-      (o.items || []).forEach(item => {
-        if (item?.id === undefined || item?.id === null) return;
-        const key = String(item.id);
-        orderItemCounts.set(key, (orderItemCounts.get(key) || 0) + (Number(item.quantity) || 1));
-      });
-    });
     const reviewStats = {
       total: products.length,
       pending: products.filter(productNeedsReview).length,
@@ -1990,9 +2019,7 @@ export default function AdminApp() {
       return false;
     });
     if (productReviewMode) {
-      filtered = filtered
-        .filter(productNeedsReview)
-        .sort((a, b) => productRiskScore(b, orderItemCounts.get(String(b.id)) || 0) - productRiskScore(a, orderItemCounts.get(String(a.id)) || 0) || Number(a.id || 0) - Number(b.id || 0));
+      filtered = getManualReviewOrderedProducts(filtered.filter(productNeedsReview));
     }
     const isSearching = !!searchLower;
     const catFilter = selectedProductCategory === '' ? null : (selectedProductCategory === '_none' ? '__none__' : parseInt(selectedProductCategory, 10));
@@ -2033,9 +2060,12 @@ export default function AdminApp() {
     };
 
     const openNextReviewProduct = () => {
-      const candidates = [...filtered]
-        .filter(productNeedsReview)
-        .sort((a, b) => productRiskScore(b, orderItemCounts.get(String(b.id)) || 0) - productRiskScore(a, orderItemCounts.get(String(a.id)) || 0) || Number(a.id || 0) - Number(b.id || 0));
+      const selectedCategoryKey = getSelectedProductCategoryKey();
+      const candidates = getManualReviewOrderedProducts(
+        filtered
+          .filter(productNeedsReview)
+          .filter(p => selectedCategoryKey === null || getProductCategoryKey(p) === selectedCategoryKey)
+      );
       openProductForReview(candidates[0]);
     };
 
@@ -2174,7 +2204,7 @@ export default function AdminApp() {
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin imagen</div><div className="text-xl font-extrabold text-gray-700">{reviewStats.noImage}</div></div>
         </div>
 
-        <p className="text-xs text-gray-500">{productReviewMode ? 'Modo revisión: se muestran productos pendientes ordenados por riesgo. Revisa precio, stock, imagen, categoría, visibilidad e IVA; luego usa Guardar y siguiente.' : 'Arrastra productos (⋮⋮) para cambiar orden en la tienda'}</p>
+        <p className="text-xs text-gray-500">{productReviewMode ? 'Modo revisión: se muestran productos pendientes por orden de categoría/subcategoría. Si filtras una categoría, Abrir siguiente y Guardar y siguiente continúan dentro de esa categoría.' : 'Arrastra productos (⋮⋮) para cambiar orden en la tienda'}</p>
         {/* Inline: Añadir producto (form above categories) */}
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
           <h3 className="font-bold text-gray-800 text-lg">Añadir producto nuevo</h3>
