@@ -3456,23 +3456,23 @@ const renderRepairs = () => (
     const isReviewModal = productReviewMode && !!currentProduct?.id;
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 backdrop-blur-sm animate-fade-in">
-        <div className={`bg-white rounded-2xl shadow-2xl w-full ${isReviewModal ? 'max-w-5xl p-3 sm:p-4' : 'max-w-2xl p-4 sm:p-6'} max-h-[95vh] sm:max-h-[90vh] overflow-y-auto`}>
-          <div className={`flex justify-between items-center ${isReviewModal ? 'mb-3' : 'mb-6'}`}>
-            <h3 className="text-xl font-bold text-gray-800">{currentProduct.id ? 'Editar' : 'Nuevo'} Producto</h3>
-            <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="text-gray-500" size={20}/></button>
+        <div className={`bg-white rounded-2xl shadow-2xl w-full ${isReviewModal ? 'max-w-6xl p-2.5 sm:p-3' : 'max-w-2xl p-4 sm:p-6'} max-h-[95vh] sm:max-h-[90vh] overflow-y-auto`}>
+          <div className={`flex justify-between items-center ${isReviewModal ? 'mb-2' : 'mb-6'}`}>
+            <h3 className={`${isReviewModal ? 'text-base' : 'text-xl'} font-bold text-gray-800`}>{currentProduct.id ? 'Editar' : 'Nuevo'} Producto</h3>
+            <button onClick={() => setIsEditing(false)} className={`${isReviewModal ? 'p-1.5' : 'p-2'} hover:bg-gray-100 rounded-full`}><X className="text-gray-500" size={20}/></button>
           </div>
           <form onSubmit={handleSaveProduct} className={isReviewModal ? 'space-y-0' : 'space-y-4'}>
             {isReviewModal ? (
-              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] gap-3 lg:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)] gap-2.5 lg:gap-3">
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden min-h-0">
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-gray-200 bg-white">
+                  <div className="flex items-center justify-between gap-3 px-2.5 py-1.5 border-b border-gray-200 bg-white">
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-gray-500 uppercase">Imagen principal</div>
                       <div className="text-sm font-semibold text-gray-800 truncate">{currentProduct.name || 'Producto sin nombre'}</div>
                     </div>
                     <span className="text-xs font-mono text-gray-400 flex-shrink-0">#{currentProduct.id}</span>
                   </div>
-                  <div className="h-56 sm:h-72 lg:h-[430px] flex items-center justify-center bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]">
+                  <div className="h-48 sm:h-[340px] lg:h-[360px] flex items-center justify-center bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]">
                     {primaryProductImage ? (
                       <img src={primaryProductImage} alt={currentProduct.name || 'Producto'} className="max-h-full max-w-full object-contain p-2"/>
                     ) : (
@@ -3484,40 +3484,40 @@ const renderRepairs = () => (
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <div>
                     <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label>
-                    <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm resize-none min-h-[4.5rem]" placeholder="Nombre completo del producto"/>
+                    <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-1.5 rounded-lg text-sm resize-none min-h-[3.75rem]" placeholder="Nombre completo del producto"/>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
-                    <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg"/></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-1.5 rounded-lg"/></div>
+                    <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-1.5 rounded-lg"/></div>
                   </div>
 
                   <div>
                     <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
-                    <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                    <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-1.5 rounded-lg text-sm bg-white">
                       {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
 
-                  <label className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer">
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer">
                     <input type="checkbox" id="product-visible" checked={currentProduct.visible !== false} onChange={e => setCurrentProduct({...currentProduct, visible: e.target.checked})} className="w-4 h-4 rounded"/>
                     <span className="font-bold text-sm text-gray-800">Mostrar en tienda</span>
                   </label>
 
-                  <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'}`}>
+                  <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'}`}>
                     <input type="checkbox" checked={!!currentProduct.imageNeedsOptimization} onChange={e => setCurrentProduct({...currentProduct, imageNeedsOptimization: e.target.checked})} className="w-4 h-4 rounded text-purple-600"/>
                     <span>
                       <span className="block font-bold text-sm text-gray-800">Foto pendiente de optimizar</span>
-                      <span className="block text-xs text-gray-500">Márcalo para arreglarla luego en lote.</span>
+                      <span className="block text-xs text-gray-500">Para arreglarla luego.</span>
                     </span>
                   </label>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
-                    <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+                    <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar</button>
+                    <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-colors">
                       Guardar y siguiente
                     </button>
                   </div>
