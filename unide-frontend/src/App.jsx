@@ -1669,14 +1669,14 @@ export default function App() {
               return (
                 <button
                   onClick={(e) => { e.stopPropagation(); addToCart(p); }}
-                  className="w-full bg-gray-900 text-white text-sm font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 active:bg-red-600 transition-colors"
+                  className="w-full bg-red-600 text-white text-sm font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-red-100 active:bg-red-700 transition-colors"
                 >
                   <Plus size={16}/> Añadir
                 </button>
               );
             }
             return (
-              <div className="w-full flex items-center justify-between bg-gray-900 text-white rounded-xl px-1 py-1" onClick={(e) => e.stopPropagation()}>
+              <div className="w-full flex items-center justify-between bg-red-600 text-white rounded-xl px-1 py-1 shadow-sm shadow-red-100" onClick={(e) => e.stopPropagation()}>
                 <button
                   aria-label="Quitar uno"
                   onClick={(e) => { e.stopPropagation(); inCart.quantity <= 1 ? removeFromCart(p.id, p.name) : updateQty(p.id, p.name, -1); }}
@@ -1703,11 +1703,11 @@ export default function App() {
             {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
           </div>
           {inCart ? (
-            <div className="flex items-center bg-gray-900 text-white rounded-full shadow-lg px-0.5 py-0.5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center bg-red-50 text-red-700 border border-red-100 rounded-full shadow-sm px-0.5 py-0.5" onClick={(e) => e.stopPropagation()}>
               <button
                 aria-label="Quitar uno"
                 onClick={(e) => { e.stopPropagation(); inCart.quantity <= 1 ? removeFromCart(p.id, p.name) : updateQty(p.id, p.name, -1); }}
-                className="w-7 h-7 flex items-center justify-center rounded-full active:bg-white/20 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-white active:bg-red-100 transition-colors"
               >
                 {inCart.quantity <= 1 ? <Trash2 size={13}/> : <Minus size={14}/>}
               </button>
@@ -1715,13 +1715,13 @@ export default function App() {
               <button
                 aria-label="Añadir uno"
                 onClick={(e) => { e.stopPropagation(); updateQty(p.id, p.name, 1); }}
-                className="w-7 h-7 flex items-center justify-center rounded-full active:bg-white/20 transition-colors"
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-white active:bg-red-100 transition-colors"
               >
                 <Plus size={14}/>
               </button>
             </div>
           ) : (
-            <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg active:bg-red-600 transition-colors"><Plus size={16}/></button>
+            <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-md shadow-red-100 active:bg-red-700 transition-colors"><Plus size={16}/></button>
           )}
         </div>
       )}
@@ -3293,7 +3293,7 @@ export default function App() {
           
           {/* 底部加购栏 — centrado y con el ancho de la columna en pantallas anchas */}
           <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md p-4 bg-white border-t border-gray-100 z-20">
-            <button onClick={() => { addToCart(selectedProduct); handleBack(); }} disabled={selectedProduct.stock <= 0} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-gray-300 disabled:bg-gray-300 disabled:shadow-none active:scale-95 transition-transform flex justify-center items-center gap-2">
+            <button onClick={() => { addToCart(selectedProduct); handleBack(); }} disabled={selectedProduct.stock <= 0} className="w-full bg-red-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-red-200 disabled:bg-gray-300 disabled:shadow-none active:scale-95 active:bg-red-700 transition-all flex justify-center items-center gap-2">
               {selectedProduct.stock > 0 ? <><Plus size={20}/> Añadir a la cesta</> : "Agotado"}
             </button>
           </div>
