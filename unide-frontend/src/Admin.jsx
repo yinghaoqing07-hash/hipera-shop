@@ -2001,7 +2001,7 @@ export default function AdminApp() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
             <p className="text-gray-500 text-xs uppercase font-bold">Ingresos hoy</p>
-            <h3 className="text-2xl font-bold text-green-600">€{revenueToday.toFixed(2)}</h3>
+            <h3 className="text-2xl font-bold text-gray-900">€{revenueToday.toFixed(2)}</h3>
           </div>
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
             <p className="text-gray-500 text-xs uppercase font-bold">Pedidos hoy</p>
@@ -2010,11 +2010,11 @@ export default function AdminApp() {
           <button
             type="button"
             onClick={() => { setActiveTab('orders'); setOrderStatusFilter('Procesando'); setOrderSearch(''); setOrderDateFrom(''); setOrderDateTo(''); setSidebarOpen(false); }}
-            className={`text-left p-5 rounded-xl shadow-sm border transition-colors ${pendingCount > 0 ? 'bg-orange-50 border-orange-200 hover:bg-orange-100' : 'bg-white border-gray-100'}`}
+            className={`text-left p-5 rounded-xl shadow-sm border transition-colors ${pendingCount > 0 ? 'bg-gray-50 border-gray-200 hover:bg-gray-100' : 'bg-white border-gray-100'}`}
             title="Ver pedidos pendientes de preparar"
           >
             <p className="text-gray-500 text-xs uppercase font-bold">Pendientes</p>
-            <h3 className={`text-2xl font-bold ${pendingCount > 0 ? 'text-orange-600' : 'text-gray-800'}`}>{pendingCount}</h3>
+            <h3 className="text-2xl font-bold text-gray-900">{pendingCount}</h3>
           </button>
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
             <p className="text-gray-500 text-xs uppercase font-bold">Ingresos total</p>
@@ -2025,7 +2025,7 @@ export default function AdminApp() {
         {topProducts.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <h3 className="p-4 font-bold text-gray-800 border-b border-gray-100 flex items-center gap-2">
-              <TrendingUp size={18} className="text-green-600"/> Productos más vendidos
+              <TrendingUp size={18} className="text-gray-400"/> Productos más vendidos
             </h3>
             <div className="divide-y">
               {topProducts.map((p, i) => {
@@ -2049,9 +2049,9 @@ export default function AdminApp() {
           </div>
         )}
         {lowStockProducts.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden">
-            <h3 className="p-4 font-bold text-amber-700 border-b border-amber-100 bg-amber-50 flex items-center gap-2">
-              <AlertCircle size={18}/> Stock bajo (≤ {LOW_STOCK_THRESHOLD} uds.) — {lowStockProducts.length}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <h3 className="p-4 font-bold text-gray-700 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+              <AlertCircle size={18} className="text-gray-400"/> Stock bajo (≤ {LOW_STOCK_THRESHOLD} uds.) — {lowStockProducts.length}
             </h3>
             <div className="divide-y max-h-72 overflow-y-auto">
               {lowStockProducts.map(p => (
@@ -2059,7 +2059,7 @@ export default function AdminApp() {
                   <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 flex-shrink-0"/>
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-gray-800 truncate" title={p.name}>{productDisplayName(p)}<span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span></div>
-                    <div className="text-xs text-gray-500">€{p.price?.toFixed(2)} · quedan <span className="font-bold text-amber-600">{p.stock}</span></div>
+                    <div className="text-xs text-gray-500">€{p.price?.toFixed(2)} · quedan <span className="font-bold text-gray-900">{p.stock}</span></div>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -2073,7 +2073,7 @@ export default function AdminApp() {
                       type="button"
                       onClick={() => handleQuickStockUpdate(p)}
                       disabled={updatingStockId === p.id}
-                      className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                      className="px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
                     >
                       {updatingStockId === p.id ? "..." : "Actualizar"}
                     </button>
@@ -2108,7 +2108,7 @@ export default function AdminApp() {
                         type="button"
                         onClick={() => handleQuickStockUpdate(p)}
                         disabled={updatingStockId === p.id}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                        className="px-3 py-1.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
                       >
                         {updatingStockId === p.id ? "..." : "Actualizar"}
                       </button>
@@ -2138,7 +2138,7 @@ export default function AdminApp() {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className="font-bold text-gray-800">€{o.total?.toFixed(2)}</span>
-                      <button type="button" onClick={() => openOrderFactura(o)} className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600" title="Ver justificante">
+                      <button type="button" onClick={() => openOrderFactura(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Ver justificante">
                         <FileText size={16}/>
                       </button>
                       <button type="button" onClick={() => openOrderTicket(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Ver ticket">
@@ -2147,7 +2147,7 @@ export default function AdminApp() {
                       <button type="button" onClick={() => printOrderTicket(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Imprimir ticket">
                         <Printer size={16}/>
                       </button>
-                      <button type="button" onClick={() => { setActiveTab('orders'); }} className="text-xs text-blue-600 font-bold">Ver</button>
+                      <button type="button" onClick={() => { setActiveTab('orders'); }} className="text-xs text-gray-700 font-bold">Ver</button>
                     </div>
                   </div>
                 );
@@ -2363,15 +2363,15 @@ export default function AdminApp() {
     return (
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row gap-3 bg-white p-4 rounded-xl shadow-sm items-stretch sm:items-center">
-          <input id="search-products" name="search-products" placeholder="Buscar por nombre o #id (ej. 42)..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-100"/>
-          <select value={selectedProductCategory} onChange={e => setSelectedProductCategory(e.target.value)} className="sm:w-48 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-100 bg-white">
+          <input id="search-products" name="search-products" placeholder="Buscar por nombre o #id (ej. 42)..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="flex-1 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-gray-200"/>
+          <select value={selectedProductCategory} onChange={e => setSelectedProductCategory(e.target.value)} className="sm:w-48 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-gray-200 bg-white">
             <option value="">Todas las categorías</option>
             {categories.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
             <option value="_none">Sin categoría</option>
           </select>
-          <select value={taxBatchFilter} onChange={e => setTaxBatchFilter(e.target.value)} className="sm:w-56 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-amber-100 bg-white">
+          <select value={taxBatchFilter} onChange={e => setTaxBatchFilter(e.target.value)} className="sm:w-56 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-gray-200 bg-white">
             <option value="">Todos los lotes IVA</option>
             {taxBatchOptions.map((batch) => (
               <option key={batch.id} value={batch.id}>{batch.label} · {batch.count}</option>
@@ -2402,7 +2402,7 @@ export default function AdminApp() {
         </div>
 
         {taxSuggestionsLoadError && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
             No se han podido cargar las sugerencias IVA locales. Revisa <span className="font-mono">/tax-suggestions/product-tax-suggestions.json</span>.
           </div>
         )}
@@ -2432,28 +2432,28 @@ export default function AdminApp() {
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Subcategoría</label><select value={newProduct.subCategoryId || ''} onChange={e => setNewProduct(p => ({ ...p, subCategoryId: e.target.value ? parseInt(e.target.value, 10) : '' }))} disabled={!newProduct.category} className="w-full border p-2 rounded-lg text-sm bg-white"><option value="">—</option>{subCategories.filter(s => s.parent_id === (Number(newProduct.category) || null)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Descripción</label><textarea rows={5} value={newProduct.description || ''} onChange={e => setNewProduct(p => ({ ...p, description: e.target.value }))} placeholder="Opcional. AI puede rellenar con «Extraer información»." className="w-full border p-2 rounded-lg text-sm resize-y min-h-[5rem]"/></div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 rounded-xl border border-amber-100 bg-amber-50/60 p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
             <div>
-              <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
-              <select value={newProduct.taxRate ?? ''} onChange={e => setNewProduct(p => ({ ...p, taxRate: e.target.value }))} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+              <label className="text-xs font-bold text-gray-600 mb-1 block">IVA</label>
+              <select value={newProduct.taxRate ?? ''} onChange={e => setNewProduct(p => ({ ...p, taxRate: e.target.value }))} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
                 {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-amber-800 mb-1 block">Categoría fiscal</label>
-              <select value={newProduct.taxCategory || ''} onChange={e => setNewProduct(p => ({ ...p, taxCategory: e.target.value }))} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+              <label className="text-xs font-bold text-gray-600 mb-1 block">Categoría fiscal</label>
+              <select value={newProduct.taxCategory || ''} onChange={e => setNewProduct(p => ({ ...p, taxCategory: e.target.value }))} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
                 {TAX_CATEGORY_OPTIONS.map(o => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-amber-800 mb-1 block">Revisión IVA</label>
-              <select value={newProduct.taxReviewStatus || 'pending'} onChange={e => setNewProduct(p => ({ ...p, taxReviewStatus: e.target.value }))} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+              <label className="text-xs font-bold text-gray-600 mb-1 block">Revisión IVA</label>
+              <select value={newProduct.taxReviewStatus || 'pending'} onChange={e => setNewProduct(p => ({ ...p, taxReviewStatus: e.target.value }))} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
                 {TAX_REVIEW_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-amber-800 mb-1 block">Nota fiscal</label>
-              <input value={newProduct.taxNote || ''} onChange={e => setNewProduct(p => ({ ...p, taxNote: e.target.value }))} placeholder="Ej: revisar con factura proveedor" className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white"/>
+              <label className="text-xs font-bold text-gray-600 mb-1 block">Nota fiscal</label>
+              <input value={newProduct.taxNote || ''} onChange={e => setNewProduct(p => ({ ...p, taxNote: e.target.value }))} placeholder="Ej: revisar con factura proveedor" className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white"/>
             </div>
           </div>
           <div className="flex flex-wrap gap-4 items-center">
@@ -2482,16 +2482,16 @@ export default function AdminApp() {
                 <button type="button" onClick={handleNewProductRemoveBg} disabled={removingBg || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">
                   {removingBg ? "..." : "Quitar fondo (AI)"}
                 </button>
-                <button type="button" onClick={handleNewProductCenterProduct} disabled={centeringProduct || removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 disabled:opacity-50">
+                <button type="button" onClick={handleNewProductCenterProduct} disabled={centeringProduct || removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                   {centeringProduct ? "..." : "Centrar producto (AI)"}
                 </button>
-                <button type="button" onClick={handleNewProductGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
+                <button type="button" onClick={handleNewProductGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                   {generatingDesc ? "..." : `Extraer información (AI)${(newProduct.images?.length || (newProduct.image ? 1 : 0)) > 1 ? ` (${newProduct.images?.length || 1} imágenes)` : ""}`}
                 </button>
               </div>
             )}
           </div>
-          <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50">Guardar producto</button>
+          <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="bg-gray-900 text-white px-6 py-2 rounded-lg font-bold hover:bg-gray-800 disabled:opacity-50">Guardar producto</button>
         </form>
 
         <>
@@ -2681,8 +2681,8 @@ export default function AdminApp() {
                  ))}
                </ul>
                {selectedParentForSub === c.id ? (
-                 <div className="flex gap-1"><input id="sub-category-name" name="sub-category-name" autoFocus placeholder="Sub..." value={newSubName} onChange={e => setNewSubName(e.target.value)} className="border p-1 text-sm rounded w-full"/><button onClick={() => handleAddSubCategory(c.id)} className="bg-blue-600 text-white px-2 rounded text-xs">OK</button></div>
-               ) : <button onClick={() => setSelectedParentForSub(c.id)} className="w-full py-1 text-xs text-blue-600 border border-dashed border-blue-200 rounded">+ Añadir Sub</button>}
+                 <div className="flex gap-1"><input id="sub-category-name" name="sub-category-name" autoFocus placeholder="Sub..." value={newSubName} onChange={e => setNewSubName(e.target.value)} className="border p-1 text-sm rounded w-full"/><button onClick={() => handleAddSubCategory(c.id)} className="bg-gray-900 text-white px-2 rounded text-xs">OK</button></div>
+               ) : <button onClick={() => setSelectedParentForSub(c.id)} className="w-full py-1 text-xs text-gray-600 border border-dashed border-gray-300 rounded">+ Añadir Sub</button>}
             </div>
           </div>
           );
@@ -2738,7 +2738,7 @@ const renderRepairs = () => (
                 <div className="flex-1">
                    <div className="flex gap-2 mb-1">
                       <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.brand}</span>
-                      <span className="bg-blue-50 text-blue-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.model}</span>
+                      <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{r.model}</span>
                    </div>
                    <p className="text-xs text-gray-600 mb-2 line-clamp-2">{r.description || "—"}</p>
                 </div>
@@ -3171,7 +3171,7 @@ const renderRepairs = () => (
               {o.phone && <div className="flex items-center gap-1.5 text-[13px] text-gray-800"><Phone size={12} className="text-gray-400"/> {o.phone}</div>}
               {o.customer_email && <div className="flex items-center gap-1.5 text-[13px] text-gray-800 break-all"><Mail size={12} className="text-gray-400"/> {o.customer_email}</div>}
               {o.address && <div className="flex items-start gap-1.5 text-[13px] text-gray-600"><MapPin size={12} className="text-gray-400 mt-0.5 flex-shrink-0"/> {o.address}</div>}
-              {o.note && <div className="flex items-start gap-1.5 text-[12px] text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2"><StickyNote size={12} className="mt-0.5 flex-shrink-0"/> {o.note}</div>}
+              {o.note && <div className="flex items-start gap-1.5 text-[12px] text-gray-700 bg-gray-100 border border-gray-200 rounded p-2"><StickyNote size={12} className="mt-0.5 flex-shrink-0 text-gray-400"/> {o.note}</div>}
             </div>
             {isPickup && (
               <div className="rounded-lg p-2.5 bg-gray-50 border border-gray-200">
@@ -3506,7 +3506,7 @@ const renderRepairs = () => (
               <FileSpreadsheet size={16}/>
               Descargar plantilla
             </button>
-            <label className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 cursor-pointer flex items-center gap-2">
+            <label className="px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 cursor-pointer flex items-center gap-2">
               <Upload size={16}/>
               Elegir CSV
               <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFileSelect}/>
@@ -3549,7 +3549,7 @@ const renderRepairs = () => (
           <button type="button" onClick={() => { setImportModalOpen(false); setImportPreview(null); setImportProgress({ done: 0, total: 0, errors: [] }); }} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50" disabled={importing}>
             Cerrar
           </button>
-          <button type="button" onClick={runImport} disabled={!importPreview?.rows?.length || importing} className="px-6 py-2 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50">
+          <button type="button" onClick={runImport} disabled={!importPreview?.rows?.length || importing} className="px-6 py-2 rounded-lg bg-gray-900 text-white font-bold hover:bg-gray-800 disabled:opacity-50">
             {importing ? 'Importando…' : 'Importar'}
           </button>
         </div>
@@ -3592,7 +3592,7 @@ const renderRepairs = () => (
         </div>
         <div className="p-6 border-t flex gap-3">
           {bulkResultModal.failed > 0 && (
-            <button type="button" onClick={handleBulkRetryFailed} className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+            <button type="button" onClick={handleBulkRetryFailed} className="px-4 py-2 rounded-lg bg-gray-900 text-white font-medium hover:bg-gray-800">
               Reintentar fallidos ({bulkResultModal.failed})
             </button>
           )}
@@ -3754,8 +3754,8 @@ const renderRepairs = () => (
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
-                    <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-1.5 rounded-lg text-sm bg-white">
+                    <label className="text-xs font-bold text-gray-600 mb-1 block">IVA</label>
+                    <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-gray-300 p-1.5 rounded-lg text-sm bg-white">
                       {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
@@ -3765,8 +3765,8 @@ const renderRepairs = () => (
                     <span className="font-bold text-sm text-gray-800">Mostrar en tienda</span>
                   </label>
 
-                  <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'}`}>
-                    <input type="checkbox" checked={!!currentProduct.imageNeedsOptimization} onChange={e => setCurrentProduct({...currentProduct, imageNeedsOptimization: e.target.checked})} className="w-4 h-4 rounded text-purple-600"/>
+                  <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-gray-400 bg-gray-100' : 'border-gray-200 bg-white'}`}>
+                    <input type="checkbox" checked={!!currentProduct.imageNeedsOptimization} onChange={e => setCurrentProduct({...currentProduct, imageNeedsOptimization: e.target.checked})} className="w-4 h-4 rounded"/>
                     <span>
                       <span className="block font-bold text-sm text-gray-800">Foto pendiente de optimizar</span>
                       <span className="block text-xs text-gray-500">Para arreglarla luego.</span>
@@ -3774,7 +3774,7 @@ const renderRepairs = () => (
                   </label>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
-                    <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar</button>
+                    <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-colors">Guardar</button>
                     <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-colors">
                       Guardar y siguiente
                     </button>
@@ -3833,36 +3833,36 @@ const renderRepairs = () => (
               </div>
             )}
 
-            <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-4 space-y-3">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h4 className="font-bold text-sm text-amber-900">IVA y revisión fiscal</h4>
-                  <p className="text-[11px] text-amber-700">Fase 2: clasificar antes de emitir facturas oficiales.</p>
+                  <h4 className="font-bold text-sm text-gray-800">IVA y revisión fiscal</h4>
+                  <p className="text-[11px] text-gray-500">Fase 2: clasificar antes de emitir facturas oficiales.</p>
                 </div>
                 <span className={`px-2 py-1 rounded-full border text-[11px] font-semibold ${taxStatusClass(currentProduct.taxReviewStatus || currentProduct.tax_review_status)}`}>{taxStatusLabel(currentProduct.taxReviewStatus || currentProduct.tax_review_status)}</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
-                  <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                  <label className="text-xs font-bold text-gray-600 mb-1 block">IVA</label>
+                  <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
                     {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-amber-800 mb-1 block">Categoría fiscal</label>
-                  <select id="product-tax-category" name="product-tax-category" value={currentProduct.taxCategory ?? currentProduct.tax_category ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxCategory: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                  <label className="text-xs font-bold text-gray-600 mb-1 block">Categoría fiscal</label>
+                  <select id="product-tax-category" name="product-tax-category" value={currentProduct.taxCategory ?? currentProduct.tax_category ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxCategory: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
                     {TAX_CATEGORY_OPTIONS.map(o => <option key={o.value || 'none'} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-amber-800 mb-1 block">Estado</label>
-                  <select id="product-tax-review-status" name="product-tax-review-status" value={currentProduct.taxReviewStatus ?? currentProduct.tax_review_status ?? 'pending'} onChange={e => setCurrentProduct({...currentProduct, taxReviewStatus: e.target.value})} className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white">
+                  <label className="text-xs font-bold text-gray-600 mb-1 block">Estado</label>
+                  <select id="product-tax-review-status" name="product-tax-review-status" value={currentProduct.taxReviewStatus ?? currentProduct.tax_review_status ?? 'pending'} onChange={e => setCurrentProduct({...currentProduct, taxReviewStatus: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
                     {TAX_REVIEW_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-amber-800 mb-1 block">Nota fiscal</label>
-                  <input id="product-tax-note" name="product-tax-note" value={currentProduct.taxNote ?? currentProduct.tax_note ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxNote: e.target.value})} placeholder="Motivo, duda o referencia proveedor" className="w-full border border-amber-200 p-2 rounded-lg text-sm bg-white"/>
+                  <label className="text-xs font-bold text-gray-600 mb-1 block">Nota fiscal</label>
+                  <input id="product-tax-note" name="product-tax-note" value={currentProduct.taxNote ?? currentProduct.tax_note ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxNote: e.target.value})} placeholder="Motivo, duda o referencia proveedor" className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white"/>
                 </div>
               </div>
             </div>
@@ -3875,29 +3875,29 @@ const renderRepairs = () => (
 
             {!productReviewMode && (
               <>
-                <div className="bg-pink-50 p-4 rounded-xl border border-pink-100">
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                     <div className="flex items-center gap-2">
                        <input 
                          type="checkbox" 
                          id="isGiftProduct" 
                          checked={currentProduct.giftProduct || false} 
                          onChange={e => setCurrentProduct({...currentProduct, giftProduct: e.target.checked})} 
-                         className="w-4 h-4 text-pink-600 rounded"
+                         className="w-4 h-4 rounded"
                        />
-                       <label htmlFor="isGiftProduct" className="font-bold text-sm text-pink-800">Producto de Regalo (订单满€65可选)</label>
+                       <label htmlFor="isGiftProduct" className="font-bold text-sm text-gray-800">Producto de Regalo (订单满€65可选)</label>
                     </div>
                 </div>
 
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                     <div className="flex items-center gap-2 mb-3">
                        <input 
                          type="checkbox" 
                          id="isOferta" 
                          checked={currentProduct.oferta || false} 
                          onChange={e => setCurrentProduct({...currentProduct, oferta: e.target.checked})} 
-                         className="w-4 h-4 text-blue-600 rounded"
+                         className="w-4 h-4 rounded"
                        />
-                       <label htmlFor="isOferta" className="font-bold text-sm text-blue-800">¿Activar Oferta?</label>
+                       <label htmlFor="isOferta" className="font-bold text-sm text-gray-800">¿Activar Oferta?</label>
                     </div>
                     
                     {currentProduct.oferta && (
@@ -3947,7 +3947,7 @@ const renderRepairs = () => (
                     <div key={idx} className="relative group">
                       <img src={img} alt={`Producto ${idx + 1}`} className="w-full h-20 object-contain rounded-lg border border-gray-200 bg-gray-50"/>
                       {idx === 0 && (
-                        <span className="absolute top-1 left-1 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded font-bold">Principal</span>
+                        <span className="absolute top-1 left-1 bg-gray-900 text-white text-xs px-1.5 py-0.5 rounded font-bold">Principal</span>
                       )}
                       <button
                         type="button"
@@ -3967,11 +3967,11 @@ const renderRepairs = () => (
                   <button type="button" onClick={handleRemoveBg} disabled={removingBg || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50">
                     {removingBg ? "..." : "Quitar fondo (AI)"}
                   </button>
-                  <button type="button" onClick={handleCenterProduct} disabled={centeringProduct || removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 disabled:opacity-50">
+                  <button type="button" onClick={handleCenterProduct} disabled={centeringProduct || removingBg} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                     {centeringProduct ? "..." : "Centrar producto (AI)"}
                   </button>
                   {!productReviewMode && (
-                    <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50">
+                    <button type="button" onClick={handleGenerateDescription} disabled={generatingDesc || centeringProduct} className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                       {generatingDesc ? "..." : `Extraer información (AI) ${currentProduct?.images?.length > 1 ? `(${currentProduct.images.length} imágenes)` : ''}`}
                     </button>
                   )}
@@ -3986,7 +3986,7 @@ const renderRepairs = () => (
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar Producto</button>
+              <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">Guardar Producto</button>
               {productReviewMode && currentProduct.id && (
                 <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">
                   Guardar y siguiente
