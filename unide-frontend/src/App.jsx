@@ -1643,7 +1643,50 @@ export default function App() {
     return null;
   };
 
-  const displayProductName = (p) => (p?.shortName || p?.short_name || p?.name || p?.title || '').trim();
+  const makeAutoShortName = (value, maxChars = 34) => {
+    const original = String(value || '').replace(/\s+/g, ' ').trim();
+    if (original.length <= maxChars) return original;
+
+    const dropWords = new Set([
+      'SABOR', 'DE', 'DEL', 'LA', 'EL', 'LAS', 'LOS', 'CON', 'SIN', 'PARA',
+      'Y', 'A', 'AL', 'EN', 'THE', 'PACK', 'FORMATO',
+    ]);
+    const sizePattern = /^\d+(?:[,.]\d+)?(?:G|GR|KG|ML|CL|L|LT|UD|UDS|UN|U|PZ|PZS|SOB|SOBRES?)$/i;
+    const tokens = original
+      .split(/\s+/)
+      .map((token) => token.replace(/[()[\]{}]/g, '').trim())
+      .filter(Boolean);
+    const sizeTokens = tokens.filter((token) => sizePattern.test(token.replace(/\s/g, '')));
+    const compactTokens = tokens.filter((token) => !dropWords.has(normalizeText(token).toUpperCase()));
+
+    const buildWithin = (candidateTokens) => {
+      const chosen = [];
+      for (const token of candidateTokens) {
+        const next = [...chosen, token].join(' ');
+        if (next.length > maxChars) break;
+        chosen.push(token);
+      }
+      return chosen.join(' ');
+    };
+
+    let short = buildWithin(compactTokens.length ? compactTokens : tokens);
+    const lastSize = sizeTokens[sizeTokens.length - 1];
+    if (lastSize && short && !normalizeText(short).includes(normalizeText(lastSize))) {
+      const baseTokens = short.split(/\s+/);
+      while (baseTokens.length > 1 && `${baseTokens.join(' ')} ${lastSize}`.length > maxChars) {
+        baseTokens.pop();
+      }
+      short = `${baseTokens.join(' ')} ${lastSize}`.trim();
+    }
+
+    return short || original.slice(0, maxChars).trim();
+  };
+
+  const displayProductName = (p) => {
+    const manual = (p?.shortName || p?.short_name || '').trim();
+    if (manual) return manual;
+    return makeAutoShortName(p?.name || p?.title || '');
+  };
 
   // expanded=true (sólo Ofertas Flash de la home): botón "Añadir" ancho que
   // se convierte en control de cantidad. Por defecto (resto de listados) se
