@@ -1505,11 +1505,15 @@ export default function AdminApp() {
     if (!collectTarget) return;
     setCollectBusy(true);
     try {
+      const targetId = collectTarget.id;
       const amount = `€${Number(collectTarget.total || 0).toFixed(2)}`;
-      await apiClient.updateOrderStatus(collectTarget.id, 'Entregado', method);
+      await apiClient.updateOrderStatus(targetId, 'Entregado', method);
       toast.success(`Cobrado ${amount} · ${method}`, { icon: '💰', duration: 3500 });
+      // Actualización en sitio (sin recargar toda la página).
+      setOrders(prev => prev.map(o => o.id === targetId
+        ? { ...o, status: 'Entregado', payment_method: method }
+        : o));
       setCollectTarget(null);
-      fetchData();
     } catch (error) {
       toast.error('Error: ' + error.message);
     } finally {
@@ -1528,7 +1532,12 @@ export default function AdminApp() {
         res?.alreadyCaptured ? 'Este pedido ya estaba cobrado' : `Cobrado ${amount}`.trim(),
         res?.alreadyCaptured ? undefined : { icon: '💰', duration: 3500 }
       );
-      fetchData();
+      // Actualización EN SITIO (sin recargar toda la página): el cobro deja
+      // el pedido en "Procesando". Fusionamos el pedido devuelto por el
+      // backend si viene, y forzamos el estado final.
+      setOrders(prev => prev.map(o => o.id === oid
+        ? { ...o, ...(res?.order || {}), status: 'Procesando' }
+        : o));
     } catch (error) {
       toast.error('Error al cobrar: ' + error.message);
     }
@@ -2961,8 +2970,11 @@ const renderRepairs = () => (
                  const isPickup = isPickupOrder(o);
                  const isAuth = o.status === 'Autorizado';
                  const hold = isAuth ? authHoldInfo(o) : null;
+                 // Pendiente = aún no terminado (no entregado ni cancelado):
+                 // necesita acción (cobrar, preparar, entregar…) → marco gris.
+                 const isPending = !['Entregado', 'Cancelado'].includes(o.status);
                  return (
-                 <tr key={o.id} onClick={() => setDetailOrder(o)} className={`border-b cursor-pointer transition-colors ${isAuth ? (hold.urgent ? 'bg-red-50/70 hover:bg-red-100/70 border-l-4 border-l-red-400' : 'bg-gray-50 hover:bg-gray-100 border-l-4 border-l-gray-300') : 'hover:bg-gray-50'}`}>
+                 <tr key={o.id} onClick={() => setDetailOrder(o)} className={`border-b cursor-pointer transition-colors ${isAuth && hold.urgent ? 'bg-red-50/70 hover:bg-red-100/70 border-l-4 border-l-red-400' : isPending ? 'bg-gray-50 hover:bg-gray-100 border-l-4 border-l-gray-300' : 'hover:bg-gray-50'}`}>
                    <td className="px-4 py-3 align-middle">
                       <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
                      <div className="font-bold text-gray-800 text-sm">{o.phone || '—'}</div>
@@ -3043,8 +3055,10 @@ const renderRepairs = () => (
             const isPickup = isPickupOrder(o);
             const isAuth = o.status === 'Autorizado';
             const hold = isAuth ? authHoldInfo(o) : null;
+            // Pendiente = aún no terminado (no entregado ni cancelado).
+            const isPending = !['Entregado', 'Cancelado'].includes(o.status);
             return (
-              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className={`w-full text-left rounded-xl shadow-sm border p-3 active:bg-gray-50 ${isAuth ? (hold.urgent ? 'bg-red-50 border-l-4 border-l-red-400' : 'bg-gray-50 border-l-4 border-l-gray-300') : 'bg-white'}`}>
+              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className={`w-full text-left rounded-xl shadow-sm border p-3 active:bg-gray-50 ${isAuth && hold.urgent ? 'bg-red-50 border-l-4 border-l-red-400' : isPending ? 'bg-gray-50 border-l-4 border-l-gray-300' : 'bg-white'}`}>
                 <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>

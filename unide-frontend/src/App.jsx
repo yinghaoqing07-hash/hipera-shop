@@ -1893,12 +1893,6 @@ export default function App() {
             <button onClick={() => navTo("repair")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><Wrench size={20} /></div><span className="text-[11px] font-bold text-gray-700">Reparación</span></button>
             <button onClick={() => navTo("orders")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><ClipboardList size={20} /></div><span className="text-[11px] font-bold text-gray-700">Pedidos</span></button>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-600">
-            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Store size={14} className="text-red-600"/> Tienda física en Meco</div>
-            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Truck size={14} className="text-red-600"/> Recogida gratis</div>
-            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Clock size={14} className="text-red-600"/> Abierto 9:00-22:00</div>
-            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Smartphone size={14} className="text-red-600"/> WhatsApp cercano</div>
-          </div>
           <div className="space-y-2">
           <button
             type="button"
