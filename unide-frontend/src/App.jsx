@@ -1054,6 +1054,7 @@ export default function App() {
       if (productsData) {
         setProducts(productsData.map(p => ({
           ...p,
+          shortName: p.short_name || '',
           ofertaType: p.oferta_type,
           ofertaValue: p.oferta_value,
           subCategoryId: p.sub_category_id,
@@ -1593,7 +1594,7 @@ export default function App() {
       
       // 刷新产品列表（通过API）
       const pData = await apiClient.getProducts();
-      if(pData) setProducts(pData.map(p => ({...p, ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id, giftProduct: p.gift_product || false})));
+      if(pData) setProducts(pData.map(p => ({...p, shortName: p.short_name || '', ofertaType: p.oferta_type, ofertaValue: p.oferta_value, subCategoryId: p.sub_category_id, giftProduct: p.gift_product || false})));
       
       navTo("home"); 
     } catch (e) {
@@ -1642,6 +1643,8 @@ export default function App() {
     return null;
   };
 
+  const displayProductName = (p) => (p?.shortName || p?.short_name || p?.name || p?.title || '').trim();
+
   // expanded=true (sólo Ofertas Flash de la home): botón "Añadir" ancho que
   // se convierte en control de cantidad. Por defecto (resto de listados) se
   // usa el "+" compacto para no alargar las tarjetas.
@@ -1657,7 +1660,7 @@ export default function App() {
         {renderDiscountTag(p)}
         <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square rounded-xl object-contain bg-gray-50 p-2" />
       </div>
-      <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words">{p.name}</p>
+      <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words" title={p.name}>{displayProductName(p)}</p>
       {expanded ? (
         <>
           <div className="mb-2">
@@ -1752,6 +1755,8 @@ export default function App() {
     const subCategoryName = subCategories.find(s => s.id === p.subCategoryId)?.name || '';
     const haystack = normalizeText([
       p.name,
+      p.shortName,
+      p.short_name,
       p.description,
       categoryName,
       subCategoryName,
@@ -2426,7 +2431,7 @@ export default function App() {
                            <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="w-20 h-20 object-cover rounded-xl bg-gray-50"/>
                            <div className="flex-1 flex flex-col justify-between py-1">
                               <div>
-                                <p className="font-bold text-gray-800 line-clamp-2">{item.name}</p>
+                                <p className="font-bold text-gray-800 line-clamp-2" title={item.name}>{displayProductName(item)}</p>
                                 {item.isGift ? (
                                   <p className="text-pink-600 font-extrabold text-sm">🎁 GRATIS</p>
                                 ) : (
@@ -2463,7 +2468,7 @@ export default function App() {
                            <div className="absolute right-0 top-0 w-20 h-20 bg-blue-500 blur-[40px] opacity-20"></div>
                            <div className="w-20 h-20 bg-gray-700 rounded-xl flex items-center justify-center text-gray-400 flex-shrink-0"><Wrench size={24}/></div>
                            <div className="flex-1 flex flex-col justify-between py-1 relative z-10">
-                              <div><p className="font-bold text-gray-100 line-clamp-2">{item.name}</p><p className="text-blue-400 font-extrabold">€{item.price}</p></div>
+                              <div><p className="font-bold text-gray-100 line-clamp-2" title={item.name}>{displayProductName(item)}</p><p className="text-blue-400 font-extrabold">€{item.price}</p></div>
                               <div className="flex items-center justify-between">
                                  <div className="flex items-center gap-3 bg-gray-700 rounded-lg p-1">
                                     <button onClick={() => updateQty(item.id, item.name, -1)} className="w-7 h-7 bg-gray-600 rounded shadow-sm flex items-center justify-center text-gray-300 active:scale-90 transition-transform"><Minus size={14}/></button>
@@ -2704,7 +2709,7 @@ export default function App() {
                      <div className="flex items-center gap-3 flex-1">
                        <img src={selectedGift.image} alt={selectedGift.name} loading="lazy" decoding="async" className="w-16 h-16 object-cover rounded-lg"/>
                        <div className="flex-1">
-                         <p className="font-bold text-gray-800 text-sm">{selectedGift.name}</p>
+                         <p className="font-bold text-gray-800 text-sm" title={selectedGift.name}>{displayProductName(selectedGift)}</p>
                          <p className="text-xs text-red-600 font-bold">GRATIS</p>
                        </div>
                      </div>
@@ -2728,7 +2733,7 @@ export default function App() {
                              className="bg-white p-3 rounded-xl border-2 border-gray-200 hover:border-red-500 transition-all text-left active:scale-95"
                            >
                              <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full h-20 object-cover rounded-lg mb-2"/>
-                             <p className="text-xs font-bold text-gray-800 line-clamp-3 mb-1">{p.name}</p>
+                         <p className="text-xs font-bold text-gray-800 line-clamp-3 mb-1" title={p.name}>{displayProductName(p)}</p>
                              <p className="text-xs text-red-600 font-bold">GRATIS</p>
                            </button>
                          ))
@@ -2900,7 +2905,7 @@ export default function App() {
                    <div key={item.id} className="flex items-center gap-3 text-sm">
                      <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="w-10 h-10 object-cover rounded-lg flex-shrink-0"/>
                      <div className="flex-1 min-w-0">
-                       <p className="font-medium text-gray-800 truncate">{item.name}</p>
+                       <p className="font-medium text-gray-800 truncate" title={item.name}>{displayProductName(item)}</p>
                        <p className="text-xs text-gray-500">{item.quantity} × €{item.price.toFixed(2)}</p>
                      </div>
                      <span className="font-semibold text-gray-800 flex-shrink-0">€{(item.price * item.quantity).toFixed(2)}</span>
@@ -2910,7 +2915,7 @@ export default function App() {
                    <div className="flex items-center gap-3 text-sm">
                      <img src={selectedGift.image} alt={selectedGift.name} loading="lazy" decoding="async" className="w-10 h-10 object-cover rounded-lg flex-shrink-0"/>
                      <div className="flex-1 min-w-0">
-                       <p className="font-medium text-gray-800 truncate">{selectedGift.name}</p>
+                       <p className="font-medium text-gray-800 truncate" title={selectedGift.name}>{displayProductName(selectedGift)}</p>
                        <p className="text-xs text-red-600 font-bold">Regalo</p>
                      </div>
                      <span className="font-semibold text-red-600 flex-shrink-0">GRATIS</span>
@@ -3283,7 +3288,7 @@ export default function App() {
                  {products.filter(p => p.category === selectedProduct.category && p.id !== selectedProduct.id).slice(0, 4).map(p => (
                    <div key={p.id} onClick={() => {setSelectedProduct(p); window.scrollTo(0,0);}} className="min-w-[100px] sm:min-w-[120px] md:min-w-[140px] w-[100px] sm:w-[120px] md:w-[140px] flex-shrink-0 snap-start bg-gray-50 p-1.5 md:p-2 rounded-xl border border-gray-100 cursor-pointer active:scale-95 transition-transform">
                      <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square object-contain rounded-lg bg-gray-50 p-1 mb-1.5 md:mb-2"/>
-                     <p className="text-[11px] md:text-xs font-bold text-gray-700 line-clamp-2">{p.name}</p>
+                     <p className="text-[11px] md:text-xs font-bold text-gray-700 line-clamp-2" title={p.name}>{displayProductName(p)}</p>
                      <p className="text-[11px] md:text-xs font-bold text-red-600">€{p.price}</p>
                    </div>
                  ))}

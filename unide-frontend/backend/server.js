@@ -636,12 +636,25 @@ const authenticatePrintAgent = (req, res, next) => {
 // Get products (public) - solo productos visibles en tienda
 app.get('/api/products', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const productFields = 'id,name,short_name,description,price,image,category,sub_category_id,stock,oferta,oferta_type,oferta_value,gift_product';
+    let { data, error } = await supabase
       .from('products')
-      .select('id,name,description,price,image,category,sub_category_id,stock,oferta,oferta_type,oferta_value,gift_product')
+      .select(productFields)
       .or('visible.is.null,visible.eq.true')
       .order('sort_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });
+
+    if (error && /short_name/i.test(error.message || '')) {
+      console.warn('[GET /api/products] short_name no existe; usando fallback sin nombre corto.');
+      const fallback = await supabase
+        .from('products')
+        .select(productFields.replace('short_name,', ''))
+        .or('visible.is.null,visible.eq.true')
+        .order('sort_order', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: true });
+      data = (fallback.data || []).map((p) => ({ ...p, short_name: '' }));
+      error = fallback.error;
+    }
     
     if (error) throw error;
     res.json(data);

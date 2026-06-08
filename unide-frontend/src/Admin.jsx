@@ -75,12 +75,13 @@ const TAX_SUGGESTION_BATCH_LABELS = {
 };
 
 const CSV_IMPORT_FIELDS = [
-  'name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description',
+  'name', 'short_name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description',
   'tax_rate', 'tax_category', 'tax_review_status', 'tax_note',
   'image_needs_optimization', 'oferta', 'oferta_type', 'oferta_value', 'gift_product', 'visible',
 ];
 const CSV_HEADER_ALIASES = {
   name: ['name', 'nombre', 'nombre del producto', 'producto'],
+  short_name: ['short_name', 'short name', 'nombre corto', 'nombre_corto', 'display_name', 'display name', 'titulo corto', 'título corto'],
   price: ['price', 'precio', 'precio €'],
   stock: ['stock', 'cantidad', 'cant'],
   image: ['image', 'imagen', 'img', 'url', 'foto'],
@@ -138,6 +139,7 @@ function normalizeProductForState(product, fallbackImages = null) {
     images,
     image: images[0] || product.image || '',
     giftProduct: product.gift_product || false,
+    shortName: product.short_name || product.shortName || '',
     taxRate: product.tax_rate ?? '',
     taxCategory: product.tax_category || '',
     taxReviewStatus: product.tax_review_status || 'pending',
@@ -175,6 +177,10 @@ function productNeedsReview(product) {
 
 function productHasImageReviewField(product) {
   return !!product?.hasImageReviewField || Object.prototype.hasOwnProperty.call(product || {}, 'image_needs_optimization');
+}
+
+function productDisplayName(product) {
+  return (product?.shortName || product?.short_name || product?.name || '').trim();
 }
 
 function taxSuggestionConfidenceClass(value) {
@@ -274,7 +280,7 @@ export default function AdminApp() {
   const [isEditing, setIsEditing] = useState(false);
   const [currentProduct, setCurrentProduct] = useState(null);
   const [newProduct, setNewProduct] = useState({
-    name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
+    name: "", shortName: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [],
     description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false,
     visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "", imageNeedsOptimization: false
   });
@@ -338,7 +344,7 @@ export default function AdminApp() {
 
   // 修改：增加了 description, oferta, oferta_type, oferta_value
   const [formData, setFormData] = useState({
-    name: "", price: "", category: "", image: "", stock: "", 
+    name: "", shortName: "", price: "", category: "", image: "", stock: "", 
     description: "", oferta: false, oferta_type: "percent", oferta_value: 0
   });
 
@@ -851,6 +857,7 @@ export default function AdminApp() {
       : (shouldSaveAndNext ? 'reviewed' : normalizeTaxStatus(currentProduct.taxReviewStatus ?? currentProduct.tax_review_status));
     const dbPayload = { 
       name: currentProduct.name, 
+      short_name: currentProduct.shortName ?? currentProduct.short_name ?? '',
       price: currentProduct.price, 
       stock: currentProduct.stock, 
       image: images[0] || currentProduct.image || '', // 主图（第一张）
@@ -1123,7 +1130,7 @@ export default function AdminApp() {
             const imgs = p.images || (p.image ? [p.image] : []);
             const newImages = [newUrl, ...imgs.slice(1)];
             await apiClient.updateProduct(p.id, {
-              name: p.name, price: p.price, stock: p.stock, category: p.category,
+              name: p.name, short_name: p.shortName ?? p.short_name ?? '', price: p.price, stock: p.stock, category: p.category,
               sub_category_id: p.subCategoryId ?? p.sub_category_id, description: p.description || '',
               oferta: p.oferta, oferta_type: p.oferta_type || 'percent', oferta_value: p.oferta_value || 0,
               gift_product: p.giftProduct || false, visible: p.visible !== false,
@@ -1165,6 +1172,7 @@ export default function AdminApp() {
     const imgs = newProduct.images?.length ? newProduct.images : (newProduct.image ? [newProduct.image] : []);
     const payload = {
       name: newProduct.name,
+      short_name: newProduct.shortName || '',
       price: newProduct.price,
       stock: newProduct.stock,
       image: imgs[0] || '',
@@ -1190,7 +1198,7 @@ export default function AdminApp() {
       if (saved) {
         setProducts(prev => [...prev, normalizeProductForState(saved, imgs)]);
       } else fetchData();
-      setNewProduct({ name: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "", imageNeedsOptimization: false });
+      setNewProduct({ name: "", shortName: "", price: 0, stock: 10, category: "", subCategoryId: "", image: "", images: [], description: "", oferta: false, oferta_type: "percent", oferta_value: 0, giftProduct: false, visible: true, taxRate: "", taxCategory: "", taxReviewStatus: "pending", taxNote: "", imageNeedsOptimization: false });
     } catch (err) {
       toast.error("Error al crear: " + (err.message || "Error"));
     }
@@ -1198,7 +1206,7 @@ export default function AdminApp() {
 
   const downloadImportTemplate = () => {
     const headers = CSV_IMPORT_FIELDS;
-    const example = ['Ejemplo Producto', '2.50', '10', '', '1', '', 'Descripción opcional', '10', 'food_general', 'pending', 'IVA pendiente de confirmar', 'false', 'false', 'percent', '0', 'false', 'true'];
+    const example = ['Ejemplo Producto Nombre Completo 500g', 'Ejemplo Producto 500g', '2.50', '10', '', '1', '', 'Descripción opcional', '10', 'food_general', 'pending', 'IVA pendiente de confirmar', 'false', 'false', 'percent', '0', 'false', 'true'];
     const lines = [headers.join(','), example.map((v) => (v.includes(',') ? `"${v}"` : v)).join(',')];
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -1284,6 +1292,7 @@ export default function AdminApp() {
       }
       const payload = {
         name,
+        short_name: get('short_name') || '',
         price,
         stock: parseInt(get('stock'), 10) || 10,
         image: get('image') || '',
@@ -2017,7 +2026,7 @@ export default function AdminApp() {
                     <span className="text-sm font-bold text-gray-400 w-5 flex-shrink-0">{i + 1}</span>
                     {img && <img src={img} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50"/>}
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-800 truncate">{p.name}{p.id != null && <span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span>}</div>
+                      <div className="font-medium text-gray-800 truncate" title={p.name}>{productDisplayName(p)}{p.id != null && <span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span>}</div>
                       <div className="text-xs text-gray-500">€{p.revenue.toFixed(2)} en ventas</div>
                     </div>
                     <div className="text-right flex-shrink-0">
@@ -2040,7 +2049,7 @@ export default function AdminApp() {
                 <div key={p.id} className="p-4 flex flex-wrap items-center gap-3 hover:bg-gray-50">
                   <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 flex-shrink-0"/>
                   <div className="flex-1 min-w-0">
-                    <div className="font-bold text-gray-800 truncate">{p.name}<span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span></div>
+                    <div className="font-bold text-gray-800 truncate" title={p.name}>{productDisplayName(p)}<span className="text-gray-400 font-mono text-xs ml-1">#{p.id}</span></div>
                     <div className="text-xs text-gray-500">€{p.price?.toFixed(2)} · quedan <span className="font-bold text-amber-600">{p.stock}</span></div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -2075,7 +2084,7 @@ export default function AdminApp() {
                   <div key={p.id} className="p-4 flex flex-wrap items-center gap-3 hover:bg-gray-50">
                     <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100 flex-shrink-0"/>
                     <div className="flex-1 min-w-0">
-                      <div className="font-bold text-gray-800 truncate">{p.name}</div>
+                      <div className="font-bold text-gray-800 truncate" title={p.name}>{productDisplayName(p)}</div>
                       <div className="text-xs text-gray-500">€{p.price?.toFixed(2)}</div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -2166,6 +2175,7 @@ export default function AdminApp() {
       // id: coincidencia EXACTA (buscar 19 no debe traer 190, 198...).
       if (isIdQuery && String(p.id) === searchId) return true;
       if ((p.name || '').toLowerCase().includes(searchLower)) return true;
+      if ((p.shortName || p.short_name || '').toLowerCase().includes(searchLower)) return true;
       return false;
     });
     if (productReviewMode) {
@@ -2236,7 +2246,8 @@ export default function AdminApp() {
         <td className="p-4 flex items-center gap-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-10 h-10 rounded object-cover bg-gray-100"/>
           <div>
-            <div className="font-bold">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
+            <div className="font-bold" title={p.name}>{productDisplayName(p)} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
+            {(p.shortName || p.short_name) && <div className="text-xs text-gray-500 truncate" title={p.name}>{p.name}</div>}
             <div className="flex flex-wrap gap-1 mt-1">
               {p.oferta && <span className="bg-gray-100 text-gray-700 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">OFERTA</span>}
               {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
@@ -2271,7 +2282,8 @@ export default function AdminApp() {
         <div className="flex items-start gap-3 mb-3">
           <img src={p.image || "https://via.placeholder.com/40"} alt="" className="w-12 h-12 rounded object-cover bg-gray-100 flex-shrink-0"/>
           <div className="flex-1 min-w-0">
-            <div className="font-bold text-gray-800 truncate">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
+            <div className="font-bold text-gray-800 truncate" title={p.name}>{productDisplayName(p)} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
+            {(p.shortName || p.short_name) && <div className="text-xs text-gray-500 truncate" title={p.name}>{p.name}</div>}
             <div className="flex flex-wrap gap-1 mt-1">
               {p.oferta && <span className="bg-gray-100 text-gray-700 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">OFERTA</span>}
               {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
@@ -2312,6 +2324,7 @@ export default function AdminApp() {
       const rows = exportRows.map(p => [
         p.id,
         p.name,
+        p.shortName ?? p.short_name ?? '',
         p.price,
         p.stock,
         p.image || '',
@@ -2400,7 +2413,8 @@ export default function AdminApp() {
         <form onSubmit={handleCreateProduct} className="bg-white rounded-xl shadow-sm border p-4 sm:p-6 space-y-4">
           <h3 className="font-bold text-gray-800 text-lg">Añadir producto nuevo</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="lg:col-span-2"><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label><textarea id="new-product-name" name="new-product-name" required rows={2} value={newProduct.name} onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo del producto" className="w-full border p-2 rounded-lg text-sm resize-y min-h-[2.5rem]"/></div>
+            <div><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre completo</label><textarea id="new-product-name" name="new-product-name" required rows={2} value={newProduct.name} onChange={e => setNewProduct(p => ({ ...p, name: e.target.value }))} placeholder="Nombre completo del producto" className="w-full border p-2 rounded-lg text-sm resize-y min-h-[2.5rem]"/></div>
+            <div><label className="text-xs font-bold text-gray-500 mb-1 block">Nombre corto</label><input value={newProduct.shortName || ''} onChange={e => setNewProduct(p => ({ ...p, shortName: e.target.value }))} placeholder="Ej: Frankfurt ElPozo Original" className="w-full border p-2 rounded-lg text-sm"/></div>
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio €</label><input required type="number" step="0.01" value={newProduct.price || ''} onChange={e => setNewProduct(p => ({ ...p, price: parseFloat(e.target.value) || 0 }))} className="w-full border p-2 rounded-lg text-sm"/></div>
             <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input required type="number" value={newProduct.stock ?? ''} onChange={e => setNewProduct(p => ({ ...p, stock: parseInt(e.target.value, 10) || 0 }))} className="w-full border p-2 rounded-lg text-sm"/></div>
             <div className="sm:col-span-2 lg:col-span-1 flex flex-col justify-end"><label className="text-xs font-bold text-gray-500 mb-1 block">Categoría</label><select required value={newProduct.category || ''} onChange={e => { const v = e.target.value; setNewProduct(p => ({ ...p, category: v ? parseInt(v, 10) : '', subCategoryId: '' })); }} className="w-full border p-2 rounded-lg text-sm bg-white"><option value="">—</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
@@ -3484,7 +3498,7 @@ const renderRepairs = () => (
               <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportFileSelect}/>
             </label>
           </div>
-          <p className="text-xs text-gray-500">Cabeceras admitidas: name/nombre, price/precio, stock, image, category, sub_category_id, description, tax_rate/iva, tax_category, tax_review_status, tax_note, image_needs_optimization, oferta, oferta_type, oferta_value, gift_product, visible. category puede ser ID o nombre.</p>
+          <p className="text-xs text-gray-500">Cabeceras admitidas: name/nombre, short_name/nombre corto, price/precio, stock, image, category, sub_category_id, description, tax_rate/iva, tax_category, tax_review_status, tax_note, image_needs_optimization, oferta, oferta_type, oferta_value, gift_product, visible. category puede ser ID o nombre.</p>
           {importPreview && (
             <>
               <div className="font-bold text-gray-800">Vista previa · {importPreview.rows.length} fila{importPreview.rows.length !== 1 ? 's' : ''}</div>
@@ -3624,7 +3638,8 @@ const renderRepairs = () => (
               {/* Campos: altura natural en móvil (la imagen se queda con el
                   resto del alto); en escritorio ocupan su columna. */}
               <div className="flex-shrink-0 sm:flex-1 sm:min-h-0 sm:overflow-y-auto flex flex-col gap-2">
-                <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm font-semibold resize-none min-h-[3rem]" placeholder="Nombre del producto"/>
+                <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm font-semibold resize-none min-h-[3rem]" placeholder="Nombre completo del producto"/>
+                <input value={currentProduct.shortName ?? currentProduct.short_name ?? ''} onChange={e => setCurrentProduct({...currentProduct, shortName: e.target.value})} className="w-full border p-2 rounded-lg text-sm" placeholder="Nombre corto para la tienda (opcional)"/>
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
@@ -3716,6 +3731,7 @@ const renderRepairs = () => (
                   <div>
                     <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label>
                     <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-1.5 rounded-lg text-sm resize-none min-h-[3.75rem]" placeholder="Nombre completo del producto"/>
+                    <input value={currentProduct.shortName ?? currentProduct.short_name ?? ''} onChange={e => setCurrentProduct({...currentProduct, shortName: e.target.value})} className="w-full border p-1.5 rounded-lg text-sm mt-2" placeholder="Nombre corto para la tienda"/>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -3775,8 +3791,12 @@ const renderRepairs = () => (
             
             {/* 基本信息 */}
             <div>
-              <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre completo</label>
               <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm resize-y min-h-[2.5rem]" placeholder="Nombre completo del producto"/>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre corto</label>
+              <input value={currentProduct.shortName ?? currentProduct.short_name ?? ''} onChange={e => setCurrentProduct({...currentProduct, shortName: e.target.value})} className="w-full border p-2 rounded-lg text-sm" placeholder="Ej: Frankfurt ElPozo Original"/>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4145,7 +4165,10 @@ const renderRepairs = () => (
               <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm">
                 Cancelar
               </button>
-              <button type="button" onClick={() => selectAllProducts(products.filter(p => !searchTerm.trim() || (p.name || '').toLowerCase().includes(searchTerm.toLowerCase().trim())).filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-gray-500 hover:underline">
+              <button type="button" onClick={() => selectAllProducts(products.filter(p => {
+                const q = searchTerm.toLowerCase().trim();
+                return !q || (p.name || '').toLowerCase().includes(q) || (p.shortName || p.short_name || '').toLowerCase().includes(q);
+              }).filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-gray-500 hover:underline">
                 Seleccionar todos (con imagen)
               </button>
             </>
