@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import { 
@@ -9,7 +9,8 @@ import {
   Plus, Trash2, Edit2, X, DollarSign, AlertCircle, RefreshCw, Undo2, MessageCircle,
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
-  Bell, BellOff, Download, TrendingUp, Eye, MapPin, Phone, Mail, CreditCard, StickyNote
+  Bell, BellOff, Download, TrendingUp, Eye, EyeOff, MapPin, Phone, Mail, CreditCard, StickyNote,
+  Truck, Store
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
@@ -60,6 +61,18 @@ const TAX_REVIEW_STATUS_OPTIONS = [
   { value: 'ask_gestor', label: 'Preguntar gestor' },
   { value: 'reviewed', label: 'Confirmado' },
 ];
+
+const TAX_SUGGESTION_BATCH_LABELS = {
+  '01_pos_exact_high': '01 POS exacto',
+  '02_alcohol_21': '02 Alcohol 21%',
+  '03_nonfood_clear_21': '03 No alimentación 21%',
+  '04_nonfood_or_drinks_21_review': '04 Bebidas/droguería 21%',
+  '05_pos_candidates_same_iva': '05 POS mismo IVA',
+  '06_general_food_10_review': '06 Alimentación 10%',
+  '07_basic_food_4_review': '07 Básicos 4%',
+  '08_low_confidence_hint': '08 Baja confianza',
+  '09_no_reliable_suggestion': '09 Sin sugerencia',
+};
 
 const CSV_IMPORT_FIELDS = [
   'name', 'price', 'stock', 'image', 'category', 'sub_category_id', 'description',
@@ -144,10 +157,10 @@ function taxRateLabel(product) {
 }
 
 function taxStatusClass(value) {
+  // Paleta sobria: solo "revisado" lleva un acento (verde tenue); el resto
+  // de estados se muestran en gris neutro para no recargar la vista.
   if (value === 'reviewed') return 'bg-green-50 text-green-700 border-green-200';
-  if (value === 'ask_gestor') return 'bg-amber-50 text-amber-700 border-amber-200';
-  if (value === 'needs_review') return 'bg-orange-50 text-orange-700 border-orange-200';
-  return 'bg-gray-50 text-gray-600 border-gray-200';
+  return 'bg-gray-100 text-gray-600 border-gray-200';
 }
 
 function isProductReviewed(product) {
@@ -162,6 +175,46 @@ function productNeedsReview(product) {
 
 function productHasImageReviewField(product) {
   return !!product?.hasImageReviewField || Object.prototype.hasOwnProperty.call(product || {}, 'image_needs_optimization');
+}
+
+function taxSuggestionConfidenceClass(value) {
+  if (value === 'high') return 'bg-green-50 text-green-700 border-green-200';
+  if (value === 'medium') return 'bg-blue-50 text-blue-700 border-blue-200';
+  if (value === 'low') return 'bg-amber-50 text-amber-700 border-amber-200';
+  return 'bg-gray-50 text-gray-600 border-gray-200';
+}
+
+function taxSuggestionRiskClass(value) {
+  if (value === 'low') return 'bg-green-50 text-green-700 border-green-200';
+  if (value === 'medium') return 'bg-blue-50 text-blue-700 border-blue-200';
+  return 'bg-red-50 text-red-700 border-red-200';
+}
+
+function resolveTaxCategoryFromSuggestion(suggestion) {
+  const raw = suggestion?.suggested_tax_category || '';
+  if (TAX_CATEGORY_OPTIONS.some((o) => o.value === raw)) return raw;
+  const batchId = suggestion?.batch_id || '';
+  const rate = String(suggestion?.suggested_tax_rate || '');
+  if (batchId.includes('alcohol')) return 'alcohol';
+  if (batchId.includes('drinks') || raw === 'sugary_drink') return 'sugary_drink';
+  if (raw === 'cleaning') return 'cleaning';
+  if (raw === 'hygiene') return 'hygiene';
+  if (rate === '4') return 'food_basic';
+  if (rate === '10') return 'food_general';
+  if (rate === '21') return 'other_21';
+  return '';
+}
+
+function buildTaxSuggestionNote(suggestion) {
+  if (!suggestion) return '';
+  const parts = [
+    `IVA sugerido ${suggestion.suggested_tax_rate || '?'}%`,
+    suggestion.tax_confidence ? `confianza ${suggestion.tax_confidence}` : '',
+    suggestion.batch_id || '',
+    suggestion.tax_source || '',
+    suggestion.matched_code ? `POS ${suggestion.matched_code}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
 }
 
 function parseCSV(text) {
@@ -233,6 +286,9 @@ export default function AdminApp() {
   const [selectedProductCategory, setSelectedProductCategory] = useState("");
   const [productReviewMode, setProductReviewMode] = useState(false);
   const [imageOptimizationOnly, setImageOptimizationOnly] = useState(false);
+  const [taxBatchFilter, setTaxBatchFilter] = useState("");
+  const [taxSuggestions, setTaxSuggestions] = useState([]);
+  const [taxSuggestionsLoadError, setTaxSuggestionsLoadError] = useState(false);
   // Filtros de la pestaña Pedidos
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("");
@@ -287,6 +343,37 @@ export default function AdminApp() {
   });
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/tax-suggestions/product-tax-suggestions.json')
+      .then((res) => {
+        if (!res.ok) throw new Error(`Tax suggestion file missing (${res.status})`);
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setTaxSuggestions(Array.isArray(data) ? data : []);
+        setTaxSuggestionsLoadError(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('Tax suggestions not loaded:', error);
+        setTaxSuggestions([]);
+        setTaxSuggestionsLoadError(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const taxSuggestionsById = useMemo(() => {
+    const map = new Map();
+    taxSuggestions.forEach((item) => {
+      if (item?.online_id !== null && item?.online_id !== undefined) {
+        map.set(String(item.online_id), item);
+      }
+    });
+    return map;
+  }, [taxSuggestions]);
 
   // =================================================================
   // Atajos de teclado globales del panel
@@ -381,7 +468,7 @@ export default function AdminApp() {
       }
       if (e.key === 'c') {
         if (activeTab === 'orders') { e.preventDefault(); setOrderSearch(''); setOrderStatusFilter(''); setOrderDateFrom(''); setOrderDateTo(''); return; }
-        if (activeTab === 'products') { e.preventDefault(); setSearchTerm(''); setSelectedProductCategory(''); setImageOptimizationOnly(false); return; }
+        if (activeTab === 'products') { e.preventDefault(); setSearchTerm(''); setSelectedProductCategory(''); setTaxBatchFilter(''); setImageOptimizationOnly(false); return; }
       }
     };
     window.addEventListener('keydown', handler);
@@ -685,6 +772,7 @@ export default function AdminApp() {
       updatedProducts
         .filter(productNeedsReview)
         .filter(p => getProductCategoryKey(p) === scopeCategory)
+        .filter(p => !taxBatchFilter || getTaxSuggestionForProduct(p)?.batch_id === taxBatchFilter)
         .filter(p => p.id !== current?.id)
     );
 
@@ -716,21 +804,51 @@ export default function AdminApp() {
       setUpdatingStockId(null);
     }
   };
+
+  const getTaxSuggestionForProduct = (product) => {
+    if (!product?.id) return null;
+    return taxSuggestionsById.get(String(product.id)) || null;
+  };
+
+  const applyTaxSuggestionToCurrentProduct = (suggestion) => {
+    if (!suggestion?.suggested_tax_rate) {
+      toast.error("Esta sugerencia no tiene IVA fiable.");
+      return;
+    }
+    setCurrentProduct((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        taxRate: String(suggestion.suggested_tax_rate),
+        taxCategory: resolveTaxCategoryFromSuggestion(suggestion),
+        taxReviewStatus: 'needs_review',
+        taxNote: buildTaxSuggestionNote(suggestion),
+      };
+    });
+    toast.success(`Sugerencia aplicada: IVA ${suggestion.suggested_tax_rate}%`);
+  };
   
   const handleSaveProduct = async (e, options = {}) => {
     e.preventDefault();
     const images = currentProduct.images || (currentProduct.image ? [currentProduct.image] : []);
     const shouldSaveAndNext = !!options.saveAndNext;
+    // markStatus: cuando se aparca un producto para revisar el IVA más tarde
+    // (no se exige IVA y se guarda con ese estado, p.ej. 'needs_review').
+    const markStatus = options.markStatus ? normalizeTaxStatus(options.markStatus) : null;
     const normalizedTaxRate = normalizeTaxRate(currentProduct.taxRate ?? currentProduct.tax_rate);
-    if (shouldSaveAndNext && normalizedTaxRate === null) {
-      toast.error("Selecciona el IVA antes de marcar el producto como revisado.");
+    // Solo exigimos IVA cuando se marca como REVISADO; si se aparca para
+    // revisar (markStatus) no hace falta saber el IVA todavía.
+    if (shouldSaveAndNext && !markStatus && normalizedTaxRate === null) {
+      toast.error("Selecciona el IVA, o usa «Revisar IVA» si aún no lo sabes.");
       return;
     }
     if (currentProduct.imageNeedsOptimization && !productHasImageReviewField(currentProduct)) {
       toast.error("Primero ejecuta la migración image_needs_optimization en Supabase.");
       return;
     }
-    const finalTaxStatus = shouldSaveAndNext ? 'reviewed' : normalizeTaxStatus(currentProduct.taxReviewStatus ?? currentProduct.tax_review_status);
+    const finalTaxStatus = markStatus
+      ? markStatus
+      : (shouldSaveAndNext ? 'reviewed' : normalizeTaxStatus(currentProduct.taxReviewStatus ?? currentProduct.tax_review_status));
     const dbPayload = { 
       name: currentProduct.name, 
       price: currentProduct.price, 
@@ -749,7 +867,7 @@ export default function AdminApp() {
       tax_rate: normalizedTaxRate,
       tax_category: currentProduct.taxCategory ?? currentProduct.tax_category ?? '',
       tax_review_status: finalTaxStatus,
-      tax_note: shouldSaveAndNext && !(currentProduct.taxNote ?? currentProduct.tax_note)
+      tax_note: shouldSaveAndNext && !markStatus && !(currentProduct.taxNote ?? currentProduct.tax_note)
         ? 'manual pre-launch review'
         : (currentProduct.taxNote ?? currentProduct.tax_note ?? '')
     };
@@ -1378,8 +1496,9 @@ export default function AdminApp() {
     if (!collectTarget) return;
     setCollectBusy(true);
     try {
+      const amount = `€${Number(collectTarget.total || 0).toFixed(2)}`;
       await apiClient.updateOrderStatus(collectTarget.id, 'Entregado', method);
-      toast.success(`Cobrado (${method}) y entregado`);
+      toast.success(`Cobrado ${amount} · ${method}`, { icon: '💰', duration: 3500 });
       setCollectTarget(null);
       fetchData();
     } catch (error) {
@@ -1393,8 +1512,13 @@ export default function AdminApp() {
   const captureOrder = async (oid) => {
     if (!window.confirm('¿Cobrar ahora el importe retenido de este pedido? El cliente verá el cargo definitivo en su tarjeta.')) return;
     try {
+      const ord = orders.find(o => o.id === oid);
+      const amount = ord?.total != null ? `€${Number(ord.total).toFixed(2)}` : '';
       const res = await apiClient.captureOrder(oid);
-      toast.success(res?.alreadyCaptured ? 'Este pedido ya estaba cobrado' : 'Pago cobrado correctamente');
+      toast.success(
+        res?.alreadyCaptured ? 'Este pedido ya estaba cobrado' : `Cobrado ${amount}`.trim(),
+        res?.alreadyCaptured ? undefined : { icon: '💰', duration: 3500 }
+      );
       fetchData();
     } catch (error) {
       toast.error('Error al cobrar: ' + error.message);
@@ -2027,6 +2151,11 @@ export default function AdminApp() {
       noImage: products.filter(p => !p.image && !(p.images || [])[0]).length,
       imageNeedsOptimization: products.filter(p => p.imageNeedsOptimization || p.image_needs_optimization).length,
     };
+    const taxBatchOptions = Object.entries(TAX_SUGGESTION_BATCH_LABELS).map(([id, label]) => ({
+      id,
+      label,
+      count: taxSuggestions.filter((item) => item.batch_id === id).length,
+    })).filter((item) => item.count > 0);
     // El nº tras quitar un '#' inicial permite buscar por id (ej. "#42"
     // o "42") además de por nombre, para casar con el #id que aparece en
     // pedidos y tickets.
@@ -2041,6 +2170,9 @@ export default function AdminApp() {
     });
     if (productReviewMode) {
       filtered = getManualReviewOrderedProducts(filtered.filter(productNeedsReview));
+    }
+    if (taxBatchFilter) {
+      filtered = filtered.filter(p => getTaxSuggestionForProduct(p)?.batch_id === taxBatchFilter);
     }
     if (imageOptimizationOnly) {
       filtered = filtered.filter(p => p.imageNeedsOptimization || p.image_needs_optimization);
@@ -2106,8 +2238,12 @@ export default function AdminApp() {
           <div>
             <div className="font-bold">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
             <div className="flex flex-wrap gap-1 mt-1">
-              {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
-              {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="text-purple-700 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
+              {p.oferta && <span className="bg-gray-100 text-gray-700 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">OFERTA</span>}
+              {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
+              {(() => {
+                const suggestion = getTaxSuggestionForProduct(p);
+                return suggestion ? <span className="bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">{TAX_SUGGESTION_BATCH_LABELS[suggestion.batch_id] || 'IVA sugerido'}</span> : null;
+              })()}
             </div>
           </div>
         </td>
@@ -2119,7 +2255,7 @@ export default function AdminApp() {
             <span className={`w-fit px-2 py-0.5 rounded-full border text-[11px] font-semibold ${taxStatusClass(p.taxReviewStatus || p.tax_review_status)}`}>{taxStatusLabel(p.taxReviewStatus || p.tax_review_status)}</span>
           </div>
         </td>
-        <td className="p-4 text-right"><button type="button" onClick={() => openProductForReview(p)} className="text-blue-600 mr-2"><Edit2 size={18}/></button><button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-red-600"><Trash2 size={18}/></button></td>
+        <td className="p-4 text-right"><button type="button" onClick={() => openProductForReview(p)} className="text-gray-500 hover:text-gray-800 mr-2"><Edit2 size={18}/></button><button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={18}/></button></td>
       </tr>
     );
 
@@ -2137,8 +2273,12 @@ export default function AdminApp() {
           <div className="flex-1 min-w-0">
             <div className="font-bold text-gray-800 truncate">{p.name} <span className="text-gray-400 font-mono text-xs font-normal">#{p.id}</span></div>
             <div className="flex flex-wrap gap-1 mt-1">
-              {p.oferta && <span className="text-red-500 text-xs font-bold">OFERTA</span>}
-              {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="text-purple-700 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
+              {p.oferta && <span className="bg-gray-100 text-gray-700 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">OFERTA</span>}
+              {(p.imageNeedsOptimization || p.image_needs_optimization) && <span className="bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">FOTO</span>}
+              {(() => {
+                const suggestion = getTaxSuggestionForProduct(p);
+                return suggestion ? <span className="bg-gray-100 text-gray-600 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-bold">{TAX_SUGGESTION_BATCH_LABELS[suggestion.batch_id] || 'IVA sugerido'}</span> : null;
+              })()}
             </div>
             <div className="flex items-center gap-4 mt-2 text-sm">
               <span className="font-bold text-gray-800">€{p.price}</span>
@@ -2151,7 +2291,7 @@ export default function AdminApp() {
           </div>
         </div>
         <div className="flex gap-2 justify-end">
-          <button type="button" onClick={() => openProductForReview(p)} className="text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 flex items-center gap-1"><Edit2 size={16}/><span className="text-xs">Editar</span></button>
+          <button type="button" onClick={() => openProductForReview(p)} className="text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 flex items-center gap-1"><Edit2 size={16}/><span className="text-xs">Editar</span></button>
           <button type="button" onClick={() => handleDeleteProduct(p.id)} className="text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 flex items-center gap-1"><Trash2 size={16}/><span className="text-xs">Eliminar</span></button>
         </div>
         </div>
@@ -2209,7 +2349,13 @@ export default function AdminApp() {
             ))}
             <option value="_none">Sin categoría</option>
           </select>
-          <button type="button" onClick={() => setProductReviewMode(v => !v)} className={`px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center justify-center gap-2 ${productReviewMode ? 'bg-amber-600 text-white hover:bg-amber-700' : 'border border-amber-200 text-amber-700 hover:bg-amber-50'}`}>
+          <select value={taxBatchFilter} onChange={e => setTaxBatchFilter(e.target.value)} className="sm:w-56 pl-4 pr-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 ring-amber-100 bg-white">
+            <option value="">Todos los lotes IVA</option>
+            {taxBatchOptions.map((batch) => (
+              <option key={batch.id} value={batch.id}>{batch.label} · {batch.count}</option>
+            ))}
+          </select>
+          <button type="button" onClick={() => setProductReviewMode(v => !v)} className={`px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center justify-center gap-2 ${productReviewMode ? 'bg-gray-900 text-white hover:bg-gray-800' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
             <CheckCircle size={18}/>
             {productReviewMode ? 'Modo revisión ON' : 'Modo revisión'}
           </button>
@@ -2219,11 +2365,11 @@ export default function AdminApp() {
               Abrir siguiente
             </button>
           )}
-          <button type="button" onClick={() => setImageOptimizationOnly(v => !v)} className={`px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center justify-center gap-2 ${imageOptimizationOnly ? 'bg-purple-600 text-white hover:bg-purple-700' : 'border border-purple-200 text-purple-700 hover:bg-purple-50'}`}>
+          <button type="button" onClick={() => setImageOptimizationOnly(v => !v)} className={`px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center justify-center gap-2 ${imageOptimizationOnly ? 'bg-gray-900 text-white hover:bg-gray-800' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
             <ImageIcon size={18}/>
             Fotos marcadas
           </button>
-          <button type="button" onClick={() => { setImportModalOpen(true); setImportPreview(null); setImportProgress({ done: 0, total: 0, errors: [] }); }} className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium text-sm inline-flex items-center justify-center gap-2 hover:bg-emerald-700">
+          <button type="button" onClick={() => { setImportModalOpen(true); setImportPreview(null); setImportProgress({ done: 0, total: 0, errors: [] }); }} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium text-sm inline-flex items-center justify-center gap-2 hover:bg-gray-50">
             <FileSpreadsheet size={18}/>
             Importar CSV
           </button>
@@ -2233,14 +2379,20 @@ export default function AdminApp() {
           </button>
         </div>
 
+        {taxSuggestionsLoadError && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            No se han podido cargar las sugerencias IVA locales. Revisa <span className="font-mono">/tax-suggestions/product-tax-suggestions.json</span>.
+          </div>
+        )}
+
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
           <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Productos</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.total}</div></div>
-          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Pendientes</div><div className="text-xl font-extrabold text-amber-700">{reviewStats.pending}</div></div>
-          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Revisados</div><div className="text-xl font-extrabold text-green-700">{reviewStats.reviewed}</div></div>
-          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin IVA</div><div className="text-xl font-extrabold text-red-700">{reviewStats.noTax}</div></div>
-          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Stock bajo</div><div className="text-xl font-extrabold text-orange-700">{reviewStats.lowStock}</div></div>
-          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin imagen</div><div className="text-xl font-extrabold text-gray-700">{reviewStats.noImage}</div></div>
-          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Foto revisar</div><div className="text-xl font-extrabold text-purple-700">{reviewStats.imageNeedsOptimization}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Pendientes</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.pending}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Revisados</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.reviewed}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin IVA</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.noTax}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Stock bajo</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.lowStock}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Sin imagen</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.noImage}</div></div>
+          <div className="bg-white rounded-xl border p-3"><div className="text-[11px] text-gray-500 font-bold uppercase">Foto revisar</div><div className="text-xl font-extrabold text-gray-900">{reviewStats.imageNeedsOptimization}</div></div>
         </div>
 
         <p className="text-xs text-gray-500">{productReviewMode ? 'Modo revisión: se muestran productos pendientes por orden de categoría/subcategoría. Si filtras una categoría, Abrir siguiente y Guardar y siguiente continúan dentro de esa categoría.' : 'Arrastra productos (⋮⋮) para cambiar orden en la tienda'}</p>
@@ -2593,37 +2745,37 @@ const renderRepairs = () => (
   );
 
   // Color del <select> de estado según el estado actual.
+  // Paleta sobria: "Entregado" lleva un acento verde tenue (estado final OK)
+  // y el resto de estados se muestran en gris neutro.
   const orderStatusSelectClass = (status) =>
-    status === 'Entregado' ? 'bg-green-100 text-green-700'
-    : status === 'Autorizado' ? 'bg-amber-100 text-amber-700'
-    : status === 'Pendiente de Pago' ? 'bg-orange-100 text-orange-700'
-    : status === 'Listo para recoger' ? 'bg-teal-100 text-teal-700'
-    : status === 'Cancelado' ? 'bg-gray-100 text-gray-600'
-    : 'bg-blue-100 text-blue-700';
+    status === 'Entregado' ? 'bg-green-50 text-green-700'
+    : 'bg-gray-100 text-gray-700';
 
-  // Color del badge de método de pago.
-  const orderPaymentBadgeClass = (method) =>
-    method === 'Contra Reembolso' ? 'bg-orange-100 text-orange-700'
-    : method === 'Bizum' ? 'bg-green-100 text-green-700'
-    : 'bg-gray-100 text-gray-600';
+  // Badge de método de pago: gris neutro para todos.
+  const orderPaymentBadgeClass = (_method) => 'bg-gray-100 text-gray-600';
 
-  // <select> de estado reutilizable (tabla, tarjeta y detalle).
-  const renderStatusSelect = (o, sizeClass = 'px-2 py-1 text-xs') => (
-    <select
-      value={o.status}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => updateOrderStatus(o.id, e.target.value)}
-      className={`border rounded font-bold cursor-pointer ${sizeClass} ${orderStatusSelectClass(o.status)}`}
-    >
-      <option>Autorizado</option>
-      <option>Procesando</option>
-      <option>Listo para recoger</option>
-      <option>Pendiente de Pago</option>
-      <option>Enviado</option>
-      <option>Entregado</option>
-      <option>Cancelado</option>
-    </select>
-  );
+  // Estados seleccionables manualmente desde el panel.
+  const ORDER_STATUS_OPTIONS = ['Autorizado', 'Procesando', 'Listo para recoger', 'Pendiente de Pago', 'Enviado', 'Entregado', 'Cancelado'];
+
+  // <select> de estado reutilizable (tabla, tarjeta y detalle). Si el estado
+  // real del pedido NO está en la lista (p.ej. 'Esperando pago' mientras
+  // Stripe aún no confirma el pago), lo añadimos como opción para que el
+  // <select> muestre la verdad en vez de caer por defecto en la primera
+  // opción (lo que hacía parecer "Autorizado" un pedido que no lo era).
+  const renderStatusSelect = (o, sizeClass = 'px-2 py-1 text-xs') => {
+    const known = ORDER_STATUS_OPTIONS.includes(o.status);
+    return (
+      <select
+        value={o.status || ''}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+        className={`border rounded font-bold cursor-pointer ${sizeClass} ${orderStatusSelectClass(o.status)}`}
+      >
+        {!known && <option value={o.status || ''} disabled>{o.status || '—'} (en curso)</option>}
+        {ORDER_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    );
+  };
 
   // Botonera de acciones de un pedido (Cobrar / Reembolsar / Justificante /
   // Ticket / Imprimir). Reutilizada en el detalle del pedido.
@@ -2636,26 +2788,26 @@ const renderRepairs = () => (
   const renderOrderActions = (o, btn = 'px-3 py-1.5 text-xs') => (
     <>
       {o.status === 'Autorizado' && (
-        <button type="button" onClick={() => captureOrder(o.id)} className={`inline-flex items-center gap-1 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold ${btn}`} title="Cobrar la retención de tarjeta">
+        <button type="button" onClick={() => captureOrder(o.id)} className={`btn-cobrar inline-flex items-center gap-1 rounded-lg text-white font-bold ${btn}`} title="Cobrar la retención de tarjeta">
           <DollarSign size={14}/> Cobrar
         </button>
       )}
       {canNotifyReady(o) && (
-        <button type="button" onClick={() => notifyOrderReady(o.id)} disabled={notifyingId === o.id} className={`inline-flex items-center gap-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold disabled:opacity-50 ${btn}`} title="Avisar al cliente de que su pedido está listo para recoger">
+        <button type="button" onClick={() => notifyOrderReady(o.id)} disabled={notifyingId === o.id} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold disabled:opacity-50 ${btn}`} title="Avisar al cliente de que su pedido está listo para recoger">
           <Bell size={14}/> {notifyingId === o.id ? 'Avisando…' : o.status === 'Listo para recoger' ? 'Reenviar aviso' : 'Avisar: listo'}
         </button>
       )}
       {isUnpaidCounter(o) && (
-        <button type="button" onClick={() => setCollectTarget(o)} className={`inline-flex items-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold ${btn}`} title="Registrar cobro en tienda y marcar entregado">
+        <button type="button" onClick={() => setCollectTarget(o)} className={`btn-cobrar inline-flex items-center gap-1 rounded-lg text-white font-bold ${btn}`} title="Registrar cobro en tienda y marcar entregado">
           <DollarSign size={14}/> Cobrar y entregar
         </button>
       )}
       {o.stripe_payment_intent && o.status !== 'Cancelado' && (
-        <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className={`inline-flex items-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold ${btn}`} title="Reembolsar y avisar al cliente">
+        <button type="button" onClick={() => { setRefundTarget(o); setRefundReason(''); setRefundMode('total'); setRefundQtys({}); }} className={`inline-flex items-center gap-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-bold ${btn}`} title="Reembolsar y avisar al cliente">
           <Undo2 size={14}/> Reembolsar
         </button>
       )}
-      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold ${btn}`} title="Ver justificante">
+      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Ver justificante">
         <FileText size={14}/> Justificante
       </button>
       <button type="button" onClick={() => openOrderTicket(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Ver ticket">
@@ -2676,32 +2828,6 @@ const renderRepairs = () => (
     const daysLeft = STRIPE_AUTH_VALID_DAYS - days;
     return { days, daysLeft, urgent: daysLeft <= 2, expired: daysLeft <= 0 };
   };
-
-  // Miniaturas apiladas + recuento de artículos (resumen compacto).
-  const renderItemsSummary = (o) => {
-    const items = Array.isArray(o.items) ? o.items : [];
-    const units = items.reduce((n, it) => n + (Number(it.quantity) || 0), 0);
-    const thumbs = items
-      .map(it => products.find(p => p.id === it.id)?.image || it.image)
-      .filter(Boolean)
-      .slice(0, 3);
-    return (
-      <div className="flex items-center gap-2">
-        {thumbs.length > 0 && (
-          <div className="flex -space-x-2">
-            {thumbs.map((src, i) => (
-              <img key={i} src={src} alt="" loading="lazy" className="w-8 h-8 rounded-lg object-cover border-2 border-white bg-gray-50 shadow-sm" />
-            ))}
-          </div>
-        )}
-        <span className="text-xs text-gray-600 whitespace-nowrap">
-          {units} {units === 1 ? 'art.' : 'arts.'}
-          {items.length > 1 && <span className="text-gray-400"> · {items.length} líneas</span>}
-        </span>
-      </div>
-    );
-  };
-
   const renderOrders = () => {
      const searchLower = orderSearch.toLowerCase().trim();
      const fromTs = orderDateFrom ? new Date(orderDateFrom + 'T00:00:00').getTime() : null;
@@ -2730,18 +2856,18 @@ const renderRepairs = () => (
         {/* Aviso de pedidos autorizados pendientes de cobro. La retención de
             tarjeta caduca a los ~7 días: si no se cobra antes, se pierde. */}
         {authorizedOrders.length > 0 && (
-          <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${urgentAuth > 0 ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
-            <AlertCircle size={20} className={`flex-shrink-0 ${urgentAuth > 0 ? 'text-red-600' : 'text-amber-600'}`} />
-            <div className={`flex-1 min-w-[200px] text-sm ${urgentAuth > 0 ? 'text-red-800' : 'text-amber-800'}`}>
-              <strong>{authorizedOrders.length}</strong> {authorizedOrders.length === 1 ? 'pedido autorizado pendiente de cobro' : 'pedidos autorizados pendientes de cobro'}.
-              {urgentAuth > 0 && <> <strong>{urgentAuth}</strong> a punto de caducar (≤2 días).</>}
-              <span className="block text-xs opacity-80 mt-0.5">La retención de tarjeta caduca a los ~7 días; cóbralos o reembólsalos antes.</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOrderStatusFilter(orderStatusFilter === 'Autorizado' ? '' : 'Autorizado')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${urgentAuth > 0 ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}
-            >
+         <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${urgentAuth > 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+           <AlertCircle size={20} className={`flex-shrink-0 ${urgentAuth > 0 ? 'text-red-600' : 'text-gray-500'}`} />
+           <div className={`flex-1 min-w-[200px] text-sm ${urgentAuth > 0 ? 'text-red-800' : 'text-gray-700'}`}>
+             <strong>{authorizedOrders.length}</strong> {authorizedOrders.length === 1 ? 'pedido autorizado pendiente de cobro' : 'pedidos autorizados pendientes de cobro'}.
+             {urgentAuth > 0 && <> <strong>{urgentAuth}</strong> a punto de caducar (≤2 días).</>}
+             <span className="block text-xs opacity-80 mt-0.5">La retención de tarjeta caduca a los ~7 días; cóbralos o reembólsalos antes.</span>
+           </div>
+           <button
+             type="button"
+             onClick={() => setOrderStatusFilter(orderStatusFilter === 'Autorizado' ? '' : 'Autorizado')}
+             className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${urgentAuth > 0 ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-900'}`}
+           >
               {orderStatusFilter === 'Autorizado' ? 'Quitar filtro' : 'Ver solo autorizados'}
             </button>
           </div>
@@ -2795,7 +2921,7 @@ const renderRepairs = () => (
             type="button"
             onClick={() => exportOrdersCsv(filteredOrders)}
             disabled={filteredOrders.length === 0}
-            className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-1.5"
+            className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold disabled:opacity-50 flex items-center gap-1.5"
             title="Exportar la lista filtrada a CSV (Excel)"
           >
             <Download size={16}/> CSV ({filteredOrders.length})
@@ -2809,45 +2935,47 @@ const renderRepairs = () => (
                <tr>
                  <th className="px-4 py-3">Pedido</th>
                  <th className="px-4 py-3">Fecha</th>
-                 <th className="px-4 py-3">Artículos</th>
                  <th className="px-4 py-3">Total</th>
-                 <th className="px-4 py-3">Pago</th>
                  <th className="px-4 py-3">Estado</th>
                  <th className="px-4 py-3 w-28 text-right">Detalle</th>
                </tr>
              </thead>
              <tbody>
                {filteredOrders.map(o => {
-                 const paymentMethod = o.payment_method || 'No especificado';
                  const orderDate = o.created_at ? new Date(o.created_at) : null;
                  const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
                  const isPickup = isPickupOrder(o);
                  const isAuth = o.status === 'Autorizado';
                  const hold = isAuth ? authHoldInfo(o) : null;
                  return (
-                 <tr key={o.id} onClick={() => setDetailOrder(o)} className={`border-b cursor-pointer transition-colors ${isAuth ? (hold.urgent ? 'bg-red-50/70 hover:bg-red-100/70 border-l-4 border-l-red-400' : 'bg-amber-50/60 hover:bg-amber-100/60 border-l-4 border-l-amber-400') : 'hover:bg-blue-50/40'}`}>
+                 <tr key={o.id} onClick={() => setDetailOrder(o)} className={`border-b cursor-pointer transition-colors ${isAuth ? (hold.urgent ? 'bg-red-50/70 hover:bg-red-100/70 border-l-4 border-l-red-400' : 'bg-gray-50 hover:bg-gray-100 border-l-4 border-l-gray-300') : 'hover:bg-gray-50'}`}>
                    <td className="px-4 py-3 align-middle">
                       <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
-                      <div className="font-bold text-gray-800 text-sm">{o.phone || '—'}</div>
-                      <div className="text-[11px] text-gray-500 truncate max-w-[200px]">{isPickup ? '🏬 Recogida en tienda' : `🚚 ${o.address || ''}`}</div>
-                      {isAuth && (
-                        <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${hold.urgent ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}`}>
-                          <DollarSign size={10}/> {hold.expired ? 'Retención caducada' : `Cobrar · quedan ${hold.daysLeft}d`}
-                        </span>
-                      )}
-                   </td>
-                   <td className="px-4 py-3 align-middle text-xs text-gray-600 whitespace-nowrap">{dateStr}</td>
-                   <td className="px-4 py-3 align-middle">{renderItemsSummary(o)}</td>
+                     <div className="font-bold text-gray-800 text-sm">{o.phone || '—'}</div>
+                     <div className="mt-0.5 flex items-center gap-1 text-[11px] max-w-[220px]">
+                       {isPickup ? (
+                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-bold whitespace-nowrap"><Store size={11}/> Recogida</span>
+                       ) : (
+                         <>
+                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-bold whitespace-nowrap"><Truck size={11}/> Envío</span>
+                           <span className="text-gray-500 truncate">{o.address || ''}</span>
+                         </>
+                       )}
+                     </div>
+                     {isAuth && (
+                       <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${hold.urgent ? 'bg-red-200 text-red-800' : 'bg-gray-200 text-gray-700'}`}>
+                         <DollarSign size={10}/> {hold.expired ? 'Retención caducada' : `Cobrar · quedan ${hold.daysLeft}d`}
+                       </span>
+                     )}
+                  </td>
+                  <td className="px-4 py-3 align-middle text-xs text-gray-600 whitespace-nowrap">{dateStr}</td>
                    <td className="px-4 py-3 align-middle font-bold whitespace-nowrap">
                       €{o.total?.toFixed(2)}
-                      {o.coupon_code && (
-                        <div className="mt-0.5 text-[10px] font-bold text-green-700">
-                          <span className="bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">−€{(Number(o.discount) || 0).toFixed(2)}</span>
-                        </div>
-                      )}
-                   </td>
-                   <td className="px-4 py-3 align-middle">
-                      <span className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span>
+                     {o.coupon_code && (
+                       <div className="mt-0.5 text-[10px] font-bold text-gray-600">
+                         <span className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">−€{(Number(o.discount) || 0).toFixed(2)}</span>
+                       </div>
+                     )}
                    </td>
                    <td className="px-4 py-3 align-middle">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -2856,7 +2984,7 @@ const renderRepairs = () => (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); captureOrder(o.id); }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-bold whitespace-nowrap"
+                            className="btn-cobrar inline-flex items-center gap-1 px-2 py-1 rounded-lg text-white text-xs font-bold whitespace-nowrap"
                             title="Cobrar la retención de tarjeta"
                           >
                             <DollarSign size={13}/> Cobrar
@@ -2866,7 +2994,7 @@ const renderRepairs = () => (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setCollectTarget(o); }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold whitespace-nowrap"
+                            className="btn-cobrar inline-flex items-center gap-1 px-2 py-1 rounded-lg text-white text-xs font-bold whitespace-nowrap"
                             title="Registrar cobro en tienda y marcar entregado"
                           >
                             <DollarSign size={13}/> Cobrar y entregar
@@ -2896,51 +3024,53 @@ const renderRepairs = () => (
         {/* Mobile cards (compactas) */}
         <div className="md:hidden space-y-3">
           {filteredOrders.map(o => {
-            const paymentMethod = o.payment_method || 'No especificado';
             const orderDate = o.created_at ? new Date(o.created_at) : null;
             const dateStr = orderDate ? orderDate.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
             const isPickup = isPickupOrder(o);
             const isAuth = o.status === 'Autorizado';
             const hold = isAuth ? authHoldInfo(o) : null;
             return (
-              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className={`w-full text-left rounded-xl shadow-sm border p-3 active:bg-gray-50 ${isAuth ? (hold.urgent ? 'bg-red-50 border-l-4 border-l-red-400' : 'bg-amber-50 border-l-4 border-l-amber-400') : 'bg-white'}`}>
+              <button type="button" key={o.id} onClick={() => setDetailOrder(o)} className={`w-full text-left rounded-xl shadow-sm border p-3 active:bg-gray-50 ${isAuth ? (hold.urgent ? 'bg-red-50 border-l-4 border-l-red-400' : 'bg-gray-50 border-l-4 border-l-gray-300') : 'bg-white'}`}>
                 <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
                     <div className="font-bold text-gray-800 truncate">{o.phone || '—'}</div>
-                    <div className="text-[11px] text-gray-500 truncate">{isPickup ? '🏬 Recogida en tienda' : `🚚 ${o.address || ''}`}</div>
+                    <div className="mt-0.5 flex items-center gap-x-2 gap-y-1 flex-wrap text-[11px]">
+                      {isPickup ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-bold whitespace-nowrap"><Store size={11}/> Recogida</span>
+                      ) : (
+                        <>
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-bold whitespace-nowrap"><Truck size={11}/> Envío</span>
+                          <span className="text-gray-500 truncate max-w-[140px]">{o.address || ''}</span>
+                        </>
+                      )}
+                      <span className="inline-flex items-center gap-1 text-gray-500 whitespace-nowrap"><Clock size={11}/> {dateStr}</span>
+                    </div>
                     {isAuth && (
-                      <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${hold.urgent ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}`}>
+                      <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${hold.urgent ? 'bg-red-200 text-red-800' : 'bg-gray-200 text-gray-700'}`}>
                         <DollarSign size={10}/> {hold.expired ? 'Retención caducada' : `Cobrar · quedan ${hold.daysLeft}d`}
                       </span>
                     )}
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="font-bold text-gray-800">€{o.total?.toFixed(2)}</div>
-                    <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t">
-                  <span className="text-[11px] text-gray-500">📅 {dateStr}</span>
-                  <div className="flex items-center gap-2">
-                    {renderItemsSummary(o)}
+                  <div className="text-right flex-shrink-0 flex flex-col items-end gap-1.5">
                     {o.status === 'Autorizado' ? (
                       <span
                         role="button"
                         tabIndex={0}
                         onClick={(e) => { e.stopPropagation(); captureOrder(o.id); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); captureOrder(o.id); } }}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-green-600 text-white text-[11px] font-bold"
+                        className="btn-cobrar inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-extrabold"
                       >
-                        <DollarSign size={12}/> Cobrar
+                        <DollarSign size={14}/> Cobrar €{o.total?.toFixed(2)}
                       </span>
                     ) : (
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${orderStatusSelectClass(o.status)}`}>{o.status}</span>
+                      <>
+                        <div className="font-bold text-gray-800">€{o.total?.toFixed(2)}</div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${orderStatusSelectClass(o.status)}`}>{o.status}</span>
+                      </>
                     )}
+                    <span className="inline-flex items-center gap-0.5 text-[11px] font-bold text-gray-500">Ver detalle <ChevronRight size={13}/></span>
                   </div>
-                </div>
-                <div className="mt-2 flex items-center justify-end gap-1 text-[11px] font-bold text-blue-600">
-                  Ver detalle <ChevronRight size={13}/>
                 </div>
               </button>
             );
@@ -2970,26 +3100,26 @@ const renderRepairs = () => (
       <div className="fixed inset-0 z-[60] flex justify-end bg-black/40" onClick={() => setDetailOrder(null)}>
         <div className="w-full max-w-md h-full bg-white shadow-2xl flex flex-col animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           {/* Cabecera */}
-          <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b">
             <div>
-              <div className="font-mono text-xs font-bold text-gray-400">#{o.id.slice(0,8)}</div>
-              <div className="text-lg font-bold text-gray-800">Pedido</div>
+              <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
+              <div className="text-base font-bold text-gray-800">Pedido</div>
             </div>
             <div className="flex items-center gap-2">
-              {renderStatusSelect(o, 'px-3 py-1.5 text-xs')}
-              <button type="button" onClick={() => setDetailOrder(null)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18}/></button>
+              {renderStatusSelect(o, 'px-2 py-1 text-xs')}
+              <button type="button" onClick={() => setDetailOrder(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><X size={18}/></button>
             </div>
           </div>
           {/* Cuerpo */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 text-sm">
             {o.status === 'Autorizado' && (() => {
               const hold = authHoldInfo(o);
               return (
-                <div className={`flex items-start gap-2 rounded-lg p-3 border ${hold.urgent ? 'bg-red-50 border-red-200 text-red-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                  <DollarSign size={16} className="mt-0.5 flex-shrink-0" />
+                <div className={`flex items-start gap-2 rounded-lg p-2.5 border ${hold.urgent ? 'bg-red-50 border-red-200 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
+                  <DollarSign size={15} className="mt-0.5 flex-shrink-0" />
                   <div>
-                    <div className="font-bold">Pago autorizado, pendiente de cobro</div>
-                    <div className="text-xs opacity-90 mt-0.5">
+                    <div className="font-bold text-[13px]">Pago autorizado, pendiente de cobro</div>
+                    <div className="text-[11px] opacity-90 mt-0.5">
                       {hold.expired
                         ? 'La retención puede haber caducado. Verifica en Stripe antes de cobrar.'
                         : `Quedan ~${hold.daysLeft} día(s) antes de que caduque la retención. Pulsa “Cobrar” para capturar el importe o “Reembolsar” para liberarla.`}
@@ -2998,69 +3128,69 @@ const renderRepairs = () => (
                 </div>
               );
             })()}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase"><Clock size={12}/> Fecha</div>
-                <div className="mt-1 text-gray-800">{dateStr}</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-gray-50 rounded-lg p-2.5">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase"><Clock size={11}/> Fecha</div>
+                <div className="mt-0.5 text-[13px] text-gray-800">{dateStr}</div>
               </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase"><CreditCard size={12}/> Pago</div>
-                <div className="mt-1"><span className={`px-2 py-0.5 rounded text-xs font-bold ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span></div>
+              <div className="bg-gray-50 rounded-lg p-2.5">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase"><CreditCard size={11}/> Pago</div>
+                <div className="mt-0.5"><span className={`px-2 py-0.5 rounded text-xs font-bold ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span></div>
               </div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase">{isPickup ? <><MapPin size={12}/> Recogida en tienda</> : <><MapPin size={12}/> Envío a domicilio</>}</div>
-              {o.phone && <div className="flex items-center gap-1.5 text-gray-800"><Phone size={13} className="text-gray-400"/> {o.phone}</div>}
-              {o.customer_email && <div className="flex items-center gap-1.5 text-gray-800 break-all"><Mail size={13} className="text-gray-400"/> {o.customer_email}</div>}
-              {o.address && <div className="flex items-start gap-1.5 text-gray-600"><MapPin size={13} className="text-gray-400 mt-0.5 flex-shrink-0"/> {o.address}</div>}
-              {o.note && <div className="flex items-start gap-1.5 text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2 mt-1"><StickyNote size={13} className="mt-0.5 flex-shrink-0"/> {o.note}</div>}
+            <div className="bg-gray-50 rounded-lg p-2.5 space-y-1">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase">{isPickup ? <><Store size={11}/> Recogida en tienda</> : <><Truck size={11}/> Envío a domicilio</>}</div>
+              {o.phone && <div className="flex items-center gap-1.5 text-[13px] text-gray-800"><Phone size={12} className="text-gray-400"/> {o.phone}</div>}
+              {o.customer_email && <div className="flex items-center gap-1.5 text-[13px] text-gray-800 break-all"><Mail size={12} className="text-gray-400"/> {o.customer_email}</div>}
+              {o.address && <div className="flex items-start gap-1.5 text-[13px] text-gray-600"><MapPin size={12} className="text-gray-400 mt-0.5 flex-shrink-0"/> {o.address}</div>}
+              {o.note && <div className="flex items-start gap-1.5 text-[12px] text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2"><StickyNote size={12} className="mt-0.5 flex-shrink-0"/> {o.note}</div>}
             </div>
             {isPickup && (
-              <div className="rounded-lg p-3 bg-teal-50 border border-teal-200">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-teal-700 uppercase"><Bell size={12}/> Código de recogida</div>
-                <div className="mt-1 font-mono text-2xl font-extrabold text-teal-800 tracking-widest">{o.pickup_code || pickupCode(o.id)}</div>
-                <div className="text-xs text-teal-700 mt-1">El cliente debe enseñar este código (va en su aviso) para identificarse al recoger.</div>
-                <div className="flex items-start gap-1.5 mt-2 text-[11px] text-teal-900 bg-teal-100/70 rounded p-2 font-semibold">
-                  <AlertCircle size={13} className="mt-0.5 flex-shrink-0"/>
-                  <span>Antes de entregar: pide también el <strong>teléfono o nombre</strong> y compáralo con el pedido{o.phone ? ` (tel. ${o.phone})` : ''}.</span>
+              <div className="rounded-lg p-2.5 bg-gray-50 border border-gray-200">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase"><Bell size={11}/> Código de recogida</div>
+                  <div className="font-mono text-xl font-extrabold text-gray-900 tracking-widest">{o.pickup_code || pickupCode(o.id)}</div>
                 </div>
-                {o.status === 'Listo para recoger' && <div className="text-[11px] text-teal-600 mt-1 font-semibold">✓ Cliente ya avisado de que está listo.</div>}
+                <div className="flex items-start gap-1.5 mt-2 text-[11px] text-gray-700 bg-gray-100 rounded p-2 font-semibold">
+                  <AlertCircle size={13} className="mt-0.5 flex-shrink-0"/>
+                  <span>Pide también el <strong>teléfono o nombre</strong> y compáralo con el pedido{o.phone ? ` (tel. ${o.phone})` : ''}.</span>
+                </div>
+                {o.status === 'Listo para recoger' && <div className="text-[11px] text-gray-500 mt-1 font-semibold">✓ Cliente ya avisado de que está listo.</div>}
               </div>
             )}
             <div>
-              <div className="text-[11px] font-bold text-gray-400 uppercase mb-2">Artículos</div>
-              <div className="space-y-1">
+              <div className="text-[10px] font-bold text-gray-400 uppercase mb-1">Artículos</div>
+              <div>
                 {items.map((item, idx) => {
                   const isGift = item.isGift || item.price === 0;
                   const thumb = products.find(p => p.id === item.id)?.image || item.image;
                   return (
-                    <div key={idx} className={`flex justify-between items-center gap-2 py-1.5 ${isGift ? 'bg-pink-50 border border-pink-200 px-2 rounded' : 'border-b border-dashed border-gray-100'}`}>
+                    <div key={idx} className={`flex justify-between items-center gap-2 py-1 ${isGift ? 'bg-gray-100 border border-gray-200 px-2 rounded' : 'border-b border-dashed border-gray-100'}`}>
                       <span className="flex items-center gap-2 min-w-0">
-                        {thumb && <img src={thumb} alt="" loading="lazy" className="w-10 h-10 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
-                        {isGift && <Gift size={13} className="text-pink-600 flex-shrink-0"/>}
-                        <span className={`min-w-0 ${isGift ? 'font-bold text-pink-700' : 'text-gray-700'}`}>
+                        {thumb && <img src={thumb} alt="" loading="lazy" className="w-8 h-8 rounded object-cover border border-gray-200 flex-shrink-0 bg-gray-50" />}
+                        {isGift && <Gift size={12} className="text-gray-500 flex-shrink-0"/>}
+                        <span className={`min-w-0 text-[13px] ${isGift ? 'font-bold text-gray-700' : 'text-gray-700'}`}>
                           <span className="font-bold">{item.quantity}x</span> {item.name}
-                          {item.id != null && <span className="text-gray-400 font-mono ml-1 text-xs">#{item.id}</span>}
                         </span>
                       </span>
                       {isGift
-                        ? <span className="text-[10px] bg-pink-200 text-pink-800 px-1.5 py-0.5 rounded font-bold flex-shrink-0">GRATIS</span>
-                        : <span className="text-gray-600 flex-shrink-0 font-medium">€{((Number(item.price)||0) * (Number(item.quantity)||0)).toFixed(2)}</span>}
+                        ? <span className="text-[10px] bg-gray-300 text-gray-800 px-1.5 py-0.5 rounded font-bold flex-shrink-0">GRATIS</span>
+                        : <span className="text-[13px] text-gray-600 flex-shrink-0 font-medium">€{((Number(item.price)||0) * (Number(item.quantity)||0)).toFixed(2)}</span>}
                     </div>
                   );
                 })}
               </div>
             </div>
-            <div className="border-t pt-3 space-y-1">
-              <div className="flex justify-between text-gray-600"><span>Subtotal artículos</span><span>€{itemsTotal.toFixed(2)}</span></div>
+            <div className="border-t pt-2 space-y-0.5">
+              <div className="flex justify-between text-[13px] text-gray-600"><span>Subtotal artículos</span><span>€{itemsTotal.toFixed(2)}</span></div>
               {o.coupon_code && (
-                <div className="flex justify-between text-green-700 font-medium"><span>Cupón {o.coupon_code}</span><span>−€{(Number(o.discount) || 0).toFixed(2)}</span></div>
+                <div className="flex justify-between text-[13px] text-gray-600 font-medium"><span>Cupón {o.coupon_code}</span><span>−€{(Number(o.discount) || 0).toFixed(2)}</span></div>
               )}
-              <div className="flex justify-between text-lg font-bold text-gray-800 pt-1"><span>Total</span><span>€{o.total?.toFixed(2)}</span></div>
+              <div className="flex justify-between text-base font-bold text-gray-800 pt-0.5"><span>Total</span><span>€{o.total?.toFixed(2)}</span></div>
             </div>
           </div>
           {/* Pie: acciones */}
-          <div className="border-t p-4 flex flex-wrap gap-2 bg-gray-50">
+          <div className="border-t p-3 flex flex-wrap gap-2 bg-gray-50">
             {renderOrderActions(o, 'px-3 py-2 text-xs')}
           </div>
         </div>
@@ -3144,7 +3274,7 @@ const renderRepairs = () => (
                 <p className="text-[11px] text-gray-400 mt-1">Se devolverá ese importe y sólo se repondrá el stock de los artículos seleccionados. El pedido sigue activo.</p>
               </div>
             ) : (
-              <div className={`rounded-xl p-3 text-xs leading-relaxed ${isHoldOnly ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+              <div className={`rounded-xl p-3 text-xs leading-relaxed ${isHoldOnly ? 'bg-gray-50 text-gray-700 border border-gray-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
                 {isHoldOnly
                   ? 'Este pedido sólo está AUTORIZADO (retención sin cobrar). Al confirmar se liberará la retención: el cliente nunca llega a pagar.'
                   : 'Se emitirá un reembolso TOTAL en Stripe al método de pago del cliente. El pedido pasará a Cancelado y se repondrá todo el stock.'}
@@ -3212,15 +3342,15 @@ const renderRepairs = () => (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4 backdrop-blur-sm">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
           <div className="p-5 text-center">
-            <div className="w-12 h-12 rounded-full bg-teal-100 text-teal-600 flex items-center justify-center mx-auto mb-3"><CheckCircle size={26}/></div>
+            <div className="w-12 h-12 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center mx-auto mb-3"><CheckCircle size={26}/></div>
             <h3 className="text-lg font-bold text-gray-800 mb-1">Pedido marcado como listo</h3>
             <p className="text-sm text-gray-500 mb-3">
               {emailed ? 'Hemos enviado un email al cliente con el código de recogida.' : 'Este pedido no tenía email. Avisa al cliente por WhatsApp.'}
             </p>
             {code && (
-              <div className="rounded-xl bg-teal-50 border border-teal-200 p-3 mb-4">
-                <div className="text-[11px] font-bold text-teal-700 uppercase tracking-wide">Código de recogida</div>
-                <div className="font-mono text-2xl font-extrabold text-teal-800 tracking-widest mt-0.5">{code}</div>
+              <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 mb-4">
+                <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Código de recogida</div>
+                <div className="font-mono text-2xl font-extrabold text-gray-900 tracking-widest mt-0.5">{code}</div>
               </div>
             )}
             {waLink ? (
@@ -3248,20 +3378,20 @@ const renderRepairs = () => (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4 backdrop-blur-sm">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
           <div className="flex justify-between items-center p-4 border-b">
-            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><DollarSign size={20} className="text-indigo-600"/> Cobrar y entregar</h3>
+            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><DollarSign size={20} className="text-green-600"/> Cobrar y entregar</h3>
             <button type="button" onClick={() => { if (!collectBusy) setCollectTarget(null); }} className="p-2 hover:bg-gray-100 rounded-full" disabled={collectBusy}><X className="text-gray-500" size={20}/></button>
           </div>
           <div className="p-5">
             <div className="bg-gray-50 rounded-xl p-3 text-sm mb-4">
               <div className="flex justify-between"><span className="text-gray-500">Pedido</span><span className="font-bold text-gray-800">#{sid}</span></div>
-              <div className="flex justify-between mt-1"><span className="text-gray-500">A cobrar</span><span className="font-extrabold text-indigo-700 text-lg">€{Number(o.total || 0).toFixed(2)}</span></div>
+              <div className="flex justify-between mt-1"><span className="text-gray-500">A cobrar</span><span className="font-extrabold text-green-700 text-lg">€{Number(o.total || 0).toFixed(2)}</span></div>
             </div>
             <p className="text-sm text-gray-500 mb-3">¿Cómo ha pagado el cliente? Se registrará y el pedido pasará a <strong>Entregado</strong>.</p>
             <div className="grid grid-cols-2 gap-3">
-              <button type="button" disabled={collectBusy} onClick={() => confirmCollect('Efectivo (en tienda)')} className="flex flex-col items-center gap-1 px-4 py-4 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold disabled:opacity-50">
+              <button type="button" disabled={collectBusy} onClick={() => confirmCollect('Efectivo (en tienda)')} className="btn-cobrar flex flex-col items-center gap-1 px-4 py-4 rounded-xl text-white font-bold disabled:opacity-50">
                 <span className="text-2xl">💵</span> Efectivo
               </button>
-              <button type="button" disabled={collectBusy} onClick={() => confirmCollect('Tarjeta TPV (en tienda)')} className="flex flex-col items-center gap-1 px-4 py-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-50">
+              <button type="button" disabled={collectBusy} onClick={() => confirmCollect('Tarjeta TPV (en tienda)')} className="flex flex-col items-center gap-1 px-4 py-4 rounded-xl bg-gray-800 hover:bg-gray-900 text-white font-bold disabled:opacity-50">
                 <CreditCard size={24}/> Tarjeta (TPV)
               </button>
             </div>
@@ -3454,27 +3584,30 @@ const renderRepairs = () => (
       : (currentProduct?.image ? [currentProduct.image] : []);
     const primaryProductImage = productImages[0];
     const isReviewModal = productReviewMode && !!currentProduct?.id;
+    const currentTaxSuggestion = getTaxSuggestionForProduct(currentProduct);
     if (isReviewModal) {
+      const isVisible = currentProduct.visible !== false;
+      const needsFoto = !!(currentProduct.imageNeedsOptimization || currentProduct.image_needs_optimization);
+      const pendingCount = products.filter(productNeedsReview).length;
+      const busy = uploading || removingBg || generatingDesc || centeringProduct;
       return (
         <div className="fixed inset-0 bg-white z-50 flex flex-col animate-fade-in">
-          <div className="h-12 flex items-center justify-between px-3 border-b border-gray-200 bg-white flex-shrink-0">
-            <div className="min-w-0">
-              <h3 className="text-base font-bold text-gray-900 truncate">Revisión producto <span className="text-gray-400 font-mono text-xs">#{currentProduct.id}</span></h3>
-              <p className="text-[11px] text-gray-500 truncate">Imagen, precio, stock, IVA y visibilidad</p>
+          <div className="h-11 flex items-center justify-between px-3 border-b border-gray-200 bg-white flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <h3 className="text-sm font-bold text-gray-900 truncate">Revisión <span className="text-gray-400 font-mono text-xs">#{currentProduct.id}</span></h3>
+              <span className={`flex-shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${taxStatusClass(currentProduct.taxReviewStatus || currentProduct.tax_review_status)}`}>{taxStatusLabel(currentProduct.taxReviewStatus || currentProduct.tax_review_status)}</span>
             </div>
-            <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-gray-100 rounded-full flex-shrink-0"><X className="text-gray-500" size={20}/></button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-[11px] font-bold text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5">{pendingCount} pend.</span>
+              <button onClick={() => setIsEditing(false)} className="p-1.5 hover:bg-gray-100 rounded-full"><X className="text-gray-500" size={20}/></button>
+            </div>
           </div>
 
           <form onSubmit={handleSaveProduct} className="flex-1 min-h-0 flex flex-col">
-            <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] gap-3 p-3 overflow-hidden">
-              <div className="rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden min-h-0 flex flex-col">
-                <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-gray-200 bg-white flex-shrink-0">
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-gray-500 uppercase">Imagen principal</div>
-                    <div className="text-sm font-semibold text-gray-800 truncate">{currentProduct.name || 'Producto sin nombre'}</div>
-                  </div>
-                  {(currentProduct.imageNeedsOptimization || currentProduct.image_needs_optimization) && <span className="text-purple-700 bg-purple-50 border border-purple-100 rounded px-2 py-0.5 text-[10px] font-bold flex-shrink-0">FOTO</span>}
-                </div>
+            <div className="flex-1 min-h-0 flex flex-col sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-2 sm:gap-3 p-2 sm:p-3 overflow-hidden">
+              {/* Imagen: ocupa todo el espacio libre en móvil (los campos van
+                  debajo con altura natural) para verla lo más grande posible. */}
+              <div className="relative rounded-2xl border border-gray-200 bg-gray-50 overflow-hidden flex flex-col min-h-0 flex-1 sm:flex-none sm:h-auto">
                 <div className="flex-1 min-h-0 flex items-center justify-center bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0]">
                   {primaryProductImage ? (
                     <img src={primaryProductImage} alt={currentProduct.name || 'Producto'} className="max-h-full max-w-full object-contain p-2"/>
@@ -3485,48 +3618,65 @@ const renderRepairs = () => (
                     </div>
                   )}
                 </div>
+                {needsFoto && <span className="absolute top-2 right-2 text-gray-600 bg-white/90 border border-gray-300 rounded px-2 py-0.5 text-[10px] font-bold">FOTO</span>}
               </div>
 
-              <div className="min-h-0 overflow-y-auto sm:overflow-visible space-y-2 pr-1">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 mb-1 block">Nombre</label>
-                  <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-1.5 rounded-lg text-sm resize-none min-h-[3.75rem]" placeholder="Nombre completo del producto"/>
+              {/* Campos: altura natural en móvil (la imagen se queda con el
+                  resto del alto); en escritorio ocupan su columna. */}
+              <div className="flex-shrink-0 sm:flex-1 sm:min-h-0 sm:overflow-y-auto flex flex-col gap-2">
+                <textarea id="product-name" name="product-name" required rows={2} value={currentProduct.name} onChange={e => setCurrentProduct({...currentProduct, name: e.target.value})} className="w-full border p-2 rounded-lg text-sm font-semibold resize-none min-h-[3rem]" placeholder="Nombre del producto"/>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-500 mb-0.5 block">Precio €</label>
+                    <input id="product-price" name="product-price" required type="number" step="0.01" inputMode="decimal" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-2 rounded-lg text-sm"/>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-500 mb-0.5 block">Stock</label>
+                    <input id="product-stock" name="product-stock" required type="number" inputMode="numeric" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-2 rounded-lg text-sm"/>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-500 mb-0.5 block">IVA</label>
+                    <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-gray-300 p-2 rounded-lg text-sm bg-white">
+                      {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
                 </div>
 
+                {/* Sugerencia IVA compacta (una línea) */}
+                {currentTaxSuggestion ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
+                    <span className="text-sm font-extrabold text-gray-900 flex-shrink-0">Sug. IVA {currentTaxSuggestion.suggested_tax_rate || '?'}%</span>
+                    <span className="px-1.5 py-0.5 rounded-full border border-gray-200 bg-white text-gray-500 text-[10px] font-semibold flex-shrink-0">{currentTaxSuggestion.tax_confidence || 's/conf'}</span>
+                    <span className="text-[11px] text-gray-500 truncate flex-1 min-w-0">{currentTaxSuggestion.matched_description || currentTaxSuggestion.tax_source || ''}</span>
+                    <button type="button" onClick={() => applyTaxSuggestionToCurrentProduct(currentTaxSuggestion)} disabled={!currentTaxSuggestion.suggested_tax_rate} className="px-2.5 py-1 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-gray-800 disabled:opacity-50 flex-shrink-0">Usar</button>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[11px] text-gray-500">Sin sugerencia IVA local. Busca en POS o consulta gestor.</div>
+                )}
+
+                {/* Visible + Foto: dos toggles en una fila */}
                 <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-gray-500 mb-1 block">Precio</label><input id="product-price" name="product-price" required type="number" step="0.01" value={currentProduct.price} onChange={e => setCurrentProduct({...currentProduct, price: parseFloat(e.target.value)})} className="w-full border p-1.5 rounded-lg"/></div>
-                  <div><label className="text-xs font-bold text-gray-500 mb-1 block">Stock</label><input id="product-stock" name="product-stock" required type="number" value={currentProduct.stock} onChange={e => setCurrentProduct({...currentProduct, stock: parseInt(e.target.value)})} className="w-full border p-1.5 rounded-lg"/></div>
+                  <button type="button" onClick={() => setCurrentProduct({...currentProduct, visible: !isVisible})} className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-sm font-bold transition-colors ${isVisible ? 'border-gray-800 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-400'}`}>
+                    {isVisible ? <Eye size={16}/> : <EyeOff size={16}/>} {isVisible ? 'Visible' : 'Oculto'}
+                  </button>
+                  <button type="button" onClick={() => setCurrentProduct({...currentProduct, imageNeedsOptimization: !needsFoto})} className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-sm font-bold transition-colors ${needsFoto ? 'border-gray-800 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-400'}`}>
+                    <ImageIcon size={16}/> {needsFoto ? 'Foto marcada' : 'Foto OK'}
+                  </button>
                 </div>
-
-                <div>
-                  <label className="text-xs font-bold text-amber-800 mb-1 block">IVA</label>
-                  <select id="product-tax-rate" name="product-tax-rate" value={currentProduct.taxRate ?? currentProduct.tax_rate ?? ''} onChange={e => setCurrentProduct({...currentProduct, taxRate: e.target.value})} className="w-full border border-amber-200 p-1.5 rounded-lg text-sm bg-white">
-                    {TAX_RATE_OPTIONS.map(o => <option key={o.value || 'pending'} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-
-                <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 bg-gray-50 cursor-pointer">
-                  <input type="checkbox" id="product-visible" checked={currentProduct.visible !== false} onChange={e => setCurrentProduct({...currentProduct, visible: e.target.checked})} className="w-4 h-4 rounded"/>
-                  <span className="font-bold text-sm text-gray-800">Mostrar en tienda</span>
-                </label>
-
-                <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer ${currentProduct.imageNeedsOptimization ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-white'}`}>
-                  <input type="checkbox" checked={!!currentProduct.imageNeedsOptimization} onChange={e => setCurrentProduct({...currentProduct, imageNeedsOptimization: e.target.checked})} className="w-4 h-4 rounded text-purple-600"/>
-                  <span>
-                    <span className="block font-bold text-sm text-gray-800">Foto pendiente de optimizar</span>
-                    <span className="block text-xs text-gray-500">Para arreglarla luego.</span>
-                  </span>
-                </label>
               </div>
             </div>
 
-            <div className="border-t border-gray-200 bg-white p-2.5 flex-shrink-0">
-              <div className="grid grid-cols-2 gap-2 max-w-xl ml-auto">
-                <button type="submit" disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-colors">Guardar</button>
-                <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={uploading || removingBg || generatingDesc || centeringProduct} className="w-full bg-gray-900 text-white py-2.5 rounded-xl font-bold hover:bg-gray-800 transition-colors">
-                  Guardar y siguiente
+            <div className="border-t border-gray-200 bg-white p-2 sm:p-2.5 flex-shrink-0 space-y-1.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+              <div className="grid grid-cols-2 gap-2 sm:max-w-xl sm:ml-auto">
+                <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true, markStatus: 'needs_review' })} disabled={busy} className="w-full bg-white border border-gray-300 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-50 transition-colors disabled:opacity-50" title="No sé el IVA: marcar para revisar y pasar al siguiente">
+                  Revisar IVA →
+                </button>
+                <button type="button" onClick={(e) => handleSaveProduct(e, { saveAndNext: true })} disabled={busy} className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors disabled:opacity-50" title="Marcar como revisado (requiere IVA) y pasar al siguiente">
+                  Revisado →
                 </button>
               </div>
+              <button type="submit" disabled={busy} className="w-full text-xs font-semibold text-gray-500 hover:text-gray-700 py-1 disabled:opacity-50">Guardar sin avanzar</button>
             </div>
           </form>
         </div>
@@ -3975,27 +4125,27 @@ const renderRepairs = () => (
 
       {/* Bulk AI: barra fija abajo cuando hay selección en Productos */}
       {activeTab === 'products' && (selectedProductIds.size > 0 || bulkProcessing.active) && (
-        <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-amber-50 border-t border-amber-200 shadow-lg z-20 p-4 flex flex-wrap items-center justify-center gap-3">
+        <div className="fixed bottom-0 left-0 right-0 md:left-64 bg-white border-t border-gray-200 shadow-lg z-20 p-4 flex flex-wrap items-center justify-center gap-3">
           {bulkProcessing.active ? (
-            <span className="text-sm font-medium text-amber-800">
+            <span className="text-sm font-medium text-gray-700">
               {bulkProcessing.action === 'both' ? 'Quitar fondo + Centrar' : bulkProcessing.action === 'removeBg' ? 'Quitar fondo' : 'Centrar producto'}: {bulkProcessing.done}/{bulkProcessing.total} (~5s entre cada uno)
             </span>
           ) : (
             <>
-              <span className="text-sm font-medium text-amber-800">{selectedProductIds.size} seleccionados</span>
-              <button type="button" onClick={() => runBulkAction('both')} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">
+              <span className="text-sm font-medium text-gray-700">{selectedProductIds.size} seleccionados</span>
+              <button type="button" onClick={() => runBulkAction('both')} className="px-4 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium">
                 Quitar fondo + Centrar (AI)
               </button>
-              <button type="button" onClick={() => runBulkAction('removeBg')} className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">
+              <button type="button" onClick={() => runBulkAction('removeBg')} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium">
                 Solo Quitar fondo
               </button>
-              <button type="button" onClick={() => runBulkAction('center')} className="px-4 py-2 rounded-lg bg-purple-200 hover:bg-purple-300 text-purple-800 text-sm font-medium">
+              <button type="button" onClick={() => runBulkAction('center')} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium">
                 Solo Centrar
               </button>
-              <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 text-sm">
+              <button type="button" onClick={clearProductSelection} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm">
                 Cancelar
               </button>
-              <button type="button" onClick={() => selectAllProducts(products.filter(p => !searchTerm.trim() || (p.name || '').toLowerCase().includes(searchTerm.toLowerCase().trim())).filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-amber-600 hover:underline">
+              <button type="button" onClick={() => selectAllProducts(products.filter(p => !searchTerm.trim() || (p.name || '').toLowerCase().includes(searchTerm.toLowerCase().trim())).filter(p => p.image || p.images?.[0]).map(p => p.id))} className="text-xs text-gray-500 hover:underline">
                 Seleccionar todos (con imagen)
               </button>
             </>
