@@ -638,7 +638,7 @@ app.get('/api/products', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('products')
-      .select('*')
+      .select('id,name,description,price,image,category,sub_category_id,stock,oferta,oferta_type,oferta_value,gift_product')
       .or('visible.is.null,visible.eq.true')
       .order('sort_order', { ascending: true, nullsFirst: false })
       .order('id', { ascending: true });

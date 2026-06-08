@@ -209,6 +209,20 @@ function getPickupReadinessNote(now = new Date()) {
 // =====================================================================
 const SHIPPING_FEE_STANDARD = 4.99;
 const FREE_SHIPPING_THRESHOLD = 40;
+const DELIVERY_AREA_LABEL = 'Meco (28880)';
+const DELIVERY_ALLOWED_TERMS = ['meco', '28880'];
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isAddressInDeliveryArea(address) {
+  const normalized = normalizeText(address);
+  return DELIVERY_ALLOWED_TERMS.some(term => normalized.includes(term));
+}
 
 // Devuelve el estado operativo de la tienda en este momento. La forma
 // del objeto se mantuvo retro-compatible con el StoreInfoBar previo
@@ -1158,6 +1172,7 @@ export default function App() {
       return i;
     }));
   };
+  const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // generateInvoice — descarga justificante A4 + ticket no fiscal 80mm
   // ----------------------------------------------------
@@ -1237,6 +1252,10 @@ export default function App() {
     const v = String(a || '').trim();
     return v.length >= 6 && /\d/.test(v);
   };
+  const isDeliveryAddressAllowed = isStorePickup
+    || !checkoutForm.address
+    || !isAddressFormatOk(checkoutForm.address)
+    || isAddressInDeliveryArea(checkoutForm.address);
 
   // Mensajes de error por campo del checkout. Solo se muestran si el
   // campo ya fue tocado (onBlur), para feedback en vivo sin agresividad.
@@ -1253,7 +1272,9 @@ export default function App() {
   const addressFieldError = (!isStorePickup && checkoutTouched.address)
     ? (!checkoutForm.address
         ? 'Indica la dirección de entrega.'
-        : (!isAddressFormatOk(checkoutForm.address) ? 'Incluye calle y número (mín. 6 caracteres).' : ''))
+        : (!isAddressFormatOk(checkoutForm.address)
+            ? 'Incluye calle y número (mín. 6 caracteres).'
+            : (!isDeliveryAddressAllowed ? `Actualmente el envío a domicilio está disponible sólo en ${DELIVERY_AREA_LABEL}.` : '')))
     : '';
 
   // Valida el cupón contra el backend y, si es correcto, lo fija. El
@@ -1325,6 +1346,10 @@ export default function App() {
     }
     if (checkoutForm.deliveryMethod === "home_delivery" && !isAddressFormatOk(checkoutForm.address)) {
       toast.error("Indica una dirección completa con número (calle, número y piso si procede).");
+      return;
+    }
+    if (checkoutForm.deliveryMethod === "home_delivery" && !isAddressInDeliveryArea(checkoutForm.address)) {
+      toast.error(`Ahora mismo el envío a domicilio sólo está disponible en ${DELIVERY_AREA_LABEL}. Puedes elegir recogida en tienda.`);
       return;
     }
     if (!isEmailFormatOk(checkoutForm.email)) {
@@ -1620,7 +1645,10 @@ export default function App() {
   // expanded=true (sólo Ofertas Flash de la home): botón "Añadir" ancho que
   // se convierte en control de cantidad. Por defecto (resto de listados) se
   // usa el "+" compacto para no alargar las tarjetas.
-  const renderProductCard = (p, { expanded = false } = {}) => (
+  const renderProductCard = (p, { expanded = false } = {}) => {
+    const inCart = cart.find(i => i.id === p.id && i.name === p.name);
+
+    return (
     <div key={p.id} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 active:scale-95 transition-transform relative group" onClick={() => {setSelectedProduct(p); navTo("detail");}}>
       <button onClick={(e) => toggleFavorite(e, p.id)} className="absolute top-2 right-2 z-20 bg-white/80 p-1.5 rounded-full shadow-sm backdrop-blur-sm text-gray-400 hover:text-red-500 transition-colors">
         <Heart size={16} fill={favorites.includes(p.id) ? "currentColor" : "none"} className={favorites.includes(p.id) ? "text-red-500" : ""}/>
@@ -1637,7 +1665,6 @@ export default function App() {
             {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
           </div>
           {(() => {
-            const inCart = cart.find(i => i.id === p.id && i.name === p.name);
             if (!inCart) {
               return (
                 <button
@@ -1675,11 +1702,32 @@ export default function App() {
             <p className="font-extrabold text-red-600 text-lg leading-none">€{p.price.toFixed(2)}</p>
             {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
           </div>
-          <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg active:bg-red-600 transition-colors"><Plus size={16}/></button>
+          {inCart ? (
+            <div className="flex items-center bg-gray-900 text-white rounded-full shadow-lg px-0.5 py-0.5" onClick={(e) => e.stopPropagation()}>
+              <button
+                aria-label="Quitar uno"
+                onClick={(e) => { e.stopPropagation(); inCart.quantity <= 1 ? removeFromCart(p.id, p.name) : updateQty(p.id, p.name, -1); }}
+                className="w-7 h-7 flex items-center justify-center rounded-full active:bg-white/20 transition-colors"
+              >
+                {inCart.quantity <= 1 ? <Trash2 size={13}/> : <Minus size={14}/>}
+              </button>
+              <span className="min-w-5 px-0.5 text-center font-bold text-xs tabular-nums">{inCart.quantity}</span>
+              <button
+                aria-label="Añadir uno"
+                onClick={(e) => { e.stopPropagation(); updateQty(p.id, p.name, 1); }}
+                className="w-7 h-7 flex items-center justify-center rounded-full active:bg-white/20 transition-colors"
+              >
+                <Plus size={14}/>
+              </button>
+            </div>
+          ) : (
+            <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg active:bg-red-600 transition-colors"><Plus size={16}/></button>
+          )}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   const renderDiscountTag = (p) => {
     // 只有当 oferta 为 true 时才显示标签
@@ -1697,11 +1745,25 @@ export default function App() {
     return <span className="absolute top-2 left-2 bg-red-600 text-white text-[10px] px-2 py-1 rounded-full font-bold shadow-sm z-10">{text}</span>;
   };
 
+  const productMatchesSearch = (p) => {
+    const query = normalizeText(searchQuery).trim();
+    if (!query) return true;
+    const categoryName = categories.find(c => c.id === p.category)?.name || '';
+    const subCategoryName = subCategories.find(s => s.id === p.subCategoryId)?.name || '';
+    const haystack = normalizeText([
+      p.name,
+      p.description,
+      categoryName,
+      subCategoryName,
+    ].filter(Boolean).join(' '));
+    return query.split(/\s+/).every(term => haystack.includes(term));
+  };
+
   const filteredProducts = products.filter(p => {
     if (page === "favorites") return favorites.includes(p.id);
     const mainMatch = mainCat ? p.category === mainCat.id : true;
     const subMatch = subCat ? p.subCategoryId === subCat.id : true;
-    const searchMatch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const searchMatch = productMatchesSearch(p);
     return mainMatch && subMatch && searchMatch;
   });
 
@@ -1735,7 +1797,7 @@ export default function App() {
                </button>
                <div className="relative p-1 cursor-pointer transition-transform active:scale-90" onClick={() => navTo("cart")}>
                  <ShoppingCart className="text-gray-700" size={24} />
-                 {cart.length > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-bounce">{cart.length}</span>}
+                 {cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] min-w-5 h-5 px-1 rounded-full flex items-center justify-center border-2 border-white animate-bounce">{cartItemCount}</span>}
                </div>
             </div>
           </div>
@@ -1764,6 +1826,12 @@ export default function App() {
             <button onClick={() => navTo("main")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><LayoutGrid size={20} /></div><span className="text-[11px] font-bold text-gray-700">Todo</span></button>
             <button onClick={() => navTo("repair")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><Wrench size={20} /></div><span className="text-[11px] font-bold text-gray-700">Reparación</span></button>
             <button onClick={() => navTo("orders")} className="bg-white py-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-transform"><div className="p-2.5 bg-red-50 text-red-600 rounded-full"><ClipboardList size={20} /></div><span className="text-[11px] font-bold text-gray-700">Pedidos</span></button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-600">
+            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Store size={14} className="text-red-600"/> Tienda física en Meco</div>
+            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Truck size={14} className="text-red-600"/> Recogida gratis</div>
+            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Clock size={14} className="text-red-600"/> Abierto 9:00-22:00</div>
+            <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-center gap-2"><Smartphone size={14} className="text-red-600"/> WhatsApp cercano</div>
           </div>
           <div className="space-y-2">
           <button
@@ -2331,7 +2399,7 @@ export default function App() {
           {/* Header */}
           <div className="p-4 bg-white shadow-sm flex items-center gap-2">
             <button onClick={handleBack} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="text-gray-600"/></button>
-            <h2 className="font-bold text-lg">Mi Cesta ({cart.reduce((a,b)=>a+b.quantity,0)})</h2>
+            <h2 className="font-bold text-lg">Mi Cesta ({cartItemCount})</h2>
             {cart.length > 0 && <button onClick={() => setCart([])} className="ml-auto text-xs text-red-500 font-bold bg-red-50 px-2 py-1 rounded">Vaciar</button>}
           </div>
 
@@ -2613,7 +2681,7 @@ export default function App() {
                       onSelect={() => setCheckoutTouched(t => ({ ...t, address: true }))}
                     />
                     {addressFieldError && <p className="text-xs text-red-500 mt-1 px-1">{addressFieldError}</p>}
-                    <p className="text-[11px] text-gray-400 mt-1 px-1">Escribe tu calle y elige una opción; luego añade piso/puerta si hace falta.</p>
+                    <p className="text-[11px] text-gray-400 mt-1 px-1">Envío disponible en {DELIVERY_AREA_LABEL}. Escribe tu calle y elige una opción; luego añade piso/puerta si hace falta.</p>
                   </div>
                 )}
                 <div>
@@ -2947,6 +3015,7 @@ export default function App() {
               const checkoutReady =
                 isEmailFormatOk(checkoutForm.email) &&
                 (isStorePickup || isAddressFormatOk(checkoutForm.address)) &&
+                isDeliveryAddressAllowed &&
                 isPhoneFormatOk(checkoutForm.phone) &&
                 (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted) &&
                 !!selectedPayment;
@@ -3151,7 +3220,7 @@ export default function App() {
                      products.filter(p => {
                        const mainMatch = mainCat ? p.category === mainCat.id : true;
                        const subMatch = subCat ? p.subCategoryId === subCat.id : true;
-                       const searchMatch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
+                       const searchMatch = productMatchesSearch(p);
                        return mainMatch && subMatch && searchMatch;
                      }).map(p => renderProductCard(p))
                    )}
@@ -3159,7 +3228,7 @@ export default function App() {
                </div>
              </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">{loading ? <div className="col-span-2 text-center py-20"><Loader2 className="animate-spin mx-auto mb-2 text-red-500"/>Cargando...</div> : products.filter(p => { const mainMatch = mainCat ? p.category === mainCat.id : true; const subMatch = subCat ? p.subCategoryId === subCat.id : true; const searchMatch = p.name?.toLowerCase().includes(searchQuery.toLowerCase()); return mainMatch && subMatch && searchMatch && (page === "offers" ? p.oferta : true); }).map(p => renderProductCard(p))}</div>
+            <div className="grid grid-cols-2 gap-3">{loading ? <div className="col-span-2 text-center py-20"><Loader2 className="animate-spin mx-auto mb-2 text-red-500"/>Cargando...</div> : products.filter(p => { const mainMatch = mainCat ? p.category === mainCat.id : true; const subMatch = subCat ? p.subCategoryId === subCat.id : true; const searchMatch = productMatchesSearch(p); return mainMatch && subMatch && searchMatch && (page === "offers" ? p.oferta : true); }).map(p => renderProductCard(p))}</div>
           )}
         </div>
       )}
