@@ -1643,21 +1643,39 @@ export default function App() {
     return null;
   };
 
-  const makeAutoShortName = (value, maxChars = 34) => {
+  const makeAutoShortName = (value, maxChars = 28) => {
     const original = String(value || '').replace(/\s+/g, ' ').trim();
-    if (original.length <= maxChars) return original;
+    if (!original) return '';
 
     const dropWords = new Set([
       'SABOR', 'DE', 'DEL', 'LA', 'EL', 'LAS', 'LOS', 'CON', 'SIN', 'PARA',
-      'Y', 'A', 'AL', 'EN', 'THE', 'PACK', 'FORMATO',
+      'Y', 'A', 'AL', 'EN', 'THE', 'PACK', 'FORMATO', 'TIPO',
     ]);
     const sizePattern = /^\d+(?:[,.]\d+)?(?:G|GR|KG|ML|CL|L|LT|UD|UDS|UN|U|PZ|PZS|SOB|SOBRES?)$/i;
+    const cleanToken = (token) => token
+      .replace(/[()[\]{}]/g, '')
+      .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}%]+$/gu, '')
+      .trim();
+    const isNoiseToken = (token) => {
+      const normalized = normalizeText(cleanToken(token)).toUpperCase();
+      return !normalized || dropWords.has(normalized) || normalized.startsWith('SABOR');
+    };
     const tokens = original
       .split(/\s+/)
-      .map((token) => token.replace(/[()[\]{}]/g, '').trim())
+      .map(cleanToken)
       .filter(Boolean);
+    const seen = new Set();
     const sizeTokens = tokens.filter((token) => sizePattern.test(token.replace(/\s/g, '')));
-    const compactTokens = tokens.filter((token) => !dropWords.has(normalizeText(token).toUpperCase()));
+    const compactTokens = tokens.filter((token) => {
+      if (isNoiseToken(token)) return false;
+      const normalized = normalizeText(token);
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+
+    const cleaned = (compactTokens.length ? compactTokens : tokens).join(' ');
+    if (cleaned.length <= maxChars) return cleaned;
 
     const buildWithin = (candidateTokens) => {
       const chosen = [];
