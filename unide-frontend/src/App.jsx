@@ -832,8 +832,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   
   // --- Navigation ---
-  const [page, setPage] = useState("home"); 
-  const [history, setHistory] = useState(["home"]); 
+  const initialPage = window.location.pathname === '/repair' ? 'repair' : 'home';
+  const [page, setPage] = useState(initialPage);
+  const [history, setHistory] = useState(initialPage === 'repair' ? ['home', 'repair'] : ['home']);
   const [mainCat, setMainCat] = useState(null); 
   const [subCat, setSubCat] = useState(null);   
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -1107,6 +1108,15 @@ export default function App() {
       fetchOrders();
     }
   }, [page, user]);
+
+  // Título del documento por pantalla. /repair se usará como landing de
+  // campañas (tráfico de pago), así que la pestaña del navegador y los
+  // bots que sí ejecutan JS deben ver un título orientado a reparación.
+  useEffect(() => {
+    document.title = page === 'repair'
+      ? 'Reparación de móviles en Meco (pantalla y batería) | HIPERA'
+      : 'HIPERA — Tu mercado de confianza en Meco';
+  }, [page]);
 
   const goBack = useCallback(() => {
     if (history.length <= 1) return;
@@ -2091,33 +2101,109 @@ export default function App() {
         </div>
       )}
 
-{/* --- REPAIR PAGE (已修正：深色风格 + 完整购买须知) --- */}
+{/* --- REPAIR PAGE: landing para tráfico frío de Google Ads --- */}
       {page === "repair" && (
-        <div className="min-h-screen bg-gray-900 text-white animate-fade-in pb-24">
-           {/* Header */}
-           <div className="px-4 py-4 flex items-center gap-3 sticky top-0 bg-gray-900/95 backdrop-blur z-20 border-b border-gray-800">
+        <div className="min-h-screen bg-gray-950 text-white animate-fade-in pb-24">
+           <div className="px-4 py-3 flex items-center gap-3 sticky top-0 bg-gray-950/95 backdrop-blur z-20 border-b border-gray-800">
              <button onClick={handleBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button>
-             <h2 className="text-xl font-bold">Centro de Reparación</h2>
+             <div className="min-w-0">
+               <h2 className="text-lg font-bold leading-tight">Reparación móvil</h2>
+               <p className="text-[11px] text-gray-500 leading-tight">HIPERA · Meco</p>
+             </div>
            </div>
-           
-           <div className="p-4 space-y-6">
-              {/* 1. 顶部 Banner */}
-              <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 rounded-3xl border border-gray-700 text-center relative overflow-hidden shadow-2xl">
-                 <div className="absolute top-0 right-0 w-24 h-24 bg-red-600 blur-[60px] opacity-20"></div>
-                 <Wrench size={40} className="mx-auto text-red-500 mb-4"/>
-                 <h3 className="text-xl font-bold mb-2">Reparación por cita</h3>
-                 <p className="text-gray-400 text-sm leading-relaxed">Elige modelo y tipo de reparación, luego consulta el precio por WhatsApp.</p>
-              </div>
 
-              {/* 2. 核心：智能筛选器 (改为深色风格) */}
-              <div className="bg-gray-800/40 p-2 rounded-3xl border border-gray-700 backdrop-blur-sm">
-                 
-                 {/* 品牌 Tabs (黑底) */}
-                 <div className="flex p-1 bg-gray-900 rounded-2xl mb-4 overflow-x-auto border border-gray-800">
+           <div className="p-4 space-y-5">
+              <section className="relative overflow-hidden rounded-3xl border border-gray-800 bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 p-5 shadow-xl">
+                 <div className="absolute -right-10 -top-10 w-36 h-36 rounded-full bg-red-600/20 blur-3xl"></div>
+                 <div className="relative">
+                   <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600/15 px-3 py-1 text-[11px] font-bold text-red-300 border border-red-500/20">
+                     <MapPin size={12}/> Paseo del Sol 1, Meco
+                   </span>
+                   <h1 className="mt-4 text-3xl font-black leading-tight tracking-tight">Reparación de móviles en Meco</h1>
+                   <p className="mt-3 text-sm leading-relaxed text-gray-300">
+                     Pantallas, baterías y diagnóstico. Cuéntanos tu modelo por WhatsApp y te orientamos con precio, disponibilidad y plazo.
+                   </p>
+                   <p className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-medium text-green-300">
+                     <CheckCircle2 size={13}/> Te confirmamos el precio antes de reparar. Sin compromiso.
+                   </p>
+                   <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                     <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
+                       <p className="text-[10px] text-gray-500">Garantía</p>
+                       <p className="text-xs font-bold">6 meses</p>
+                     </div>
+                     <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
+                       <p className="text-[10px] text-gray-500">Marcas</p>
+                       <p className="text-xs font-bold">Todas</p>
+                     </div>
+                     <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
+                       <p className="text-[10px] text-gray-500">Presupuesto</p>
+                       <p className="text-xs font-bold">Sin compromiso</p>
+                     </div>
+                   </div>
+                   <div className="mt-5 flex gap-2">
+                     <a
+                       href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
+                       target="_blank"
+                       rel="noreferrer"
+                       className="flex-1 bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+                     >
+                       <Smartphone size={18}/> Consultar por WhatsApp
+                     </a>
+                     <a
+                       href="#repair-models"
+                       className="px-4 bg-white/10 hover:bg-white/15 text-white py-3 rounded-2xl font-bold flex items-center justify-center active:scale-95 transition-all"
+                     >
+                       Ver modelos
+                     </a>
+                   </div>
+                 </div>
+              </section>
+
+              <section className="grid grid-cols-3 gap-2">
+                {[
+                  { icon: Smartphone, title: 'Pantalla', text: 'Roturas y táctil' },
+                  { icon: Wrench, title: 'Batería', text: 'Cambio y revisión' },
+                  { icon: Info, title: 'Diagnóstico', text: 'Consulta primero' },
+                ].map(({ icon: Icon, title, text }) => (
+                  <div key={title} className="rounded-2xl bg-gray-900 border border-gray-800 p-3">
+                    <Icon size={18} className="text-red-400 mb-2"/>
+                    <p className="text-xs font-bold leading-tight">{title}</p>
+                    <p className="mt-1 text-[10px] text-gray-500 leading-tight">{text}</p>
+                  </div>
+                ))}
+              </section>
+
+              <section className="rounded-3xl bg-gray-900/70 border border-gray-800 p-4">
+                <h3 className="font-bold text-white mb-3 flex items-center gap-2"><CheckCircle2 size={16} className="text-green-400"/> Cómo funciona</h3>
+                <div className="space-y-3">
+                  {[
+                    ['1', 'Dinos tu modelo', 'Elige tu móvil abajo o escríbenos directamente por WhatsApp.'],
+                    ['2', 'Confirmamos precio', 'Te indicamos el precio, la disponibilidad de piezas y el plazo antes de empezar.'],
+                    ['3', 'Tráelo a HIPERA', 'Paseo del Sol 1, Meco. Puedes dejarlo mientras haces la compra.'],
+                  ].map(([step, title, text]) => (
+                    <div key={step} className="flex gap-3">
+                      <span className="w-7 h-7 rounded-full bg-red-600 text-white text-xs font-black flex items-center justify-center flex-shrink-0">{step}</span>
+                      <div>
+                        <p className="text-sm font-bold">{title}</p>
+                        <p className="text-xs text-gray-500 leading-snug">{text}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section id="repair-models" className="scroll-mt-24 bg-gray-900/70 p-3 rounded-3xl border border-gray-800 backdrop-blur-sm">
+                 <div className="px-1 py-2 mb-2">
+                   <p className="text-xs font-bold text-red-300 uppercase tracking-wide">Consulta por modelo</p>
+                   <h3 className="text-xl font-black text-white">Busca tu dispositivo</h3>
+                   <p className="text-xs text-gray-500 mt-1">Si no aparece en la lista, elige "No encuentro mi modelo" y te atendemos por WhatsApp.</p>
+                 </div>
+
+                 <div className="flex p-1 bg-gray-950 rounded-2xl mb-4 overflow-x-auto border border-gray-800">
                     {['Apple', 'Samsung', 'Xiaomi', 'Oppo'].map(brand => (
-                      <button 
+                      <button
                         key={brand}
-                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); setSelectedRepairType(null); }} 
+                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); setSelectedRepairType(null); }}
                         className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap px-4 ${selectedBrand === brand ? 'bg-gray-800 text-white shadow-lg border border-gray-700' : 'text-gray-500 hover:text-gray-300'}`}
                       >
                         {brand}
@@ -2125,53 +2211,45 @@ export default function App() {
                     ))}
                  </div>
 
-                 <div className="px-2 pb-2">
-                    {/* 型号选择 (已修改：增加"找不到型号"选项) */}
-                    <div className="mb-6">
-                       <label className="text-xs font-bold text-gray-500 uppercase ml-2 mb-2 block">Selecciona Modelo</label>
+                 <div className="px-1 pb-1">
+                    <div className="mb-4">
+                       <label className="text-xs font-bold text-gray-500 uppercase ml-2 mb-2 block">Selecciona modelo</label>
                        <div className="relative">
-                         <select 
-                           value={selectedModel} 
+                         <select
+                           value={selectedModel}
                            onChange={e => { setSelectedModel(e.target.value); setSelectedRepairType(null); }}
-                           className="w-full p-4 bg-gray-900 border border-gray-700 rounded-xl text-white font-bold outline-none focus:ring-2 focus:ring-red-900/50 appearance-none transition-all"
+                           className="w-full p-4 bg-gray-950 border border-gray-700 rounded-xl text-white font-bold outline-none focus:ring-2 focus:ring-red-900/50 appearance-none transition-all"
                          >
-                           <option value="" className="text-gray-500">-- Elige tu dispositivo --</option>
-                           
-                           {/* 1. 正常的数据库型号 */}
+                           <option value="" className="text-gray-500">Elige tu dispositivo</option>
                            {[...new Set(repairs.filter(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase()).map(r => r.model))].sort().map(model => (
                               <option key={model} value={model}>{model}</option>
                            ))}
-
-                           {/* 2. 👇 新增：兜底选项 (手动加上去的) */}
-                           <option value="others" className="text-red-400 font-bold">❓ No encuentro mi modelo</option>
+                           <option value="others" className="text-red-400 font-bold">No encuentro mi modelo</option>
                          </select>
                          <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 rotate-90 pointer-events-none" size={16}/>
                        </div>
                     </div>
 
-                    {/* 预约制：选型号 → 简单信息 + Cambiar pantalla / batería → WhatsApp 咨询价格 */}
                     <div className="space-y-3">
-                       {/* A: 未选型号 */}
                        {!selectedModel && (
-                         <div className="text-center py-10 border-2 border-dashed border-gray-800 rounded-2xl">
-                            <Smartphone size={32} className="mx-auto mb-3 text-gray-700"/>
-                            <p className="text-sm text-gray-500">👆 Selecciona un modelo arriba</p>
+                         <div className="text-center py-7 border border-dashed border-gray-800 rounded-2xl">
+                            <Smartphone size={30} className="mx-auto mb-3 text-gray-700"/>
+                            <p className="text-sm text-gray-500">Selecciona un modelo para consultar pantalla o batería.</p>
                          </div>
                        )}
 
-                       {/* B: "找不到型号" → 直接 WhatsApp */}
                        {selectedModel === 'others' && (
-                         <div className="bg-gray-800 p-6 rounded-2xl text-center border border-gray-700 animate-fade-in">
-                            <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-400">
-                               <Info size={32} />
+                         <div className="bg-gray-800 p-5 rounded-2xl text-center border border-gray-700 animate-fade-in">
+                            <div className="w-14 h-14 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-400">
+                               <Info size={28} />
                             </div>
-                            <h3 className="text-xl font-bold text-white mb-2">¿Tu modelo no está en la lista?</h3>
-                            <p className="text-gray-400 text-sm mb-6 leading-relaxed">
-                               Trabajamos con casi todas las marcas. Contáctanos por WhatsApp para consultar precio.
+                            <h3 className="text-lg font-bold text-white mb-2">¿Tu modelo no está en la lista?</h3>
+                            <p className="text-gray-400 text-sm mb-5 leading-relaxed">
+                               Escríbenos marca, modelo y problema. Te confirmamos si podemos ayudarte.
                             </p>
-                            <a 
-                              href="https://wa.me/34612466034?text=Hola,%20quiero%20reparar%20un%20móvil%20que%20no%20aparece%20en%20la%20web.%20Quisiera%20consultar%20precio."
-                              target="_blank" 
+                            <a
+                              href={waLink('Hola, quiero reparar un móvil que no aparece en la web. Quisiera consultar precio.')}
+                              target="_blank"
                               rel="noreferrer"
                               className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full"
                             >
@@ -2180,7 +2258,6 @@ export default function App() {
                          </div>
                        )}
 
-                       {/* C: 已选型号 → 简单信息 + Cambiar pantalla / batería（点击仅选中）→ 再显示 Consultar / Pedir cita → WhatsApp */}
                        {selectedModel && selectedModel !== 'others' && (
                          <div className="space-y-4 animate-fade-in">
                            {(() => {
@@ -2194,84 +2271,101 @@ export default function App() {
                              <p className="text-gray-400 text-sm mt-1">
                                {!selectedRepairType
                                  ? "Elige el tipo de reparación."
-                                 : `Has elegido: Cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}. Pulsa abajo para consultar o pedir cita.`}
+                                 : `Has elegido: Cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}. Pulsa abajo para consultar precio.`}
                              </p>
                            </div>
                            ); })()}
 
                            {!selectedRepairType ? (
-                             <>
-                               <div className="grid grid-cols-1 gap-3">
-                                 <button
-                                   type="button"
-                                   onClick={() => setSelectedRepairType('pantalla')}
-                                   className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
-                                 >
-                                   <div className="w-12 h-12 bg-gray-900 rounded-xl flex items-center justify-center text-red-400">
-                                     <Smartphone size={24}/>
-                                   </div>
-                                   <div className="flex-1">
-                                     <h4 className="font-bold text-white">Cambiar pantalla</h4>
-                                     <p className="text-gray-500 text-xs">Seleccionar</p>
-                                   </div>
-                                   <ChevronRight className="text-gray-500" size={20}/>
-                                 </button>
-                                 <button
-                                   type="button"
-                                   onClick={() => setSelectedRepairType('bateria')}
-                                   className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
-                                 >
-                                   <div className="w-12 h-12 bg-gray-900 rounded-xl flex items-center justify-center text-amber-400">
-                                     <Wrench size={24}/>
-                                   </div>
-                                   <div className="flex-1">
-                                     <h4 className="font-bold text-white">Cambiar batería</h4>
-                                     <p className="text-gray-500 text-xs">Seleccionar</p>
-                                   </div>
-                                   <ChevronRight className="text-gray-500" size={20}/>
-                                 </button>
-                               </div>
-                             </>
+                             <div className="grid grid-cols-1 gap-3">
+                               <button
+                                 type="button"
+                                 onClick={() => setSelectedRepairType('pantalla')}
+                                 className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
+                               >
+                                 <div className="w-12 h-12 bg-gray-950 rounded-xl flex items-center justify-center text-red-400">
+                                   <Smartphone size={24}/>
+                                 </div>
+                                 <div className="flex-1">
+                                   <h4 className="font-bold text-white">Cambiar pantalla</h4>
+                                   <p className="text-gray-500 text-xs">Consultar precio</p>
+                                 </div>
+                                 <ChevronRight className="text-gray-500" size={20}/>
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => setSelectedRepairType('bateria')}
+                                 className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
+                               >
+                                 <div className="w-12 h-12 bg-gray-950 rounded-xl flex items-center justify-center text-amber-400">
+                                   <Wrench size={24}/>
+                                 </div>
+                                 <div className="flex-1">
+                                   <h4 className="font-bold text-white">Cambiar batería</h4>
+                                   <p className="text-gray-500 text-xs">Consultar precio</p>
+                                 </div>
+                                 <ChevronRight className="text-gray-500" size={20}/>
+                               </button>
+                             </div>
                            ) : (
                              <a
-                               href={`https://wa.me/34612466034?text=${encodeURIComponent(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}`}
+                               href={waLink(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}
                                target="_blank"
                                rel="noreferrer"
                                className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
                              >
-                               <Smartphone size={20}/> Consultar / Pedir cita por WhatsApp
+                               <Smartphone size={20}/> Consultar precio por WhatsApp
                              </a>
                            )}
                          </div>
                        )}
                     </div>
                  </div>
-              </div>
+              </section>
 
-              {/* 3. 购买须知 (完整版 - 5条) */}
-              <div className="bg-gray-900/50 p-5 rounded-3xl border border-gray-800 mt-4">
+              <section className="bg-gray-900/50 p-5 rounded-3xl border border-gray-800">
                  <h3 className="font-bold text-gray-200 mb-5 text-sm flex items-center gap-2">
-                    <Info size={16} className="text-red-500"/> Información Importante
+                    <Info size={16} className="text-red-500"/> Información importante
                  </h3>
-                 
                  <div className="space-y-5">
-                    {/* 时间 */}
                     <div className="flex gap-4">
                        <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-yellow-400"><Clock size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Horario</p><p className="text-xs text-gray-500 mt-0.5">Lunes a Domingo, de 9:00 a 22:00.</p></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Horario</p><p className="text-xs text-gray-500 mt-0.5">Consulta y entrega en tienda durante el horario de HIPERA.</p></div>
                     </div>
-                    {/* 库存等待时间 */}
                     <div className="flex gap-4">
                        <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-orange-400"><Package size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Disponibilidad de Piezas</p><p className="text-xs text-gray-500 mt-0.5">Algunos modelos pueden requerir <strong>2-3 días</strong> para disponibilidad de piezas. Le notificaremos cuando esté listo.</p></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Disponibilidad de piezas</p><p className="text-xs text-gray-500 mt-0.5">Algunos modelos pueden requerir <strong>2-3 días</strong> para disponibilidad de piezas.</p></div>
                     </div>
-                    {/* 保修 */}
                     <div className="flex gap-4">
                        <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-red-400"><ShieldCheck size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Garantía Extendida</p><p className="text-xs text-gray-500 mt-0.5">Cobertura total de <strong>6 meses</strong>.</p></div>
+                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Garantía</p><p className="text-xs text-gray-500 mt-0.5">Cobertura de <strong>6 meses</strong> sobre la reparación realizada.</p></div>
                     </div>
                  </div>
-              </div>
+              </section>
+           </div>
+
+           {/* CTA fija inferior: en una landing de campaña el contacto debe
+               estar siempre a mano, sin depender del scroll. La barra inferior
+               global está oculta en /repair, así que el espacio es libre
+               (el contenedor reserva pb-24). El degradado no captura toques
+               (pointer-events-none) salvo en los propios botones. */}
+           <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 pb-4 pt-8 bg-gradient-to-t from-gray-950 via-gray-950/95 to-transparent pointer-events-none">
+             <div className="flex gap-2 pointer-events-auto">
+               <a
+                 href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
+                 target="_blank"
+                 rel="noreferrer"
+                 className="flex-1 bg-[#25D366] hover:bg-[#20bd5a] text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-black/40 active:scale-95 transition-all"
+               >
+                 <Smartphone size={18}/> Consultar por WhatsApp
+               </a>
+               <a
+                 href="tel:+34918782602"
+                 className="px-5 bg-white/10 border border-white/15 text-white py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all"
+               >
+                 <Phone size={18}/> Llamar
+               </a>
+             </div>
            </div>
         </div>
       )}
