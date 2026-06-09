@@ -1711,6 +1711,12 @@ export default function App() {
   // usa el "+" compacto para no alargar las tarjetas.
   const renderProductCard = (p, { expanded = false } = {}) => {
     const inCart = cart.find(i => i.id === p.id && i.name === p.name);
+    // "Agotado" en tarjeta: misma condición que bloquea addToCart, para que
+    // lo que se ve coincida con lo que se puede hacer. Los servicios (sin
+    // stock pero con title) nunca se marcan como agotados.
+    const stockNum = Number(p.stock);
+    const isService = !p.stock && !!(p.title);
+    const soldOut = !isService && (Number.isNaN(stockNum) || stockNum <= 0);
 
     return (
     <div key={p.id} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 active:scale-95 transition-transform relative group" onClick={() => {setSelectedProduct(p); navTo("detail");}}>
@@ -1719,7 +1725,10 @@ export default function App() {
       </button>
       <div className="relative mb-2">
         {renderDiscountTag(p)}
-        <img src={p.image} alt={p.name} loading="lazy" decoding="async" className="w-full aspect-square rounded-xl object-contain bg-gray-50 p-2" />
+        <img src={p.image} alt={p.name} loading="lazy" decoding="async" className={`w-full aspect-square rounded-xl object-contain bg-gray-50 p-2 transition ${soldOut ? 'opacity-40 grayscale' : ''}`} />
+        {soldOut && (
+          <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-gray-900/85 text-white text-[11px] font-bold uppercase tracking-wide px-3 py-1 rounded-full shadow-sm">Agotado</span>
+        )}
       </div>
       <p className="font-medium text-gray-800 text-sm line-clamp-2 mb-1 break-words" title={p.name}>{displayProductName(p)}</p>
       {expanded ? (
@@ -1729,6 +1738,13 @@ export default function App() {
             {p.oferta && (() => { const orig = getOriginalPrice(p); return orig != null ? <p className="text-[10px] text-gray-400 line-through mt-0.5">€{orig.toFixed(2)}</p> : null; })()}
           </div>
           {(() => {
+            if (soldOut) {
+              return (
+                <button disabled className="w-full bg-gray-200 text-gray-500 text-sm font-bold py-2 rounded-xl flex items-center justify-center cursor-not-allowed">
+                  Agotado
+                </button>
+              );
+            }
             if (!inCart) {
               return (
                 <button
@@ -1784,6 +1800,8 @@ export default function App() {
                 <Plus size={14}/>
               </button>
             </div>
+          ) : soldOut ? (
+            <span className="text-[10px] uppercase bg-gray-200 text-gray-500 px-2 py-1 rounded-full font-bold">Agotado</span>
           ) : (
             <button onClick={(e) => {e.stopPropagation(); addToCart(p);}} className="bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-md shadow-red-100 active:bg-red-700 transition-colors"><Plus size={16}/></button>
           )}
