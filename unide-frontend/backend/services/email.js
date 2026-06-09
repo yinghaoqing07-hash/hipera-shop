@@ -80,6 +80,16 @@ const formatDate = (iso) => {
 
 const shortId = (id) => String(id || '').slice(0, 8).toUpperCase();
 
+// Preheader: texto de previsualización que muestran Gmail/Outlook/Apple Mail
+// justo después del asunto en la bandeja de entrada. Sin él, el cliente
+// "roba" el primer texto visible (a menudo la dirección o el botón), dando
+// una previsualización pobre. Va oculto y seguido de espacios invisibles
+// (zero-width) para evitar que se cuele el contenido posterior.
+const preheader = (text) =>
+  `<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${escapeHtml(text)}` +
+  '&#8203;&zwnj;&nbsp;'.repeat(60) +
+  '</div>';
+
 // =====================================================================
 // Helpers de horario operativo (espejo del cálculo en src/App.jsx)
 // =====================================================================
@@ -168,9 +178,15 @@ const renderOrderHtml = (order, frontendUrl) => {
   // justificante PDF también usa este nombre. Si se rompe la coherencia, el
   // enlace del email cae a la home en lugar de abrir el seguimiento.
   const trackingUrl = `${frontendUrl}/?order=${encodeURIComponent(order.id)}`;
-  const statusBadge = order.status === 'Pendiente de Pago'
+  const isPendingPayment = order.status === 'Pendiente de Pago';
+  const statusBadge = isPendingPayment
     ? '<span style="display:inline-block;background:#ffedd5;color:#9a3412;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;">Pendiente de pago</span>'
     : '<span style="display:inline-block;background:#dcfce7;color:#166534;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;">En preparación</span>';
+  // El texto de bienvenida DEBE ser coherente con el badge de estado: si el
+  // pago aún está pendiente no podemos afirmar que ya lo estamos preparando.
+  const introLead = isPendingPayment
+    ? 'Gracias por tu pedido en HIPERA. Lo hemos registrado y empezaremos a prepararlo en cuanto se confirme el pago.'
+    : 'Gracias por confiar en HIPERA. Hemos recibido tu pedido y lo estamos preparando.';
 
   // Bloque "Datos de entrega" adaptado a la modalidad: envío a
   // domicilio muestra la dirección del cliente, recogida en tienda
@@ -216,6 +232,7 @@ const renderOrderHtml = (order, frontendUrl) => {
 <title>Confirmación de pedido</title>
 </head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  ${preheader(`Pedido #${id} · ${formatEUR(order.total)}. ${isPendingPayment ? 'Pendiente de confirmar el pago.' : 'Ya lo estamos preparando.'}`)}
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;">
     <tr><td align="center" style="padding:24px 16px;">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
@@ -227,7 +244,7 @@ const renderOrderHtml = (order, frontendUrl) => {
 
         <tr><td style="padding:28px;">
           <h1 style="margin:0 0 4px 0;font-size:22px;font-weight:700;color:#0f172a;">¡Pedido confirmado!</h1>
-          <p style="margin:0 0 20px 0;font-size:14px;color:#64748b;">Gracias por confiar en HIPERA. Hemos recibido tu pedido y lo estamos preparando.</p>
+          <p style="margin:0 0 20px 0;font-size:14px;color:#64748b;">${introLead}</p>
 
           ${afterHoursBlock}
 
@@ -382,7 +399,7 @@ export async function sendOrderConfirmationEmail(order, email) {
     const text = renderOrderText(order, frontendUrl);
 
     const payload = { from, to: email, subject, html, text };
-    if (replyTo) payload.reply_to = replyTo;
+    if (replyTo) payload.replyTo = replyTo;
 
     const { data, error } = await client.emails.send(payload);
     if (error) {
@@ -467,6 +484,7 @@ const renderRefundHtml = (order, frontendUrl, reason, refundType, refundedItems,
 <title>${escapeHtml(copy.heading)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  ${preheader(`${copy.heading} · pedido #${id} · ${formatEUR(displayTotal)}`)}
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;">
     <tr><td align="center" style="padding:24px 16px;">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
@@ -609,7 +627,7 @@ export async function sendRefundEmail(order, email, { reason = '', refundType = 
     const text = renderRefundText(order, frontendUrl, reason, refundType, refundedItems, refundedAmount);
 
     const payload = { from, to: email, subject, html, text };
-    if (replyTo) payload.reply_to = replyTo;
+    if (replyTo) payload.replyTo = replyTo;
 
     const { data, error } = await client.emails.send(payload);
     if (error) {
@@ -662,6 +680,7 @@ const renderPickupReadyHtml = (order, frontendUrl, code) => {
 <title>Tu pedido está listo para recoger</title>
 </head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  ${preheader(`Tu pedido #${id} ya está listo · código de recogida ${code}`)}
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;">
     <tr><td align="center" style="padding:24px 16px;">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
@@ -802,7 +821,7 @@ export async function sendPickupReadyEmail(order, email, { code = null } = {}) {
     const text = renderPickupReadyText(order, frontendUrl, theCode);
 
     const payload = { from, to: email, subject, html, text };
-    if (replyTo) payload.reply_to = replyTo;
+    if (replyTo) payload.replyTo = replyTo;
 
     const { data, error } = await client.emails.send(payload);
     if (error) {
