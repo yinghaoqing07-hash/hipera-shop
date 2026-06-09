@@ -13,7 +13,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
 import { randomInt } from 'crypto';
-import { sendOrderConfirmationEmail, sendRefundEmail, sendPickupReadyEmail, pickupCode } from './services/email.js';
+import { sendOrderConfirmationEmail, sendRefundEmail, sendPickupReadyEmail, pickupCode, sendRepairBookingNotification } from './services/email.js';
 
 // Código de recogida ALEATORIO de 6 dígitos (independiente del id del
 // pedido). Se almacena en orders.pickup_code para pedidos de recogida en
@@ -466,6 +466,24 @@ const orderDailyLimiter = rateLimit({
   },
 });
 
+// Límite para solicitudes de cita de reparación (separado del de pedidos
+// para no mezclar contadores). Anti-spam suave: una persona normal no
+// pide más de unas pocas citas por hora.
+const repairBookingLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  validate: { trustProxy: false },
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: 'Demasiadas solicitudes de cita desde esta conexión. Espera unos minutos o llámanos.',
+      code: 'RATE_LIMIT_HOURLY',
+    });
+  },
+});
+
 // =====================================================================
 // Cloudflare Turnstile — verificación de token
 // =====================================================================
@@ -709,6 +727,81 @@ app.get('/api/repair-services', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================================
+// Solicitud de cita de reparación (pública)
+// =====================================================================
+// El cliente envía marca/modelo/tipo + nombre + teléfono + preferencia
+// de día/franja. Se guarda como "Nueva" y se avisa a la tienda por email
+// (best-effort). NO reserva un hueco real: la tienda confirma después.
+const REPAIR_TYPES = ['pantalla', 'bateria', 'otro'];
+// preferred_day se guarda como fecha ISO (YYYY-MM-DD) elegida por el
+// cliente, o vacío. preferred_slot es una franja gruesa.
+const REPAIR_SLOTS = ['Por la mañana', 'Por la tarde', 'Me da igual'];
+const MAX_OPEN_BOOKINGS_PER_PHONE_24H = 3;
+
+app.post('/api/repair-bookings', repairBookingLimiter, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const customer_name = String(b.customer_name || b.name || '').trim().slice(0, 80);
+    const phoneRaw = String(b.phone || '').trim();
+    if (!customer_name) {
+      return res.status(400).json({ error: 'Indica tu nombre para poder confirmarte la cita.' });
+    }
+    if (!isSpanishPhoneOk(phoneRaw)) {
+      return res.status(400).json({ error: 'El teléfono no parece válido. Revisa que sean 9 dígitos (móvil o fijo español).' });
+    }
+    const phone = phoneRaw.replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, '');
+
+    const repair_type = REPAIR_TYPES.includes(b.repair_type) ? b.repair_type : 'otro';
+    const preferred_day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.preferred_day || '')) ? b.preferred_day : '';
+    const preferred_slot = REPAIR_SLOTS.includes(b.preferred_slot) ? b.preferred_slot : '';
+    const brand = String(b.brand || '').trim().slice(0, 60);
+    const model = String(b.model || '').trim().slice(0, 60);
+    const note = String(b.note || '').trim().slice(0, 500);
+    const user_id = await getVerifiedUserId(req);
+
+    // Anti-abuso por teléfono: máximo de citas abiertas en 24 h.
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recent, error: countErr } = await supabase
+        .from('repair_bookings')
+        .select('id, status')
+        .eq('phone', phone)
+        .gte('created_at', since);
+      const open = (recent || []).filter(r => !['Completada', 'Cancelada'].includes(r.status));
+      if (!countErr && open.length >= MAX_OPEN_BOOKINGS_PER_PHONE_24H) {
+        return res.status(429).json({
+          error: 'Ya tienes varias solicitudes de cita recientes. Te contactaremos; si es urgente, llámanos.',
+          code: 'RATE_LIMIT_PHONE',
+        });
+      }
+    } catch (e) {
+      // fail-open: no bloqueamos una cita legítima por un glitch de BD
+      console.warn('[repair-bookings] check teléfono falló (continúo):', e?.message || e);
+    }
+
+    const payload = { brand, model, repair_type, customer_name, phone, preferred_day, preferred_slot, note, status: 'Nueva' };
+    if (user_id) payload.user_id = user_id;
+
+    const { data, error } = await supabase
+      .from('repair_bookings')
+      .insert([payload])
+      .select()
+      .single();
+    if (error) throw error;
+
+    // Aviso a la tienda (best-effort, no bloquea la respuesta al cliente).
+    sendRepairBookingNotification(data).catch((err) =>
+      console.warn('[repair-bookings] aviso a tienda falló:', err?.message || err)
+    );
+
+    res.json({ ok: true, booking: { id: data.id, status: data.status } });
+  } catch (error) {
+    console.error('[repair-bookings] error:', error?.message || error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2543,6 +2636,44 @@ app.delete('/api/admin/repair-services/:id', authenticateAdmin, async (req, res)
     
     if (error) throw error;
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// =====================================================================
+// Citas de reparación — gestión (admin)
+// =====================================================================
+app.get('/api/admin/repair-bookings', authenticateAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('repair_bookings')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const REPAIR_BOOKING_STATUSES = ['Nueva', 'Contactado', 'Agendada', 'Completada', 'Cancelada'];
+
+app.patch('/api/admin/repair-bookings/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    if (!REPAIR_BOOKING_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Estado no válido. Use uno de: ${REPAIR_BOOKING_STATUSES.join(', ')}.` });
+    }
+    const { data, error } = await supabase
+      .from('repair_bookings')
+      .update({ status })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

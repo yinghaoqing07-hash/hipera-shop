@@ -179,6 +179,14 @@ class ApiClient {
     return this.requestSimple('/repair-services');
   }
 
+  // Solicitud de cita de reparación (pública). Devuelve { ok, booking }.
+  async createRepairBooking(data) {
+    return this.request('/repair-bookings', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async createOrder(orderData) {
     return this.request('/orders', {
       method: 'POST',
@@ -360,6 +368,18 @@ class ApiClient {
   async deleteRepairService(repairId) {
     return this.request(`/admin/repair-services/${repairId}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Citas de reparación (admin)
+  async getAdminRepairBookings() {
+    return this.request('/admin/repair-bookings');
+  }
+
+  async updateRepairBookingStatus(id, status) {
+    return this.request(`/admin/repair-bookings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     });
   }
 

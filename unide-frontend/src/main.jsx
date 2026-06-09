@@ -162,6 +162,7 @@ root.render(
         <Routes>
           {/* 公开前台 */}
           <Route path="/" element={<App />} />
+          <Route path="/repair" element={<App />} />
 
           {/* 登录页面 */}
           <Route path="/login" element={<Login />} />

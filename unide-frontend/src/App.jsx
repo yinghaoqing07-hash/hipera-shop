@@ -33,6 +33,7 @@ import {
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock, LogIn,
   Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone, Mail,
+  CalendarCheck, CalendarClock,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical,
@@ -909,6 +910,44 @@ export default function App() {
   const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedRepairType, setSelectedRepairType] = useState(null); // 'pantalla' | 'bateria' | null
+
+  // Reserva de cita de reparación (formulario en /repair).
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [bookingForm, setBookingForm] = useState({ brand: '', model: '', repair_type: 'otro', customer_name: '', phone: '', preferred_day: '', preferred_slot: '', note: '' });
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+  const [bookingDone, setBookingDone] = useState(false);
+
+  // Abre el formulario de cita, opcionalmente preseleccionando dispositivo.
+  const openBooking = (prefill = {}) => {
+    setBookingDone(false);
+    setBookingForm({
+      brand: prefill.brand || '',
+      model: prefill.model || '',
+      repair_type: prefill.repair_type || 'otro',
+      customer_name: '',
+      phone: '',
+      preferred_day: '',
+      preferred_slot: '',
+      note: '',
+    });
+    setBookingOpen(true);
+  };
+
+  const submitBooking = async () => {
+    const name = bookingForm.customer_name.trim();
+    const phoneOk = /^[6-9]\d{8}$/.test(bookingForm.phone.replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, ''));
+    if (!name) { toast.error('Escribe tu nombre.'); return; }
+    if (!phoneOk) { toast.error('El teléfono no parece válido (9 dígitos).'); return; }
+    setBookingSubmitting(true);
+    try {
+      await apiClient.createRepairBooking(bookingForm);
+      setBookingDone(true);
+    } catch (e) {
+      toast.error(e?.message || 'No se pudo enviar la solicitud. Inténtalo de nuevo o llámanos.');
+    } finally {
+      setBookingSubmitting(false);
+    }
+  };
 
   const navigate = useNavigate();
   const [queryOrderId, setQueryOrderId] = useState(null);
@@ -2123,9 +2162,14 @@ export default function App() {
                    <p className="mt-3 text-sm leading-relaxed text-gray-300">
                      Pantallas, baterías y diagnóstico. Cuéntanos tu modelo por WhatsApp y te orientamos con precio, disponibilidad y plazo.
                    </p>
-                   <p className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-medium text-green-300">
-                     <CheckCircle2 size={13}/> Te confirmamos el precio antes de reparar. Sin compromiso.
-                   </p>
+                   <div className="mt-3 space-y-1.5">
+                     <p className="inline-flex items-center gap-1.5 text-[12px] font-medium text-green-300">
+                       <CheckCircle2 size={13}/> Te confirmamos el precio antes de reparar. Sin compromiso.
+                     </p>
+                     <p className="flex items-center gap-1.5 text-[12px] font-medium text-gray-400">
+                       <CheckCircle2 size={13} className="text-gray-500"/> También puedes venir sin cita: la mayoría se reparan en el día.
+                     </p>
+                   </div>
                    <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                      <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
                        <p className="text-[10px] text-gray-500">Garantía</p>
@@ -2140,21 +2184,30 @@ export default function App() {
                        <p className="text-xs font-bold">Sin compromiso</p>
                      </div>
                    </div>
-                   <div className="mt-5 flex gap-2">
-                     <a
-                       href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
-                       target="_blank"
-                       rel="noreferrer"
-                       className="flex-1 bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+                   <div className="mt-5 space-y-2">
+                     <button
+                       type="button"
+                       onClick={() => openBooking({ repair_type: 'otro' })}
+                       className="w-full bg-red-600 hover:bg-red-500 text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-red-900/30 active:scale-95 transition-all"
                      >
-                       <Smartphone size={18}/> Consultar por WhatsApp
-                     </a>
-                     <a
-                       href="#repair-models"
-                       className="px-4 bg-white/10 hover:bg-white/15 text-white py-3 rounded-2xl font-bold flex items-center justify-center active:scale-95 transition-all"
-                     >
-                       Ver modelos
-                     </a>
+                       <CalendarCheck size={18}/> Pedir cita
+                     </button>
+                     <div className="flex gap-2">
+                       <a
+                         href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
+                         target="_blank"
+                         rel="noreferrer"
+                         className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all"
+                       >
+                         <Smartphone size={15}/> Consultar por WhatsApp
+                       </a>
+                       <a
+                         href="#repair-models"
+                         className="px-4 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center active:scale-95 transition-all"
+                       >
+                         Ver modelos
+                       </a>
+                     </div>
                    </div>
                  </div>
               </section>
@@ -2177,8 +2230,8 @@ export default function App() {
                 <h3 className="font-bold text-white mb-3 flex items-center gap-2"><CheckCircle2 size={16} className="text-green-400"/> Cómo funciona</h3>
                 <div className="space-y-3">
                   {[
-                    ['1', 'Dinos tu modelo', 'Elige tu móvil abajo o escríbenos directamente por WhatsApp.'],
-                    ['2', 'Confirmamos precio', 'Te indicamos el precio, la disponibilidad de piezas y el plazo antes de empezar.'],
+                    ['1', 'Pide tu cita', 'Rellena el formulario con tu modelo y cuándo puedes venir. Sin llamadas ni esperas.'],
+                    ['2', 'Confirmamos contigo', 'Te escribimos para confirmar la cita, el precio orientativo y la disponibilidad de piezas.'],
                     ['3', 'Tráelo a HIPERA', 'Paseo del Sol 1, Meco. Puedes dejarlo mientras haces la compra.'],
                   ].map(([step, title, text]) => (
                     <div key={step} className="flex gap-3">
@@ -2245,15 +2298,22 @@ export default function App() {
                             </div>
                             <h3 className="text-lg font-bold text-white mb-2">¿Tu modelo no está en la lista?</h3>
                             <p className="text-gray-400 text-sm mb-5 leading-relaxed">
-                               Escríbenos marca, modelo y problema. Te confirmamos si podemos ayudarte.
+                               Pide cita indicando tu marca y modelo. Te confirmamos si podemos ayudarte.
                             </p>
+                            <button
+                              type="button"
+                              onClick={() => openBooking({ repair_type: 'otro' })}
+                              className="bg-red-600 hover:bg-red-500 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full"
+                            >
+                               <CalendarCheck size={20}/> Pedir cita
+                            </button>
                             <a
                               href={waLink('Hola, quiero reparar un móvil que no aparece en la web. Quisiera consultar precio.')}
                               target="_blank"
                               rel="noreferrer"
-                              className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full"
+                              className="mt-2 text-gray-400 hover:text-gray-200 text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
                             >
-                               <Smartphone size={20}/> Consultar precio por WhatsApp
+                               <Smartphone size={15}/> o consultar por WhatsApp
                             </a>
                          </div>
                        )}
@@ -2308,14 +2368,23 @@ export default function App() {
                                </button>
                              </div>
                            ) : (
-                             <a
-                               href={waLink(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}
-                               target="_blank"
-                               rel="noreferrer"
-                               className="bg-[#25D366] hover:bg-[#20bd5a] text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
-                             >
-                               <Smartphone size={20}/> Consultar precio por WhatsApp
-                             </a>
+                             <div className="space-y-2">
+                               <button
+                                 type="button"
+                                 onClick={() => openBooking({ brand: selectedBrand, model: selectedModel, repair_type: selectedRepairType })}
+                                 className="bg-red-600 hover:bg-red-500 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
+                               >
+                                 <CalendarCheck size={20}/> Pedir cita para este móvil
+                               </button>
+                               <a
+                                 href={waLink(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}
+                                 target="_blank"
+                                 rel="noreferrer"
+                                 className="text-gray-400 hover:text-gray-200 text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors w-full"
+                               >
+                                 <Smartphone size={15}/> o consultar precio por WhatsApp
+                               </a>
+                             </div>
                            )}
                          </div>
                        )}
@@ -2351,22 +2420,184 @@ export default function App() {
                (pointer-events-none) salvo en los propios botones. */}
            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 pb-4 pt-8 bg-gradient-to-t from-gray-950 via-gray-950/95 to-transparent pointer-events-none">
              <div className="flex gap-2 pointer-events-auto">
+               <button
+                 type="button"
+                 onClick={() => openBooking({ repair_type: 'otro' })}
+                 className="flex-1 bg-red-600 hover:bg-red-500 text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-black/40 active:scale-95 transition-all"
+               >
+                 <CalendarCheck size={18}/> Pedir cita
+               </button>
                <a
                  href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
                  target="_blank"
                  rel="noreferrer"
-                 className="flex-1 bg-[#25D366] hover:bg-[#20bd5a] text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-black/40 active:scale-95 transition-all"
+                 aria-label="Consultar por WhatsApp"
+                 className="w-12 bg-white/10 border border-white/15 text-gray-200 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
                >
-                 <Smartphone size={18}/> Consultar por WhatsApp
+                 <Smartphone size={18}/>
                </a>
                <a
                  href="tel:+34918782602"
-                 className="px-5 bg-white/10 border border-white/15 text-white py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all"
+                 aria-label="Llamar a la tienda"
+                 className="w-12 bg-white/10 border border-white/15 text-gray-200 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
                >
-                 <Phone size={18}/> Llamar
+                 <Phone size={18}/>
                </a>
              </div>
            </div>
+
+           {/* --- Modal: solicitud de cita de reparación --- */}
+           {bookingOpen && (
+             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+               <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => !bookingSubmitting && setBookingOpen(false)}></div>
+               <div className="relative w-full sm:max-w-md bg-gray-900 border border-gray-800 rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[92vh] overflow-y-auto">
+                 <div className="sticky top-0 bg-gray-900/95 backdrop-blur px-5 py-4 flex items-center justify-between border-b border-gray-800 z-10">
+                   <div className="flex items-center gap-2">
+                     <CalendarCheck size={18} className="text-red-400"/>
+                     <div>
+                       <h3 className="font-black text-white leading-tight">Pedir cita</h3>
+                       <p className="text-[11px] text-gray-500 leading-tight">Te confirmamos por WhatsApp</p>
+                     </div>
+                   </div>
+                   <button type="button" onClick={() => !bookingSubmitting && setBookingOpen(false)} className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 transition-colors">
+                     <X size={18}/>
+                   </button>
+                 </div>
+
+                 {bookingDone ? (
+                   <div className="p-6 text-center">
+                     <div className="w-16 h-16 rounded-full bg-green-500/15 border border-green-500/30 flex items-center justify-center mx-auto mb-4 text-green-400">
+                       <CheckCircle2 size={32}/>
+                     </div>
+                     <h4 className="text-lg font-black text-white mb-2">¡Solicitud enviada!</h4>
+                     <p className="text-sm text-gray-400 leading-relaxed mb-5">
+                       Te contactaremos para confirmar la cita, el precio orientativo y la disponibilidad de piezas. Si es urgente, también puedes escribirnos por WhatsApp.
+                     </p>
+                     <div className="flex flex-col gap-2">
+                       <a
+                         href={waLink('Hola, acabo de pedir una cita de reparación en la web.')}
+                         target="_blank"
+                         rel="noreferrer"
+                         className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all"
+                       >
+                         <Smartphone size={15}/> Escribir por WhatsApp
+                       </a>
+                       <button type="button" onClick={() => setBookingOpen(false)} className="w-full bg-red-600 hover:bg-red-500 text-white py-3 rounded-2xl font-bold transition-all">
+                         Cerrar
+                       </button>
+                     </div>
+                   </div>
+                 ) : (
+                   <div className="p-5 space-y-4">
+                     <div className="grid grid-cols-2 gap-2">
+                       <div>
+                         <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Marca</label>
+                         <input
+                           value={bookingForm.brand}
+                           onChange={(e) => setBookingForm(f => ({ ...f, brand: e.target.value }))}
+                           placeholder="Apple, Samsung…"
+                           className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
+                         />
+                       </div>
+                       <div>
+                         <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Modelo</label>
+                         <input
+                           value={bookingForm.model}
+                           onChange={(e) => setBookingForm(f => ({ ...f, model: e.target.value }))}
+                           placeholder="iPhone 13…"
+                           className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
+                         />
+                       </div>
+                     </div>
+
+                     <div>
+                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Reparación</label>
+                       <div className="grid grid-cols-3 gap-2">
+                         {[['pantalla', 'Pantalla'], ['bateria', 'Batería'], ['otro', 'Otro']].map(([val, label]) => (
+                           <button
+                             key={val}
+                             type="button"
+                             onClick={() => setBookingForm(f => ({ ...f, repair_type: val }))}
+                             className={`py-2.5 rounded-xl text-sm font-bold border transition-all ${bookingForm.repair_type === val ? 'bg-red-600 border-red-500 text-white' : 'bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200'}`}
+                           >
+                             {label}
+                           </button>
+                         ))}
+                       </div>
+                     </div>
+
+                     <div>
+                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Tu nombre</label>
+                       <input
+                         value={bookingForm.customer_name}
+                         onChange={(e) => setBookingForm(f => ({ ...f, customer_name: e.target.value }))}
+                         placeholder="Nombre y apellido"
+                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
+                       />
+                     </div>
+
+                     <div>
+                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Teléfono</label>
+                       <input
+                         type="tel"
+                         inputMode="tel"
+                         value={bookingForm.phone}
+                         onChange={(e) => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                         placeholder="6XX XXX XXX"
+                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
+                       />
+                     </div>
+
+                     <div>
+                       <label className="text-[11px] font-bold text-gray-500 uppercase mb-1.5 flex items-center gap-1.5"><CalendarClock size={13}/> ¿Qué día prefieres? <span className="text-gray-600 normal-case font-normal">(opcional)</span></label>
+                       <input
+                         type="date"
+                         min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}
+                         value={bookingForm.preferred_day}
+                         onChange={(e) => setBookingForm(f => ({ ...f, preferred_day: e.target.value }))}
+                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50 [color-scheme:dark]"
+                       />
+                       <div className="grid grid-cols-3 gap-2 mt-2">
+                         {['Por la mañana', 'Por la tarde', 'Me da igual'].map(s => (
+                           <button
+                             key={s}
+                             type="button"
+                             onClick={() => setBookingForm(f => ({ ...f, preferred_slot: f.preferred_slot === s ? '' : s }))}
+                             className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${bookingForm.preferred_slot === s ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200'}`}
+                           >
+                             {s}
+                           </button>
+                         ))}
+                       </div>
+                     </div>
+
+                     <div>
+                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Nota <span className="text-gray-600 normal-case font-normal">(opcional)</span></label>
+                       <textarea
+                         value={bookingForm.note}
+                         onChange={(e) => setBookingForm(f => ({ ...f, note: e.target.value }))}
+                         rows={2}
+                         placeholder="Cuéntanos el problema…"
+                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50 resize-none"
+                       />
+                     </div>
+
+                     <button
+                       type="button"
+                       onClick={submitBooking}
+                       disabled={bookingSubmitting}
+                       className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-red-900/30 active:scale-95 transition-all"
+                     >
+                       {bookingSubmitting ? <><Loader2 size={18} className="animate-spin"/> Enviando…</> : <><CalendarCheck size={18}/> Enviar solicitud</>}
+                     </button>
+                     <p className="text-[11px] text-gray-500 text-center leading-relaxed">
+                       No se cobra nada online. Te escribiremos por WhatsApp (en horario de tienda) para confirmar día y precio orientativo. También puedes venir sin cita.
+                     </p>
+                   </div>
+                 )}
+               </div>
+             </div>
+           )}
         </div>
       )}
 

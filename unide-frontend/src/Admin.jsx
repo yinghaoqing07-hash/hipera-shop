@@ -10,7 +10,7 @@ import {
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
   Bell, BellOff, Download, TrendingUp, Eye, EyeOff, MapPin, Phone, Mail, CreditCard, StickyNote,
-  Truck, Store
+  Truck, Store, Smartphone, CalendarCheck
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
@@ -274,6 +274,8 @@ export default function AdminApp() {
   const [categories, setCategories] = useState([]);      
   const [subCategories, setSubCategories] = useState([]); 
   const [repairs, setRepairs] = useState([]); 
+  const [bookings, setBookings] = useState([]); // citas de reparación
+  const [bookingStatusFilter, setBookingStatusFilter] = useState('');
   const [loading, setLoading] = useState(false);
 
   // UI
@@ -548,11 +550,12 @@ export default function AdminApp() {
         apiClient.getAdminOrders(),
         apiClient.getCategories(),
         apiClient.getSubCategories(),
-        apiClient.getRepairServices()
+        apiClient.getRepairServices(),
+        apiClient.getAdminRepairBookings()
       ]);
 
       // 处理每个结果，只更新成功的数据
-      const [pResult, oResult, cResult, sResult, rResult] = results;
+      const [pResult, oResult, cResult, sResult, rResult, bResult] = results;
 
       if (pResult.status === 'fulfilled' && pResult.value) {
         setProducts(pResult.value.map(p => {
@@ -597,6 +600,12 @@ export default function AdminApp() {
         setRepairs(rResult.value);
       } else if (rResult.status === 'rejected') {
         console.error("Repairs error:", rResult.reason);
+      }
+
+      if (bResult.status === 'fulfilled' && Array.isArray(bResult.value)) {
+        setBookings(bResult.value);
+      } else if (bResult.status === 'rejected') {
+        console.error("Bookings error:", bResult.reason);
       }
 
       const hasFailures = results.some(r => r.status === 'rejected');
@@ -2851,6 +2860,104 @@ const renderRepairs = () => (
     const daysLeft = STRIPE_AUTH_VALID_DAYS - days;
     return { days, daysLeft, urgent: daysLeft <= 2, expired: daysLeft <= 0 };
   };
+  // ---- Citas de reparación ----
+  const BOOKING_STATUSES = ['Nueva', 'Contactado', 'Agendada', 'Completada', 'Cancelada'];
+  const REPAIR_TYPE_LABELS = { pantalla: 'Pantalla', bateria: 'Batería', otro: 'Otro / a consultar' };
+  const updateBookingStatus = async (id, status) => {
+    const prev = bookings;
+    setBookings(bs => bs.map(b => b.id === id ? { ...b, status } : b));
+    try {
+      await apiClient.updateRepairBookingStatus(id, status);
+      toast.success('Cita actualizada');
+    } catch (e) {
+      setBookings(prev);
+      toast.error('No se pudo actualizar: ' + (e?.message || ''));
+    }
+  };
+
+  const renderBookings = () => {
+    const filtered = bookingStatusFilter ? bookings.filter(b => b.status === bookingStatusFilter) : bookings;
+    const newCount = bookings.filter(b => b.status === 'Nueva').length;
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-black text-gray-900">Citas de reparación</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {newCount > 0 ? `${newCount} nueva${newCount > 1 ? 's' : ''} sin atender` : 'Sin citas nuevas pendientes'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={bookingStatusFilter}
+              onChange={(e) => setBookingStatusFilter(e.target.value)}
+              className="p-2 text-sm bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-200"
+            >
+              <option value="">Todos los estados</option>
+              {BOOKING_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <button onClick={() => fetchData()} className="p-2 text-sm bg-gray-900 text-white rounded-lg font-bold hover:bg-gray-800">Actualizar</button>
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-gray-200">
+            <Wrench size={32} className="mx-auto mb-3 text-gray-300"/>
+            <p className="text-gray-500">No hay citas {bookingStatusFilter ? `en estado "${bookingStatusFilter}"` : 'todavía'}.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map(b => {
+              const device = [b.brand, b.model].filter(Boolean).join(' ') || 'Sin especificar';
+              let dayLabel = '';
+              if (/^\d{4}-\d{2}-\d{2}$/.test(String(b.preferred_day || ''))) {
+                try { dayLabel = new Date(b.preferred_day + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: '2-digit', month: 'short' }); }
+                catch { dayLabel = b.preferred_day; }
+              }
+              const when = [dayLabel, b.preferred_slot].filter(Boolean).join(' · ') || 'Sin preferencia';
+              const phone = String(b.phone || '').replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, '');
+              const isNew = b.status === 'Nueva';
+              const created = b.created_at ? new Date(b.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+              return (
+                <div key={b.id} className={`rounded-2xl border p-4 ${isNew ? 'bg-gray-50 border-l-4 border-l-gray-900 border-gray-200' : 'bg-white border-gray-200'}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-gray-900">{device}</span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{REPAIR_TYPE_LABELS[b.repair_type] || 'A consultar'}</span>
+                      </div>
+                      <p className="text-sm text-gray-700 mt-1"><span className="font-bold">{b.customer_name}</span> · {b.phone}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Prefiere: {when} · Recibida {created}</p>
+                      {b.note ? <p className="text-sm text-gray-600 mt-2 bg-gray-100 rounded-lg px-3 py-2">{b.note}</p> : null}
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <select
+                        value={BOOKING_STATUSES.includes(b.status) ? b.status : ''}
+                        onChange={(e) => updateBookingStatus(b.id, e.target.value)}
+                        className="p-2 text-sm bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-gray-200 font-bold text-gray-800"
+                      >
+                        {!BOOKING_STATUSES.includes(b.status) && <option value="" disabled>{b.status || '—'}</option>}
+                        {BOOKING_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <div className="flex gap-2">
+                        <a href={`https://wa.me/34${phone}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">
+                          <Smartphone size={14}/> WhatsApp
+                        </a>
+                        <a href={`tel:+34${phone}`} className="inline-flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">
+                          <Phone size={14}/> Llamar
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderOrders = () => {
      const searchLower = orderSearch.toLowerCase().trim();
      const fromTs = orderDateFrom ? new Date(orderDateFrom + 'T00:00:00').getTime() : null;
@@ -4029,6 +4136,12 @@ const renderRepairs = () => (
             <button onClick={() => { setActiveTab("products"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='products'?'bg-red-600':'hover:bg-gray-800'}`}><Package size={20}/><span>Productos</span></button>
             <button onClick={() => { setActiveTab("categories"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='categories'?'bg-red-600':'hover:bg-gray-800'}`}><List size={20}/><span>Categorías</span></button>
             <button onClick={() => { setActiveTab("repairs"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='repairs'?'bg-red-600':'hover:bg-gray-800'}`}><Wrench size={20}/><span>Reparaciones</span></button>
+            <button onClick={() => { setActiveTab("citas"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='citas'?'bg-red-600':'hover:bg-gray-800'}`}>
+              <CalendarCheck size={20}/><span className="flex-1 text-left">Citas</span>
+              {bookings.filter(b => b.status === 'Nueva').length > 0 && (
+                <span className="text-[11px] font-black bg-white text-red-600 rounded-full px-2 py-0.5">{bookings.filter(b => b.status === 'Nueva').length}</span>
+              )}
+            </button>
             <button onClick={() => { setActiveTab("orders"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
         </nav>
         <div className="px-4 pt-4 border-t border-gray-800 space-y-2">
@@ -4143,6 +4256,7 @@ const renderRepairs = () => (
             {activeTab === 'products' && renderProducts()}
             {activeTab === 'categories' && renderCategoryManager()}
             {activeTab === 'repairs' && renderRepairs()}
+            {activeTab === 'citas' && renderBookings()}
             {activeTab === 'orders' && renderOrders()}
           </>
         )}

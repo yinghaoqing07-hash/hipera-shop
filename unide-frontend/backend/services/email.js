@@ -835,3 +835,98 @@ export async function sendPickupReadyEmail(order, email, { code = null } = {}) {
     return { error: e?.message || 'unknown' };
   }
 }
+
+// =====================================================================
+// Aviso INTERNO a la tienda: nueva solicitud de cita de reparación
+// =====================================================================
+// A diferencia de los demás, este email va a la TIENDA (no al cliente):
+// le avisa de que alguien ha pedido cita desde /repair, con todos los
+// datos y un enlace directo para responder por WhatsApp/teléfono.
+// Best-effort: no propaga errores.
+
+const REPAIR_TYPE_LABELS = { pantalla: 'Pantalla', bateria: 'Batería', otro: 'Otro / a consultar' };
+
+export async function sendRepairBookingNotification(booking) {
+  const client = getClient();
+  if (!client) return { skipped: true, reason: 'RESEND_API_KEY missing' };
+  if (!booking || !booking.id) return { skipped: true, reason: 'invalid booking object' };
+
+  const from = process.env.RESEND_FROM_EMAIL || FROM_DEFAULT;
+  // Destinatario interno: SHOP_NOTIFY_EMAIL (configurable) o el buzón
+  // general por defecto.
+  const to = process.env.SHOP_NOTIFY_EMAIL || 'info@hipera.es';
+
+  const device = [booking.brand, booking.model].filter(Boolean).join(' ') || 'Sin especificar';
+  const typeLabel = REPAIR_TYPE_LABELS[booking.repair_type] || 'A consultar';
+  let dayLabel = '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(booking.preferred_day || ''))) {
+    try {
+      dayLabel = new Date(booking.preferred_day + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: '2-digit', month: 'long' });
+    } catch { dayLabel = booking.preferred_day; }
+  }
+  const when = [dayLabel, booking.preferred_slot].filter(Boolean).join(' · ') || 'Sin preferencia';
+  const phoneDigits = String(booking.phone || '').replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, '');
+  const waCustomer = `https://wa.me/34${phoneDigits}`;
+  const telCustomer = `tel:+34${phoneDigits}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Nueva cita de reparación</title></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  ${preheader(`${device} · ${typeLabel} · ${when} · ${booking.customer_name}`)}
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;"><tr><td align="center" style="padding:24px 16px;">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
+      <tr><td style="background:#dc2626;padding:20px 28px;">
+        <div style="color:#ffffff;font-size:20px;font-weight:800;">HIPERA · Taller</div>
+        <div style="color:#fecaca;font-size:13px;margin-top:2px;">Nueva solicitud de cita de reparación</div>
+      </td></tr>
+      <tr><td style="padding:24px 28px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#0f172a;">
+          <tr><td style="padding:8px 0;color:#64748b;width:130px;">Dispositivo</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(device)}</td></tr>
+          <tr><td style="padding:8px 0;color:#64748b;">Reparación</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(typeLabel)}</td></tr>
+          <tr><td style="padding:8px 0;color:#64748b;">Preferencia</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(when)}</td></tr>
+          <tr><td style="padding:8px 0;color:#64748b;">Cliente</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(booking.customer_name)}</td></tr>
+          <tr><td style="padding:8px 0;color:#64748b;">Teléfono</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(booking.phone)}</td></tr>
+          ${booking.note ? `<tr><td style="padding:8px 0;color:#64748b;vertical-align:top;">Nota</td><td style="padding:8px 0;">${escapeHtml(booking.note)}</td></tr>` : ''}
+          <tr><td style="padding:8px 0;color:#64748b;">Recibida</td><td style="padding:8px 0;">${escapeHtml(formatDate(booking.created_at))}</td></tr>
+        </table>
+        <div style="margin:20px 0 4px 0;">
+          <a href="${waCustomer}" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;margin-right:8px;">Responder por WhatsApp</a>
+          <a href="${telCustomer}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;">Llamar</a>
+        </div>
+        <p style="margin:18px 0 0 0;font-size:12px;color:#94a3b8;">Gestiona esta cita (estado: contactado/agendada/completada) en el panel de administración → pestaña Citas.</p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+
+  const textLines = [
+    'NUEVA CITA DE REPARACIÓN',
+    '========================',
+    `Dispositivo: ${device}`,
+    `Reparación: ${typeLabel}`,
+    `Preferencia: ${when}`,
+    `Cliente: ${booking.customer_name}`,
+    `Teléfono: ${booking.phone}`,
+  ];
+  if (booking.note) textLines.push(`Nota: ${booking.note}`);
+  textLines.push(`Recibida: ${formatDate(booking.created_at)}`, '', `WhatsApp: ${waCustomer}`, `Llamar: ${telCustomer}`);
+
+  try {
+    const { data, error } = await client.emails.send({
+      from,
+      to,
+      subject: `Nueva cita: ${device} · ${typeLabel}`,
+      html,
+      text: textLines.join('\n'),
+    });
+    if (error) {
+      console.error('[Email] Resend error (repair booking):', error?.message || error);
+      return { error: error?.message || 'Resend error' };
+    }
+    console.log(`[Email] ✉️  Aviso de cita enviado a tienda (${to}) — ${device} (id=${data?.id || 'n/a'})`);
+    return { id: data?.id };
+  } catch (e) {
+    console.error('[Email] Exception sending repair booking notification:', e?.message || e);
+    return { error: e?.message || 'unknown' };
+  }
+}
