@@ -738,9 +738,9 @@ app.get('/api/repair-services', async (req, res) => {
 // de día/franja. Se guarda como "Nueva" y se avisa a la tienda por email
 // (best-effort). NO reserva un hueco real: la tienda confirma después.
 const REPAIR_TYPES = ['pantalla', 'bateria', 'otro'];
-// preferred_day se guarda como fecha ISO (YYYY-MM-DD) elegida por el
-// cliente, o vacío. preferred_slot es una franja gruesa.
-const REPAIR_SLOTS = ['Por la mañana', 'Por la tarde', 'Me da igual'];
+// Cómo nos hace llegar el móvil: en tienda (gratis) o recogida a
+// domicilio en Meco (5€, gratis con pedido del súper de 25€+).
+const REPAIR_HANDOVERS = ['tienda', 'domicilio'];
 const MAX_OPEN_BOOKINGS_PER_PHONE_24H = 3;
 
 app.post('/api/repair-bookings', repairBookingLimiter, async (req, res) => {
@@ -756,12 +756,25 @@ app.post('/api/repair-bookings', repairBookingLimiter, async (req, res) => {
     }
     const phone = phoneRaw.replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, '');
 
+    // Email obligatorio: el presupuesto y la hora propuesta se responden
+    // por email, así que sin él la solicitud no sirve de nada.
+    const email = String(b.email || '').trim().slice(0, 120);
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ error: 'Indica un email válido: ahí te enviaremos el precio y la hora propuesta.' });
+    }
+
     const repair_type = REPAIR_TYPES.includes(b.repair_type) ? b.repair_type : 'otro';
-    const preferred_day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.preferred_day || '')) ? b.preferred_day : '';
-    const preferred_slot = REPAIR_SLOTS.includes(b.preferred_slot) ? b.preferred_slot : '';
     const brand = String(b.brand || '').trim().slice(0, 60);
     const model = String(b.model || '').trim().slice(0, 60);
     const note = String(b.note || '').trim().slice(0, 500);
+
+    const handover = REPAIR_HANDOVERS.includes(b.handover) ? b.handover : 'tienda';
+    let address = String(b.address || '').trim().slice(0, 200);
+    if (handover === 'domicilio' && !address) {
+      return res.status(400).json({ error: 'Indica tu dirección en Meco para la recogida a domicilio.' });
+    }
+    if (handover === 'tienda') address = '';
+
     const user_id = await getVerifiedUserId(req);
 
     // Anti-abuso por teléfono: máximo de citas abiertas en 24 h.
@@ -784,7 +797,7 @@ app.post('/api/repair-bookings', repairBookingLimiter, async (req, res) => {
       console.warn('[repair-bookings] check teléfono falló (continúo):', e?.message || e);
     }
 
-    const payload = { brand, model, repair_type, customer_name, phone, preferred_day, preferred_slot, note, status: 'Nueva' };
+    const payload = { brand, model, repair_type, customer_name, phone, email, note, handover, address, status: 'Nueva' };
     if (user_id) payload.user_id = user_id;
 
     const { data, error } = await supabase

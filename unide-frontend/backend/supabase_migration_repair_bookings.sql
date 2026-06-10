@@ -22,12 +22,15 @@ create table if not exists public.repair_bookings (
   model          text default '',
   repair_type    text default '',          -- 'pantalla' | 'bateria' | 'otro'
   -- Contacto del cliente (obligatorio para poder confirmar la cita).
+  -- El presupuesto y la hora propuesta se responden por EMAIL.
   customer_name  text not null,
   phone          text not null,
-  -- Preferencia de cita (gruesa): día + franja. La tienda concreta luego.
-  preferred_day  text default '',          -- 'Hoy' | 'Mañana'
-  preferred_slot text default '',          -- 'Mañana' | 'Tarde'
+  email          text not null default '',
   note           text default '',
+  -- Cómo nos hace llegar el móvil: 'tienda' (gratis) o 'domicilio'
+  -- (recogida y entrega en Meco: 5€, gratis con pedido del súper de 25€+).
+  handover       text not null default 'tienda',
+  address        text default '',
   -- Estado del flujo de atención (lo gestiona la tienda en el panel).
   status         text not null default 'Nueva',  -- Nueva | Contactado | Agendada | Completada | Cancelada
   -- Si el cliente estaba logueado, vinculamos su cuenta (opcional).
@@ -43,3 +46,8 @@ create index if not exists repair_bookings_phone_idx       on public.repair_book
 -- RLS activado sin políticas públicas: solo la service-role key (backend)
 -- puede leer/escribir. El frontend nunca accede directamente a la tabla.
 alter table public.repair_bookings enable row level security;
+
+-- Si la tabla ya existía de una versión anterior, añadir columnas nuevas.
+alter table public.repair_bookings add column if not exists email text not null default '';
+alter table public.repair_bookings add column if not exists handover text not null default 'tienda';
+alter table public.repair_bookings add column if not exists address text default '';

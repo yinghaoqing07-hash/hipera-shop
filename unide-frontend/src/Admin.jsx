@@ -2909,12 +2909,6 @@ const renderRepairs = () => (
           <div className="space-y-3">
             {filtered.map(b => {
               const device = [b.brand, b.model].filter(Boolean).join(' ') || 'Sin especificar';
-              let dayLabel = '';
-              if (/^\d{4}-\d{2}-\d{2}$/.test(String(b.preferred_day || ''))) {
-                try { dayLabel = new Date(b.preferred_day + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: '2-digit', month: 'short' }); }
-                catch { dayLabel = b.preferred_day; }
-              }
-              const when = [dayLabel, b.preferred_slot].filter(Boolean).join(' · ') || 'Sin preferencia';
               const phone = String(b.phone || '').replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, '');
               const isNew = b.status === 'Nueva';
               const created = b.created_at ? new Date(b.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
@@ -2925,9 +2919,16 @@ const renderRepairs = () => (
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-gray-900">{device}</span>
                         <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{REPAIR_TYPE_LABELS[b.repair_type] || 'A consultar'}</span>
+                        {b.handover === 'domicilio' && (
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-900 text-white inline-flex items-center gap-1"><Truck size={11}/> Domicilio</span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-700 mt-1"><span className="font-bold">{b.customer_name}</span> · {b.phone}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Prefiere: {when} · Recibida {created}</p>
+                      {b.email ? <p className="text-xs text-gray-500 mt-0.5">{b.email}</p> : null}
+                      {b.handover === 'domicilio' && b.address ? (
+                        <p className="text-xs text-gray-700 mt-0.5 font-bold">Recoger en: {b.address} <span className="font-normal text-gray-500">(5€ · gratis con pedido 25€+)</span></p>
+                      ) : null}
+                      <p className="text-xs text-gray-500 mt-0.5">Recibida {created}</p>
                       {b.note ? <p className="text-sm text-gray-600 mt-2 bg-gray-100 rounded-lg px-3 py-2">{b.note}</p> : null}
                     </div>
                     <div className="flex flex-col items-end gap-2">
@@ -2939,7 +2940,12 @@ const renderRepairs = () => (
                         {!BOOKING_STATUSES.includes(b.status) && <option value="" disabled>{b.status || '—'}</option>}
                         {BOOKING_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap justify-end">
+                        {b.email && (
+                          <a href={`mailto:${b.email}?subject=${encodeURIComponent(`Tu reparación en HIPERA: ${device}`)}`} className="inline-flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white">
+                            <Mail size={14}/> Email
+                          </a>
+                        )}
                         <a href={`https://wa.me/34${phone}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700">
                           <Smartphone size={14}/> WhatsApp
                         </a>

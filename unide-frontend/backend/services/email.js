@@ -858,21 +858,22 @@ export async function sendRepairBookingNotification(booking) {
 
   const device = [booking.brand, booking.model].filter(Boolean).join(' ') || 'Sin especificar';
   const typeLabel = REPAIR_TYPE_LABELS[booking.repair_type] || 'A consultar';
-  let dayLabel = '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(booking.preferred_day || ''))) {
-    try {
-      dayLabel = new Date(booking.preferred_day + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: '2-digit', month: 'long' });
-    } catch { dayLabel = booking.preferred_day; }
-  }
-  const when = [dayLabel, booking.preferred_slot].filter(Boolean).join(' · ') || 'Sin preferencia';
   const phoneDigits = String(booking.phone || '').replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, '');
   const waCustomer = `https://wa.me/34${phoneDigits}`;
   const telCustomer = `tel:+34${phoneDigits}`;
+  const customerEmail = String(booking.email || '').trim();
+  const mailtoCustomer = customerEmail
+    ? `mailto:${customerEmail}?subject=${encodeURIComponent(`Tu reparación en HIPERA: ${device}`)}`
+    : '';
+  const isHomePickup = booking.handover === 'domicilio';
+  const handoverLabel = isHomePickup
+    ? 'RECOGIDA A DOMICILIO — 5€ ida y vuelta (Meco)'
+    : 'Lo trae a la tienda';
 
   const html = `<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Nueva cita de reparación</title></head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
-  ${preheader(`${device} · ${typeLabel} · ${when} · ${booking.customer_name}`)}
+  ${preheader(`${device} · ${typeLabel} · ${booking.customer_name}`)}
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;"><tr><td align="center" style="padding:24px 16px;">
     <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
       <tr><td style="background:#dc2626;padding:20px 28px;">
@@ -883,14 +884,18 @@ export async function sendRepairBookingNotification(booking) {
         <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#0f172a;">
           <tr><td style="padding:8px 0;color:#64748b;width:130px;">Dispositivo</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(device)}</td></tr>
           <tr><td style="padding:8px 0;color:#64748b;">Reparación</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(typeLabel)}</td></tr>
-          <tr><td style="padding:8px 0;color:#64748b;">Preferencia</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(when)}</td></tr>
           <tr><td style="padding:8px 0;color:#64748b;">Cliente</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(booking.customer_name)}</td></tr>
           <tr><td style="padding:8px 0;color:#64748b;">Teléfono</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(booking.phone)}</td></tr>
+          ${customerEmail ? `<tr><td style="padding:8px 0;color:#64748b;">Email</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(customerEmail)}</td></tr>` : ''}
+          <tr><td style="padding:8px 0;color:#64748b;">Entrega</td><td style="padding:8px 0;font-weight:700;${isHomePickup ? 'color:#dc2626;' : ''}">${escapeHtml(handoverLabel)}</td></tr>
+          ${isHomePickup && booking.address ? `<tr><td style="padding:8px 0;color:#64748b;vertical-align:top;">Dirección</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(booking.address)}</td></tr>` : ''}
           ${booking.note ? `<tr><td style="padding:8px 0;color:#64748b;vertical-align:top;">Nota</td><td style="padding:8px 0;">${escapeHtml(booking.note)}</td></tr>` : ''}
           <tr><td style="padding:8px 0;color:#64748b;">Recibida</td><td style="padding:8px 0;">${escapeHtml(formatDate(booking.created_at))}</td></tr>
         </table>
-        <div style="margin:20px 0 4px 0;">
-          <a href="${waCustomer}" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;margin-right:8px;">Responder por WhatsApp</a>
+        <p style="margin:16px 0 0 0;font-size:13px;color:#475569;">El cliente espera recibir el <strong>precio y la hora propuesta por email</strong>.</p>
+        <div style="margin:14px 0 4px 0;">
+          ${mailtoCustomer ? `<a href="${mailtoCustomer}" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;margin-right:8px;">Responder por email</a>` : ''}
+          <a href="${waCustomer}" style="display:inline-block;background:#25D366;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;margin-right:8px;">WhatsApp</a>
           <a href="${telCustomer}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;">Llamar</a>
         </div>
         <p style="margin:18px 0 0 0;font-size:12px;color:#94a3b8;">Gestiona esta cita (estado: contactado/agendada/completada) en el panel de administración → pestaña Citas.</p>
@@ -904,12 +909,21 @@ export async function sendRepairBookingNotification(booking) {
     '========================',
     `Dispositivo: ${device}`,
     `Reparación: ${typeLabel}`,
-    `Preferencia: ${when}`,
     `Cliente: ${booking.customer_name}`,
     `Teléfono: ${booking.phone}`,
   ];
+  if (customerEmail) textLines.push(`Email: ${customerEmail}`);
+  textLines.push(`Entrega: ${handoverLabel}`);
+  if (isHomePickup && booking.address) textLines.push(`Dirección: ${booking.address}`);
   if (booking.note) textLines.push(`Nota: ${booking.note}`);
-  textLines.push(`Recibida: ${formatDate(booking.created_at)}`, '', `WhatsApp: ${waCustomer}`, `Llamar: ${telCustomer}`);
+  textLines.push(
+    `Recibida: ${formatDate(booking.created_at)}`,
+    '',
+    'El cliente espera el precio y la hora propuesta POR EMAIL.',
+    customerEmail ? `Responder: ${customerEmail}` : '',
+    `WhatsApp: ${waCustomer}`,
+    `Llamar: ${telCustomer}`
+  );
 
   try {
     const { data, error } = await client.emails.send({

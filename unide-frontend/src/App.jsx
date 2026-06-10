@@ -33,7 +33,7 @@ import {
   Utensils, Coffee, Apple, Baby, Loader2, Wrench, Smartphone,
   LayoutGrid, Percent, ClipboardList, User, LogOut, Plus, Minus, X, CreditCard, Lock, LogIn,
   Cookie, ShieldCheck, FileText, Info, Users, Wallet, CheckCircle2, RotateCcw, Phone, Mail,
-  CalendarCheck, CalendarClock,
+  CalendarCheck, Sun, Moon,
   // --- 新增的超市分类图标 ---
   Beef, Fish, Milk, Wheat, Croissant, Sandwich, Droplet, Candy, 
   Wine, Beer, Salad, Globe, Bone, BriefcaseMedical,
@@ -907,37 +907,45 @@ export default function App() {
   const [couponLoading, setCouponLoading] = useState(false);
 
   // 新增这两个状态用于筛选
-  const [selectedBrand, setSelectedBrand] = useState("Apple"); // 默认选 Apple
-  const [selectedModel, setSelectedModel] = useState("");
-  const [selectedRepairType, setSelectedRepairType] = useState(null); // 'pantalla' | 'bateria' | null
-
-  // Reserva de cita de reparación (formulario en /repair).
+  // Reserva de cita de reparación (formulario por pasos en /repair).
+  // Flujo: 1 Contacto → 2 Tu móvil → 3 Avería → enviado. La tienda
+  // responde por email con precio y hora propuesta.
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [bookingForm, setBookingForm] = useState({ brand: '', model: '', repair_type: 'otro', customer_name: '', phone: '', preferred_day: '', preferred_slot: '', note: '' });
+  const [bookingStep, setBookingStep] = useState(1); // 1 contacto · 2 móvil · 3 avería · 4 recogida
+  const [bookingForm, setBookingForm] = useState({ brand: '', model: '', repair_type: '', customer_name: '', phone: '', email: '', note: '', handover: '', address: '' });
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingDone, setBookingDone] = useState(false);
 
   // Abre el formulario de cita, opcionalmente preseleccionando dispositivo.
   const openBooking = (prefill = {}) => {
     setBookingDone(false);
+    setBookingStep(1);
     setBookingForm({
       brand: prefill.brand || '',
       model: prefill.model || '',
-      repair_type: prefill.repair_type || 'otro',
+      repair_type: prefill.repair_type || '',
       customer_name: '',
       phone: '',
-      preferred_day: '',
-      preferred_slot: '',
+      email: '',
       note: '',
+      handover: '',
+      address: '',
     });
     setBookingOpen(true);
   };
 
-  const submitBooking = async () => {
-    const name = bookingForm.customer_name.trim();
+  const bookingContactOk = () => {
+    if (!bookingForm.customer_name.trim()) { toast.error('Escribe tu nombre.'); return false; }
     const phoneOk = /^[6-9]\d{8}$/.test(bookingForm.phone.replace(/[\s.\-()]/g, '').replace(/^\+?(0034|34)/, ''));
-    if (!name) { toast.error('Escribe tu nombre.'); return; }
-    if (!phoneOk) { toast.error('El teléfono no parece válido (9 dígitos).'); return; }
+    if (!phoneOk) { toast.error('El teléfono no parece válido (9 dígitos).'); return false; }
+    if (!/^\S+@\S+\.\S+$/.test(bookingForm.email.trim())) { toast.error('Escribe un email válido: ahí te enviaremos el precio.'); return false; }
+    return true;
+  };
+
+  const submitBooking = async () => {
+    if (!bookingForm.repair_type) { toast.error('Elige qué le pasa a tu móvil.'); return; }
+    if (!bookingForm.handover) { toast.error('Elige cómo nos haces llegar el móvil.'); return; }
+    if (bookingForm.handover === 'domicilio' && !bookingForm.address.trim()) { toast.error('Escribe tu dirección en Meco para la recogida.'); return; }
     setBookingSubmitting(true);
     try {
       await apiClient.createRepairBooking(bookingForm);
@@ -947,6 +955,147 @@ export default function App() {
     } finally {
       setBookingSubmitting(false);
     }
+  };
+
+  // Tema día/noche de la página de reparación. Día (blanco + azul, estilo
+  // Apple) por defecto; la elección se recuerda en localStorage.
+  const [repairTheme, setRepairTheme] = useState(() => {
+    try { return localStorage.getItem('hipera-repair-theme') || 'light'; } catch { return 'light'; }
+  });
+  const toggleRepairTheme = () => {
+    setRepairTheme(t => {
+      const next = t === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('hipera-repair-theme', next); } catch { /* modo privado */ }
+      return next;
+    });
+  };
+  const rdk = repairTheme === 'dark';
+  // Tokens de clase por tema. Literales completos (no concatenados) para
+  // que el JIT de Tailwind genere ambas variantes.
+  const rt = rdk ? {
+    page: 'bg-gray-950 text-white',
+    topbar: 'bg-gray-950/95 border-gray-800',
+    topbarBtn: 'bg-white/10 hover:bg-white/20 text-white',
+    hero: 'border-gray-800 bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800',
+    heroGlow: 'bg-red-600/20',
+    heroBadge: 'bg-red-600/15 text-red-300 border-red-500/20',
+    heroText: 'text-gray-300',
+    ok1: 'text-green-300',
+    ok2: 'text-gray-400',
+    ok2Icon: 'text-gray-500',
+    stat: 'bg-white/5 border-white/10',
+    primaryBtn: 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/30',
+    secondaryBtn: 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300',
+    card: 'bg-gray-900 border-gray-800',
+    cardIcon: 'text-red-400',
+    section: 'bg-gray-900/70 border-gray-800',
+    sectionTitle: 'text-white',
+    howIcon: 'text-green-400',
+    stepBadge: 'bg-red-600',
+    eyebrow: 'text-red-300',
+    brandTabs: 'bg-gray-950 border-gray-800',
+    brandTabOn: 'bg-gray-800 text-white shadow-lg border border-gray-700',
+    brandTabOff: 'text-gray-500 hover:text-gray-300',
+    select: 'bg-gray-950 border-gray-700 text-white focus:ring-red-900/50',
+    dashed: 'border-gray-800',
+    dashedIcon: 'text-gray-700',
+    panel: 'bg-gray-800 border-gray-700',
+    panelTitle: 'text-white',
+    panelText: 'text-gray-400',
+    othersIcon: 'bg-gray-700 text-yellow-400',
+    optBtn: 'bg-gray-800 hover:bg-gray-700 border-gray-700',
+    optIcon1: 'bg-gray-950 text-red-400',
+    optIcon2: 'bg-gray-950 text-amber-400',
+    optTitle: 'text-white',
+    linkMuted: 'text-gray-400 hover:text-gray-200',
+    infoHead: 'text-gray-200',
+    infoTitle: 'text-gray-300',
+    infoIcon: 'bg-gray-800 border-gray-700',
+    infoIc1: 'text-yellow-400',
+    infoIc2: 'text-orange-400',
+    infoIc3: 'text-red-400',
+    stickyGrad: 'from-gray-950 via-gray-950/95',
+    stickyBtn: 'bg-white/10 border-white/15 text-gray-200',
+    modalTitle: 'text-white',
+    closeBtn: 'bg-white/10 hover:bg-white/20 text-gray-300',
+    input: 'bg-gray-950 border-gray-700 text-white focus:ring-red-900/50',
+    label: 'text-gray-500',
+    muted: 'text-gray-600',
+    progressOn: 'bg-red-500',
+    progressOff: 'bg-gray-800',
+    chipOn: 'bg-red-600 border-red-500 text-white',
+    chipOff: 'bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200',
+    bigOn: 'bg-red-600/15 border-red-500 text-white',
+    bigOff: 'bg-gray-950 border-gray-700 text-gray-300 hover:border-gray-500',
+    bigIconOn: 'bg-red-600 text-white',
+    bigIconOff: 'bg-gray-800 text-gray-400',
+    check: 'text-red-400',
+    backBtn: 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300',
+    doneCircle: 'bg-green-500/15 border-green-500/30 text-green-400',
+    doneText: 'text-gray-400',
+    doneStrong: 'text-gray-200',
+  } : {
+    page: 'bg-[#f2f5f9] text-gray-900',
+    topbar: 'bg-white/95 border-gray-200',
+    topbarBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-700',
+    hero: 'border-gray-200 bg-white',
+    heroGlow: 'bg-blue-500/10',
+    heroBadge: 'bg-blue-50 text-blue-700 border-blue-200',
+    heroText: 'text-gray-600',
+    ok1: 'text-green-600',
+    ok2: 'text-gray-500',
+    ok2Icon: 'text-gray-400',
+    stat: 'bg-blue-50/70 border-blue-100',
+    primaryBtn: 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/25',
+    secondaryBtn: 'bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700',
+    card: 'bg-white border-gray-200',
+    cardIcon: 'text-blue-600',
+    section: 'bg-white border-gray-200',
+    sectionTitle: 'text-gray-900',
+    howIcon: 'text-green-600',
+    stepBadge: 'bg-blue-600',
+    eyebrow: 'text-blue-600',
+    brandTabs: 'bg-gray-100 border-gray-200',
+    brandTabOn: 'bg-white text-gray-900 shadow border border-gray-200',
+    brandTabOff: 'text-gray-500 hover:text-gray-700',
+    select: 'bg-white border-gray-300 text-gray-900 focus:ring-blue-200',
+    dashed: 'border-gray-300',
+    dashedIcon: 'text-gray-300',
+    panel: 'bg-gray-50 border-gray-200',
+    panelTitle: 'text-gray-900',
+    panelText: 'text-gray-600',
+    othersIcon: 'bg-blue-50 text-blue-600',
+    optBtn: 'bg-white hover:bg-gray-50 border-gray-200',
+    optIcon1: 'bg-blue-50 text-blue-600',
+    optIcon2: 'bg-blue-50 text-blue-600',
+    optTitle: 'text-gray-900',
+    linkMuted: 'text-gray-500 hover:text-gray-700',
+    infoHead: 'text-gray-800',
+    infoTitle: 'text-gray-700',
+    infoIcon: 'bg-blue-50 border-blue-100',
+    infoIc1: 'text-blue-600',
+    infoIc2: 'text-blue-600',
+    infoIc3: 'text-blue-600',
+    stickyGrad: 'from-[#f2f5f9] via-[#f2f5f9]/95',
+    stickyBtn: 'bg-white border-gray-200 text-gray-700 shadow-sm',
+    modalTitle: 'text-gray-900',
+    closeBtn: 'bg-gray-100 hover:bg-gray-200 text-gray-600',
+    input: 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400 focus:ring-blue-200',
+    label: 'text-gray-500',
+    muted: 'text-gray-400',
+    progressOn: 'bg-blue-600',
+    progressOff: 'bg-gray-200',
+    chipOn: 'bg-blue-600 border-blue-600 text-white',
+    chipOff: 'bg-white border-gray-300 text-gray-600 hover:text-gray-900',
+    bigOn: 'bg-blue-50 border-blue-500 text-gray-900',
+    bigOff: 'bg-white border-gray-300 text-gray-700 hover:border-gray-400',
+    bigIconOn: 'bg-blue-600 text-white',
+    bigIconOff: 'bg-gray-100 text-gray-500',
+    check: 'text-blue-600',
+    backBtn: 'bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700',
+    doneCircle: 'bg-green-50 border-green-200 text-green-600',
+    doneText: 'text-gray-500',
+    doneStrong: 'text-gray-800',
   };
 
   const navigate = useNavigate();
@@ -2142,44 +2291,55 @@ export default function App() {
 
 {/* --- REPAIR PAGE: landing para tráfico frío de Google Ads --- */}
       {page === "repair" && (
-        <div className="min-h-screen bg-gray-950 text-white animate-fade-in pb-24">
-           <div className="px-4 py-3 flex items-center gap-3 sticky top-0 bg-gray-950/95 backdrop-blur z-20 border-b border-gray-800">
-             <button onClick={handleBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"><ArrowLeft size={20}/></button>
-             <div className="min-w-0">
+        <div className={`min-h-screen animate-fade-in pb-24 ${rt.page}`}>
+           <div className={`px-4 py-3 flex items-center gap-3 sticky top-0 backdrop-blur z-20 border-b ${rt.topbar}`}>
+             <button onClick={handleBack} className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${rt.topbarBtn}`}><ArrowLeft size={20}/></button>
+             <div className="min-w-0 flex-1">
                <h2 className="text-lg font-bold leading-tight">Reparación móvil</h2>
                <p className="text-[11px] text-gray-500 leading-tight">HIPERA · Meco</p>
              </div>
+             <button
+               type="button"
+               onClick={toggleRepairTheme}
+               aria-label={rdk ? 'Modo claro' : 'Modo oscuro'}
+               className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${rt.topbarBtn}`}
+             >
+               {rdk ? <Sun size={18}/> : <Moon size={18}/>}
+             </button>
            </div>
 
            <div className="p-4 space-y-5">
-              <section className="relative overflow-hidden rounded-3xl border border-gray-800 bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 p-5 shadow-xl">
-                 <div className="absolute -right-10 -top-10 w-36 h-36 rounded-full bg-red-600/20 blur-3xl"></div>
+              <section className={`relative overflow-hidden rounded-3xl border p-5 shadow-xl ${rt.hero}`}>
+                 <div className={`absolute -right-10 -top-10 w-36 h-36 rounded-full blur-3xl ${rt.heroGlow}`}></div>
                  <div className="relative">
-                   <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600/15 px-3 py-1 text-[11px] font-bold text-red-300 border border-red-500/20">
+                   <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold border ${rt.heroBadge}`}>
                      <MapPin size={12}/> Paseo del Sol 1, Meco
                    </span>
                    <h1 className="mt-4 text-3xl font-black leading-tight tracking-tight">Reparación de móviles en Meco</h1>
-                   <p className="mt-3 text-sm leading-relaxed text-gray-300">
+                   <p className={`mt-3 text-sm leading-relaxed ${rt.heroText}`}>
                      Pantallas, baterías y diagnóstico. Cuéntanos tu modelo por WhatsApp y te orientamos con precio, disponibilidad y plazo.
                    </p>
                    <div className="mt-3 space-y-1.5">
-                     <p className="inline-flex items-center gap-1.5 text-[12px] font-medium text-green-300">
+                     <p className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${rt.ok1}`}>
                        <CheckCircle2 size={13}/> Te confirmamos el precio antes de reparar. Sin compromiso.
                      </p>
-                     <p className="flex items-center gap-1.5 text-[12px] font-medium text-gray-400">
-                       <CheckCircle2 size={13} className="text-gray-500"/> También puedes venir sin cita: la mayoría se reparan en el día.
+                     <p className={`flex items-center gap-1.5 text-[12px] font-medium ${rt.ok2}`}>
+                       <CheckCircle2 size={13} className={rt.ok2Icon}/> También puedes venir sin cita: la mayoría se reparan en el día.
+                     </p>
+                     <p className={`flex items-center gap-1.5 text-[12px] font-medium ${rt.ok2}`}>
+                       <CheckCircle2 size={13} className={rt.ok2Icon}/> Recogida y entrega a domicilio en Meco por solo 5€.
                      </p>
                    </div>
                    <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                     <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
+                     <div className={`rounded-2xl px-2 py-2 border ${rt.stat}`}>
                        <p className="text-[10px] text-gray-500">Garantía</p>
                        <p className="text-xs font-bold">6 meses</p>
                      </div>
-                     <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
+                     <div className={`rounded-2xl px-2 py-2 border ${rt.stat}`}>
                        <p className="text-[10px] text-gray-500">Marcas</p>
                        <p className="text-xs font-bold">Todas</p>
                      </div>
-                     <div className="rounded-2xl bg-white/5 px-2 py-2 border border-white/10">
+                     <div className={`rounded-2xl px-2 py-2 border ${rt.stat}`}>
                        <p className="text-[10px] text-gray-500">Presupuesto</p>
                        <p className="text-xs font-bold">Sin compromiso</p>
                      </div>
@@ -2187,27 +2347,19 @@ export default function App() {
                    <div className="mt-5 space-y-2">
                      <button
                        type="button"
-                       onClick={() => openBooking({ repair_type: 'otro' })}
-                       className="w-full bg-red-600 hover:bg-red-500 text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-red-900/30 active:scale-95 transition-all"
+                       onClick={() => openBooking()}
+                       className={`w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
                      >
                        <CalendarCheck size={18}/> Pedir cita
                      </button>
-                     <div className="flex gap-2">
-                       <a
-                         href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
-                         target="_blank"
-                         rel="noreferrer"
-                         className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all"
-                       >
-                         <Smartphone size={15}/> Consultar por WhatsApp
-                       </a>
-                       <a
-                         href="#repair-models"
-                         className="px-4 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center active:scale-95 transition-all"
-                       >
-                         Ver modelos
-                       </a>
-                     </div>
+                     <a
+                       href={waLink('Hola, quiero consultar precio para reparar mi móvil en HIPERA Meco.')}
+                       target="_blank"
+                       rel="noreferrer"
+                       className={`w-full border py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all ${rt.secondaryBtn}`}
+                     >
+                       <Smartphone size={15}/> Consultar por WhatsApp
+                     </a>
                    </div>
                  </div>
               </section>
@@ -2218,24 +2370,24 @@ export default function App() {
                   { icon: Wrench, title: 'Batería', text: 'Cambio y revisión' },
                   { icon: Info, title: 'Diagnóstico', text: 'Consulta primero' },
                 ].map(({ icon: Icon, title, text }) => (
-                  <div key={title} className="rounded-2xl bg-gray-900 border border-gray-800 p-3">
-                    <Icon size={18} className="text-red-400 mb-2"/>
+                  <div key={title} className={`rounded-2xl border p-3 ${rt.card}`}>
+                    <Icon size={18} className={`mb-2 ${rt.cardIcon}`}/>
                     <p className="text-xs font-bold leading-tight">{title}</p>
                     <p className="mt-1 text-[10px] text-gray-500 leading-tight">{text}</p>
                   </div>
                 ))}
               </section>
 
-              <section className="rounded-3xl bg-gray-900/70 border border-gray-800 p-4">
-                <h3 className="font-bold text-white mb-3 flex items-center gap-2"><CheckCircle2 size={16} className="text-green-400"/> Cómo funciona</h3>
+              <section className={`rounded-3xl border p-4 ${rt.section}`}>
+                <h3 className={`font-bold mb-3 flex items-center gap-2 ${rt.sectionTitle}`}><CheckCircle2 size={16} className={rt.howIcon}/> Cómo funciona</h3>
                 <div className="space-y-3">
                   {[
-                    ['1', 'Pide tu cita', 'Rellena el formulario con tu modelo y cuándo puedes venir. Sin llamadas ni esperas.'],
-                    ['2', 'Confirmamos contigo', 'Te escribimos para confirmar la cita, el precio orientativo y la disponibilidad de piezas.'],
+                    ['1', 'Pide tu cita', 'Tus datos, tu móvil y qué le pasa. Tres pasos, menos de un minuto.'],
+                    ['2', 'Recibe precio y hora', 'Te enviamos por email el precio y la hora propuesta, sin compromiso.'],
                     ['3', 'Tráelo a HIPERA', 'Paseo del Sol 1, Meco. Puedes dejarlo mientras haces la compra.'],
                   ].map(([step, title, text]) => (
                     <div key={step} className="flex gap-3">
-                      <span className="w-7 h-7 rounded-full bg-red-600 text-white text-xs font-black flex items-center justify-center flex-shrink-0">{step}</span>
+                      <span className={`w-7 h-7 rounded-full text-white text-xs font-black flex items-center justify-center flex-shrink-0 ${rt.stepBadge}`}>{step}</span>
                       <div>
                         <p className="text-sm font-bold">{title}</p>
                         <p className="text-xs text-gray-500 leading-snug">{text}</p>
@@ -2245,169 +2397,22 @@ export default function App() {
                 </div>
               </section>
 
-              <section id="repair-models" className="scroll-mt-24 bg-gray-900/70 p-3 rounded-3xl border border-gray-800 backdrop-blur-sm">
-                 <div className="px-1 py-2 mb-2">
-                   <p className="text-xs font-bold text-red-300 uppercase tracking-wide">Consulta por modelo</p>
-                   <h3 className="text-xl font-black text-white">Busca tu dispositivo</h3>
-                   <p className="text-xs text-gray-500 mt-1">Si no aparece en la lista, elige "No encuentro mi modelo" y te atendemos por WhatsApp.</p>
-                 </div>
-
-                 <div className="flex p-1 bg-gray-950 rounded-2xl mb-4 overflow-x-auto border border-gray-800">
-                    {['Apple', 'Samsung', 'Xiaomi', 'Oppo'].map(brand => (
-                      <button
-                        key={brand}
-                        onClick={() => { setSelectedBrand(brand); setSelectedModel(""); setSelectedRepairType(null); }}
-                        className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap px-4 ${selectedBrand === brand ? 'bg-gray-800 text-white shadow-lg border border-gray-700' : 'text-gray-500 hover:text-gray-300'}`}
-                      >
-                        {brand}
-                      </button>
-                    ))}
-                 </div>
-
-                 <div className="px-1 pb-1">
-                    <div className="mb-4">
-                       <label className="text-xs font-bold text-gray-500 uppercase ml-2 mb-2 block">Selecciona modelo</label>
-                       <div className="relative">
-                         <select
-                           value={selectedModel}
-                           onChange={e => { setSelectedModel(e.target.value); setSelectedRepairType(null); }}
-                           className="w-full p-4 bg-gray-950 border border-gray-700 rounded-xl text-white font-bold outline-none focus:ring-2 focus:ring-red-900/50 appearance-none transition-all"
-                         >
-                           <option value="" className="text-gray-500">Elige tu dispositivo</option>
-                           {[...new Set(repairs.filter(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase()).map(r => r.model))].sort().map(model => (
-                              <option key={model} value={model}>{model}</option>
-                           ))}
-                           <option value="others" className="text-red-400 font-bold">No encuentro mi modelo</option>
-                         </select>
-                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 rotate-90 pointer-events-none" size={16}/>
-                       </div>
-                    </div>
-
-                    <div className="space-y-3">
-                       {!selectedModel && (
-                         <div className="text-center py-7 border border-dashed border-gray-800 rounded-2xl">
-                            <Smartphone size={30} className="mx-auto mb-3 text-gray-700"/>
-                            <p className="text-sm text-gray-500">Selecciona un modelo para consultar pantalla o batería.</p>
-                         </div>
-                       )}
-
-                       {selectedModel === 'others' && (
-                         <div className="bg-gray-800 p-5 rounded-2xl text-center border border-gray-700 animate-fade-in">
-                            <div className="w-14 h-14 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-yellow-400">
-                               <Info size={28} />
-                            </div>
-                            <h3 className="text-lg font-bold text-white mb-2">¿Tu modelo no está en la lista?</h3>
-                            <p className="text-gray-400 text-sm mb-5 leading-relaxed">
-                               Pide cita indicando tu marca y modelo. Te confirmamos si podemos ayudarte.
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => openBooking({ repair_type: 'otro' })}
-                              className="bg-red-600 hover:bg-red-500 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 mx-auto w-full"
-                            >
-                               <CalendarCheck size={20}/> Pedir cita
-                            </button>
-                            <a
-                              href={waLink('Hola, quiero reparar un móvil que no aparece en la web. Quisiera consultar precio.')}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mt-2 text-gray-400 hover:text-gray-200 text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
-                            >
-                               <Smartphone size={15}/> o consultar por WhatsApp
-                            </a>
-                         </div>
-                       )}
-
-                       {selectedModel && selectedModel !== 'others' && (
-                         <div className="space-y-4 animate-fade-in">
-                           {(() => {
-                             const modelRepair = repairs.find(r => r.brand?.toLowerCase() === selectedBrand.toLowerCase() && r.model === selectedModel);
-                             const desc = modelRepair?.description;
-                             return (
-                           <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700">
-                             <p className="text-xs text-gray-500 uppercase font-bold mb-1">{selectedBrand}</p>
-                             <h3 className="text-lg font-bold text-white">{selectedModel}</h3>
-                             {desc ? <p className="text-gray-400 text-sm mt-1">{desc}</p> : null}
-                             <p className="text-gray-400 text-sm mt-1">
-                               {!selectedRepairType
-                                 ? "Elige el tipo de reparación."
-                                 : `Has elegido: Cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}. Pulsa abajo para consultar precio.`}
-                             </p>
-                           </div>
-                           ); })()}
-
-                           {!selectedRepairType ? (
-                             <div className="grid grid-cols-1 gap-3">
-                               <button
-                                 type="button"
-                                 onClick={() => setSelectedRepairType('pantalla')}
-                                 className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
-                               >
-                                 <div className="w-12 h-12 bg-gray-950 rounded-xl flex items-center justify-center text-red-400">
-                                   <Smartphone size={24}/>
-                                 </div>
-                                 <div className="flex-1">
-                                   <h4 className="font-bold text-white">Cambiar pantalla</h4>
-                                   <p className="text-gray-500 text-xs">Consultar precio</p>
-                                 </div>
-                                 <ChevronRight className="text-gray-500" size={20}/>
-                               </button>
-                               <button
-                                 type="button"
-                                 onClick={() => setSelectedRepairType('bateria')}
-                                 className="bg-gray-800 hover:bg-gray-700 p-4 rounded-2xl border border-gray-700 flex items-center gap-4 transition-all active:scale-[0.98] w-full text-left"
-                               >
-                                 <div className="w-12 h-12 bg-gray-950 rounded-xl flex items-center justify-center text-amber-400">
-                                   <Wrench size={24}/>
-                                 </div>
-                                 <div className="flex-1">
-                                   <h4 className="font-bold text-white">Cambiar batería</h4>
-                                   <p className="text-gray-500 text-xs">Consultar precio</p>
-                                 </div>
-                                 <ChevronRight className="text-gray-500" size={20}/>
-                               </button>
-                             </div>
-                           ) : (
-                             <div className="space-y-2">
-                               <button
-                                 type="button"
-                                 onClick={() => openBooking({ brand: selectedBrand, model: selectedModel, repair_type: selectedRepairType })}
-                                 className="bg-red-600 hover:bg-red-500 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 w-full"
-                               >
-                                 <CalendarCheck size={20}/> Pedir cita para este móvil
-                               </button>
-                               <a
-                                 href={waLink(`Hola, quiero consultar precio para ${selectedBrand} ${selectedModel} - cambiar ${selectedRepairType === 'pantalla' ? 'pantalla' : 'batería'}.`)}
-                                 target="_blank"
-                                 rel="noreferrer"
-                                 className="text-gray-400 hover:text-gray-200 text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors w-full"
-                               >
-                                 <Smartphone size={15}/> o consultar precio por WhatsApp
-                               </a>
-                             </div>
-                           )}
-                         </div>
-                       )}
-                    </div>
-                 </div>
-              </section>
-
-              <section className="bg-gray-900/50 p-5 rounded-3xl border border-gray-800">
-                 <h3 className="font-bold text-gray-200 mb-5 text-sm flex items-center gap-2">
-                    <Info size={16} className="text-red-500"/> Información importante
+              <section className={`p-5 rounded-3xl border ${rt.section}`}>
+                 <h3 className={`font-bold mb-5 text-sm flex items-center gap-2 ${rt.infoHead}`}>
+                    <Info size={16} className={rt.cardIcon}/> Información importante
                  </h3>
                  <div className="space-y-5">
                     <div className="flex gap-4">
-                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-yellow-400"><Clock size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Horario</p><p className="text-xs text-gray-500 mt-0.5">Consulta y entrega en tienda durante el horario de HIPERA.</p></div>
+                       <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border ${rt.infoIcon} ${rt.infoIc1}`}><Clock size={14}/></div>
+                       <div><p className={`text-xs font-bold uppercase tracking-wide ${rt.infoTitle}`}>Horario</p><p className="text-xs text-gray-500 mt-0.5">Consulta y entrega en tienda durante el horario de HIPERA.</p></div>
                     </div>
                     <div className="flex gap-4">
-                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-orange-400"><Package size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Disponibilidad de piezas</p><p className="text-xs text-gray-500 mt-0.5">Algunos modelos pueden requerir <strong>2-3 días</strong> para disponibilidad de piezas.</p></div>
+                       <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border ${rt.infoIcon} ${rt.infoIc2}`}><Package size={14}/></div>
+                       <div><p className={`text-xs font-bold uppercase tracking-wide ${rt.infoTitle}`}>Disponibilidad de piezas</p><p className="text-xs text-gray-500 mt-0.5">Algunos modelos pueden requerir <strong>2-3 días</strong> para disponibilidad de piezas.</p></div>
                     </div>
                     <div className="flex gap-4">
-                       <div className="w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center flex-shrink-0 border border-gray-700 text-red-400"><ShieldCheck size={14}/></div>
-                       <div><p className="text-xs font-bold text-gray-300 uppercase tracking-wide">Garantía</p><p className="text-xs text-gray-500 mt-0.5">Cobertura de <strong>6 meses</strong> sobre la reparación realizada.</p></div>
+                       <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border ${rt.infoIcon} ${rt.infoIc3}`}><ShieldCheck size={14}/></div>
+                       <div><p className={`text-xs font-bold uppercase tracking-wide ${rt.infoTitle}`}>Garantía</p><p className="text-xs text-gray-500 mt-0.5">Cobertura de <strong>6 meses</strong> sobre la reparación realizada.</p></div>
                     </div>
                  </div>
               </section>
@@ -2418,12 +2423,12 @@ export default function App() {
                global está oculta en /repair, así que el espacio es libre
                (el contenedor reserva pb-24). El degradado no captura toques
                (pointer-events-none) salvo en los propios botones. */}
-           <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 pb-4 pt-8 bg-gradient-to-t from-gray-950 via-gray-950/95 to-transparent pointer-events-none">
+           <div className={`fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 pb-4 pt-8 bg-gradient-to-t to-transparent pointer-events-none ${rt.stickyGrad}`}>
              <div className="flex gap-2 pointer-events-auto">
                <button
                  type="button"
-                 onClick={() => openBooking({ repair_type: 'otro' })}
-                 className="flex-1 bg-red-600 hover:bg-red-500 text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-black/40 active:scale-95 transition-all"
+                 onClick={() => openBooking()}
+                 className={`flex-1 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
                >
                  <CalendarCheck size={18}/> Pedir cita
                </button>
@@ -2432,167 +2437,350 @@ export default function App() {
                  target="_blank"
                  rel="noreferrer"
                  aria-label="Consultar por WhatsApp"
-                 className="w-12 bg-white/10 border border-white/15 text-gray-200 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+                 className={`w-12 border rounded-2xl flex items-center justify-center active:scale-95 transition-all ${rt.stickyBtn}`}
                >
                  <Smartphone size={18}/>
                </a>
                <a
                  href="tel:+34918782602"
                  aria-label="Llamar a la tienda"
-                 className="w-12 bg-white/10 border border-white/15 text-gray-200 rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+                 className={`w-12 border rounded-2xl flex items-center justify-center active:scale-95 transition-all ${rt.stickyBtn}`}
                >
                  <Phone size={18}/>
                </a>
              </div>
            </div>
 
-           {/* --- Modal: solicitud de cita de reparación --- */}
+           {/* --- Página completa: solicitud de cita en 3 pasos ---
+               1 Contacto → 2 Tu móvil → 3 Avería. Pantalla completa (no
+               bottom-sheet): cabecera propia donde la flecha retrocede un
+               paso (o cierra en el paso 1) y la X cierra siempre. Cada
+               paso lleva título + explicación sobre la barra de progreso. */}
            {bookingOpen && (
-             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-               <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => !bookingSubmitting && setBookingOpen(false)}></div>
-               <div className="relative w-full sm:max-w-md bg-gray-900 border border-gray-800 rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[92vh] overflow-y-auto">
-                 <div className="sticky top-0 bg-gray-900/95 backdrop-blur px-5 py-4 flex items-center justify-between border-b border-gray-800 z-10">
-                   <div className="flex items-center gap-2">
-                     <CalendarCheck size={18} className="text-red-400"/>
-                     <div>
-                       <h3 className="font-black text-white leading-tight">Pedir cita</h3>
-                       <p className="text-[11px] text-gray-500 leading-tight">Te confirmamos por WhatsApp</p>
-                     </div>
-                   </div>
-                   <button type="button" onClick={() => !bookingSubmitting && setBookingOpen(false)} className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 transition-colors">
-                     <X size={18}/>
-                   </button>
+             <div className={`fixed inset-0 z-50 overflow-y-auto animate-fade-in ${rt.page}`}>
+               <div className={`px-4 py-3 flex items-center gap-3 sticky top-0 backdrop-blur z-10 border-b ${rt.topbar}`}>
+                 <button
+                   type="button"
+                   onClick={() => { if (bookingSubmitting) return; if (!bookingDone && bookingStep > 1) setBookingStep(s => s - 1); else setBookingOpen(false); }}
+                   aria-label="Atrás"
+                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${rt.topbarBtn}`}
+                 >
+                   <ArrowLeft size={20}/>
+                 </button>
+                 <div className="min-w-0 flex-1">
+                   <h3 className={`font-black leading-tight ${rt.modalTitle}`}>Pedir cita</h3>
+                   <p className="text-[11px] text-gray-500 leading-tight">Te respondemos por email con precio y hora</p>
                  </div>
+                 <button type="button" onClick={() => !bookingSubmitting && setBookingOpen(false)} aria-label="Cerrar" className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${rt.closeBtn}`}>
+                   <X size={18}/>
+                 </button>
+               </div>
 
+               <div className="max-w-md mx-auto">
                  {bookingDone ? (
-                   <div className="p-6 text-center">
-                     <div className="w-16 h-16 rounded-full bg-green-500/15 border border-green-500/30 flex items-center justify-center mx-auto mb-4 text-green-400">
+                   <div className="p-6 pt-16 text-center">
+                     <div className={`w-16 h-16 rounded-full border flex items-center justify-center mx-auto mb-4 ${rt.doneCircle}`}>
                        <CheckCircle2 size={32}/>
                      </div>
-                     <h4 className="text-lg font-black text-white mb-2">¡Solicitud enviada!</h4>
-                     <p className="text-sm text-gray-400 leading-relaxed mb-5">
-                       Te contactaremos para confirmar la cita, el precio orientativo y la disponibilidad de piezas. Si es urgente, también puedes escribirnos por WhatsApp.
+                     <h4 className={`text-lg font-black mb-2 ${rt.modalTitle}`}>¡Solicitud enviada!</h4>
+                     <p className={`text-sm leading-relaxed mb-5 ${rt.doneText}`}>
+                       Te enviaremos un email a <span className={`font-bold ${rt.doneStrong}`}>{bookingForm.email}</span> con el precio y la hora propuesta.
+                       {' '}Si hay que encargar la pieza para tu modelo, el email incluirá un enlace de pago seguro para la señal.
+                       {bookingForm.handover === 'domicilio' ? ' Cuando lo confirmes, pasaremos a recoger el móvil por tu dirección.' : ''}
+                       {' '}Si es urgente, escríbenos por WhatsApp.
                      </p>
                      <div className="flex flex-col gap-2">
                        <a
                          href={waLink('Hola, acabo de pedir una cita de reparación en la web.')}
                          target="_blank"
                          rel="noreferrer"
-                         className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all"
+                         className={`w-full border py-2.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${rt.secondaryBtn}`}
                        >
                          <Smartphone size={15}/> Escribir por WhatsApp
                        </a>
-                       <button type="button" onClick={() => setBookingOpen(false)} className="w-full bg-red-600 hover:bg-red-500 text-white py-3 rounded-2xl font-bold transition-all">
+                       <button type="button" onClick={() => setBookingOpen(false)} className={`w-full py-3 rounded-2xl font-bold transition-all ${rt.primaryBtn}`}>
                          Cerrar
                        </button>
                      </div>
                    </div>
                  ) : (
-                   <div className="p-5 space-y-4">
-                     <div className="grid grid-cols-2 gap-2">
-                       <div>
-                         <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Marca</label>
-                         <input
-                           value={bookingForm.brand}
-                           onChange={(e) => setBookingForm(f => ({ ...f, brand: e.target.value }))}
-                           placeholder="Apple, Samsung…"
-                           className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
-                         />
-                       </div>
-                       <div>
-                         <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Modelo</label>
-                         <input
-                           value={bookingForm.model}
-                           onChange={(e) => setBookingForm(f => ({ ...f, model: e.target.value }))}
-                           placeholder="iPhone 13…"
-                           className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
-                         />
-                       </div>
-                     </div>
-
+                   <div className="p-5 pb-16 space-y-5">
+                     {/* Cabecera del paso: qué hay que hacer + progreso */}
                      <div>
-                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Reparación</label>
-                       <div className="grid grid-cols-3 gap-2">
-                         {[['pantalla', 'Pantalla'], ['bateria', 'Batería'], ['otro', 'Otro']].map(([val, label]) => (
-                           <button
-                             key={val}
-                             type="button"
-                             onClick={() => setBookingForm(f => ({ ...f, repair_type: val }))}
-                             className={`py-2.5 rounded-xl text-sm font-bold border transition-all ${bookingForm.repair_type === val ? 'bg-red-600 border-red-500 text-white' : 'bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200'}`}
-                           >
-                             {label}
-                           </button>
+                       <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Paso {bookingStep} de 4</p>
+                       <h4 className={`text-2xl font-black mt-1 leading-tight ${rt.modalTitle}`}>
+                         {bookingStep === 1 ? 'Tus datos de contacto' : bookingStep === 2 ? 'Tu móvil' : bookingStep === 3 ? '¿Qué le pasa?' : 'Recogida del móvil'}
+                       </h4>
+                       <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+                         {bookingStep === 1
+                           ? 'Dinos cómo contactarte: te enviaremos el precio y la hora propuesta por email.'
+                           : bookingStep === 2
+                           ? 'Cuéntanos qué dispositivo traes: marca y modelo (aproximado también vale).'
+                           : bookingStep === 3
+                           ? 'Elige el problema y, si quieres, cuéntanos algún detalle más para preparar tu presupuesto.'
+                           : '¿Nos lo traes a la tienda o pasamos a recogerlo por tu casa en Meco?'}
+                       </p>
+                       <div className="flex gap-1.5 mt-4">
+                         {[1, 2, 3, 4].map(s => (
+                           <div key={s} className={`h-1.5 flex-1 rounded-full transition-colors ${s <= bookingStep ? rt.progressOn : rt.progressOff}`}></div>
                          ))}
                        </div>
                      </div>
 
-                     <div>
-                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Tu nombre</label>
-                       <input
-                         value={bookingForm.customer_name}
-                         onChange={(e) => setBookingForm(f => ({ ...f, customer_name: e.target.value }))}
-                         placeholder="Nombre y apellido"
-                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
-                       />
-                     </div>
-
-                     <div>
-                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Teléfono</label>
-                       <input
-                         type="tel"
-                         inputMode="tel"
-                         value={bookingForm.phone}
-                         onChange={(e) => setBookingForm(f => ({ ...f, phone: e.target.value }))}
-                         placeholder="6XX XXX XXX"
-                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50"
-                       />
-                     </div>
-
-                     <div>
-                       <label className="text-[11px] font-bold text-gray-500 uppercase mb-1.5 flex items-center gap-1.5"><CalendarClock size={13}/> ¿Qué día prefieres? <span className="text-gray-600 normal-case font-normal">(opcional)</span></label>
-                       <input
-                         type="date"
-                         min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}
-                         value={bookingForm.preferred_day}
-                         onChange={(e) => setBookingForm(f => ({ ...f, preferred_day: e.target.value }))}
-                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50 [color-scheme:dark]"
-                       />
-                       <div className="grid grid-cols-3 gap-2 mt-2">
-                         {['Por la mañana', 'Por la tarde', 'Me da igual'].map(s => (
-                           <button
-                             key={s}
-                             type="button"
-                             onClick={() => setBookingForm(f => ({ ...f, preferred_slot: f.preferred_slot === s ? '' : s }))}
-                             className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${bookingForm.preferred_slot === s ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-950 border-gray-700 text-gray-400 hover:text-gray-200'}`}
-                           >
-                             {s}
-                           </button>
-                         ))}
+                     {bookingStep === 1 && (
+                       <div className="space-y-4 animate-fade-in">
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Tu nombre</label>
+                           <input
+                             value={bookingForm.customer_name}
+                             onChange={(e) => setBookingForm(f => ({ ...f, customer_name: e.target.value }))}
+                             placeholder="Nombre y apellido"
+                             autoComplete="name"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                         </div>
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Teléfono</label>
+                           <input
+                             type="tel"
+                             inputMode="tel"
+                             value={bookingForm.phone}
+                             onChange={(e) => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                             placeholder="6XX XXX XXX"
+                             autoComplete="tel"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                         </div>
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Email</label>
+                           <input
+                             type="email"
+                             inputMode="email"
+                             value={bookingForm.email}
+                             onChange={(e) => setBookingForm(f => ({ ...f, email: e.target.value }))}
+                             placeholder="tu@email.com"
+                             autoComplete="email"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                           <p className="text-[11px] text-gray-500 mt-1.5">Aquí te enviaremos el precio y la hora propuesta.</p>
+                         </div>
+                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
+                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
+                           <p className="text-xs text-gray-500 leading-relaxed">Tus datos solo se usan para gestionar esta reparación. Te respondemos normalmente el mismo día, en horario de tienda.</p>
+                         </div>
+                         <button
+                           type="button"
+                           onClick={() => { if (bookingContactOk()) setBookingStep(2); }}
+                           className={`w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
+                         >
+                           Siguiente <ArrowRight size={17}/>
+                         </button>
                        </div>
-                     </div>
+                     )}
 
-                     <div>
-                       <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Nota <span className="text-gray-600 normal-case font-normal">(opcional)</span></label>
-                       <textarea
-                         value={bookingForm.note}
-                         onChange={(e) => setBookingForm(f => ({ ...f, note: e.target.value }))}
-                         rows={2}
-                         placeholder="Cuéntanos el problema…"
-                         className="w-full p-3 bg-gray-950 border border-gray-700 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-red-900/50 resize-none"
-                       />
-                     </div>
+                     {bookingStep === 2 && (
+                       <div className="space-y-4 animate-fade-in">
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Marca</label>
+                           <div className="grid grid-cols-4 gap-2">
+                             {['Apple', 'Samsung', 'Xiaomi', 'Oppo'].map(b => (
+                               <button
+                                 key={b}
+                                 type="button"
+                                 onClick={() => setBookingForm(f => ({ ...f, brand: f.brand === b ? '' : b, model: f.brand === b ? f.model : '' }))}
+                                 className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${bookingForm.brand === b ? rt.chipOn : rt.chipOff}`}
+                               >
+                                 {b}
+                               </button>
+                             ))}
+                           </div>
+                           <p className="text-[11px] text-gray-500 mt-1.5">¿Otra marca? Escríbela junto al modelo abajo.</p>
+                         </div>
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Modelo</label>
+                           <input
+                             value={bookingForm.model}
+                             onChange={(e) => setBookingForm(f => ({ ...f, model: e.target.value }))}
+                             placeholder={bookingForm.brand ? (bookingForm.brand === 'Apple' ? 'iPhone 13, iPhone 12…' : `${bookingForm.brand} Galaxy S22…`) : 'iPhone 13, Galaxy S22…'}
+                             list="booking-model-suggestions"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                           <datalist id="booking-model-suggestions">
+                             {[...new Set(repairs.filter(r => !bookingForm.brand || r.brand?.toLowerCase() === bookingForm.brand.toLowerCase()).map(r => r.model))].sort().map(m => (
+                               <option key={m} value={m}/>
+                             ))}
+                           </datalist>
+                           <p className="text-[11px] text-gray-500 mt-1.5">Si no lo sabes exacto, pon lo que recuerdes.</p>
+                         </div>
+                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
+                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
+                           <p className="text-xs text-gray-500 leading-relaxed">Truco: el modelo exacto aparece en Ajustes → Información del teléfono, o en la caja original. Reparamos todas las marcas.</p>
+                         </div>
+                         <div className="flex gap-2">
+                           <button
+                             type="button"
+                             onClick={() => setBookingStep(1)}
+                             className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
+                           >
+                             <ArrowLeft size={16}/> Atrás
+                           </button>
+                           <button
+                             type="button"
+                             onClick={() => {
+                               if (!bookingForm.model.trim()) { toast.error('Dinos el modelo (aunque sea aproximado).'); return; }
+                               setBookingStep(3);
+                             }}
+                             className={`flex-1 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
+                           >
+                             Siguiente <ArrowRight size={17}/>
+                           </button>
+                         </div>
+                       </div>
+                     )}
 
-                     <button
-                       type="button"
-                       onClick={submitBooking}
-                       disabled={bookingSubmitting}
-                       className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-red-900/30 active:scale-95 transition-all"
-                     >
-                       {bookingSubmitting ? <><Loader2 size={18} className="animate-spin"/> Enviando…</> : <><CalendarCheck size={18}/> Enviar solicitud</>}
-                     </button>
-                     <p className="text-[11px] text-gray-500 text-center leading-relaxed">
-                       No se cobra nada online. Te escribiremos por WhatsApp (en horario de tienda) para confirmar día y precio orientativo. También puedes venir sin cita.
-                     </p>
+                     {bookingStep === 3 && (
+                       <div className="space-y-4 animate-fade-in">
+                         <div className="space-y-2">
+                           {[
+                             ['pantalla', 'Pantalla rota o no responde', Smartphone],
+                             ['bateria', 'Batería: dura poco o se apaga', Wrench],
+                             ['otro', 'Otro problema', Info],
+                           ].map(([val, label, Icon]) => (
+                             <button
+                               key={val}
+                               type="button"
+                               onClick={() => setBookingForm(f => ({ ...f, repair_type: val }))}
+                               className={`w-full p-4 rounded-2xl border flex items-center gap-3 text-left transition-all active:scale-[0.99] ${bookingForm.repair_type === val ? rt.bigOn : rt.bigOff}`}
+                             >
+                               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bookingForm.repair_type === val ? rt.bigIconOn : rt.bigIconOff}`}>
+                                 <Icon size={20}/>
+                               </div>
+                               <span className="text-sm font-bold flex-1">{label}</span>
+                               {bookingForm.repair_type === val && <CheckCircle2 size={18} className={`flex-shrink-0 ${rt.check}`}/>}
+                             </button>
+                           ))}
+                         </div>
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Cuéntanos más <span className={`normal-case font-normal ${rt.muted}`}>(opcional)</span></label>
+                           <textarea
+                             value={bookingForm.note}
+                             onChange={(e) => setBookingForm(f => ({ ...f, note: e.target.value }))}
+                             rows={2}
+                             placeholder="Ej.: se cayó al suelo y la pantalla tiene grietas…"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 resize-none ${rt.input}`}
+                           />
+                         </div>
+                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
+                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
+                           <p className="text-xs text-gray-500 leading-relaxed">El presupuesto no compromete a nada: te lo enviamos y tú decides. Toda reparación incluye 6 meses de garantía.</p>
+                         </div>
+                         <div className="flex gap-2">
+                           <button
+                             type="button"
+                             onClick={() => setBookingStep(2)}
+                             className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
+                           >
+                             <ArrowLeft size={16}/> Atrás
+                           </button>
+                           <button
+                             type="button"
+                             onClick={() => {
+                               if (!bookingForm.repair_type) { toast.error('Elige qué le pasa a tu móvil.'); return; }
+                               setBookingStep(4);
+                             }}
+                             className={`flex-1 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
+                           >
+                             Siguiente <ArrowRight size={17}/>
+                           </button>
+                         </div>
+                       </div>
+                     )}
+
+                     {bookingStep === 4 && (
+                       <div className="space-y-4 animate-fade-in">
+                         <div className="space-y-2">
+                           <button
+                             type="button"
+                             onClick={() => setBookingForm(f => ({ ...f, handover: 'tienda' }))}
+                             className={`w-full p-4 rounded-2xl border flex items-center gap-3 text-left transition-all active:scale-[0.99] ${bookingForm.handover === 'tienda' ? rt.bigOn : rt.bigOff}`}
+                           >
+                             <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bookingForm.handover === 'tienda' ? rt.bigIconOn : rt.bigIconOff}`}>
+                               <Store size={20}/>
+                             </div>
+                             <span className="flex-1">
+                               <span className="text-sm font-bold block">Lo llevo a la tienda</span>
+                               <span className="text-xs text-gray-500 block mt-0.5">Gratis · Paseo del Sol 1, Meco</span>
+                             </span>
+                             {bookingForm.handover === 'tienda' && <CheckCircle2 size={18} className={`flex-shrink-0 ${rt.check}`}/>}
+                           </button>
+                           <button
+                             type="button"
+                             onClick={() => setBookingForm(f => ({ ...f, handover: 'domicilio' }))}
+                             className={`w-full p-4 rounded-2xl border flex items-center gap-3 text-left transition-all active:scale-[0.99] ${bookingForm.handover === 'domicilio' ? rt.bigOn : rt.bigOff}`}
+                           >
+                             <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bookingForm.handover === 'domicilio' ? rt.bigIconOn : rt.bigIconOff}`}>
+                               <Truck size={20}/>
+                             </div>
+                             <span className="flex-1">
+                               <span className="text-sm font-bold block">Recogida y entrega a domicilio</span>
+                               <span className="text-xs text-gray-500 block mt-0.5">5€ ida y vuelta · Meco</span>
+                             </span>
+                             {bookingForm.handover === 'domicilio' && <CheckCircle2 size={18} className={`flex-shrink-0 ${rt.check}`}/>}
+                           </button>
+                         </div>
+
+                         {bookingForm.handover === 'domicilio' && (
+                           <div className="animate-fade-in">
+                             <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Tu dirección en Meco</label>
+                             <input
+                               value={bookingForm.address}
+                               onChange={(e) => setBookingForm(f => ({ ...f, address: e.target.value }))}
+                               placeholder="Calle, número, piso…"
+                               autoComplete="street-address"
+                               className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                             />
+                             <div className={`rounded-xl border p-3 mt-3 ${rt.stat}`}>
+                               <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">¿Cómo funciona?</p>
+                               <ol className="text-xs text-gray-500 leading-relaxed space-y-1 list-decimal list-inside">
+                                 <li>Pasamos por tu dirección a recoger el móvil a la hora acordada.</li>
+                                 <li>Lo reparamos en nuestra tienda de Meco.</li>
+                                 <li>Te lo devolvemos en casa, listo y con garantía.</li>
+                               </ol>
+                               <p className="text-xs text-gray-500 leading-relaxed mt-2">
+                                 Los 5€ cubren la ida y la vuelta dentro de Meco.
+                               </p>
+                             </div>
+                           </div>
+                         )}
+
+                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
+                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
+                           <p className="text-xs text-gray-500 leading-relaxed">Al enviar la solicitud te responderemos por email con el precio y la hora propuesta. Para algunos modelos pedimos una señal para encargar la pieza: se paga con un enlace de pago 100% seguro (Stripe) y se descuenta del precio final.</p>
+                         </div>
+
+                         <div className="flex gap-2">
+                           <button
+                             type="button"
+                             onClick={() => setBookingStep(3)}
+                             disabled={bookingSubmitting}
+                             className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
+                           >
+                             <ArrowLeft size={16}/> Atrás
+                           </button>
+                           <button
+                             type="button"
+                             onClick={submitBooking}
+                             disabled={bookingSubmitting}
+                             className={`flex-1 disabled:opacity-60 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
+                           >
+                             {bookingSubmitting ? <><Loader2 size={18} className="animate-spin"/> Enviando…</> : <><CalendarCheck size={18}/> Enviar solicitud</>}
+                           </button>
+                         </div>
+                         <p className="text-[11px] text-gray-500 text-center leading-relaxed">
+                           Enviar la solicitud no cuesta nada y no compromete a nada. También puedes venir sin cita.
+                         </p>
+                       </div>
+                     )}
                    </div>
                  )}
                </div>
