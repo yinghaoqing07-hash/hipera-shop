@@ -103,9 +103,14 @@ export default function PoliticaEnvios() {
           <p>
             Los servicios de reparación de dispositivos móviles y otros servicios
             técnicos prestados por HIPERA <strong>no están cubiertos</strong> por esta
-            Política. La entrega y recogida del dispositivo se realiza siempre
-            presencialmente en el establecimiento físico, conforme al apartado §10 de
-            los Términos y Condiciones y al <Lit>Real Decreto 58/1988</Lit>.
+            Política, sino que se rigen por el apartado §10 de los Términos y
+            Condiciones y por el <Lit>Real Decreto 58/1988</Lit>. Por defecto, la
+            entrega y recogida del dispositivo se realiza presencialmente en el
+            establecimiento físico. Adicionalmente, dentro de la localidad de Meco,
+            el Cliente puede contratar de forma opcional un servicio de{' '}
+            <strong>recogida y entrega a domicilio</strong> del dispositivo, cuyas
+            condiciones y tarifa se detallan en el apartado §10 de los Términos y
+            Condiciones.
           </p>
         </Subsection>
 

@@ -139,9 +139,21 @@
 // es favorable/neutral para el Cliente (se le carga más tarde y la
 // retención puede liberarse) y no agrava obligaciones ni garantías; es una
 // aclaración del flujo real de pago, en línea con el criterio de 1.3→1.4.
+// 1.5 → 1.6 (2026-06-10): el flujo real de reparación pasa a reflejarse.
+// §10.4 reescrito: la solicitud de cita es GRATUITA y no vinculante (antes
+// se describía como "la reserva requiere el pago de un depósito"); la señal
+// (pago a cuenta) sólo se solicita, tras comunicar el presupuesto y con
+// aceptación previa, en reparaciones que requieren encargar pieza específica,
+// abonándose por enlace de pago seguro (Stripe) y descontándose del precio
+// final. Nuevo §10.9 "Recogida y entrega a domicilio (opcional)": servicio
+// opcional dentro de Meco, 5 € ida y vuelta. Terminología unificada a "señal".
+// NO requiere re-aceptación (TERMS_VERSION se mantiene): la cita pasa de
+// "requiere pago" a gratuita (favorable al Cliente) y el servicio a domicilio
+// es opcional y adicional; no se agravan obligaciones, garantías ni la base
+// económica del contrato.
 export const TERMS_VERSION = 3;
-export const TERMS_DOCUMENT_VERSION = '1.5';
-export const TERMS_UPDATED_AT = '2026-06-04';
+export const TERMS_DOCUMENT_VERSION = '1.6';
+export const TERMS_UPDATED_AT = '2026-06-10';
 
 // --- Política de Privacidad ---
 // 1.2 → 1.3 (2026-05-26): revisión correctiva no material que
@@ -173,9 +185,17 @@ export const TERMS_UPDATED_AT = '2026-06-04';
 // estaba divulgado como encargado desde doc 1.0, esta versión añade
 // una declaración material nueva de TRANSFERENCIA INTERNACIONAL de
 // datos a EE.UU.; por prudencia se renueva el consentimiento informado.
+// 1.4 → 1.5 (2026-06-10): aclaración no material en §4.1. Los datos del
+// servicio de reparación incluyen explícitamente, cuando el Cliente elige
+// la modalidad de recogida y entrega a domicilio, su dirección y franja
+// horaria de recogida. NO es una categoría nueva (la dirección postal ya
+// figuraba entre los datos identificativos y de contacto); sólo se precisa
+// su uso en el contexto de reparación. No cambian finalidades, bases
+// jurídicas, destinatarios ni transferencias. NO requiere re-aceptación
+// (PRIVACY_VERSION se mantiene).
 export const PRIVACY_VERSION = 4;
-export const PRIVACY_DOCUMENT_VERSION = '1.4';
-export const PRIVACY_UPDATED_AT = '2026-05-30';
+export const PRIVACY_DOCUMENT_VERSION = '1.5';
+export const PRIVACY_UPDATED_AT = '2026-06-10';
 
 // --- Política de Devoluciones ---
 // Documento informativo (manual operativo complementario a T&C §8),
@@ -226,9 +246,18 @@ export const RETURNS_UPDATED_AT = '2026-06-04';
 // en la custodia y confidencialidad del código. Cambio menor/aclaratorio:
 // no altera derechos del Cliente ni el procedimiento esencial; no requiere
 // re-aceptación (SHIPPING_VERSION se mantiene).
+// 1.3 → 1.4 (2026-06-10): se corrige §1.2 (servicios de reparación) para
+// eliminar la contradicción con el nuevo servicio opcional de recogida y
+// entrega a domicilio en Meco. Antes afirmaba que la entrega/recogida del
+// dispositivo era "siempre presencial en el establecimiento"; ahora indica
+// que por defecto es presencial y que, opcionalmente y dentro de Meco, cabe
+// la recogida/entrega a domicilio según T&C §10.9. Cambio aclaratorio que
+// describe un servicio adicional opcional; no altera tarifas de envío de
+// pedidos, zonas ni derechos del Cliente; no requiere re-aceptación
+// (SHIPPING_VERSION se mantiene).
 export const SHIPPING_VERSION = 1;
-export const SHIPPING_DOCUMENT_VERSION = '1.3';
-export const SHIPPING_UPDATED_AT = '2026-06-06';
+export const SHIPPING_DOCUMENT_VERSION = '1.4';
+export const SHIPPING_UPDATED_AT = '2026-06-10';
 
 // --- Política de Cookies ---
 // Documento independiente exigido por el Art. 22.2 LSSI-CE y la Guía

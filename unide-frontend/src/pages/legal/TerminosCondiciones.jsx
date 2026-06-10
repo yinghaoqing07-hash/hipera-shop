@@ -514,22 +514,46 @@ export default function TerminosCondiciones() {
             Art. 103.m del <Lit>RDLeg 1/2007</Lit>.
           </p>
         </Subsection>
-        <Subsection title="10.4 Reserva de citas y depósito">
+        <Subsection title="10.4 Solicitud de cita y señal para reparación">
           <p>
-            La reserva de cita para reparación requiere el pago de un depósito cuyo
-            importe se indica en el proceso de reserva en función del tipo de servicio y
-            dispositivo.
+            La solicitud de cita de reparación a través de la web es{' '}
+            <strong>gratuita y no vinculante</strong>: el Cliente facilita sus datos
+            de contacto y la información del dispositivo, y HIPERA le comunica por
+            correo electrónico el presupuesto y la hora propuesta, sin que se efectúe
+            ningún cobro en línea en el momento de solicitar la cita.
           </p>
           <p>
-            El depósito tiene la naturaleza de <strong>pago a cuenta</strong> según el{' '}
-            <Lit>Art. 1454 del Código Civil</Lit>:
+            En determinadas reparaciones cuyos componentes deben encargarse
+            específicamente (piezas no disponibles en stock), HIPERA podrá solicitar
+            al Cliente, <strong>una vez comunicado el presupuesto y con su
+            aceptación previa</strong>, el pago de una <strong>señal</strong> para
+            encargar la pieza. Dicha señal:
           </p>
           <ul className="list-disc list-inside space-y-1 ml-2">
-            <li>Si el cliente decide proceder con la reparación, el depósito se aplica al precio final del servicio.</li>
-            <li>Si HIPERA no puede realizar la reparación (falta de stock, complejidad imprevista), el depósito se reembolsa íntegramente.</li>
-            <li>Si el cliente cancela con más de 24 horas de antelación, el depósito se reembolsa íntegramente.</li>
-            <li>Si el cliente cancela con menos de 24 horas o no se presenta (<em>no-show</em>), el depósito no será reembolsado.</li>
+            <li>
+              Se abona mediante un <strong>enlace de pago seguro</strong> procesado
+              por la pasarela de pagos (Stripe), conforme a la §6 de los presentes
+              Términos.
+            </li>
+            <li>
+              Tiene la naturaleza de <strong>pago a cuenta</strong> (<Lit>Art. 1454
+              del Código Civil</Lit>) y se descuenta del precio final del servicio
+              cuando la reparación se lleva a cabo.
+            </li>
+            <li>
+              Se <strong>reembolsa íntegramente</strong> si HIPERA no puede finalmente
+              realizar la reparación o no logra obtener la pieza encargada.
+            </li>
+            <li>
+              Cubre el coste del componente encargado; en caso de que el Cliente
+              desista una vez encargada la pieza específica, HIPERA podrá retener el
+              importe correspondiente al coste de dicha pieza, reembolsando el resto.
+            </li>
           </ul>
+          <p className="text-xs text-gray-500">
+            Para las reparaciones estándar con componentes en stock no se solicita
+            señal; el pago se realiza al recoger el dispositivo reparado.
+          </p>
         </Subsection>
         <Subsection title="10.5 Garantía de la reparación">
           <p>
@@ -651,6 +675,40 @@ export default function TerminosCondiciones() {
             del equipo o del personal. Si durante el diagnóstico se detectan defectos
             adicionales a los inicialmente comunicados, HIPERA contactará al cliente con
             un presupuesto ampliado para su aprobación expresa antes de continuar.
+          </p>
+        </Subsection>
+        <Subsection title="10.9 Recogida y entrega a domicilio (opcional)">
+          <p>
+            Como alternativa a la entrega presencial en tienda, y únicamente dentro
+            de la localidad de <strong>Meco</strong>, el Cliente puede contratar de
+            forma <strong>opcional</strong> que HIPERA recoja el dispositivo en su
+            domicilio y se lo devuelva una vez reparado.
+          </p>
+          <ul className="list-disc list-inside space-y-1 ml-2">
+            <li>
+              El precio del servicio es de <strong>5 €</strong> e incluye la recogida
+              y la posterior entrega (ida y vuelta) dentro de la localidad de Meco.
+            </li>
+            <li>
+              El Cliente selecciona esta modalidad e indica su dirección al solicitar
+              la cita. HIPERA acuerda con el Cliente la franja horaria de recogida.
+            </li>
+            <li>
+              En el momento de la recogida y de la entrega, el Cliente o persona
+              autorizada deberá encontrarse en el domicilio indicado. Si no fuera
+              posible la entrega o recogida por causa ajena a HIPERA, podrán acordarse
+              un nuevo intento o la recogida presencial en tienda.
+            </li>
+            <li>
+              La responsabilidad sobre los datos del dispositivo y las recomendaciones
+              previas (copia de seguridad, retirada de SIM/SD, etc.) descritas en la
+              §10.6 resultan igualmente de aplicación a esta modalidad.
+            </li>
+          </ul>
+          <p className="text-xs text-gray-500">
+            HIPERA podrá modificar o ampliar la zona de cobertura y la tarifa de este
+            servicio, comunicándolo en el sitio web. La tarifa vigente es la que se
+            muestra al Cliente en el proceso de solicitud de cita.
           </p>
         </Subsection>
       </Section>

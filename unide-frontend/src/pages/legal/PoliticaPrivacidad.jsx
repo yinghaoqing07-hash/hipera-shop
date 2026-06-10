@@ -275,7 +275,9 @@ export default function PoliticaPrivacidad() {
               <strong>Datos del servicio de reparación:</strong> modelo y marca del
               dispositivo, descripción de la avería, número de serie o IMEI cuando
               proceda, fecha y hora de la cita, fotografía del estado inicial del
-              equipo si se considera oportuno.
+              equipo si se considera oportuno y, cuando el Cliente solicita la
+              modalidad de recogida y entrega a domicilio, su dirección y franja
+              horaria de recogida.
             </li>
             <li>
               <strong>Datos de comunicaciones:</strong> mensajes intercambiados con
