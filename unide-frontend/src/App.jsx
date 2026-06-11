@@ -2616,7 +2616,7 @@ export default function App() {
                                  key={b}
                                  type="button"
                                  onClick={() => setBookingForm(f => ({ ...f, brand: f.brand === b ? '' : b, model: f.brand === b ? f.model : '' }))}
-                                 className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${bookingForm.brand === b ? rt.chipOn : rt.chipOff}`}
+                                 className={`py-2.5 rounded-xl text-xs font-bold border transition-colors ${bookingForm.brand === b ? rt.chipOn : rt.chipOff}`}
                                >
                                  {b}
                                </button>
@@ -2630,13 +2630,13 @@ export default function App() {
                                reparaciones): elegir tocando, sin teclear. El input de abajo
                                queda como vía libre para modelos fuera del catálogo. */}
                            {bookingForm.brand && bookingModelOptions.length > 0 && (
-                             <div className="flex flex-wrap gap-2 mb-2">
+                             <div className="flex gap-2 mb-2 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-1">
                                {bookingModelOptions.map(m => (
                                  <button
                                    key={m}
                                    type="button"
                                    onClick={() => setBookingForm(f => ({ ...f, model: f.model === m ? '' : m }))}
-                                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${bookingForm.model === m ? rt.chipOn : rt.chipOff}`}
+                                   className={`flex-shrink-0 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${bookingForm.model === m ? rt.chipOn : rt.chipOff}`}
                                  >
                                    {m}
                                  </button>
