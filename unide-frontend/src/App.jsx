@@ -2630,7 +2630,7 @@ export default function App() {
                                queda como vía libre para modelos fuera del catálogo. */}
                            {bookingForm.brand && bookingModelOptions.length > 0 && (
                              <div className="flex flex-wrap gap-2 mb-2">
-                               {bookingModelOptions.slice(0, 12).map(m => (
+                               {bookingModelOptions.slice(0, 24).map(m => (
                                  <button
                                    key={m}
                                    type="button"
