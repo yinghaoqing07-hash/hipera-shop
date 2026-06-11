@@ -2142,7 +2142,7 @@ export default function App() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3" onClick={() => navTo("home")}>
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white font-extrabold shadow-lg shadow-red-200">H</div>
-              <div><h1 className="font-bold text-lg leading-none text-gray-900">HIPERA</h1><p className="text-[10px] text-gray-500 tracking-wider font-medium">SUPERMERCADO EN MECO</p></div>
+              <div><h1 className="font-bold text-lg leading-none text-gray-900">HIPERA</h1><p className="text-[10px] text-gray-500 tracking-wider font-medium">SUPERMERCADO Y BAZAR EN MECO</p></div>
             </div>
             <div className="flex items-center gap-3">
                {user ? (
