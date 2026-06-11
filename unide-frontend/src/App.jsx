@@ -12,6 +12,7 @@ import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保�
 import { apiClient } from './api/client'; // 新增：API客户端
 import CookieConsent from './components/CookieConsent';
 import { useCookieConsent } from './hooks/useCookieConsent';
+import { enableAnalytics, disableAnalytics, trackPurchase, trackRepairLead } from './utils/analytics';
 import { TurnstileGate } from './components/TurnstileGate';
 import AddressAutocomplete from './components/AddressAutocomplete';
 import TerminosCondiciones from './pages/legal/TerminosCondiciones';
@@ -813,6 +814,21 @@ const LegalPage = ({ type, onBack }) => {
 // con dynamic import en los call-sites para mantener jsPDF/QRCode
 // fuera del bundle inicial.
 
+// AnalyticsConsentBridge — puente RGPD entre el banner de cookies y GA4.
+// No renderiza nada: sólo observa el consentimiento de 'analytics' y
+// activa/desactiva GA4 (que se carga bajo demanda en analytics.js, nunca
+// antes del consentimiento). Reacciona en caliente si el usuario cambia
+// su decisión en el modal "Configurar".
+function AnalyticsConsentBridge() {
+  const { hasConsent } = useCookieConsent();
+  const analyticsOn = hasConsent('analytics');
+  useEffect(() => {
+    if (analyticsOn) enableAnalytics();
+    else disableAnalytics();
+  }, [analyticsOn]);
+  return null;
+}
+
 export default function App() {
   // --- Core Data ---
   const [products, setProducts] = useState([]);
@@ -950,6 +966,7 @@ export default function App() {
     try {
       await apiClient.createRepairBooking(bookingForm);
       setBookingDone(true);
+      trackRepairLead(); // conversión GA4: solicitud de cita de reparación
     } catch (e) {
       toast.error(e?.message || 'No se pudo enviar la solicitud. Inténtalo de nuevo o llámanos.');
     } finally {
@@ -1146,6 +1163,21 @@ export default function App() {
       setSelectedGift(null);
       setAppliedCoupon(null); setCouponInput(''); setCouponError('');
       toast.success('¡Pago recibido! Te hemos enviado la confirmación por email.', { duration: 7000 });
+      // Conversión GA4: pago con tarjeta/Bizum completado al volver de
+      // Stripe. transaction_id = id del pedido (?pedido=), value estimado
+      // guardado antes del redirect. GA4 deduplica por transaction_id, así
+      // que un reload no cuenta doble. (La success_url no es prueba de
+      // pago, pero es el punto de conversión convencional para Ads.)
+      let stripeValue;
+      try {
+        const v = sessionStorage.getItem('hipera_pending_value');
+        if (v != null) stripeValue = Number(v);
+        sessionStorage.removeItem('hipera_pending_value');
+      } catch { /* ignore */ }
+      trackPurchase({
+        id: urlParams.get('pedido') || undefined,
+        value: Number.isFinite(stripeValue) ? stripeValue : undefined,
+      });
       // Limpiamos los parámetros de la URL para que recargar no repita el toast.
       window.history.replaceState({ app: true }, '', window.location.pathname);
     } else if (pago === 'cancelado') {
@@ -1682,7 +1714,12 @@ export default function App() {
         });
         if (!url) throw new Error('No se pudo iniciar el pago. Inténtalo de nuevo.');
         // Marca para mostrar feedback al volver y limpiar el carrito.
-        try { sessionStorage.setItem('hipera_pending_stripe', '1'); } catch { /* ignore */ }
+        try {
+          sessionStorage.setItem('hipera_pending_stripe', '1');
+          // Importe estimado (base − descuento) para reportar el value de
+          // la conversión GA4 al volver de Stripe (ver rama ?pago=ok).
+          sessionStorage.setItem('hipera_pending_value', String(Math.max(0, baseTotal - discount)));
+        } catch { /* ignore */ }
         toast.loading('Redirigiendo al pago seguro…', { duration: 4000 });
         window.location.href = url; // salida de la SPA → Stripe Checkout
         return; // no seguimos con el flujo de pedido normal
@@ -1707,6 +1744,10 @@ export default function App() {
         items: finalCart,
         turnstile_token: turnstileToken,
       });
+
+      // Conversión GA4: pedido completado (Bizum / contra reembolso). El
+      // total autoritativo (con descuento aplicado) lo devuelve el backend.
+      trackPurchase({ id: orderData?.id, value: Number(orderData?.total) });
 
       // Mensaje matizado por método de pago + modalidad de entrega.
       // En contra_reembolso + store_pickup se paga en mostrador, no al
@@ -2053,6 +2094,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 pb-20 font-sans selection:bg-red-100 max-w-md mx-auto relative shadow-2xl">
       <Toaster position="top-center" toastOptions={{style:{borderRadius:'12px', background:'#333', color:'#fff'}}}/>
       <CookieConsent onShowPolicy={() => { setLegalType("cookies"); navTo("legal"); }} />
+      <AnalyticsConsentBridge />
 
       {/* Payment Modal */}
       {/* HEADER */}

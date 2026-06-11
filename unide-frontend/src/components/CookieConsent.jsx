@@ -8,7 +8,10 @@
 // Antes de la decisión del usuario:
 //   - No se carga ningún script de tracking (analytics, marketing).
 //     El consumidor de estos servicios debe consultar useCookieConsent()
-//     antes de inicializar: if (hasConsent('analytics')) loadPlausible();
+//     antes de inicializar. En la práctica esto lo hace
+//     AnalyticsConsentBridge (App.jsx): observa hasConsent('analytics') y
+//     activa/desactiva GA4 (src/utils/analytics.js), que sólo inyecta
+//     gtag.js bajo demanda y nunca antes del consentimiento.
 // =====================================================================
 
 import { useState, useEffect } from 'react';
