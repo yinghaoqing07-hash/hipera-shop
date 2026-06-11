@@ -51,6 +51,15 @@ export default defineConfig({
             return 'vendor-router';
           }
 
+          // Sentry: se inicializa en el primer paint (main.jsx) para
+          // capturar errores desde el arranque, así que no se puede
+          // diferir. Lo aislamos en su propio chunk estable para que el
+          // navegador lo cachee entre despliegues y no re-descargue ~30 KB
+          // cada vez que cambie el código de la app.
+          if (id.includes('@sentry')) {
+            return 'vendor-sentry';
+          }
+
           // Iconos: lucide-react entrega un export por icono, Rollup
           // sólo incluye los usados, pero la lista usada por HIPERA
           // ronda ~60 iconos → vale la pena aislarlos para que el

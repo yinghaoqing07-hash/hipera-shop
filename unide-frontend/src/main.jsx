@@ -1,11 +1,31 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
+import * as Sentry from '@sentry/react';
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { supabase, clearSupabaseLocalSession } from './supabaseClient';
 import { apiClient } from './api/client';
 import './index.css';
 
 import App from './App';
+
+// =====================================================================
+// Sentry — monitorización de errores del cliente (opcional, gated por env)
+// =====================================================================
+// Sólo se activa si VITE_SENTRY_DSN está definido en el build; sin DSN es
+// un no-op total. Se ejecuta como monitorización FUNCIONAL (interés
+// legítimo): no escribe cookies, no rastrea al usuario y desactiva el
+// envío de PII (sendDefaultPii false). Por eso NO se condiciona al banner
+// de cookies — sólo captura excepciones de JS para enterarnos de pantallas
+// en blanco en el navegador del cliente. tracesSampleRate a 0: ni trazas
+// de rendimiento ni session replay, así no añade peso ni recoge sesiones.
+if (import.meta.env.VITE_SENTRY_DSN) {
+  Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    environment: import.meta.env.MODE,
+    sendDefaultPii: false,
+    tracesSampleRate: 0,
+  });
+}
 // =====================================================================
 // Code-splitting: páginas que no son la home pública se cargan a
 // demanda. El panel /admin es el caso más extremo (~600 KB con jsPDF,
@@ -31,6 +51,40 @@ function ChunkLoading({ label = 'Cargando…' }) {
       <div className="flex flex-col items-center gap-3 text-gray-500">
         <div className="w-8 h-8 border-4 border-gray-200 border-t-gray-600 rounded-full animate-spin" aria-hidden="true" />
         <span className="text-sm">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+// Fallback de último recurso si un error de render rompe toda la app
+// (pantalla en blanco). En vez de dejar al cliente con una página vacía,
+// mostramos un mensaje claro y un botón para recargar. Si Sentry está
+// activo ya ha capturado la excepción al llegar aquí. Funciona aunque no
+// haya DSN: el ErrorBoundary evita el white screen por sí solo.
+function AppCrash({ resetError }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+      <div className="max-w-md bg-white border border-gray-200 rounded-2xl shadow-sm p-6 text-center space-y-4">
+        <h1 className="text-xl font-bold text-gray-900">Algo ha fallado</h1>
+        <p className="text-sm text-gray-600">
+          Ha ocurrido un error inesperado al cargar la página. Vuelve a
+          intentarlo; si el problema continúa, recarga la web.
+        </p>
+        <div className="flex gap-2 justify-center pt-2">
+          <button
+            type="button"
+            onClick={() => { resetError?.(); window.location.reload(); }}
+            className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors"
+          >
+            Recargar
+          </button>
+          <a
+            href="/"
+            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            Ir al inicio
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -157,9 +211,10 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 
 root.render(
   <React.StrictMode>
-    <BrowserRouter>
-      <Suspense fallback={<ChunkLoading />}>
-        <Routes>
+    <Sentry.ErrorBoundary fallback={({ resetError }) => <AppCrash resetError={resetError} />}>
+      <BrowserRouter>
+        <Suspense fallback={<ChunkLoading />}>
+          <Routes>
           {/* 公开前台 */}
           <Route path="/" element={<App />} />
           <Route path="/repair" element={<App />} />
@@ -184,8 +239,9 @@ root.render(
               lo que provocaba "soft 404" en Google: cualquier URL
               desconocida devolvía contenido de home con HTTP 200). */}
           <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </Sentry.ErrorBoundary>
   </React.StrictMode>
 );

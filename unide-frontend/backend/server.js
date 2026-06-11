@@ -1,4 +1,5 @@
 import express from 'express';
+import * as Sentry from '@sentry/node';
 import dotenv from 'dotenv';
 import FormData from 'form-data';
 import rateLimit from 'express-rate-limit';
@@ -38,6 +39,50 @@ import {
 } from './services/coupons.js';
 
 dotenv.config();
+
+// =====================================================================
+// Sentry — monitorización de errores (opcional, gated por env)
+// =====================================================================
+// Sólo se activa si SENTRY_DSN está definido en el entorno; sin DSN es un
+// no-op total (no se envía nada, no añade latencia). Configurado como
+// monitor de errores PURO: tracesSampleRate 0 (sin trazas de rendimiento,
+// que es lo que abulta la factura) y sendDefaultPii false (no adjuntamos
+// IP ni datos del cliente). Objetivo: enterarse de las caídas que más
+// cuestan en una tienda de una persona —proceso muerto, fallo silencioso
+// del webhook de Stripe— aunque ocurran de madrugada.
+const SENTRY_ENABLED = !!process.env.SENTRY_DSN;
+if (SENTRY_ENABLED) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: 0,
+    sendDefaultPii: false,
+  });
+  console.log('[Sentry] monitorización de errores activada');
+}
+
+// reportError — registra en consola y, si Sentry está activo, lo envía.
+// Centraliza el patrón para los catch críticos sin acoplar el resto del
+// código a Sentry (función hoisted → usable en los handlers de más abajo).
+function reportError(err, context) {
+  if (context) console.error(context, err?.message || err);
+  else console.error(err?.message || err);
+  if (SENTRY_ENABLED) {
+    Sentry.captureException(err, context ? { extra: { context } } : undefined);
+  }
+}
+
+// Red de seguridad a nivel de proceso: una excepción no capturada o una
+// promesa rechazada sin manejar tumban el servidor en Railway. Las
+// reportamos antes de salir para enterarnos del porqué.
+process.on('uncaughtException', (err) => {
+  reportError(err, '[fatal] uncaughtException');
+  if (SENTRY_ENABLED) Sentry.flush(2000).finally(() => process.exit(1));
+  else process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  reportError(reason, '[fatal] unhandledRejection');
+});
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -392,7 +437,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
     // Otros eventos: los aceptamos con 200 sin procesar.
     return res.json({ received: true });
   } catch (e) {
-    console.error('[stripe] error crítico procesando webhook:', e?.message || e);
+    // Fallo crítico: el pago se confirmó en Stripe pero no pudimos
+    // reflejarlo en BD (pedido pagado pero no registrado / sin stock
+    // descontado). Es el error más caro de no enterarse → a Sentry.
+    reportError(e, '[stripe] error crítico procesando webhook');
     // 500 → Stripe reintentará el evento (no perdemos la confirmación).
     return res.status(500).json({ error: 'internal' });
   }
@@ -1026,6 +1074,54 @@ async function restockItems(items) {
 }
 
 // =====================================================================
+// snapshotItemTaxRates — congela el tipo de IVA de cada producto en el
+// momento de la venta.
+// =====================================================================
+// VeriFactu exige que la factura refleje el IVA vigente CUANDO se vendió,
+// no el actual. Si mañana se reclasifica un producto en el panel (p. ej.
+// de 21% a 10%), las facturas ya emitidas —con hash encadenado inmutable—
+// deben poder reconstruirse con el IVA correcto. Por eso copiamos
+// products.tax_rate dentro de cada línea del pedido en el instante de la
+// compra; el desglose de IVA (tax_breakdown) de la fase de facturación se
+// calculará a partir de este valor congelado, nunca releyendo el catálogo.
+//
+// Fuente AUTORITATIVA = tabla products (servidor). Ignoramos cualquier
+// tax_rate que viniera en el body del cliente (no es de fiar para algo
+// fiscal). Los servicios (sin id en products) se dejan intactos: su IVA se
+// resolverá aparte en facturación. Si un producto se borra tras la compra
+// se deja como estaba (no podemos inventar su IVA).
+//
+// Tolerante a fallos: si la lectura del catálogo falla devolvemos los
+// items sin tocar en vez de bloquear la venta. Es preferible un pedido sin
+// IVA congelado (la facturación lo marcará para revisión) a un cliente que
+// no puede comprar por un glitch de Supabase.
+async function snapshotItemTaxRates(items) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+
+  const ids = [...new Set(
+    items
+      .filter((it) => it && it.id && !it.isService)
+      .map((it) => it.id)
+  )];
+  if (ids.length === 0) return items;
+
+  const { data, error } = await supabase
+    .from('products')
+    .select('id, tax_rate')
+    .in('id', ids);
+  if (error) {
+    console.error('[tax] snapshot de IVA falló (pedido se guarda sin congelar):', error.message);
+    return items;
+  }
+
+  const rateById = new Map((data || []).map((p) => [p.id, p.tax_rate]));
+  return items.map((it) => {
+    if (!it || !it.id || it.isService || !rateById.has(it.id)) return it;
+    return { ...it, tax_rate: rateById.get(it.id) };
+  });
+}
+
+// =====================================================================
 // Handlers de webhook de Stripe
 // =====================================================================
 // (Declarados como function → hoisted, usables por la ruta de webhook
@@ -1534,6 +1630,11 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
       }
     }
 
+    // Congelar el IVA vigente de cada producto dentro del propio pedido
+    // (ver snapshotItemTaxRates) para poder emitir después la factura
+    // VeriFactu con el desglose correcto aunque el catálogo cambie luego.
+    const itemsForOrder = await snapshotItemTaxRates(items);
+
     // Create order
     // confirmed_at = now: estos pedidos (efectivo/COD/Bizum manual) son
     // accionables al instante, así que deben disparar la alerta del Admin
@@ -1550,7 +1651,7 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
         total: finalTotal,
         status: status || 'Procesando',
         payment_method: payment_method || 'Pendiente',
-        items,
+        items: itemsForOrder,
         customer_email: hasValidEmail ? normalizedEmail : null,
         delivery_method: resolvedDeliveryMethod,
         ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
@@ -1584,6 +1685,8 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
 
     res.json(data);
   } catch (error) {
+    // Pedido que no llegó a guardarse = venta perdida → lo reportamos.
+    reportError(error, '[orders] error creando pedido');
     res.status(500).json({ error: error.message });
   }
 });
@@ -1730,6 +1833,11 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
     }
     const finalTotal = Math.max(0, Math.round((Number(total) - discount) * 100) / 100);
 
+    // Congelar el IVA vigente de cada producto (ver snapshotItemTaxRates),
+    // igual que en POST /api/orders: la factura VeriFactu se emitirá a
+    // partir de este snapshot, no releyendo el catálogo.
+    const itemsForOrder = await snapshotItemTaxRates(items);
+
     // 1) Crear el pedido en 'Esperando pago' (sin descontar stock).
     const { data: order, error: insErr } = await supabase
       .from('orders')
@@ -1741,7 +1849,7 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
         total: finalTotal,
         status: 'Esperando pago',
         payment_method: 'Tarjeta (Stripe)', // provisional; el webhook lo afina al método real
-        items,
+        items: itemsForOrder,
         customer_email: normalizedEmail,
         delivery_method: resolvedDeliveryMethod,
         ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
@@ -1797,7 +1905,7 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
 
     return res.json({ url: session.url, order_id: order.id });
   } catch (error) {
-    console.error('[stripe] error creando sesión de checkout:', error?.message || error);
+    reportError(error, '[stripe] error creando sesión de checkout');
     return res.status(500).json({
       error: 'No se pudo iniciar el pago. Inténtalo de nuevo en unos segundos.',
       code: 'STRIPE_SESSION_FAILED',
@@ -3060,10 +3168,18 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+// El health check vive arriba (justo tras crear el cliente de Supabase):
+// `GET /api/health` hace una consulta real a la BD y devuelve 500 si el
+// entorno está roto, ideal para el monitor de uptime. Express usa la
+// PRIMERA ruta registrada, así que aquí no se duplica.
+
+// Manejador de errores de Sentry: captura cualquier excepción que SÍ se
+// propague por Express (rutas sin try/catch propio o errores lanzados por
+// middleware). Debe registrarse DESPUÉS de todas las rutas. Los handlers
+// que ya capturan su propio error usan reportError() directamente.
+if (SENTRY_ENABLED) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on port ${PORT}`);
