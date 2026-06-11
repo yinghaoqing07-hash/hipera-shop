@@ -924,10 +924,32 @@ export default function App() {
 
   // 新增这两个状态用于筛选
   // Reserva de cita de reparación (formulario por pasos en /repair).
-  // Flujo: 1 Contacto → 2 Tu móvil → 3 Avería → enviado. La tienda
-  // responde por email con precio y hora propuesta.
+  // Flujo: 1 Tu móvil + avería → 2 Recogida → 3 Contacto → enviado. La
+  // tienda responde por email con precio y hora propuesta.
+  //
+  // Reordenado el 2026-06-11: antes el PRIMER paso pedía nombre/teléfono/
+  // email, es decir, exigía datos personales a alguien que aún no había
+  // contado nada de su avería — el punto de mayor abandono, y justo la
+  // página a la que apuntará el tráfico de pago (Google Ads). Ahora el
+  // cliente primero invierte en describir móvil/problema/recogida (pasos
+  // de tocar botones, sin fricción) y el contacto se pide AL FINAL, cuando
+  // ya está comprometido y a un clic del presupuesto. El formulario sólo
+  // se envía al final, así que el cambio no pierde ningún dato parcial.
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [bookingStep, setBookingStep] = useState(1); // 1 contacto · 2 móvil · 3 avería · 4 recogida
+  const [bookingStep, setBookingStep] = useState(1); // 1 móvil+avería · 2 recogida · 3 contacto
+
+  // Al abrir el asistente o avanzar de paso, el scroll se quedaba donde
+  // estaba (el paso 1 es alto: tras pulsar "Siguiente" se veía una
+  // pantalla en blanco hasta subir a mano). Subimos arriba en cada
+  // cambio. Nota: el overlay es `fixed`, pero dentro del layout centrado
+  // (ancestro con transform) `fixed` se comporta como absolute, así que
+  // quien manda es el scroll de la VENTANA — por eso se resetean ambos.
+  const bookingScrollRef = useRef(null);
+  useEffect(() => {
+    if (!bookingOpen) return;
+    bookingScrollRef.current?.scrollTo?.(0, 0);
+    window.scrollTo(0, 0);
+  }, [bookingOpen, bookingStep]);
   const [bookingForm, setBookingForm] = useState({ brand: '', model: '', repair_type: '', customer_name: '', phone: '', email: '', note: '', handover: '', address: '' });
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingDone, setBookingDone] = useState(false);
@@ -958,7 +980,23 @@ export default function App() {
     return true;
   };
 
+  // Modelos conocidos de la marca elegida, sacados del catálogo de
+  // servicios de reparación (tabla repairs). Alimentan los chips de
+  // selección rápida y el datalist del campo de modelo. Orden numérico
+  // ("iPhone 9" antes que "iPhone 11"); sin marca elegida devuelve todos
+  // (solo lo usa el datalist — los chips exigen marca para no abrumar).
+  const bookingModelOptions = [...new Set(
+    repairs
+      .filter(r => !bookingForm.brand || r.brand?.toLowerCase() === bookingForm.brand.toLowerCase())
+      .map(r => r.model)
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+
   const submitBooking = async () => {
+    // El contacto es la pantalla desde la que se envía → se valida aquí.
+    if (!bookingContactOk()) return;
+    // Defensivos: estos campos se validaron en sus pasos, pero protegen
+    // contra estados imposibles (p. ej. cambios futuros del flujo).
     if (!bookingForm.repair_type) { toast.error('Elige qué le pasa a tu móvil.'); return; }
     if (!bookingForm.handover) { toast.error('Elige cómo nos haces llegar el móvil.'); return; }
     if (bookingForm.handover === 'domicilio' && !bookingForm.address.trim()) { toast.error('Escribe tu dirección en Meco para la recogida.'); return; }
@@ -2424,7 +2462,7 @@ export default function App() {
                 <h3 className={`font-bold mb-3 flex items-center gap-2 ${rt.sectionTitle}`}><CheckCircle2 size={16} className={rt.howIcon}/> Cómo funciona</h3>
                 <div className="space-y-3">
                   {[
-                    ['1', 'Pide tu cita', 'Tus datos, tu móvil y qué le pasa. Tres pasos, menos de un minuto.'],
+                    ['1', 'Pide tu cita', 'Tu móvil, qué le pasa y cómo contactarte. Tres pasos, menos de un minuto.'],
                     ['2', 'Recibe precio y hora', 'Te enviamos por email el precio y la hora propuesta, sin compromiso.'],
                     ['3', 'Tráelo a HIPERA', 'Paseo del Sol 1, Meco. Puedes dejarlo mientras haces la compra.'],
                   ].map(([step, title, text]) => (
@@ -2499,7 +2537,7 @@ export default function App() {
                paso (o cierra en el paso 1) y la X cierra siempre. Cada
                paso lleva título + explicación sobre la barra de progreso. */}
            {bookingOpen && (
-             <div className={`fixed inset-0 z-50 overflow-y-auto animate-fade-in ${rt.page}`}>
+             <div ref={bookingScrollRef} className={`fixed inset-0 z-50 overflow-y-auto animate-fade-in ${rt.page}`}>
                <div className={`px-4 py-3 flex items-center gap-3 sticky top-0 backdrop-blur z-10 border-b ${rt.topbar}`}>
                  <button
                    type="button"
@@ -2549,78 +2587,25 @@ export default function App() {
                    <div className="p-5 pb-16 space-y-5">
                      {/* Cabecera del paso: qué hay que hacer + progreso */}
                      <div>
-                       <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Paso {bookingStep} de 4</p>
+                       <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Paso {bookingStep} de 3</p>
                        <h4 className={`text-2xl font-black mt-1 leading-tight ${rt.modalTitle}`}>
-                         {bookingStep === 1 ? 'Tus datos de contacto' : bookingStep === 2 ? 'Tu móvil' : bookingStep === 3 ? '¿Qué le pasa?' : 'Recogida del móvil'}
+                         {bookingStep === 1 ? 'Tu móvil' : bookingStep === 2 ? 'Recogida del móvil' : 'Tus datos de contacto'}
                        </h4>
                        <p className="text-sm text-gray-500 mt-1 leading-relaxed">
                          {bookingStep === 1
-                           ? 'Dinos cómo contactarte: te enviaremos el precio y la hora propuesta por email.'
+                           ? 'Cuéntanos qué dispositivo traes y qué le pasa: con eso preparamos tu presupuesto.'
                            : bookingStep === 2
-                           ? 'Cuéntanos qué dispositivo traes: marca y modelo (aproximado también vale).'
-                           : bookingStep === 3
-                           ? 'Elige el problema y, si quieres, cuéntanos algún detalle más para preparar tu presupuesto.'
-                           : '¿Nos lo traes a la tienda o pasamos a recogerlo por tu casa en Meco?'}
+                           ? '¿Nos lo traes a la tienda o pasamos a recogerlo por tu casa en Meco?'
+                           : 'Ya casi está: dinos dónde te enviamos el precio y la hora propuesta.'}
                        </p>
                        <div className="flex gap-1.5 mt-4">
-                         {[1, 2, 3, 4].map(s => (
+                         {[1, 2, 3].map(s => (
                            <div key={s} className={`h-1.5 flex-1 rounded-full transition-colors ${s <= bookingStep ? rt.progressOn : rt.progressOff}`}></div>
                          ))}
                        </div>
                      </div>
 
                      {bookingStep === 1 && (
-                       <div className="space-y-4 animate-fade-in">
-                         <div>
-                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Tu nombre</label>
-                           <input
-                             value={bookingForm.customer_name}
-                             onChange={(e) => setBookingForm(f => ({ ...f, customer_name: e.target.value }))}
-                             placeholder="Nombre y apellido"
-                             autoComplete="name"
-                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
-                           />
-                         </div>
-                         <div>
-                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Teléfono</label>
-                           <input
-                             type="tel"
-                             inputMode="tel"
-                             value={bookingForm.phone}
-                             onChange={(e) => setBookingForm(f => ({ ...f, phone: e.target.value }))}
-                             placeholder="6XX XXX XXX"
-                             autoComplete="tel"
-                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
-                           />
-                         </div>
-                         <div>
-                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Email</label>
-                           <input
-                             type="email"
-                             inputMode="email"
-                             value={bookingForm.email}
-                             onChange={(e) => setBookingForm(f => ({ ...f, email: e.target.value }))}
-                             placeholder="tu@email.com"
-                             autoComplete="email"
-                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
-                           />
-                           <p className="text-[11px] text-gray-500 mt-1.5">Aquí te enviaremos el precio y la hora propuesta.</p>
-                         </div>
-                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
-                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
-                           <p className="text-xs text-gray-500 leading-relaxed">Tus datos solo se usan para gestionar esta reparación. Te respondemos normalmente el mismo día, en horario de tienda.</p>
-                         </div>
-                         <button
-                           type="button"
-                           onClick={() => { if (bookingContactOk()) setBookingStep(2); }}
-                           className={`w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
-                         >
-                           Siguiente <ArrowRight size={17}/>
-                         </button>
-                       </div>
-                     )}
-
-                     {bookingStep === 2 && (
                        <div className="space-y-4 animate-fade-in">
                          <div>
                            <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Marca</label>
@@ -2640,6 +2625,23 @@ export default function App() {
                          </div>
                          <div>
                            <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Modelo</label>
+                           {/* Chips de modelos conocidos de la marca elegida (catálogo de
+                               reparaciones): elegir tocando, sin teclear. El input de abajo
+                               queda como vía libre para modelos fuera del catálogo. */}
+                           {bookingForm.brand && bookingModelOptions.length > 0 && (
+                             <div className="flex flex-wrap gap-2 mb-2">
+                               {bookingModelOptions.slice(0, 12).map(m => (
+                                 <button
+                                   key={m}
+                                   type="button"
+                                   onClick={() => setBookingForm(f => ({ ...f, model: f.model === m ? '' : m }))}
+                                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${bookingForm.model === m ? rt.chipOn : rt.chipOff}`}
+                                 >
+                                   {m}
+                                 </button>
+                               ))}
+                             </div>
+                           )}
                            <input
                              value={bookingForm.model}
                              onChange={(e) => setBookingForm(f => ({ ...f, model: e.target.value }))}
@@ -2648,59 +2650,34 @@ export default function App() {
                              className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
                            />
                            <datalist id="booking-model-suggestions">
-                             {[...new Set(repairs.filter(r => !bookingForm.brand || r.brand?.toLowerCase() === bookingForm.brand.toLowerCase()).map(r => r.model))].sort().map(m => (
+                             {bookingModelOptions.map(m => (
                                <option key={m} value={m}/>
                              ))}
                            </datalist>
                            <p className="text-[11px] text-gray-500 mt-1.5">Si no lo sabes exacto, pon lo que recuerdes.</p>
                          </div>
-                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
-                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
-                           <p className="text-xs text-gray-500 leading-relaxed">Truco: el modelo exacto aparece en Ajustes → Información del teléfono, o en la caja original. Reparamos todas las marcas.</p>
-                         </div>
-                         <div className="flex gap-2">
-                           <button
-                             type="button"
-                             onClick={() => setBookingStep(1)}
-                             className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
-                           >
-                             <ArrowLeft size={16}/> Atrás
-                           </button>
-                           <button
-                             type="button"
-                             onClick={() => {
-                               if (!bookingForm.model.trim()) { toast.error('Dinos el modelo (aunque sea aproximado).'); return; }
-                               setBookingStep(3);
-                             }}
-                             className={`flex-1 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
-                           >
-                             Siguiente <ArrowRight size={17}/>
-                           </button>
-                         </div>
-                       </div>
-                     )}
-
-                     {bookingStep === 3 && (
-                       <div className="space-y-4 animate-fade-in">
-                         <div className="space-y-2">
-                           {[
-                             ['pantalla', 'Pantalla rota o no responde', Smartphone],
-                             ['bateria', 'Batería: dura poco o se apaga', Wrench],
-                             ['otro', 'Otro problema', Info],
-                           ].map(([val, label, Icon]) => (
-                             <button
-                               key={val}
-                               type="button"
-                               onClick={() => setBookingForm(f => ({ ...f, repair_type: val }))}
-                               className={`w-full p-4 rounded-2xl border flex items-center gap-3 text-left transition-all active:scale-[0.99] ${bookingForm.repair_type === val ? rt.bigOn : rt.bigOff}`}
-                             >
-                               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bookingForm.repair_type === val ? rt.bigIconOn : rt.bigIconOff}`}>
-                                 <Icon size={20}/>
-                               </div>
-                               <span className="text-sm font-bold flex-1">{label}</span>
-                               {bookingForm.repair_type === val && <CheckCircle2 size={18} className={`flex-shrink-0 ${rt.check}`}/>}
-                             </button>
-                           ))}
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">¿Qué le pasa?</label>
+                           <div className="space-y-2">
+                             {[
+                               ['pantalla', 'Pantalla rota o no responde', Smartphone],
+                               ['bateria', 'Batería: dura poco o se apaga', Wrench],
+                               ['otro', 'Otro problema', Info],
+                             ].map(([val, label, Icon]) => (
+                               <button
+                                 key={val}
+                                 type="button"
+                                 onClick={() => setBookingForm(f => ({ ...f, repair_type: val }))}
+                                 className={`w-full p-4 rounded-2xl border flex items-center gap-3 text-left transition-all active:scale-[0.99] ${bookingForm.repair_type === val ? rt.bigOn : rt.bigOff}`}
+                               >
+                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bookingForm.repair_type === val ? rt.bigIconOn : rt.bigIconOff}`}>
+                                   <Icon size={20}/>
+                                 </div>
+                                 <span className="text-sm font-bold flex-1">{label}</span>
+                                 {bookingForm.repair_type === val && <CheckCircle2 size={18} className={`flex-shrink-0 ${rt.check}`}/>}
+                               </button>
+                             ))}
+                           </div>
                          </div>
                          <div>
                            <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Cuéntanos más <span className={`normal-case font-normal ${rt.muted}`}>(opcional)</span></label>
@@ -2716,29 +2693,21 @@ export default function App() {
                            <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
                            <p className="text-xs text-gray-500 leading-relaxed">El presupuesto no compromete a nada: te lo enviamos y tú decides. Toda reparación incluye 6 meses de garantía.</p>
                          </div>
-                         <div className="flex gap-2">
-                           <button
-                             type="button"
-                             onClick={() => setBookingStep(2)}
-                             className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
-                           >
-                             <ArrowLeft size={16}/> Atrás
-                           </button>
-                           <button
-                             type="button"
-                             onClick={() => {
-                               if (!bookingForm.repair_type) { toast.error('Elige qué le pasa a tu móvil.'); return; }
-                               setBookingStep(4);
-                             }}
-                             className={`flex-1 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
-                           >
-                             Siguiente <ArrowRight size={17}/>
-                           </button>
-                         </div>
+                         <button
+                           type="button"
+                           onClick={() => {
+                             if (!bookingForm.model.trim()) { toast.error('Dinos el modelo (aunque sea aproximado).'); return; }
+                             if (!bookingForm.repair_type) { toast.error('Elige qué le pasa a tu móvil.'); return; }
+                             setBookingStep(2);
+                           }}
+                           className={`w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
+                         >
+                           Siguiente <ArrowRight size={17}/>
+                         </button>
                        </div>
                      )}
 
-                     {bookingStep === 4 && (
+                     {bookingStep === 2 && (
                        <div className="space-y-4 animate-fade-in">
                          <div className="space-y-2">
                            <button
@@ -2795,15 +2764,78 @@ export default function App() {
                            </div>
                          )}
 
+                         <div className="flex gap-2">
+                           <button
+                             type="button"
+                             onClick={() => setBookingStep(1)}
+                             className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
+                           >
+                             <ArrowLeft size={16}/> Atrás
+                           </button>
+                           <button
+                             type="button"
+                             onClick={() => {
+                               if (!bookingForm.handover) { toast.error('Elige cómo nos haces llegar el móvil.'); return; }
+                               if (bookingForm.handover === 'domicilio' && !bookingForm.address.trim()) { toast.error('Escribe tu dirección en Meco para la recogida.'); return; }
+                               setBookingStep(3);
+                             }}
+                             className={`flex-1 py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all ${rt.primaryBtn}`}
+                           >
+                             Siguiente <ArrowRight size={17}/>
+                           </button>
+                         </div>
+                       </div>
+                     )}
+
+                     {bookingStep === 3 && (
+                       <div className="space-y-4 animate-fade-in">
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Tu nombre</label>
+                           <input
+                             value={bookingForm.customer_name}
+                             onChange={(e) => setBookingForm(f => ({ ...f, customer_name: e.target.value }))}
+                             placeholder="Nombre y apellido"
+                             autoComplete="name"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                         </div>
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Teléfono</label>
+                           <input
+                             type="tel"
+                             inputMode="tel"
+                             value={bookingForm.phone}
+                             onChange={(e) => setBookingForm(f => ({ ...f, phone: e.target.value }))}
+                             placeholder="6XX XXX XXX"
+                             autoComplete="tel"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                         </div>
+                         <div>
+                           <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1.5">Email</label>
+                           <input
+                             type="email"
+                             inputMode="email"
+                             value={bookingForm.email}
+                             onChange={(e) => setBookingForm(f => ({ ...f, email: e.target.value }))}
+                             placeholder="tu@email.com"
+                             autoComplete="email"
+                             className={`w-full p-3.5 border rounded-xl text-sm outline-none focus:ring-2 ${rt.input}`}
+                           />
+                           <p className="text-[11px] text-gray-500 mt-1.5">Aquí te enviaremos el precio y la hora propuesta.</p>
+                         </div>
+                         <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
+                           <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
+                           <p className="text-xs text-gray-500 leading-relaxed">Tus datos solo se usan para gestionar esta reparación. Te respondemos normalmente el mismo día, en horario de tienda.</p>
+                         </div>
                          <div className={`rounded-xl border p-3 flex gap-2.5 ${rt.stat}`}>
                            <Info size={14} className={`flex-shrink-0 mt-0.5 ${rt.cardIcon}`}/>
                            <p className="text-xs text-gray-500 leading-relaxed">Al enviar la solicitud te responderemos por email con el precio y la hora propuesta. Para algunos modelos pedimos una señal para encargar la pieza: se paga con un enlace de pago 100% seguro (Stripe) y se descuenta del precio final.</p>
                          </div>
-
                          <div className="flex gap-2">
                            <button
                              type="button"
-                             onClick={() => setBookingStep(3)}
+                             onClick={() => setBookingStep(2)}
                              disabled={bookingSubmitting}
                              className={`px-4 border py-3.5 rounded-2xl font-bold flex items-center justify-center gap-1.5 transition-all ${rt.backBtn}`}
                            >
