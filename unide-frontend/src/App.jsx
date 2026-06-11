@@ -982,15 +982,16 @@ export default function App() {
 
   // Modelos conocidos de la marca elegida, sacados del catálogo de
   // servicios de reparación (tabla repairs). Alimentan los chips de
-  // selección rápida y el datalist del campo de modelo. Orden numérico
-  // ("iPhone 9" antes que "iPhone 11"); sin marca elegida devuelve todos
-  // (solo lo usa el datalist — los chips exigen marca para no abrumar).
+  // selección rápida y el datalist del campo de modelo. Se respeta el
+  // orden de la tabla (id ascendente = orden curado en BD: de más nuevo a
+  // más antiguo, agrupado por línea de producto), por eso NO reordenamos
+  // aquí. Sin marca elegida devuelve todos (solo lo usa el datalist).
   const bookingModelOptions = [...new Set(
     repairs
       .filter(r => !bookingForm.brand || r.brand?.toLowerCase() === bookingForm.brand.toLowerCase())
       .map(r => r.model)
       .filter(Boolean)
-  )].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  )];
 
   const submitBooking = async () => {
     // El contacto es la pantalla desde la que se envía → se valida aquí.
