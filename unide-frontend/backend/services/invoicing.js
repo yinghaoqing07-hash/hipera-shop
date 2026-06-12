@@ -12,8 +12,9 @@
 //   3) buildVerifactuPayload(...) → normaliza los datos del pedido al
 //      formato que enviaremos al proveedor. Sirve también para detectar
 //      qué datos faltan ANTES de contratar la API.
-//   4) issueInvoiceWithProvider(...) → STUB. Lanza error hasta que se
-//      integre fiskaly. Mantiene aislado todo lo específico del proveedor.
+//
+// La emisión real (API SIGN ES de fiskaly) vive en services/fiskaly.js,
+// que reutiliza las piezas de este módulo.
 //
 // Marco legal: RD 1007/2023 y Orden HAC/1177/2024 (VeriFactu). El IVA en
 // España aplica tipos 4 % (superreducido), 10 % (reducido) y 21 %
@@ -256,17 +257,9 @@ export function buildVerifactuPayload(order, opts = {}) {
 }
 
 /**
- * STUB del proveedor VeriFactu. Cuando se contrate fiskaly, aquí se hará
- * la llamada HTTP a su API (SIGN ES) con el payload de buildVerifactuPayload
- * y se devolverá { id, hash, qr } para guardarlos en el pedido.
- *
- * Mantener TODO lo específico de fiskaly dentro de esta función para que el
- * resto del backend no dependa del proveedor.
+ * La emisión real con el proveedor vive en services/fiskaly.js
+ * (createFiskalyService → issueInvoiceForOrder): API SIGN ES, claim
+ * atómico de verifactu_status, numeración persistida antes de emitir y
+ * PUT idempotente. Este módulo queda como capa PURA (desglose, numeración
+ * y datos del emisor) que fiskaly.js reutiliza.
  */
-// eslint-disable-next-line no-unused-vars
-export async function issueInvoiceWithProvider(payload) {
-  throw new Error(
-    'Proveedor VeriFactu (fiskaly) aún no configurado. ' +
-    'Implementar la llamada a la API en services/invoicing.js → issueInvoiceWithProvider.'
-  );
-}

@@ -37,6 +37,7 @@ import {
   computeSubtotal,
   couponErrorMessage,
 } from './services/coupons.js';
+import { createFiskalyService, isFiskalyEnabled } from './services/fiskaly.js';
 
 dotenv.config();
 
@@ -359,6 +360,25 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+// =====================================================================
+// fiskaly SIGN ES — facturación VeriFactu (dormant sin FISKALY_*)
+// =====================================================================
+// La factura simplificada se emite EN EL MOMENTO DEL COBRO efectivo:
+//   - Stripe con cargo inmediato (Bizum/tarjeta auto) → webhook 'paid'
+//   - Tarjeta con retención → al capturar desde el panel
+//   - Contra reembolso / pago en tienda → al marcar 'Entregado'
+// Siempre best-effort: una caída de fiskaly NUNCA bloquea el pedido; el
+// estado queda en 'error' y se reintenta desde el panel
+// (POST /api/admin/orders/:id/invoice).
+const fiskaly = createFiskalyService({ supabase, reportError });
+
+function issueInvoiceBestEffort(orderId, trigger) {
+  if (!isFiskalyEnabled()) return;
+  fiskaly.issueInvoiceForOrder(orderId).catch((e) => {
+    reportError(e, `[fiskaly] emisión falló (${trigger}) pedido ${orderId}`);
+  });
+}
 
 // Health check (for Railway/Vercel monitoring + debugging env issues)
 app.get('/api/health', async (_req, res) => {
@@ -1248,6 +1268,12 @@ async function handleStripeCheckoutCompleted(session) {
     autoPrintTicket(fulfilledOrder).catch((err) => {
       console.error('[stripe][print] fallo (no bloquea):', err?.message || err);
     });
+  }
+
+  // Factura VeriFactu sólo si hubo COBRO real (Bizum / captura automática).
+  // Las autorizaciones aún no cobradas facturan al capturar desde el panel.
+  if (!isAuthorizedOnly) {
+    issueInvoiceBestEffort(orderId, 'stripe pago confirmado');
   }
 
   console.log('[stripe] pedido', isAuthorizedOnly ? 'AUTORIZADO (pendiente de cobro)' : 'confirmado y procesado', ':', orderId, '·', paymentLabel);
@@ -2174,10 +2200,39 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
+
+    // 'Entregado' = cobro efectivo de contra reembolso / pago en tienda →
+    // momento de la factura. Para pedidos Stripe ya facturados al cobrar,
+    // el claim de verifactu_status lo convierte en no-op (idempotente).
+    if (status === 'Entregado') {
+      issueInvoiceBestEffort(id, 'pedido entregado');
+    }
+
     res.json(data);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/admin/orders/:id/invoice — emite (o REINTENTA) la factura
+// VeriFactu de un pedido. Pensado para el caso 'error' (fiskaly caído en
+// el momento del cobro) o para forzar un 'pending' atascado con
+// { force: true }. Responde con el resultado de la emisión.
+app.post('/api/admin/orders/:id/invoice', authenticateAdmin, async (req, res) => {
+  try {
+    if (!isFiskalyEnabled()) {
+      return res.status(503).json({ error: 'fiskaly no está configurado (faltan FISKALY_* en el entorno)' });
+    }
+    const { id } = req.params;
+    const force = req.body?.force === true;
+    const result = await fiskaly.issueInvoiceForOrder(id, { force });
+    if (result.ok) return res.json(result);
+    if (result.skipped) return res.status(409).json({ error: `No emitida: ${result.skipped}`, ...result });
+    return res.status(500).json({ error: result.error || 'Emisión fallida', ...result });
+  } catch (error) {
+    reportError(error, '[fiskaly] reintento manual falló');
     res.status(500).json({ error: error.message });
   }
 });
@@ -2208,6 +2263,7 @@ app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) =>
       if (order.status === 'Autorizado') {
         await supabase.from('orders').update({ status: 'Procesando' }).eq('id', id);
       }
+      issueInvoiceBestEffort(id, 'captura ya realizada'); // idempotente si ya facturó
       return res.json({ ok: true, alreadyCaptured: true });
     }
 
@@ -2225,6 +2281,9 @@ app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) =>
       .select()
       .single();
     if (uErr) throw uErr;
+
+    // El dinero acaba de moverse de verdad → momento de la factura.
+    issueInvoiceBestEffort(id, 'captura de autorización');
 
     console.log('[stripe] pago cobrado (capturado) para pedido:', id);
     return res.json({ ok: true, order: data });

@@ -26,4 +26,12 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  // El backend es Node (process, Buffer…), no navegador. Sin este bloque,
+  // todo backend/ daba falsos "process is not defined" y el lint era ruido.
+  {
+    files: ['backend/**/*.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ])
