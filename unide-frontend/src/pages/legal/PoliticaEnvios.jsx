@@ -402,11 +402,41 @@ export default function PoliticaEnvios() {
           <p>
             El equipo de HIPERA prepara el pedido en el establecimiento físico,
             verificando la disponibilidad de cada producto, su buen estado y, cuando
-            proceda, sus condiciones de conservación (refrigeración, fragilidad). Si
-            durante la preparación se detectara que algún producto no está disponible,
-            HIPERA contactará con el Cliente para acordar la sustitución por un
-            producto equivalente, el reembolso del importe correspondiente o la
-            cancelación parcial del pedido.
+            proceda, sus condiciones de conservación (refrigeración, fragilidad).
+          </p>
+        </Subsection>
+
+        <Subsection title="5.2 bis. Sustituciones y productos no disponibles">
+          <p>
+            El catálogo online comparte existencias con la tienda física, por lo que,
+            excepcionalmente, un producto puede agotarse entre la confirmación del
+            pedido y su preparación. En tal caso, HIPERA contactará con el Cliente{' '}
+            <strong>antes de expedir el pedido</strong> (preferentemente por WhatsApp
+            o teléfono, al número facilitado en el pedido) para que elija entre:
+          </p>
+          <ul className="list-disc list-inside space-y-1 ml-2">
+            <li>
+              <strong>Sustitución</strong> por un producto equivalente de igual o
+              superior calidad. Si el sustituto tiene un precio superior, la
+              diferencia será asumida por HIPERA; si es inferior, se reembolsará la
+              diferencia al Cliente.
+            </li>
+            <li>
+              <strong>Reembolso parcial inmediato</strong> del importe del producto
+              no disponible, por el mismo medio de pago utilizado.
+            </li>
+            <li>
+              <strong>Cancelación total</strong> del pedido con reembolso íntegro,
+              si el producto no disponible era esencial para el Cliente.
+            </li>
+          </ul>
+          <p>
+            Si el Cliente no respondiera antes de la salida del pedido, HIPERA
+            aplicará por defecto la opción menos gravosa para el Cliente: se retira
+            el producto no disponible y se <strong>reembolsa su importe</strong> de
+            forma inmediata, sin coste ni gestión alguna a cargo del Cliente. En
+            ningún caso se sustituirá un producto sin ofrecer al Cliente la
+            posibilidad de reembolso.
           </p>
         </Subsection>
 

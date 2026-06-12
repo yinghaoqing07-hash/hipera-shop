@@ -3045,12 +3045,23 @@ export default function App() {
                       </div>
                       <span className="font-extrabold text-lg text-gray-900">€{order.total?.toFixed(2)}</span>
                     </div>
-                    <button 
-                      onClick={() => generateInvoice(order)} 
+                    <button
+                      onClick={() => generateInvoice(order)}
                       className="mt-4 w-full border border-gray-200 py-2 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
                     >
                       <Download size={16}/> Descargar justificante de pedido
                     </button>
+                    {/* Canal directo por pedido: abre WhatsApp con el nº de
+                        pedido ya escrito. Las dudas de "¿dónde está / falta
+                        algo?" se resuelven en chat y no en reseñas. */}
+                    <a
+                      href={waLink(`Hola, tengo una consulta sobre mi pedido #${order.id.slice(0, 8).toUpperCase()} de hipera.es`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 w-full border border-green-200 bg-green-50 py-2 rounded-xl text-sm font-bold text-green-700 flex items-center justify-center gap-2 hover:bg-green-100 transition-colors"
+                    >
+                      <Phone size={16}/> ¿Alguna duda? Escríbenos por WhatsApp
+                    </a>
                   </div>
                 ))}
               </div>
@@ -3409,6 +3420,21 @@ export default function App() {
                  )}
                </div>
              )}
+
+            {/* Compromiso de disponibilidad: el stock online comparte
+                estantería con la tienda física, así que puede faltar
+                alguna unidad al preparar. Decirlo ANTES de pagar (con la
+                solución incluida) convierte el imprevisto en una
+                expectativa gestionada en vez de en una reseña negativa.
+                Política completa en /?legal=envios. */}
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3">
+              <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5"/>
+              <p className="text-xs text-blue-900 leading-relaxed">
+                <span className="font-bold">Si algo se agota al preparar tu pedido,</span>{' '}
+                te escribimos por WhatsApp antes de enviarlo: lo cambiamos por un
+                producto equivalente o te devolvemos esa parte al instante. Tú decides.
+              </p>
+            </div>
 
             {/* =====================================================
                 Método de pago (inline, en la propia página).
