@@ -2555,7 +2555,7 @@ export default function AdminApp() {
                           (() => {
                             const list = (byCategoryAndSub[cid] || {})['__none__'] || [];
                             return list.length === 0 ? <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos sin categoría.</div> : (
-                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>
+                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, '__none__', list))}</tbody></table>
                             );
                           })()
                         ) : (
