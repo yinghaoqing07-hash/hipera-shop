@@ -330,17 +330,24 @@ const autoPrintTicket = async (order) => {
 // Trust proxy (needed for Railway/reverse proxy setups)
 app.set('trust proxy', true);
 
-// CORS: valid header values only (Chrome rejects invalid tokens in Allow-Headers).
-// El dominio canónico desde 2026-05-25 es https://hipera.es (Cloudflare DNS +
-// Vercel Domains). El alias técnico https://hipera-shop.vercel.app sigue activo
-// y se acepta como origen para no romper despliegues de preview ni accesos
-// directos al deploy de Vercel.
-const CORS_ALLOW_ORIGIN = 'https://hipera.es';
+// CORS: whitelist explícita de orígenes permitidos.
+// - https://hipera.es — dominio canónico (Cloudflare DNS + Vercel Domains)
+// - https://hipera-shop.vercel.app — alias técnico del deploy de Vercel
+// - *.vercel.app — previews de PR/branch generados automáticamente por Vercel
+// Cualquier otro Origin recibe el dominio canónico (sin credenciales válidas
+// para la petición, pero la respuesta no expone datos).
 const CORS_ALLOW_HEADERS = 'Content-Type, Authorization, Accept';
+const CORS_ALLOWED_ORIGINS = new Set([
+  'https://hipera.es',
+  'https://hipera-shop.vercel.app',
+]);
+const isAllowedOrigin = (origin) =>
+  CORS_ALLOWED_ORIGINS.has(origin) ||
+  /^https:\/\/[a-z0-9-]+-[a-z0-9]+-[a-z0-9]+\.vercel\.app$/.test(origin);
 
 app.use((req, res, next) => {
   const raw = (req.headers.origin || '').trim();
-  const validOrigin = raw && raw !== 'null' && /^https?:\/\//.test(raw) ? raw : CORS_ALLOW_ORIGIN;
+  const validOrigin = raw && isAllowedOrigin(raw) ? raw : 'https://hipera.es';
   res.setHeader('Access-Control-Allow-Origin', validOrigin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
