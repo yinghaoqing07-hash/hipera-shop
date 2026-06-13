@@ -3055,12 +3055,12 @@ export default function App() {
                         pedido ya escrito. Las dudas de "¿dónde está / falta
                         algo?" se resuelven en chat y no en reseñas. */}
                     <a
-                      href={waLink(`Hola, tengo una consulta sobre mi pedido #${order.id.slice(0, 8).toUpperCase()} de hipera.es`)}
+                      href={waLink(`Hola, es por mi pedido #${order.id.slice(0, 8).toUpperCase()} de hipera.es`)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="mt-2 w-full border border-green-200 bg-green-50 py-2 rounded-xl text-sm font-bold text-green-700 flex items-center justify-center gap-2 hover:bg-green-100 transition-colors"
                     >
-                      <Phone size={16}/> ¿Alguna duda? Escríbenos por WhatsApp
+                      <Phone size={16}/> Consultar por WhatsApp
                     </a>
                   </div>
                 ))}
@@ -3430,9 +3430,9 @@ export default function App() {
             <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3">
               <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5"/>
               <p className="text-xs text-blue-900 leading-relaxed">
-                <span className="font-bold">Si algo se agota al preparar tu pedido,</span>{' '}
-                te escribimos por WhatsApp antes de enviarlo: lo cambiamos por un
-                producto equivalente o te devolvemos esa parte al instante. Tú decides.
+                A veces algo se agota en tienda. Si pasa con tu pedido, te
+                escribimos por WhatsApp antes de enviarlo y eliges: otro parecido
+                o te devolvemos el dinero de ese producto.
               </p>
             </div>
 
