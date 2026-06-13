@@ -183,18 +183,6 @@ function productDisplayName(product) {
   return (product?.shortName || product?.short_name || product?.name || '').trim();
 }
 
-function taxSuggestionConfidenceClass(value) {
-  if (value === 'high') return 'bg-green-50 text-green-700 border-green-200';
-  if (value === 'medium') return 'bg-blue-50 text-blue-700 border-blue-200';
-  if (value === 'low') return 'bg-amber-50 text-amber-700 border-amber-200';
-  return 'bg-gray-50 text-gray-600 border-gray-200';
-}
-
-function taxSuggestionRiskClass(value) {
-  if (value === 'low') return 'bg-green-50 text-green-700 border-green-200';
-  if (value === 'medium') return 'bg-blue-50 text-blue-700 border-blue-200';
-  return 'bg-red-50 text-red-700 border-red-200';
-}
 
 function resolveTaxCategoryFromSuggestion(suggestion) {
   const raw = suggestion?.suggested_tax_category || '';
@@ -344,11 +332,6 @@ export default function AdminApp() {
   const [selectedParentForSub, setSelectedParentForSub] = useState(null);
   const [newRepair, setNewRepair] = useState({ brand: "", model: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO." });
 
-  // 修改：增加了 description, oferta, oferta_type, oferta_value
-  const [formData, setFormData] = useState({
-    name: "", shortName: "", price: "", category: "", image: "", stock: "", 
-    description: "", oferta: false, oferta_type: "percent", oferta_value: 0
-  });
 
   useEffect(() => { fetchData(); }, []);
 
@@ -492,7 +475,6 @@ export default function AdminApp() {
   // que el histórico no se reporta como nuevo (sólo lo que entre a
   // partir de este momento).
   const {
-    newOrders,
     newCount,
     isMuted,
     toggleMute,
@@ -564,7 +546,7 @@ export default function AdminApp() {
           if (p.images) {
             try {
               images = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
-            } catch (e) {
+            } catch (_e) {
               images = p.image ? [p.image] : [];
             }
           } else if (p.image) {
@@ -797,7 +779,7 @@ export default function AdminApp() {
   };
 
   const [stockEdits, setStockEdits] = useState({});
-  const [reordering, setReordering] = useState(false);
+  const [, setReordering] = useState(false);
   const [updatingStockId, setUpdatingStockId] = useState(null);
   const handleQuickStockUpdate = async (p) => {
     const newStock = parseInt(stockEdits[p.id] ?? p.stock, 10);
@@ -809,7 +791,7 @@ export default function AdminApp() {
     try {
       const payload = { stock: newStock };
       if (newStock > 0) payload.visible = true;
-      const updated = await apiClient.updateProduct(p.id, payload);
+      await apiClient.updateProduct(p.id, payload);
       setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock: newStock, visible: newStock > 0 ? true : x.visible } : x));
       setStockEdits(prev => { const n = {...prev}; delete n[p.id]; return n; });
       toast.success(newStock > 0 ? "Stock actualizado, producto re-publicado" : "Stock actualizado");
@@ -1941,7 +1923,7 @@ export default function AdminApp() {
       const url = URL.createObjectURL(blob);
       const w = window.open(url, '_blank');
       if (w) {
-        setTimeout(() => { try { w.print(); } catch (_) {} }, 800);
+        setTimeout(() => { try { w.print(); } catch (_) { /* ignore */ } }, 800);
         setTimeout(() => URL.revokeObjectURL(url), 30000);
         toast.success('Imprimir ticket');
       } else {
@@ -1953,7 +1935,7 @@ export default function AdminApp() {
           setTimeout(() => {
             try { iframe.contentWindow?.print(); } catch (_) { window.open(url, '_blank'); }
           }, 600);
-          setTimeout(() => { URL.revokeObjectURL(url); try { document.body.removeChild(iframe); } catch (_) {} }, 30000);
+          setTimeout(() => { URL.revokeObjectURL(url); try { document.body.removeChild(iframe); } catch (_) { /* ignore */ } }, 30000);
         };
         toast.success('Imprimir ticket');
       }
@@ -2254,7 +2236,7 @@ export default function AdminApp() {
     };
 
     const renderProductRow = (p, cid, subId, list) => (
-      <tr key={p.id} draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
+      <tr key={p.id} draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) { /* ignore */ } }}>
         <td className="p-2 w-10">
           {(p.image || p.images?.[0]) && (
             <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" onClick={e => e.stopPropagation()}/>
@@ -2289,7 +2271,7 @@ export default function AdminApp() {
     );
 
     const renderProductCard = (p, cid, subId, list) => (
-      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3" draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
+      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3" draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) { /* ignore */ } }}>
         <div className="flex-shrink-0 pt-1 flex flex-col gap-1">
           {(p.image || p.images?.[0]) && (
             <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" onClick={e => e.stopPropagation()}/>
@@ -2647,7 +2629,7 @@ export default function AdminApp() {
         ids.splice(fromIdx, 1);
         ids.splice(ids.indexOf(targetCat.id), 0, d.id);
         handleReorderCategories(ids);
-      } catch (_) {}
+      } catch (_) { /* ignore */ }
     };
 
     return (
@@ -2682,7 +2664,7 @@ export default function AdminApp() {
                        ids.splice(fromIdx, 1);
                        ids.splice(ids.indexOf(s.id), 0, d.id);
                        handleReorderSubCategories(c.id, ids);
-                     } catch (_) {}
+                     } catch (_) { /* ignore */ }
                    }}>
                      <span className="flex items-center gap-1"><GripVertical size={12} className="text-gray-300 opacity-0 group-hover:opacity-100 cursor-grab"/>- {s.name}</span>
                      <button onClick={() => handleDeleteCategory(s.id, true)} className="text-gray-300 hover:text-red-600"><Trash2 size={14}/></button>

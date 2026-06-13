@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import { jsPDF } from 'jspdf'; // named import: el default es un objeto, no el constructor (rompe `new jsPDF`)
 import QRCode from 'qrcode';
 import printer from 'pdf-to-printer';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
@@ -2980,7 +2980,7 @@ REGLAS:
           specifications: productInfo.specifications || null
         }
       });
-    } catch (parseErr) {
+    } catch (_parseErr) {
       // 如果JSON解析失败，返回原始内容作为description
       res.json({ description: responseContent, productInfo: null });
     }
