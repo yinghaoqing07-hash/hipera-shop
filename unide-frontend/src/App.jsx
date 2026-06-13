@@ -3058,9 +3058,9 @@ export default function App() {
                       href={waLink(`Hola, es por mi pedido #${order.id.slice(0, 8).toUpperCase()} de hipera.es`)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-2 w-full border border-green-200 bg-green-50 py-2 rounded-xl text-sm font-bold text-green-700 flex items-center justify-center gap-2 hover:bg-green-100 transition-colors"
+                      className="mt-2 w-full border border-gray-200 py-2 rounded-xl text-sm font-bold text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors"
                     >
-                      <Phone size={16}/> Consultar por WhatsApp
+                      Consultar por WhatsApp
                     </a>
                   </div>
                 ))}
@@ -3426,15 +3426,13 @@ export default function App() {
                 alguna unidad al preparar. Decirlo ANTES de pagar (con la
                 solución incluida) convierte el imprevisto en una
                 expectativa gestionada en vez de en una reseña negativa.
-                Política completa en /?legal=envios. */}
-            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3">
-              <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5"/>
-              <p className="text-xs text-blue-900 leading-relaxed">
-                A veces algo se agota en tienda. Si pasa con tu pedido, te
-                escribimos por WhatsApp antes de enviarlo y eliges: otro parecido
-                o te devolvemos el dinero de ese producto.
-              </p>
-            </div>
+                A propósito SIN caja de color ni icono: es letra pequeña
+                honesta, no un aviso que grita. Política en /?legal=envios. */}
+            <p className="text-xs text-gray-500 leading-relaxed px-1">
+              A veces algo se agota en tienda. Si pasa con tu pedido, te
+              escribimos por WhatsApp antes de enviarlo y eliges: otro parecido
+              o te devolvemos el dinero de ese producto.
+            </p>
 
             {/* =====================================================
                 Método de pago (inline, en la propia página).
