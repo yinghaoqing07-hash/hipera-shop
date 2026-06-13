@@ -6,6 +6,10 @@
       "destination": "https://hipera-shop-production.up.railway.app/api/:path*"
     },
     {
+      "source": "/repair",
+      "destination": "/repair.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
