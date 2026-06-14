@@ -10,10 +10,11 @@ import {
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
   Bell, BellOff, Download, TrendingUp, Eye, EyeOff, MapPin, Phone, Mail, CreditCard, StickyNote,
-  Truck, Store, Smartphone, CalendarCheck
+  Truck, Store, Smartphone, CalendarCheck, ScanLine
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
+import IvaLookup from './components/IvaLookup';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
 
@@ -445,12 +446,14 @@ export default function AdminApp() {
         case '3': setActiveTab('categories'); return;
         case '4': setActiveTab('repairs'); return;
         case '5': setActiveTab('orders'); return;
+        case '6': setActiveTab('iva'); return;
         case 'r': e.preventDefault(); fetchData(); toast.success('Datos actualizados'); return;
         default: break;
       }
       if (e.key === '/') {
         if (activeTab === 'products') { e.preventDefault(); focusEl('search-products'); return; }
         if (activeTab === 'orders') { e.preventDefault(); focusEl('search-orders'); return; }
+        if (activeTab === 'iva') { e.preventDefault(); focusEl('search-iva'); return; }
       }
       if (e.key === 'n') {
         if (activeTab === 'products') { e.preventDefault(); focusEl('new-product-name'); return; }
@@ -3555,7 +3558,7 @@ const renderRepairs = () => (
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
             <Group title="Navegación" rows={[
-              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos'],
+              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd><Kbd>6</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos / Consulta IVA'],
             ]}/>
             <Group title="En cada sección" rows={[
               [<Kbd>/</Kbd>, 'Enfocar el buscador'],
@@ -4131,6 +4134,7 @@ const renderRepairs = () => (
               )}
             </button>
             <button onClick={() => { setActiveTab("orders"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
+            <button onClick={() => { setActiveTab("iva"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='iva'?'bg-red-600':'hover:bg-gray-800'}`}><ScanLine size={20}/><span>Consulta IVA</span></button>
         </nav>
         <div className="px-4 pt-4 border-t border-gray-800 space-y-2">
           {/* Controles de alerta sonora de pedidos nuevos.
@@ -4246,6 +4250,7 @@ const renderRepairs = () => (
             {activeTab === 'repairs' && renderRepairs()}
             {activeTab === 'citas' && renderBookings()}
             {activeTab === 'orders' && renderOrders()}
+            {activeTab === 'iva' && <IvaLookup />}
           </>
         )}
       </main>
