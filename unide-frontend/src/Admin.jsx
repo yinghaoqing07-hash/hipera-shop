@@ -15,6 +15,7 @@ import {
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
 import IvaLookup from './components/IvaLookup';
+import EanIvaScanner from './components/EanIvaScanner';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
 
@@ -3779,7 +3780,7 @@ const renderRepairs = () => (
                     <button type="button" onClick={() => applyTaxSuggestionToCurrentProduct(currentTaxSuggestion)} disabled={!currentTaxSuggestion.suggested_tax_rate} className="px-2.5 py-1 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-gray-800 disabled:opacity-50 flex-shrink-0">Usar</button>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[11px] text-gray-500">Sin sugerencia IVA local. Busca en POS o consulta gestor.</div>
+                  <EanIvaScanner onApply={(rate) => setCurrentProduct(prev => ({ ...prev, taxRate: rate }))} />
                 )}
 
                 {/* Visible + Foto: dos toggles en una fila */}
