@@ -1,19 +1,19 @@
-// EanIvaScanner — botón inline de escaneo EAN para la pantalla de revisión de IVA.
+// EanIvaScanner — escáner EAN inline para la pantalla de revisión de IVA.
 //
-// Sustituye el texto "Sin sugerencia IVA local" cuando no hay sugerencia
-// automática. El usuario escanea el código de barras del producto físico
-// y, si se encuentra en el catálogo de UNIDE, aparece el IVA con un botón
-// "Usar" que llama a onApply(taxRateString).
+// Estrategia de detección (de más rápido a más lento):
+//   1. BarcodeDetector nativo (iOS 17+ Safari / Android Chrome) → casi instantáneo.
+//   2. @zxing/browser como fallback (JS puro, sin WASM, funciona en todos).
 //
-// Los datos se cargan de /unide-iva.json la primera vez que se monta
-// cualquier instancia; quedan en DATA_CACHE para toda la sesión.
+// El escáner se muestra a pantalla completa para maximizar la resolución
+// que el navegador envía a la cámara. Guía visual de esquinas (como POS
+// físicos), sin marco opaco que tape el código.
 
 import { useEffect, useRef, useState } from 'react';
-import { ScanLine, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { ScanLine, X, AlertCircle, CheckCircle, Zap } from 'lucide-react';
 
+// ─── Catálogo UNIDE (caché compartida por toda la sesión) ────────────────────
 let DATA_CACHE = null;
 let DATA_LOAD_PROMISE = null;
-
 function loadData() {
   if (DATA_CACHE) return Promise.resolve(DATA_CACHE);
   if (!DATA_LOAD_PROMISE) {
@@ -24,12 +24,87 @@ function loadData() {
   }
   return DATA_LOAD_PROMISE;
 }
-
 function lookupEan(ean, data) {
   if (!ean || !data) return null;
   return data.find(p => p.e === ean) ?? null;
 }
 
+// ─── Motor de detección ──────────────────────────────────────────────────────
+// Devuelve una función de cleanup (para parar la cámara/escáner).
+async function startDetection(videoEl, onFound) {
+  // — Abrir cámara a alta resolución (el navegador elegirá el mejor modo) —
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    });
+  } catch (err) {
+    const code =
+      err?.name === 'NotAllowedError' ? 'permission' :
+      err?.name === 'NotFoundError'   ? 'nocamera'   : 'error';
+    throw Object.assign(new Error(err?.message), { code });
+  }
+  videoEl.srcObject = stream;
+  await videoEl.play();
+
+  // — 1. BarcodeDetector nativo (iOS 17+ / Chrome Android) —
+  if ('BarcodeDetector' in window) {
+    let active = true;
+    let detector;
+    try {
+      detector = new window.BarcodeDetector({
+        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf'],
+      });
+    } catch (_) {
+      detector = new window.BarcodeDetector(); // fallback sin especificar formatos
+    }
+
+    const poll = async () => {
+      if (!active || videoEl.readyState < 2) {
+        if (active) setTimeout(poll, 80);
+        return;
+      }
+      try {
+        const results = await detector.detect(videoEl);
+        if (results?.length > 0 && active) {
+          active = false;
+          onFound(results[0].rawValue);
+        }
+      } catch (_) { /* frame descartado */ }
+      if (active) setTimeout(poll, 80);
+    };
+    poll();
+
+    return () => {
+      active = false;
+      stream.getTracks().forEach(t => t.stop());
+    };
+  }
+
+  // — 2. Fallback: @zxing/browser (JS puro) —
+  const { BrowserMultiFormatReader } = await import('@zxing/browser');
+  const reader = new BrowserMultiFormatReader();
+  // decodeFromVideoElement (no decodeFromConstraints) porque ya abrimos la cámara arriba.
+  let zxingActive = true;
+  reader.decodeFromVideoElement(videoEl, (result) => {
+    if (result && zxingActive) {
+      zxingActive = false;
+      onFound(result.getText?.() ?? '');
+    }
+  }).catch(() => {});
+
+  return () => {
+    zxingActive = false;
+    try { reader.reset(); } catch (_) { /* ignore */ }
+    stream.getTracks().forEach(t => t.stop());
+  };
+}
+
+// ─── Badge de IVA ────────────────────────────────────────────────────────────
 function IvaBadge({ rate }) {
   const cls =
     rate === 4  ? 'bg-green-100 text-green-700' :
@@ -42,24 +117,27 @@ function IvaBadge({ rate }) {
   );
 }
 
+// ─── Componente principal ────────────────────────────────────────────────────
 export default function EanIvaScanner({ onApply }) {
-  const [phase, setPhase] = useState('idle'); // idle | scanning | found | notfound | error
+  const [phase, setPhase] = useState('idle'); // idle|scanning|found|notfound|error
   const [scanError, setScanError] = useState('');
-  const [result, setResult] = useState(null); // { d, i, e }
+  const [result, setResult] = useState(null);
   const [applied, setApplied] = useState(false);
+  const [usingNative, setUsingNative] = useState(false);
 
   const videoRef = useRef(null);
-  const controlsRef = useRef(null);
+  const stopRef  = useRef(null); // función de cleanup del motor activo
 
-  function stopScanner() {
-    try { controlsRef.current?.stop(); } catch (_) { /* ignore */ }
-    controlsRef.current = null;
+  function stopAll() {
+    try { stopRef.current?.(); } catch (_) { /* ignore */ }
+    stopRef.current = null;
   }
 
   async function startScan() {
     setResult(null);
     setApplied(false);
     setScanError('');
+    setUsingNative('BarcodeDetector' in window);
     setPhase('scanning');
 
     let data;
@@ -71,32 +149,20 @@ export default function EanIvaScanner({ onApply }) {
       return;
     }
 
+    // Esperamos al frame siguiente para que el <video> esté montado
+    await new Promise(r => setTimeout(r, 50));
+    if (!videoRef.current) return;
+
     try {
-      const { BrowserMultiFormatReader } = await import('@zxing/browser');
-      const reader = new BrowserMultiFormatReader();
-      controlsRef.current = await reader.decodeFromConstraints(
-        { video: { facingMode: { ideal: 'environment' } } },
-        videoRef.current,
-        (res) => {
-          if (!res) return;
-          const ean = res.getText?.() ?? '';
-          if (!ean) return;
-          stopScanner();
-          const hit = lookupEan(ean, data);
-          if (hit) {
-            setResult(hit);
-            setPhase('found');
-          } else {
-            setResult({ e: ean });
-            setPhase('notfound');
-          }
-        }
-      );
+      stopRef.current = await startDetection(videoRef.current, (ean) => {
+        const hit = lookupEan(ean, data);
+        setResult(hit ?? { e: ean });
+        setPhase(hit ? 'found' : 'notfound');
+      });
     } catch (err) {
-      stopScanner();
       const msg =
-        err?.name === 'NotAllowedError' ? 'Permiso de cámara denegado. Actívalo en el navegador.' :
-        err?.name === 'NotFoundError'   ? 'No se encontró cámara en este dispositivo.' :
+        err?.code === 'permission' ? 'Permiso de cámara denegado. Actívalo en Ajustes > Safari.' :
+        err?.code === 'nocamera'   ? 'No se encontró cámara en este dispositivo.' :
         'No se pudo abrir la cámara.';
       setScanError(msg);
       setPhase('error');
@@ -104,7 +170,7 @@ export default function EanIvaScanner({ onApply }) {
   }
 
   function cancel() {
-    stopScanner();
+    stopAll();
     setPhase('idle');
     setResult(null);
     setApplied(false);
@@ -116,10 +182,9 @@ export default function EanIvaScanner({ onApply }) {
     setApplied(true);
   }
 
-  // Apaga la cámara si el componente se desmonta (p. ej. se cierra el modal).
-  useEffect(() => () => stopScanner(), []);
+  useEffect(() => () => stopAll(), []);
 
-  // --- Idle: botón compacto de escanear ---
+  // ── Idle ──
   if (phase === 'idle') {
     return (
       <button
@@ -128,30 +193,13 @@ export default function EanIvaScanner({ onApply }) {
         className="w-full flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-2.5 py-1.5 text-[11px] text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-colors"
       >
         <ScanLine size={14} className="flex-shrink-0 text-gray-400" />
-        Sin sugerencia local · <span className="font-semibold text-gray-700">Escanear EAN del producto</span>
+        Sin sugerencia local ·{' '}
+        <span className="font-semibold text-gray-700">Escanear EAN del producto</span>
       </button>
     );
   }
 
-  // --- Escáner activo ---
-  if (phase === 'scanning') {
-    return (
-      <div className="rounded-lg border border-gray-200 overflow-hidden">
-        <div className="relative bg-black" style={{ aspectRatio: '4/3', maxHeight: 180 }}>
-          <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-3/4 h-14 border-2 border-red-500 rounded-lg shadow-[0_0_0_100vmax_rgba(0,0,0,0.3)]" />
-          </div>
-        </div>
-        <div className="flex items-center justify-between px-2.5 py-1.5 bg-gray-50">
-          <span className="text-[11px] text-gray-500">Apunta al código de barras…</span>
-          <button type="button" onClick={cancel} className="p-1 text-gray-400 hover:text-gray-700"><X size={14}/></button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- Error de cámara ---
+  // ── Error ──
   if (phase === 'error') {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5">
@@ -162,7 +210,7 @@ export default function EanIvaScanner({ onApply }) {
     );
   }
 
-  // --- Resultado encontrado ---
+  // ── Resultado encontrado ──
   if (phase === 'found') {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5">
@@ -181,12 +229,14 @@ export default function EanIvaScanner({ onApply }) {
             Usar
           </button>
         )}
-        <button type="button" onClick={cancel} className="p-1 text-gray-400 hover:text-gray-700 flex-shrink-0"><X size={13}/></button>
+        <button type="button" onClick={cancel} className="p-1 text-gray-400 hover:text-gray-700 flex-shrink-0">
+          <X size={13} />
+        </button>
       </div>
     );
   }
 
-  // --- EAN no encontrado en UNIDE (comida internacional, etc.) ---
+  // ── EAN no encontrado en UNIDE ──
   if (phase === 'notfound') {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5">
@@ -194,10 +244,74 @@ export default function EanIvaScanner({ onApply }) {
         <span className="text-[11px] text-amber-700 flex-1">
           EAN <span className="font-mono">{result?.e}</span> no está en catálogo UNIDE. Consulta al gestor.
         </span>
-        <button type="button" onClick={cancel} className="p-1 text-amber-400 hover:text-amber-700 flex-shrink-0"><X size={13}/></button>
+        <button type="button" onClick={cancel} className="p-1 text-amber-400 hover:text-amber-700 flex-shrink-0">
+          <X size={13} />
+        </button>
       </div>
     );
   }
 
-  return null;
+  // ── Escáner activo (pantalla completa) ──
+  return (
+    <div className="fixed inset-0 z-[60] bg-black flex flex-col" style={{ touchAction: 'none' }}>
+      {/* Vídeo a pantalla completa */}
+      <video
+        ref={videoRef}
+        className="absolute inset-0 w-full h-full object-cover"
+        muted
+        playsInline
+      />
+
+      {/* Overlay oscuro con recorte central transparente (efecto visor) */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(ellipse 65% 22% at 50% 50%, transparent 100%, rgba(0,0,0,0.55) 100%)',
+      }} />
+
+      {/* Esquinas del visor (estilo POS) */}
+      {[
+        'top-[35%] left-[12%]  border-t-2 border-l-2 rounded-tl-md',
+        'top-[35%] right-[12%] border-t-2 border-r-2 rounded-tr-md',
+        'top-[57%] left-[12%]  border-b-2 border-l-2 rounded-bl-md',
+        'top-[57%] right-[12%] border-b-2 border-r-2 rounded-br-md',
+      ].map((cls, i) => (
+        <div key={i} className={`absolute w-7 h-7 border-cyan-400 ${cls}`} />
+      ))}
+
+      {/* Línea de escaneo animada */}
+      <div className="absolute left-[12%] right-[12%] top-[35%]" style={{ animation: 'scanline 1.8s ease-in-out infinite' }}>
+        <div className="h-0.5 bg-cyan-400 opacity-80" />
+      </div>
+      <style>{`
+        @keyframes scanline {
+          0%   { transform: translateY(0); }
+          50%  { transform: translateY(calc((57vh - 35vh))); }
+          100% { transform: translateY(0); }
+        }
+      `}</style>
+
+      {/* Barra superior */}
+      <div className="relative z-10 flex items-center justify-between px-4 pt-safe pt-4 pb-2">
+        <button
+          type="button"
+          onClick={cancel}
+          className="p-2 rounded-full bg-black/40 text-white"
+          aria-label="Cerrar escáner"
+        >
+          <X size={20} />
+        </button>
+        {usingNative && (
+          <span className="flex items-center gap-1 text-[11px] font-bold text-cyan-300 bg-black/40 px-2 py-1 rounded-full">
+            <Zap size={11} /> Modo rápido
+          </span>
+        )}
+      </div>
+
+      {/* Etiqueta central */}
+      <div className="relative z-10 flex-1 flex items-center justify-center">
+        <span className="text-white/70 text-sm mt-[22vh]">
+          Apunta al código de barras
+        </span>
+      </div>
+    </div>
+  );
 }
