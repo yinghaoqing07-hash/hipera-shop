@@ -1,18 +1,21 @@
 import js from '@eslint/js'
 import globals from 'globals'
+import reactPlugin from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
   globalIgnores(['dist']),
+  // Frontend React (src/)
   {
-    files: ['**/*.{js,jsx}'],
+    files: ['src/**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
+    plugins: { react: reactPlugin },
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
@@ -23,15 +26,29 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'react/jsx-uses-vars': 'error',
+      'no-unused-vars': ['error', {
+        varsIgnorePattern: '^[A-Z_]',
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
     },
   },
-  // El backend es Node (process, Buffer…), no navegador. Sin este bloque,
-  // todo backend/ daba falsos "process is not defined" y el lint era ruido.
+  // Backend Node.js (backend/, print-agent/)
   {
-    files: ['backend/**/*.js'],
+    files: ['backend/**/*.js', 'print-agent/**/*.js'],
+    extends: [js.configs.recommended],
     languageOptions: {
-      globals: globals.node,
+      ecmaVersion: 2022,
+      globals: { ...globals.node },
+      sourceType: 'module',
+    },
+    rules: {
+      'no-unused-vars': ['error', {
+        varsIgnorePattern: '^[A-Z_]',
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
     },
   },
 ])

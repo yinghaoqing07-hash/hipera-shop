@@ -10,10 +10,11 @@ import {
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
   Bell, BellOff, Download, TrendingUp, Eye, EyeOff, MapPin, Phone, Mail, CreditCard, StickyNote,
-  Truck, Store, Smartphone, CalendarCheck
+  Truck, Store, Smartphone, CalendarCheck, ScanLine
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
+import IvaLookup from './components/IvaLookup';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
 
@@ -183,18 +184,6 @@ function productDisplayName(product) {
   return (product?.shortName || product?.short_name || product?.name || '').trim();
 }
 
-function taxSuggestionConfidenceClass(value) {
-  if (value === 'high') return 'bg-green-50 text-green-700 border-green-200';
-  if (value === 'medium') return 'bg-blue-50 text-blue-700 border-blue-200';
-  if (value === 'low') return 'bg-amber-50 text-amber-700 border-amber-200';
-  return 'bg-gray-50 text-gray-600 border-gray-200';
-}
-
-function taxSuggestionRiskClass(value) {
-  if (value === 'low') return 'bg-green-50 text-green-700 border-green-200';
-  if (value === 'medium') return 'bg-blue-50 text-blue-700 border-blue-200';
-  return 'bg-red-50 text-red-700 border-red-200';
-}
 
 function resolveTaxCategoryFromSuggestion(suggestion) {
   const raw = suggestion?.suggested_tax_category || '';
@@ -344,11 +333,6 @@ export default function AdminApp() {
   const [selectedParentForSub, setSelectedParentForSub] = useState(null);
   const [newRepair, setNewRepair] = useState({ brand: "", model: "", description: "Incluye limpieza interna + Cristal y Funda (o Cargador) de REGALO." });
 
-  // 修改：增加了 description, oferta, oferta_type, oferta_value
-  const [formData, setFormData] = useState({
-    name: "", shortName: "", price: "", category: "", image: "", stock: "", 
-    description: "", oferta: false, oferta_type: "percent", oferta_value: 0
-  });
 
   useEffect(() => { fetchData(); }, []);
 
@@ -462,12 +446,14 @@ export default function AdminApp() {
         case '3': setActiveTab('categories'); return;
         case '4': setActiveTab('repairs'); return;
         case '5': setActiveTab('orders'); return;
+        case '6': setActiveTab('iva'); return;
         case 'r': e.preventDefault(); fetchData(); toast.success('Datos actualizados'); return;
         default: break;
       }
       if (e.key === '/') {
         if (activeTab === 'products') { e.preventDefault(); focusEl('search-products'); return; }
         if (activeTab === 'orders') { e.preventDefault(); focusEl('search-orders'); return; }
+        if (activeTab === 'iva') { e.preventDefault(); focusEl('search-iva'); return; }
       }
       if (e.key === 'n') {
         if (activeTab === 'products') { e.preventDefault(); focusEl('new-product-name'); return; }
@@ -492,7 +478,6 @@ export default function AdminApp() {
   // que el histórico no se reporta como nuevo (sólo lo que entre a
   // partir de este momento).
   const {
-    newOrders,
     newCount,
     isMuted,
     toggleMute,
@@ -564,7 +549,7 @@ export default function AdminApp() {
           if (p.images) {
             try {
               images = typeof p.images === 'string' ? JSON.parse(p.images) : p.images;
-            } catch (e) {
+            } catch (_e) {
               images = p.image ? [p.image] : [];
             }
           } else if (p.image) {
@@ -797,7 +782,7 @@ export default function AdminApp() {
   };
 
   const [stockEdits, setStockEdits] = useState({});
-  const [reordering, setReordering] = useState(false);
+  const [, setReordering] = useState(false);
   const [updatingStockId, setUpdatingStockId] = useState(null);
   const handleQuickStockUpdate = async (p) => {
     const newStock = parseInt(stockEdits[p.id] ?? p.stock, 10);
@@ -809,7 +794,7 @@ export default function AdminApp() {
     try {
       const payload = { stock: newStock };
       if (newStock > 0) payload.visible = true;
-      const updated = await apiClient.updateProduct(p.id, payload);
+      await apiClient.updateProduct(p.id, payload);
       setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock: newStock, visible: newStock > 0 ? true : x.visible } : x));
       setStockEdits(prev => { const n = {...prev}; delete n[p.id]; return n; });
       toast.success(newStock > 0 ? "Stock actualizado, producto re-publicado" : "Stock actualizado");
@@ -1941,7 +1926,7 @@ export default function AdminApp() {
       const url = URL.createObjectURL(blob);
       const w = window.open(url, '_blank');
       if (w) {
-        setTimeout(() => { try { w.print(); } catch (_) {} }, 800);
+        setTimeout(() => { try { w.print(); } catch (_) { /* ignore */ } }, 800);
         setTimeout(() => URL.revokeObjectURL(url), 30000);
         toast.success('Imprimir ticket');
       } else {
@@ -1953,7 +1938,7 @@ export default function AdminApp() {
           setTimeout(() => {
             try { iframe.contentWindow?.print(); } catch (_) { window.open(url, '_blank'); }
           }, 600);
-          setTimeout(() => { URL.revokeObjectURL(url); try { document.body.removeChild(iframe); } catch (_) {} }, 30000);
+          setTimeout(() => { URL.revokeObjectURL(url); try { document.body.removeChild(iframe); } catch (_) { /* ignore */ } }, 30000);
         };
         toast.success('Imprimir ticket');
       }
@@ -2254,7 +2239,7 @@ export default function AdminApp() {
     };
 
     const renderProductRow = (p, cid, subId, list) => (
-      <tr key={p.id} draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
+      <tr key={p.id} draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) { /* ignore */ } }}>
         <td className="p-2 w-10">
           {(p.image || p.images?.[0]) && (
             <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" onClick={e => e.stopPropagation()}/>
@@ -2289,7 +2274,7 @@ export default function AdminApp() {
     );
 
     const renderProductCard = (p, cid, subId, list) => (
-      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3" draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) {} }}>
+      <div key={p.id} className="bg-white rounded-xl shadow-sm border p-4 flex gap-3" draggable onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify({ type: 'product', id: p.id })); e.dataTransfer.effectAllowed = 'move'; }} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }} onDrop={e => { e.preventDefault(); try { const d = JSON.parse(e.dataTransfer.getData('application/json')); if (d.type === 'product') { const target = list.find(x => x.id === p.id); if (target) productDnD(list.find(x => x.id === d.id), target, list, cid, subId); } } catch (_) { /* ignore */ } }}>
         <div className="flex-shrink-0 pt-1 flex flex-col gap-1">
           {(p.image || p.images?.[0]) && (
             <input type="checkbox" checked={selectedProductIds.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="rounded" onClick={e => e.stopPropagation()}/>
@@ -2555,7 +2540,7 @@ export default function AdminApp() {
                           (() => {
                             const list = (byCategoryAndSub[cid] || {})['__none__'] || [];
                             return list.length === 0 ? <div className="px-4 py-8 text-center text-gray-500 text-sm">No hay productos sin categoría.</div> : (
-                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, subId, list))}</tbody></table>
+                              <table className="w-full text-left text-sm"><thead className="bg-gray-100/80 text-gray-500 font-bold"><tr><th className="p-2 w-10"></th><th className="p-4">Producto</th><th className="p-4">Precio</th><th className="p-4">Stock</th><th className="p-4">IVA</th><th className="p-4 text-right">Acción</th></tr></thead><tbody className="divide-y bg-white">{list.map(p => renderProductRow(p, cid, '__none__', list))}</tbody></table>
                             );
                           })()
                         ) : (
@@ -2647,7 +2632,7 @@ export default function AdminApp() {
         ids.splice(fromIdx, 1);
         ids.splice(ids.indexOf(targetCat.id), 0, d.id);
         handleReorderCategories(ids);
-      } catch (_) {}
+      } catch (_) { /* ignore */ }
     };
 
     return (
@@ -2682,7 +2667,7 @@ export default function AdminApp() {
                        ids.splice(fromIdx, 1);
                        ids.splice(ids.indexOf(s.id), 0, d.id);
                        handleReorderSubCategories(c.id, ids);
-                     } catch (_) {}
+                     } catch (_) { /* ignore */ }
                    }}>
                      <span className="flex items-center gap-1"><GripVertical size={12} className="text-gray-300 opacity-0 group-hover:opacity-100 cursor-grab"/>- {s.name}</span>
                      <button onClick={() => handleDeleteCategory(s.id, true)} className="text-gray-300 hover:text-red-600"><Trash2 size={14}/></button>
@@ -3573,7 +3558,7 @@ const renderRepairs = () => (
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
             <Group title="Navegación" rows={[
-              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos'],
+              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd><Kbd>6</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos / Consulta IVA'],
             ]}/>
             <Group title="En cada sección" rows={[
               [<Kbd>/</Kbd>, 'Enfocar el buscador'],
@@ -4149,6 +4134,7 @@ const renderRepairs = () => (
               )}
             </button>
             <button onClick={() => { setActiveTab("orders"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
+            <button onClick={() => { setActiveTab("iva"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='iva'?'bg-red-600':'hover:bg-gray-800'}`}><ScanLine size={20}/><span>Consulta IVA</span></button>
         </nav>
         <div className="px-4 pt-4 border-t border-gray-800 space-y-2">
           {/* Controles de alerta sonora de pedidos nuevos.
@@ -4264,6 +4250,7 @@ const renderRepairs = () => (
             {activeTab === 'repairs' && renderRepairs()}
             {activeTab === 'citas' && renderBookings()}
             {activeTab === 'orders' && renderOrders()}
+            {activeTab === 'iva' && <IvaLookup />}
           </>
         )}
       </main>

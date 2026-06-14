@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import { jsPDF } from 'jspdf'; // named import: el default es un objeto, no el constructor (rompe `new jsPDF`)
 import QRCode from 'qrcode';
 import printer from 'pdf-to-printer';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { platform } from 'os';
@@ -331,17 +331,26 @@ const autoPrintTicket = async (order) => {
 // Trust proxy (needed for Railway/reverse proxy setups)
 app.set('trust proxy', true);
 
-// CORS: valid header values only (Chrome rejects invalid tokens in Allow-Headers).
-// El dominio canónico desde 2026-05-25 es https://hipera.es (Cloudflare DNS +
-// Vercel Domains). El alias técnico https://hipera-shop.vercel.app sigue activo
-// y se acepta como origen para no romper despliegues de preview ni accesos
-// directos al deploy de Vercel.
-const CORS_ALLOW_ORIGIN = 'https://hipera.es';
+// CORS: whitelist explícita de orígenes permitidos.
+// - https://www.hipera.es — dominio CANÓNICO real servido (el apex 307→www)
+// - https://hipera.es — apex (redirige a www, se permite por si acaso)
+// - https://hipera-shop.vercel.app — alias técnico del deploy de Vercel
+// - *.vercel.app — previews de PR/branch generados automáticamente por Vercel
+// Cualquier otro Origin recibe el dominio canónico (sin credenciales válidas
+// para la petición, pero la respuesta no expone datos).
 const CORS_ALLOW_HEADERS = 'Content-Type, Authorization, Accept';
+const CORS_ALLOWED_ORIGINS = new Set([
+  'https://www.hipera.es',
+  'https://hipera.es',
+  'https://hipera-shop.vercel.app',
+]);
+const isAllowedOrigin = (origin) =>
+  CORS_ALLOWED_ORIGINS.has(origin) ||
+  /^https:\/\/[a-z0-9-]+-[a-z0-9]+-[a-z0-9]+\.vercel\.app$/.test(origin);
 
 app.use((req, res, next) => {
   const raw = (req.headers.origin || '').trim();
-  const validOrigin = raw && raw !== 'null' && /^https?:\/\//.test(raw) ? raw : CORS_ALLOW_ORIGIN;
+  const validOrigin = raw && isAllowedOrigin(raw) ? raw : 'https://hipera.es';
   res.setHeader('Access-Control-Allow-Origin', validOrigin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -3032,7 +3041,7 @@ REGLAS:
           specifications: productInfo.specifications || null
         }
       });
-    } catch (parseErr) {
+    } catch (_parseErr) {
       // 如果JSON解析失败，返回原始内容作为description
       res.json({ description: responseContent, productInfo: null });
     }

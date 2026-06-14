@@ -149,7 +149,7 @@ export const TurnstileGate = forwardRef(function TurnstileGate(_props, ref) {
       resolverRef.current = resolve;
       try {
         turnstile.execute(widgetIdRef.current);
-      } catch (e) {
+      } catch (_e) {
         if (resolverRef.current === resolve) {
           resolverRef.current = null;
           resolve(null);
