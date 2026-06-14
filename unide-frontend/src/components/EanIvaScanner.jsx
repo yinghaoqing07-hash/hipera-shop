@@ -36,11 +36,11 @@ function lookupEan(ean, data) {
 //   2. @zxing/browser fallback: deja que la librería abra su propio stream
 //      con decodeFromConstraints (la API estable y bien probada de zxing).
 async function startDetection(videoEl, onFound) {
-  const VIDEO_CONSTRAINTS = {
-    facingMode: { ideal: 'environment' },
-    width:  { ideal: 1920 },
-    height: { ideal: 1080 },
-  };
+  // Sin restricciones de resolución explícitas: el navegador elige la
+  // orientación correcta según cómo se sujeta el móvil. Forzar 1920×1080
+  // en portrait hace que iOS abra el stream en landscape internamente y
+  // el barcode quede girado 90° en los frames que lee el decodificador.
+  const VIDEO_CONSTRAINTS = { facingMode: { ideal: 'environment' } };
 
   // — 1. BarcodeDetector nativo —
   if ('BarcodeDetector' in window) {
