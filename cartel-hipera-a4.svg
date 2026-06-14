@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">
+  <!-- Fondo crema, tono cálido y discreto -->
+  <rect x="0" y="0" width="210" height="297" fill="#FBFAF6"/>
+
+  <!-- Marco interior fino, muy sutil -->
+  <rect x="14" y="14" width="182" height="269" fill="none" stroke="#E4DFD4" stroke-width="0.4"/>
+
+  <!-- Identidad de tienda, discreta -->
+  <text x="105" y="58" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="5"
+        letter-spacing="6" fill="#9A9486" font-weight="600">H I P E R A</text>
+
+  <!-- Titular -->
+  <text x="105" y="118" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="17"
+        fill="#2E2A24">Próximamente,</text>
+  <text x="105" y="139" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="17"
+        fill="#2E2A24">también online</text>
+
+  <!-- Acento de marca, corto y fino -->
+  <rect x="95" y="151" width="20" height="0.9" fill="#C0392B"/>
+
+  <!-- Intro -->
+  <text x="105" y="178" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="4.6"
+        fill="#6E685C">Estamos dando los últimos retoques. Pronto, desde tu móvil, podrás:</text>
+
+  <!-- Lista de funciones (reales del sitio), centrada y ligera -->
+  <text x="105" y="202" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="5.4"
+        fill="#3A352D">Ver nuestros productos y ofertas</text>
+  <text x="105" y="216" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="5.4"
+        fill="#3A352D">Pedir cita para reparar tu móvil</text>
+  <text x="105" y="230" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="5.4"
+        fill="#3A352D">Recoger tu pedido en tienda</text>
+  <text x="105" y="244" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="5.4"
+        fill="#3A352D">Recibirlo a domicilio en la zona</text>
+
+  <!-- Cierre -->
+  <text x="105" y="270" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif" font-size="4.4"
+        font-style="italic" fill="#9A9486">Gracias por tu confianza.</text>
+</svg>
