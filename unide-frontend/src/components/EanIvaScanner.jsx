@@ -30,29 +30,32 @@ function lookupEan(ean, data) {
 }
 
 // ─── Motor de detección ──────────────────────────────────────────────────────
-// Devuelve una función de cleanup (para parar la cámara/escáner).
+// Devuelve una función de cleanup. Dos caminos:
+//   1. BarcodeDetector nativo (iOS 17+ / Chrome Android): abre stream propio,
+//      hace polling a 80 ms — casi instantáneo porque usa hardware del chip.
+//   2. @zxing/browser fallback: deja que la librería abra su propio stream
+//      con decodeFromConstraints (la API estable y bien probada de zxing).
 async function startDetection(videoEl, onFound) {
-  // — Abrir cámara a alta resolución (el navegador elegirá el mejor modo) —
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width:  { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-    });
-  } catch (err) {
-    const code =
-      err?.name === 'NotAllowedError' ? 'permission' :
-      err?.name === 'NotFoundError'   ? 'nocamera'   : 'error';
-    throw Object.assign(new Error(err?.message), { code });
-  }
-  videoEl.srcObject = stream;
-  await videoEl.play();
+  const VIDEO_CONSTRAINTS = {
+    facingMode: { ideal: 'environment' },
+    width:  { ideal: 1920 },
+    height: { ideal: 1080 },
+  };
 
-  // — 1. BarcodeDetector nativo (iOS 17+ / Chrome Android) —
+  // — 1. BarcodeDetector nativo —
   if ('BarcodeDetector' in window) {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: VIDEO_CONSTRAINTS });
+    } catch (err) {
+      const code =
+        err?.name === 'NotAllowedError' ? 'permission' :
+        err?.name === 'NotFoundError'   ? 'nocamera'   : 'error';
+      throw Object.assign(new Error(err?.message), { code });
+    }
+    videoEl.srcObject = stream;
+    await videoEl.play();
+
     let active = true;
     let detector;
     try {
@@ -60,21 +63,21 @@ async function startDetection(videoEl, onFound) {
         formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf'],
       });
     } catch (_) {
-      detector = new window.BarcodeDetector(); // fallback sin especificar formatos
+      detector = new window.BarcodeDetector();
     }
 
     const poll = async () => {
-      if (!active || videoEl.readyState < 2) {
-        if (active) setTimeout(poll, 80);
-        return;
+      if (!active) return;
+      if (videoEl.readyState >= 2) {
+        try {
+          const results = await detector.detect(videoEl);
+          if (results?.length > 0 && active) {
+            active = false;
+            onFound(results[0].rawValue);
+            return;
+          }
+        } catch (_) { /* frame descartado */ }
       }
-      try {
-        const results = await detector.detect(videoEl);
-        if (results?.length > 0 && active) {
-          active = false;
-          onFound(results[0].rawValue);
-        }
-      } catch (_) { /* frame descartado */ }
       if (active) setTimeout(poll, 80);
     };
     poll();
@@ -82,25 +85,39 @@ async function startDetection(videoEl, onFound) {
     return () => {
       active = false;
       stream.getTracks().forEach(t => t.stop());
+      videoEl.srcObject = null;
     };
   }
 
-  // — 2. Fallback: @zxing/browser (JS puro) —
+  // — 2. Fallback: zxing gestiona su propio stream (decodeFromConstraints) —
+  // Aquí NO pre-abrimos la cámara; dejamos que zxing lo haga internamente
+  // para evitar conflictos con el stream ya abierto.
   const { BrowserMultiFormatReader } = await import('@zxing/browser');
   const reader = new BrowserMultiFormatReader();
-  // decodeFromVideoElement (no decodeFromConstraints) porque ya abrimos la cámara arriba.
-  let zxingActive = true;
-  reader.decodeFromVideoElement(videoEl, (result) => {
-    if (result && zxingActive) {
-      zxingActive = false;
-      onFound(result.getText?.() ?? '');
-    }
-  }).catch(() => {});
+  let active = true;
+  let controls;
+
+  try {
+    controls = await reader.decodeFromConstraints(
+      { video: VIDEO_CONSTRAINTS },
+      videoEl,
+      (result) => {
+        if (result && active) {
+          active = false;
+          onFound(result.getText?.() ?? '');
+        }
+      }
+    );
+  } catch (err) {
+    const code =
+      err?.name === 'NotAllowedError' ? 'permission' :
+      err?.name === 'NotFoundError'   ? 'nocamera'   : 'error';
+    throw Object.assign(new Error(err?.message), { code });
+  }
 
   return () => {
-    zxingActive = false;
-    try { reader.reset(); } catch (_) { /* ignore */ }
-    stream.getTracks().forEach(t => t.stop());
+    active = false;
+    try { controls?.stop(); } catch (_) { /* ignore */ }
   };
 }
 
