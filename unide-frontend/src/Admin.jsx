@@ -1566,7 +1566,12 @@ export default function AdminApp() {
       }
       toast.success(res?.already ? 'Factura ya emitida' : `Factura emitida ${res?.fullNumber || ''}`.trim());
     } catch (error) {
-      toast.error('No se pudo emitir factura: ' + (error.message || 'Error'));
+      if (error.code === 'MISSING_TAX_RATE') {
+        const item = error.details?.itemName || 'un producto del pedido';
+        toast.error(`Falta IVA en "${item}". Completa el IVA del producto y vuelve a emitir.`, { duration: 7000 });
+      } else {
+        toast.error('No se pudo emitir factura: ' + (error.message || 'Error'));
+      }
     } finally {
       setInvoicingId(null);
     }

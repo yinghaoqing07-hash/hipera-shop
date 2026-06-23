@@ -2321,6 +2321,9 @@ app.post('/api/admin/orders/:id/invoice', authenticateAdmin, async (req, res) =>
     const result = await issuer.issueInvoiceForOrder(id, { force });
     if (result.ok) return res.json(result);
     if (result.skipped) return res.status(409).json({ error: `No emitida: ${result.skipped}`, ...result });
+    if (result.status && result.status >= 400 && result.status < 500) {
+      return res.status(result.status).json({ error: result.error || 'No se puede emitir factura', ...result });
+    }
     return res.status(500).json({ error: result.error || 'Emisión fallida', ...result });
   } catch (error) {
     reportError(error, '[invoice] reintento manual falló');

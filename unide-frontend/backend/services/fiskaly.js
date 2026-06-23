@@ -61,6 +61,20 @@ const FALLBACK_VAT_RATE = 21;
 // exception_unidentified le indica a fiskaly que no aplique el tope de 400.
 const SIMPLIFIED_LIMIT_CENTS = 40000;
 
+export class InvoiceValidationError extends Error {
+  constructor(message, { code = 'INVOICE_VALIDATION_ERROR', details = {} } = {}) {
+    super(message);
+    this.name = 'InvoiceValidationError';
+    this.code = code;
+    this.status = 422;
+    this.details = details;
+  }
+}
+
+export function isInvoiceValidationError(error) {
+  return error?.name === 'InvoiceValidationError' || error?.status === 422;
+}
+
 export function isFiskalyEnabled() {
   return !!(
     process.env.FISKALY_API_KEY &&
@@ -160,7 +174,10 @@ export function buildInvoiceContent(order, { series, number, strictTaxRates = fa
   const items = Array.isArray(order?.items) ? order.items : [];
   const totalCents = Math.round(Number(order?.total) * 100);
   if (!Number.isFinite(totalCents) || totalCents <= 0) {
-    throw new Error(`pedido ${order?.id}: total no facturable (${order?.total})`);
+    throw new InvoiceValidationError(`pedido ${order?.id}: total no facturable (${order?.total})`, {
+      code: 'INVOICE_TOTAL_INVALID',
+      details: { orderId: order?.id, total: order?.total },
+    });
   }
 
   // --- Líneas de producto (mismos filtros que computeSubtotal) ---
@@ -173,7 +190,14 @@ export function buildInvoiceContent(order, { series, number, strictTaxRates = fa
     const rawRate = Number(it?.tax_rate);
     const hasValidRate = [4, 10, 21].includes(rawRate);
     if (!hasValidRate && strictTaxRates && !it?.isService) {
-      throw new Error(`pedido ${order?.id}: falta IVA en "${it?.name || 'Artículo'}"`);
+      throw new InvoiceValidationError(`pedido ${order?.id}: falta IVA en "${it?.name || 'Artículo'}"`, {
+        code: 'MISSING_TAX_RATE',
+        details: {
+          orderId: order?.id,
+          itemName: it?.name || 'Artículo',
+          productId: it?.id || it?.product_id || null,
+        },
+      });
     }
     const rate = hasValidRate ? rawRate : FALLBACK_VAT_RATE;
     lines.push({
@@ -184,7 +208,10 @@ export function buildInvoiceContent(order, { series, number, strictTaxRates = fa
     });
   }
   if (lines.length === 0) {
-    throw new Error(`pedido ${order?.id}: sin líneas facturables`);
+    throw new InvoiceValidationError(`pedido ${order?.id}: sin líneas facturables`, {
+      code: 'INVOICE_NO_LINES',
+      details: { orderId: order?.id },
+    });
   }
 
   const productGross = lines.reduce((s, l) => s + l.grossCents, 0);
@@ -220,8 +247,16 @@ export function buildInvoiceContent(order, { series, number, strictTaxRates = fa
   if (shippingCents < 0) {
     // El total guardado no cuadra con items+descuento: datos inconsistentes.
     // Mejor abortar y revisar a mano que declarar un desglose inventado.
-    throw new Error(
-      `pedido ${order?.id}: total (${totalCents}) menor que items−descuento (${productGross - discountCents}); revisar a mano`
+    throw new InvoiceValidationError(
+      `pedido ${order?.id}: total (${totalCents}) menor que items-descuento (${productGross - discountCents}); revisar a mano`,
+      {
+        code: 'INVOICE_TOTAL_MISMATCH',
+        details: {
+          orderId: order?.id,
+          totalCents,
+          expectedMinimumCents: productGross - discountCents,
+        },
+      }
     );
   }
   if (shippingCents > 0) {
@@ -392,6 +427,16 @@ export function createFiskalyService({ supabase, reportError }) {
         .update({ verifactu_status: 'error' })
         .eq('id', orderId)
         .then(() => {}, () => {});
+      if (isInvoiceValidationError(e)) {
+        console.warn(`[fiskaly] factura no emitida por datos incompletos: ${e.message}`);
+        return {
+          ok: false,
+          status: e.status || 422,
+          code: e.code || 'INVOICE_VALIDATION_ERROR',
+          error: e?.message || String(e),
+          details: e.details || {},
+        };
+      }
       reportError(e, `[fiskaly] emisión falló para pedido ${orderId}`);
       return { ok: false, error: e?.message || String(e) };
     }

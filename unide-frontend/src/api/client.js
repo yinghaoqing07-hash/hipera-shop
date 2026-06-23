@@ -99,6 +99,7 @@ class ApiClient {
         const apiError = new Error(str);
         apiError.status = response.status;
         apiError.code = data?.code;
+        apiError.details = data?.details;
         throw apiError;
       }
 

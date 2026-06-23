@@ -12,7 +12,7 @@
 // =====================================================================
 
 import { nextInvoiceNumber, formatInvoiceNumber } from './invoicing.js';
-import { buildInvoiceContent } from './fiskaly.js';
+import { buildInvoiceContent, isInvoiceValidationError } from './fiskaly.js';
 
 const LOCAL_PENDING_MARK = '__LOCAL_INVOICE_PENDING__';
 
@@ -158,6 +158,16 @@ export function createLocalInvoiceService({ supabase, reportError = () => {} }) 
           .eq('invoice_full_number', LOCAL_PENDING_MARK)
           .is('invoice_number', null)
           .then(() => {}, () => {});
+      }
+      if (isInvoiceValidationError(e)) {
+        console.warn(`[invoice-local] factura no emitida por datos incompletos: ${e.message}`);
+        return {
+          ok: false,
+          status: e.status || 422,
+          code: e.code || 'INVOICE_VALIDATION_ERROR',
+          error: e?.message || String(e),
+          details: e.details || {},
+        };
       }
       reportError(e, `[invoice-local] emision fallida para pedido ${orderId}`);
       return { ok: false, error: e?.message || String(e) };
