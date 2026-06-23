@@ -41,3 +41,24 @@ Los productos deben tener `tax_rate` congelado en las lineas del pedido. La emis
 - `LOCAL_INVOICE_SERIES_PREFIX=WEB` cambia la serie local.
 
 Si `FISKALY_*` esta configurado, el backend prioriza fiskaly y usa la misma numeracion/payload.
+
+## Cumplimiento y migracion a VeriFactu
+
+- La factura simplificada local es LEGAL como solucion previa: para una S.L.
+  (sujeta a Impuesto de Sociedades) la obligacion VeriFactu empieza el
+  **1 de enero de 2027** (aplazada en diciembre de 2025). Hay que activar
+  fiskaly/VeriFactu ANTES de esa fecha.
+
+- **Continuidad de serie al activar fiskaly.** El contador es por
+  `(serie, año)`. Local y fiskaly comparten por defecto la serie `WEB`:
+  - Si se conmuta en el cambio de año (local todo 2026 -> fiskaly desde el
+    1-1-2027), fiskaly arranca un contador nuevo `WEB-2027` desde 1 y no
+    colisiona con los numeros locales de `WEB-2026`. Limpio.
+  - Si se activa fiskaly A MITAD del mismo año, seguiria el contador
+    `WEB-2026` y la serie mezclaria numeros locales (NO registrados en
+    AEAT) con numeros VeriFactu (registrados), rompiendo la continuidad
+    ante AEAT. En ese caso, darle a fiskaly un prefijo distinto:
+    `FISKALY_SERIES_PREFIX=WF` (u otro) para que la serie VeriFactu sea
+    limpia desde el numero 1.
+  - No re-facturar con fiskaly pedidos que ya tengan numero local: fiskaly
+    reutilizaria ese numero y lo registraria tarde en AEAT.

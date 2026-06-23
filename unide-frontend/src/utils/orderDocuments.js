@@ -340,13 +340,17 @@ export const generateDocuments = async (order, type = 'both') => {
     doc.setFontSize(9);
     doc.text(isFiscal ? 'Precios con IVA incluido.' : 'Precios con impuestos incluidos si corresponde.', 5, y);
     y += 6;
-    if (isFiscal && taxRows.length > 0) {
-      doc.text('Desglose IVA:', 5, y);
-      y += 5;
-      taxRows.forEach((r) => {
-        doc.text(`${r.rate}% Base ${r.base.toFixed(2)} IVA ${r.cuota.toFixed(2)}`, 5, y);
+    if (isFiscal) {
+      // Pedido ya facturado: NUNCA imprimir "no válido" (contradiría el
+      // número de factura impreso arriba). El desglose se muestra si está.
+      if (taxRows.length > 0) {
+        doc.text('Desglose IVA:', 5, y);
         y += 5;
-      });
+        taxRows.forEach((r) => {
+          doc.text(`${r.rate}% Base ${r.base.toFixed(2)} IVA ${r.cuota.toFixed(2)}`, 5, y);
+          y += 5;
+        });
+      }
     } else {
       doc.text('No valido como factura fiscal.', 5, y);
       y += 6;
