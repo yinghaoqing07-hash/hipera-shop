@@ -60,6 +60,8 @@ export const config = {
   // Cabecera del ticket (datos de la tienda). Valores por defecto = datos
   // reales de HIPERA; configurables por si cambian.
   storeName: get('STORE_NAME', 'HIPERA'),
+  storeLegalName: get('STORE_LEGAL_NAME', 'QIANG GUO SL'),
+  storeNif: get('STORE_NIF', 'B86126638'),
   storeAddr1: get('STORE_ADDRESS_1', 'Paseo del Sol 1'),
   storeAddr2: get('STORE_ADDRESS_2', '28880 Meco, Madrid'),
   storePhone: get('STORE_PHONE', '+34 918 782 602'),

@@ -20,6 +20,15 @@
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  fiscalDocumentTitle,
+  fiscalFooterText,
+  formatFiscalDate,
+  formatEuro,
+  hasFiscalInvoice,
+  itemTaxRate,
+  normalizeTaxBreakdown,
+} from './fiscalDocuments';
 
 export const generateDocuments = async (order, type = 'both') => {
   const isService = order.items.some(i => i.isService);
@@ -35,6 +44,8 @@ export const generateDocuments = async (order, type = 'both') => {
     phone: '+34 918 782 602',
     web: 'hipera.es',
   };
+  const isFiscal = hasFiscalInvoice(order);
+  const taxRows = normalizeTaxBreakdown(order);
 
   // QR con URL de seguimiento del pedido (mismo formato que los
   // enlaces del email transaccional; ?order= no ?orderId=).
@@ -75,15 +86,15 @@ export const generateDocuments = async (order, type = 'both') => {
     doc.text(order.phone || '', 14, 67);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('JUSTIFICANTE DE PEDIDO', 140, 55);
+    doc.text(fiscalDocumentTitle(order), 140, 55);
     doc.setFont('helvetica', 'normal');
     doc.text(`Pedido: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
-    doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString()}`, 140, 67);
-    doc.text(`Forma de Pago: ${order.payment_method?.toUpperCase() || 'CONTADO'}`, 140, 72);
+    doc.text(`${isFiscal ? 'Factura' : 'Fecha'}: ${isFiscal ? order.invoice_full_number : new Date(order.created_at).toLocaleDateString()}`, 140, 67);
+    doc.text(`Fecha: ${isFiscal ? formatFiscalDate(order.invoice_issued_at) : new Date(order.created_at).toLocaleDateString()}`, 140, 72);
+    doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'CONTADO'}`, 140, 77);
     doc.setFontSize(8);
     doc.setTextColor(120);
-    doc.text('Documento no válido como factura fiscal.', 140, 77);
-    doc.text('Si necesita factura oficial, solicítela con sus datos fiscales.', 140, 81);
+    fiscalFooterText(order).forEach((line, i) => doc.text(line, 140, 82 + i * 4));
     doc.setTextColor(0, 0, 0);
 
     // 3. Tablas: productos y regalos por separado
@@ -96,12 +107,13 @@ export const generateDocuments = async (order, type = 'both') => {
       const tableRows = regularItems.map(item => [
         item.name,
         item.quantity,
-        `€${item.price.toFixed(2)}`,
-        `€${(item.price * item.quantity).toFixed(2)}`,
+        formatEuro(item.price),
+        itemTaxRate(item) ? `${itemTaxRate(item)}%` : 'Pend.',
+        formatEuro(item.price * item.quantity),
       ]);
       autoTable(doc, {
         startY,
-        head: [['Descripción', 'Cant.', 'Precio', 'TOTAL']],
+        head: [['Descripción', 'Cant.', 'Precio', 'IVA', 'TOTAL']],
         body: tableRows,
         theme: 'grid',
         headStyles: { fillColor: [31, 41, 55] },
@@ -163,8 +175,26 @@ export const generateDocuments = async (order, type = 'both') => {
       }
     }
 
+    if (isFiscal && taxRows.length > 0) {
+      autoTable(doc, {
+        startY: finalY + 1,
+        head: [['IVA', 'Base imponible', 'Cuota IVA', 'Total']],
+        body: taxRows.map((r) => [`${r.rate}%`, formatEuro(r.base), formatEuro(r.cuota), formatEuro(r.total)]),
+        theme: 'plain',
+        styles: { fontSize: 8, cellPadding: 1.5 },
+        headStyles: { textColor: [31, 41, 55], fontStyle: 'bold' },
+        columnStyles: {
+          1: { halign: 'right' },
+          2: { halign: 'right' },
+          3: { halign: 'right' },
+        },
+        margin: { left: 118, right: 14 },
+      });
+      finalY = doc.lastAutoTable.finalY + 4;
+    }
+
     doc.setTextColor(120);
-    doc.text('Precios con impuestos incluidos cuando corresponda.', 190, finalY, { align: 'right' });
+    doc.text(isFiscal ? 'Precios con IVA incluido.' : 'Precios con impuestos incluidos cuando corresponda.', 190, finalY, { align: 'right' });
     finalY += 9;
     doc.setTextColor(0, 0, 0);
 
@@ -237,12 +267,18 @@ export const generateDocuments = async (order, type = 'both') => {
     y += 5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text(isService ? 'RESGUARDO REPARACION' : 'JUSTIFICANTE DE PEDIDO', centerX, y, { align: 'center' });
+    doc.text(isService && !isFiscal ? 'RESGUARDO REPARACION' : fiscalDocumentTitle(order), centerX, y, { align: 'center' });
     y += 5;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.text(`Ref: ${order.id.slice(0, 8)}`, centerX, y, { align: 'center' });
     y += 5;
+    if (isFiscal) {
+      doc.text(`Factura: ${order.invoice_full_number}`, centerX, y, { align: 'center' });
+      y += 5;
+      doc.text(formatFiscalDate(order.invoice_issued_at), centerX, y, { align: 'center' });
+      y += 5;
+    }
     doc.text('--------------------------------', centerX, y, { align: 'center' });
     y += 6;
 
@@ -302,10 +338,19 @@ export const generateDocuments = async (order, type = 'both') => {
     y += 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text('Precios con impuestos incluidos si corresponde.', 5, y);
+    doc.text(isFiscal ? 'Precios con IVA incluido.' : 'Precios con impuestos incluidos si corresponde.', 5, y);
     y += 6;
-    doc.text('No valido como factura fiscal.', 5, y);
-    y += 6;
+    if (isFiscal && taxRows.length > 0) {
+      doc.text('Desglose IVA:', 5, y);
+      y += 5;
+      taxRows.forEach((r) => {
+        doc.text(`${r.rate}% Base ${r.base.toFixed(2)} IVA ${r.cuota.toFixed(2)}`, 5, y);
+        y += 5;
+      });
+    } else {
+      doc.text('No valido como factura fiscal.', 5, y);
+      y += 6;
+    }
     doc.setFontSize(10);
     doc.text(`Pago: ${order.payment_method?.toUpperCase() || 'Efectivo/Bizum'}`, 5, y);
     y += 10;

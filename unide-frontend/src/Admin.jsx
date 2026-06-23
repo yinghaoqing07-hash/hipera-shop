@@ -16,6 +16,15 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
 import IvaLookup from './components/IvaLookup';
 import EanIvaScanner from './components/EanIvaScanner';
+import {
+  fiscalDocumentTitle,
+  fiscalFooterText,
+  formatFiscalDate,
+  formatEuro,
+  hasFiscalInvoice,
+  itemTaxRate,
+  normalizeTaxBreakdown,
+} from './utils/fiscalDocuments';
 
 const AVAILABLE_ICONS = ["Package", "Apple", "Coffee", "Utensils", "Baby", "Home", "Gift"];
 
@@ -303,6 +312,7 @@ export default function AdminApp() {
   // Tras avisar "listo para recoger": aviso por WhatsApp + código de recogida.
   const [pickupWaModal, setPickupWaModal] = useState(null); // { waLink, emailed, code } o null
   const [notifyingId, setNotifyingId] = useState(null); // id del pedido cuyo aviso se está enviando
+  const [invoicingId, setInvoicingId] = useState(null); // id del pedido cuya factura se está emitiendo
   // Cobro en tienda al entregar (pago en tienda / contra reembolso).
   const [collectTarget, setCollectTarget] = useState(null); // pedido a cobrar+entregar, o null
   const [collectBusy, setCollectBusy] = useState(false);
@@ -1502,11 +1512,11 @@ export default function AdminApp() {
     try {
       const targetId = collectTarget.id;
       const amount = `€${Number(collectTarget.total || 0).toFixed(2)}`;
-      await apiClient.updateOrderStatus(targetId, 'Entregado', method);
+      const updated = await apiClient.updateOrderStatus(targetId, 'Entregado', method);
       toast.success(`Cobrado ${amount} · ${method}`, { icon: '💰', duration: 3500 });
       // Actualización en sitio (sin recargar toda la página).
       setOrders(prev => prev.map(o => o.id === targetId
-        ? { ...o, status: 'Entregado', payment_method: method }
+        ? { ...o, ...(updated || {}), status: 'Entregado', payment_method: method }
         : o));
       setCollectTarget(null);
     } catch (error) {
@@ -1535,6 +1545,30 @@ export default function AdminApp() {
         : o));
     } catch (error) {
       toast.error('Error al cobrar: ' + error.message);
+    }
+  };
+
+  const canIssueInvoice = (o) =>
+    !hasFiscalInvoice(o) &&
+    Number(o?.total || 0) > 0 &&
+    !['Cancelado', 'Esperando pago', 'Autorizado', 'Pendiente de Pago'].includes(o?.status) &&
+    !isUnpaidCounter(o);
+
+  const issueOrderInvoice = async (oid) => {
+    setInvoicingId(oid);
+    try {
+      const res = await apiClient.issueOrderInvoice(oid);
+      if (res?.order) {
+        setOrders(prev => prev.map(o => o.id === oid ? { ...o, ...res.order } : o));
+        setDetailOrder(prev => prev && prev.id === oid ? { ...prev, ...res.order } : prev);
+      } else {
+        fetchData();
+      }
+      toast.success(res?.already ? 'Factura ya emitida' : `Factura emitida ${res?.fullNumber || ''}`.trim());
+    } catch (error) {
+      toast.error('No se pudo emitir factura: ' + (error.message || 'Error'));
+    } finally {
+      setInvoicingId(null);
     }
   };
 
@@ -1626,7 +1660,8 @@ export default function AdminApp() {
     };
     const headers = [
       'Nº pedido', 'Fecha', 'Teléfono', 'Email', 'Dirección',
-      'Entrega', 'Estado', 'Pago', 'Cupón', 'Descuento (EUR)', 'Total (EUR)', 'Artículos', 'Nota',
+      'Entrega', 'Estado', 'Pago', 'Factura', 'Fecha factura', 'IVA desglosado',
+      'Cupón', 'Descuento (EUR)', 'Total (EUR)', 'Artículos', 'Nota',
     ];
     const rows = list.map(o => {
       const fecha = o.created_at
@@ -1636,9 +1671,13 @@ export default function AdminApp() {
       const articulos = Array.isArray(o.items)
         ? o.items.map(it => `${it.quantity || 1}x ${it.name || ''}${it.id != null ? ` (#${it.id})` : ''}`).join(' | ')
         : '';
+      const iva = normalizeTaxBreakdown(o)
+        .map(r => `${r.rate}% base ${r.base.toFixed(2)} iva ${r.cuota.toFixed(2)} total ${r.total.toFixed(2)}`)
+        .join(' | ');
       return [
         o.id || '', fecha, o.phone || '', o.customer_email || '', o.address || '',
         entrega, o.status || '', o.payment_method || '',
+        o.invoice_full_number || '', o.invoice_issued_at ? formatFiscalDate(o.invoice_issued_at) : '', iva,
         o.coupon_code || '', (Number(o.discount) || 0).toFixed(2),
         (Number(o.total) || 0).toFixed(2), articulos, o.note || '',
       ].map(esc).join(';');
@@ -1658,6 +1697,8 @@ export default function AdminApp() {
 
   const buildTicketPdfBlob = async (order) => {
     const isService = order.items?.some(i => i.isService) ?? false;
+    const isFiscal = hasFiscalInvoice(order);
+    const taxRows = normalizeTaxBreakdown(order);
     const orderQueryUrl = `${window.location.origin.replace(/\/admin.*$/, '')}/?order=${order.id}`;
     const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, { errorCorrectionLevel: 'H', width: 300, margin: 2 });
     const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 260] });
@@ -1675,19 +1716,23 @@ export default function AdminApp() {
     y += 5;
     doc.text(`NIF: ${COMPANY_DATA.nif}`, centerX, y, { align: 'center' });
     y += 5;
-    doc.text(new Date(order.created_at).toLocaleString('es-ES'), centerX, y, { align: 'center' });
+    doc.text(isFiscal ? formatFiscalDate(order.invoice_issued_at) : new Date(order.created_at).toLocaleString('es-ES'), centerX, y, { align: 'center' });
     y += 8;
     doc.setFontSize(9);
     doc.text('--------------------------------', centerX, y, { align: 'center' });
     y += 5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text(isService ? 'RESGUARDO REPARACION' : 'JUSTIFICANTE DE PEDIDO', centerX, y, { align: 'center' });
+    doc.text(isService && !isFiscal ? 'RESGUARDO REPARACION' : fiscalDocumentTitle(order), centerX, y, { align: 'center' });
     y += 5;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.text(`Ref: ${order.id.slice(0, 8)}`, centerX, y, { align: 'center' });
     y += 5;
+    if (isFiscal) {
+      doc.text(`Factura: ${order.invoice_full_number}`, centerX, y, { align: 'center' });
+      y += 5;
+    }
     doc.text('--------------------------------', centerX, y, { align: 'center' });
     y += 6;
     doc.setFontSize(10);
@@ -1745,10 +1790,19 @@ export default function AdminApp() {
     y += 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text('Precios con impuestos incluidos si corresponde.', 5, y);
+    doc.text(isFiscal ? 'Precios con IVA incluido.' : 'Precios con impuestos incluidos si corresponde.', 5, y);
     y += 6;
-    doc.text('No valido como factura fiscal.', 5, y);
-    y += 6;
+    if (isFiscal && taxRows.length > 0) {
+      doc.text('Desglose IVA:', 5, y);
+      y += 5;
+      taxRows.forEach((r) => {
+        doc.text(`${r.rate}% Base ${r.base.toFixed(2)} IVA ${r.cuota.toFixed(2)}`, 5, y);
+        y += 5;
+      });
+    } else {
+      doc.text('No valido como factura fiscal.', 5, y);
+      y += 6;
+    }
     doc.setFontSize(10);
     doc.text(`Pago: ${(order.payment_method || 'Efectivo/Bizum').toUpperCase()}`, 5, y);
     y += 10;
@@ -1769,6 +1823,8 @@ export default function AdminApp() {
   const openOrderFactura = async (order) => {
     try {
       const isService = order.items?.some(i => i.isService) ?? false;
+      const isFiscal = hasFiscalInvoice(order);
+      const taxRows = normalizeTaxBreakdown(order);
       const orderQueryUrl = `${window.location.origin.replace(/\/admin.*$/, '')}/?order=${order.id}`;
       const qrCodeUrl = await QRCode.toDataURL(orderQueryUrl, { errorCorrectionLevel: 'H', width: 300, margin: 2 });
       const doc = new jsPDF();
@@ -1792,15 +1848,15 @@ export default function AdminApp() {
       doc.text(order.address || 'Cliente General', 14, 62);
       doc.text(order.phone || '', 14, 67);
       doc.setFont('helvetica', 'bold');
-      doc.text('JUSTIFICANTE DE PEDIDO', 140, 55);
+      doc.text(fiscalDocumentTitle(order), 140, 55);
       doc.setFont('helvetica', 'normal');
       doc.text(`Pedido: ${order.id.slice(0, 8).toUpperCase()}`, 140, 62);
-      doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString('es-ES')}`, 140, 67);
-      doc.text(`Forma de Pago: ${(order.payment_method || 'CONTADO').toUpperCase()}`, 140, 72);
+      doc.text(`${isFiscal ? 'Factura' : 'Fecha'}: ${isFiscal ? order.invoice_full_number : new Date(order.created_at).toLocaleDateString('es-ES')}`, 140, 67);
+      doc.text(`Fecha: ${isFiscal ? formatFiscalDate(order.invoice_issued_at) : new Date(order.created_at).toLocaleDateString('es-ES')}`, 140, 72);
+      doc.text(`Pago: ${(order.payment_method || 'CONTADO').toUpperCase()}`, 140, 77);
       doc.setFontSize(8);
       doc.setTextColor(120);
-      doc.text('Documento no válido como factura fiscal.', 140, 77);
-      doc.text('Si necesita factura oficial, solicítela con sus datos fiscales.', 140, 81);
+      fiscalFooterText(order).forEach((line, i) => doc.text(line, 140, 82 + i * 4));
       doc.setTextColor(0, 0, 0);
       const regularItems = (order.items || []).filter(i => !(i.isGift || i.price === 0));
       const giftItems = (order.items || []).filter(i => i.isGift || i.price === 0);
@@ -1809,12 +1865,13 @@ export default function AdminApp() {
         const tableRows = regularItems.map(item => [
           item.name || '',
           item.quantity,
-          `€${(item.price || 0).toFixed(2)}`,
-          `€${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`
+          formatEuro(item.price),
+          itemTaxRate(item) ? `${itemTaxRate(item)}%` : 'Pend.',
+          formatEuro((item.price || 0) * (item.quantity || 0))
         ]);
         autoTable(doc, {
           startY,
-          head: [['Descripción', 'Cant.', 'Precio', 'TOTAL']],
+          head: [['Descripción', 'Cant.', 'Precio', 'IVA', 'TOTAL']],
           body: tableRows,
           theme: 'grid',
           headStyles: { fillColor: [31, 41, 55] },
@@ -1870,8 +1927,25 @@ export default function AdminApp() {
           finalY += 5;
         }
       }
+      if (isFiscal && taxRows.length > 0) {
+        autoTable(doc, {
+          startY: finalY + 1,
+          head: [['IVA', 'Base imponible', 'Cuota IVA', 'Total']],
+          body: taxRows.map((r) => [`${r.rate}%`, formatEuro(r.base), formatEuro(r.cuota), formatEuro(r.total)]),
+          theme: 'plain',
+          styles: { fontSize: 8, cellPadding: 1.5 },
+          headStyles: { textColor: [31, 41, 55], fontStyle: 'bold' },
+          columnStyles: {
+            1: { halign: 'right' },
+            2: { halign: 'right' },
+            3: { halign: 'right' },
+          },
+          margin: { left: 118, right: 14 },
+        });
+        finalY = doc.lastAutoTable.finalY + 4;
+      }
       doc.setTextColor(120);
-      doc.text('Precios con impuestos incluidos cuando corresponda.', 190, finalY, { align: 'right' });
+      doc.text(isFiscal ? 'Precios con IVA incluido.' : 'Precios con impuestos incluidos cuando corresponda.', 190, finalY, { align: 'right' });
       finalY += 9;
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
@@ -2128,12 +2202,13 @@ export default function AdminApp() {
                     <div className="min-w-0">
                       <span className="font-mono text-xs font-bold text-gray-500">#{o.id.slice(0,8)}</span>
                       <span className="text-gray-400 text-xs ml-2">{dateStr}</span>
+                      {hasFiscalInvoice(o) && <span className="ml-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">{o.invoice_full_number}</span>}
                       <div className="font-bold text-gray-800 truncate">{o.phone}</div>
                       <div className="text-xs text-gray-500 truncate">{o.address}</div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className="font-bold text-gray-800">€{o.total?.toFixed(2)}</span>
-                      <button type="button" onClick={() => openOrderFactura(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Ver justificante">
+                      <button type="button" onClick={() => openOrderFactura(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title={hasFiscalInvoice(o) ? 'Ver factura' : 'Ver justificante'}>
                         <FileText size={16}/>
                       </button>
                       <button type="button" onClick={() => openOrderTicket(o)} className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600" title="Ver ticket">
@@ -2825,8 +2900,13 @@ const renderRepairs = () => (
           <Undo2 size={14}/> Reembolsar
         </button>
       )}
-      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Ver justificante">
-        <FileText size={14}/> Justificante
+      {canIssueInvoice(o) && (
+        <button type="button" onClick={() => issueOrderInvoice(o.id)} disabled={invoicingId === o.id} className={`inline-flex items-center gap-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold disabled:opacity-50 ${btn}`} title="Emitir factura simplificada">
+          <FileText size={14}/> {invoicingId === o.id ? 'Emitiendo…' : 'Emitir factura'}
+        </button>
+      )}
+      <button type="button" onClick={() => openOrderFactura(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title={hasFiscalInvoice(o) ? 'Ver factura simplificada' : 'Ver justificante'}>
+        <FileText size={14}/> {hasFiscalInvoice(o) ? 'Factura' : 'Justificante'}
       </button>
       <button type="button" onClick={() => openOrderTicket(o)} className={`inline-flex items-center gap-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold ${btn}`} title="Ver ticket">
         <FileText size={14}/> Ticket
@@ -3074,8 +3154,9 @@ const renderRepairs = () => (
                  const isPending = !['Entregado', 'Cancelado'].includes(o.status);
                  return (
                  <tr key={o.id} onClick={() => setDetailOrder(o)} className={`border-b cursor-pointer transition-colors ${isAuth && hold.urgent ? 'bg-red-50/70 hover:bg-red-100/70 border-l-4 border-l-red-400' : isPending ? 'bg-gray-50 hover:bg-gray-100 border-l-4 border-l-gray-300' : 'hover:bg-gray-50'}`}>
-                   <td className="px-4 py-3 align-middle">
+                  <td className="px-4 py-3 align-middle">
                       <div className="font-mono text-[11px] font-bold text-gray-400">#{o.id.slice(0,8)}</div>
+                     {hasFiscalInvoice(o) && <div className="mt-0.5 font-mono text-[10px] font-bold text-emerald-700">{o.invoice_full_number}</div>}
                      <div className="font-bold text-gray-800 text-sm">{o.phone || '—'}</div>
                      <div className="mt-0.5 flex items-center gap-1 text-[11px] max-w-[220px]">
                        {isPickup ? (
@@ -3264,6 +3345,17 @@ const renderRepairs = () => (
                 <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase"><CreditCard size={11}/> Pago</div>
                 <div className="mt-0.5"><span className={`px-2 py-0.5 rounded text-xs font-bold ${orderPaymentBadgeClass(paymentMethod)}`}>{paymentMethod}</span></div>
               </div>
+            </div>
+            <div className={`rounded-lg p-2.5 border ${hasFiscalInvoice(o) ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase"><FileText size={11}/> Facturación</div>
+                {hasFiscalInvoice(o)
+                  ? <span className="font-mono text-xs font-extrabold text-emerald-800">{o.invoice_full_number}</span>
+                  : <span className="text-xs font-bold text-gray-500">Sin factura emitida</span>}
+              </div>
+              {hasFiscalInvoice(o) && (
+                <div className="text-[11px] text-emerald-700 mt-1 font-semibold">Factura simplificada · {formatFiscalDate(o.invoice_issued_at)}</div>
+              )}
             </div>
             <div className="bg-gray-50 rounded-lg p-2.5 space-y-1">
               <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase">{isPickup ? <><Store size={11}/> Recogida en tienda</> : <><Truck size={11}/> Envío a domicilio</>}</div>

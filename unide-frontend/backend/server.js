@@ -27,6 +27,36 @@ const generatePickupCode = () => String(randomInt(0, 1000000)).padStart(6, '0');
 // almacenado si existe, o el determinista a partir del id como fallback
 // (compatibilidad con pedidos previos a la columna pickup_code).
 const resolvePickupCode = (order) => order?.pickup_code || pickupCode(order?.id);
+
+const hasFiscalInvoice = (order) => Boolean(order?.invoice_full_number && order?.invoice_issued_at);
+const taxRowsForOrder = (order) => {
+  const rows = order?.tax_breakdown?.rates;
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((r) => ({
+      rate: Number(r.rate),
+      base: Number(r.base) || 0,
+      cuota: Number(r.cuota) || 0,
+      total: Number(r.total) || 0,
+    }))
+    .filter((r) => [4, 10, 21].includes(r.rate) && r.total > 0)
+    .sort((a, b) => a.rate - b.rate);
+};
+
+const formatFiscalDate = (value) => {
+  try {
+    return new Date(value).toLocaleString('es-ES', {
+      timeZone: 'Europe/Madrid',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return String(value || '');
+  }
+};
 import {
   getStripe,
   buildCheckoutLineItems,
@@ -38,6 +68,7 @@ import {
   couponErrorMessage,
 } from './services/coupons.js';
 import { createFiskalyService, isFiskalyEnabled } from './services/fiskaly.js';
+import { createLocalInvoiceService, isLocalInvoicingEnabled } from './services/localInvoicing.js';
 
 dotenv.config();
 
@@ -91,6 +122,8 @@ const PORT = process.env.PORT || 3001;
 // 生成 80mm 热敏小票 PDF（用于自动打印）
 const generateTicketPDF = async (order) => {
   const isService = order.items?.some(i => i.isService);
+  const isFiscal = hasFiscalInvoice(order);
+  const taxRows = taxRowsForOrder(order);
   const companyData = {
     name: "QIANG GUO SL",
     address: "Paseo del Sol 1, 28880 Meco",
@@ -147,14 +180,18 @@ const generateTicketPDF = async (order) => {
   // Order Info
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(isService ? "RESGUARDO REPARACION" : "JUSTIFICANTE DE PEDIDO", centerX, y, { align: 'center' });
+  doc.text(isService && !isFiscal ? "RESGUARDO REPARACION" : (isFiscal ? "FACTURA SIMPLIFICADA" : "JUSTIFICANTE DE PEDIDO"), centerX, y, { align: 'center' });
   y += 5;
   
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.text(`Pedido: ${order.id.slice(0, 8).toUpperCase()}`, centerX, y, { align: 'center' });
   y += 4;
-  doc.text(`Fecha: ${new Date(order.created_at).toLocaleDateString('es-ES')}`, centerX, y, { align: 'center' });
+  if (isFiscal) {
+    doc.text(`Factura: ${order.invoice_full_number}`, centerX, y, { align: 'center' });
+    y += 4;
+  }
+  doc.text(`Fecha: ${isFiscal ? formatFiscalDate(order.invoice_issued_at) : new Date(order.created_at).toLocaleDateString('es-ES')}`, centerX, y, { align: 'center' });
   y += 4;
   doc.text(`Hora: ${new Date(order.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`, centerX, y, { align: 'center' });
   y += 6;
@@ -206,10 +243,19 @@ const generateTicketPDF = async (order) => {
   y += 5;
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text(`Precios con impuestos incluidos si corresponde.`, centerX, y, { align: 'center' });
+  doc.text(isFiscal ? `Precios con IVA incluido.` : `Precios con impuestos incluidos si corresponde.`, centerX, y, { align: 'center' });
   y += 4;
-  doc.text(`No valido como factura fiscal.`, centerX, y, { align: 'center' });
-  y += 5;
+  if (isFiscal && taxRows.length > 0) {
+    doc.text('Desglose IVA:', centerX, y, { align: 'center' });
+    y += 4;
+    taxRows.forEach((r) => {
+      doc.text(`${r.rate}% Base ${r.base.toFixed(2)} IVA ${r.cuota.toFixed(2)}`, centerX, y, { align: 'center' });
+      y += 4;
+    });
+  } else {
+    doc.text(`No valido como factura fiscal.`, centerX, y, { align: 'center' });
+    y += 5;
+  }
 
   // Payment Method
   doc.setFontSize(8);
@@ -381,11 +427,15 @@ const supabase = createClient(
 // estado queda en 'error' y se reintenta desde el panel
 // (POST /api/admin/orders/:id/invoice).
 const fiskaly = createFiskalyService({ supabase, reportError });
+const localInvoicing = createLocalInvoiceService({ supabase, reportError });
 
 function issueInvoiceBestEffort(orderId, trigger) {
-  if (!isFiskalyEnabled()) return;
-  fiskaly.issueInvoiceForOrder(orderId).catch((e) => {
-    reportError(e, `[fiskaly] emisión falló (${trigger}) pedido ${orderId}`);
+  const issuerName = isFiskalyEnabled() ? 'fiskaly' : 'invoice-local';
+  const issuer = isFiskalyEnabled() ? fiskaly : (isLocalInvoicingEnabled() ? localInvoicing : null);
+  if (!issuer) return Promise.resolve({ ok: false, skipped: 'disabled' });
+  return issuer.issueInvoiceForOrder(orderId).catch((e) => {
+    reportError(e, `[${issuerName}] emisión falló (${trigger}) pedido ${orderId}`);
+    return { ok: false, error: e?.message || String(e) };
   });
 }
 
@@ -1263,7 +1313,19 @@ async function handleStripeCheckoutCompleted(session) {
   }
 
   // Objeto del pedido para email/impresión.
-  const fulfilledOrder = { ...order, status: newStatus, payment_method: paymentLabel };
+  let fulfilledOrder = { ...order, status: newStatus, payment_method: paymentLabel };
+
+  // Factura al mover dinero de verdad. En modo local esperamos la BD
+  // para que el ticket/PDF ya puedan mostrar numero y desglose; con
+  // fiskaly lo dejamos best-effort para no alargar el webhook.
+  if (!isAuthorizedOnly) {
+    if (isFiskalyEnabled()) {
+      issueInvoiceBestEffort(orderId, 'stripe pago confirmado');
+    } else {
+      const invoiceResult = await issueInvoiceBestEffort(orderId, 'stripe pago confirmado');
+      if (invoiceResult?.order) fulfilledOrder = { ...fulfilledOrder, ...invoiceResult.order };
+    }
+  }
 
   // Email de confirmación (best-effort).
   if (order.customer_email) {
@@ -1277,12 +1339,6 @@ async function handleStripeCheckoutCompleted(session) {
     autoPrintTicket(fulfilledOrder).catch((err) => {
       console.error('[stripe][print] fallo (no bloquea):', err?.message || err);
     });
-  }
-
-  // Factura VeriFactu sólo si hubo COBRO real (Bizum / captura automática).
-  // Las autorizaciones aún no cobradas facturan al capturar desde el panel.
-  if (!isAuthorizedOnly) {
-    issueInvoiceBestEffort(orderId, 'stripe pago confirmado');
   }
 
   console.log('[stripe] pedido', isAuthorizedOnly ? 'AUTORIZADO (pendiente de cobro)' : 'confirmado y procesado', ':', orderId, '·', paymentLabel);
@@ -1700,9 +1756,25 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
 
     if (error) throw error;
 
+    const shouldInvoiceNow =
+      data.status !== 'Pendiente de Pago' &&
+      data.status !== 'Esperando pago' &&
+      data.status !== 'Autorizado' &&
+      !/contra\s*reembolso/i.test(data.payment_method || '');
+
+    let orderForAftercare = data;
+    if (shouldInvoiceNow) {
+      if (isFiskalyEnabled()) {
+        issueInvoiceBestEffort(data.id, 'pedido creado con cobro manual');
+      } else {
+        const invoiceResult = await issueInvoiceBestEffort(data.id, 'pedido creado con cobro manual');
+        if (invoiceResult?.order) orderForAftercare = invoiceResult.order;
+      }
+    }
+
     // 自动打印 ticket（异步执行，不阻塞响应）
     if (process.env.AUTO_PRINT_ENABLED !== 'false') {
-      autoPrintTicket(data).catch(err => {
+      autoPrintTicket(orderForAftercare).catch(err => {
         console.error('Error en auto-impresión:', err);
       });
     }
@@ -1711,14 +1783,14 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
     // falla la creación del pedido aunque Resend caiga, el dominio no
     // esté verificado, o el cliente no haya facilitado un email válido).
     if (hasValidEmail) {
-      sendOrderConfirmationEmail(data, normalizedEmail).catch((err) => {
+      sendOrderConfirmationEmail(orderForAftercare, normalizedEmail).catch((err) => {
         console.error('[Email] Excepción inesperada (no propagada):', err?.message || err);
       });
     } else {
-      console.warn(`[Email] Pedido ${data?.id?.slice?.(0, 8) || '?'} sin customer_email válido — skip envío`);
+      console.warn(`[Email] Pedido ${orderForAftercare?.id?.slice?.(0, 8) || '?'} sin customer_email válido — skip envío`);
     }
 
-    res.json(data);
+    res.json(orderForAftercare);
   } catch (error) {
     // Pedido que no llegó a guardarse = venta perdida → lo reportamos.
     reportError(error, '[orders] error creando pedido');
@@ -1981,6 +2053,10 @@ const PUBLIC_ORDER_FIELDS = [
   'delivery_method',
   'note',
   'created_at',
+  'invoice_full_number',
+  'invoice_issued_at',
+  'tax_breakdown',
+  'verifactu_qr',
 ].join(',');
 
 app.get('/api/orders/:orderId', async (req, res) => {
@@ -2110,7 +2186,7 @@ app.get('/api/admin/orders/new', authenticateAdmin, async (req, res) => {
 // payment_method + status permiten al agente decidir la etiqueta de
 // "estado de pago" (PAGADO vs COBRAR AL ENTREGAR).
 const PRINT_ORDER_FIELDS =
-  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent, coupon_code, discount';
+  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent, coupon_code, discount, invoice_full_number, invoice_issued_at, tax_breakdown, verifactu_qr';
 
 // GET /api/print/pending — cola de impresión.
 // Devuelve pedidos confirmados (confirmed_at no nulo) y aún no impresos
@@ -2203,7 +2279,7 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
 
     const updateFields = { status };
     if (paymentMethod) updateFields.payment_method = paymentMethod;
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('orders')
       .update(updateFields)
       .eq('id', id)
@@ -2216,7 +2292,12 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
     // momento de la factura. Para pedidos Stripe ya facturados al cobrar,
     // el claim de verifactu_status lo convierte en no-op (idempotente).
     if (status === 'Entregado') {
-      issueInvoiceBestEffort(id, 'pedido entregado');
+      if (isFiskalyEnabled()) {
+        issueInvoiceBestEffort(id, 'pedido entregado');
+      } else {
+        const invoiceResult = await issueInvoiceBestEffort(id, 'pedido entregado');
+        if (invoiceResult?.order) data = invoiceResult.order;
+      }
     }
 
     res.json(data);
@@ -2226,22 +2307,23 @@ app.patch('/api/admin/orders/:id', authenticateAdmin, async (req, res) => {
 });
 
 // POST /api/admin/orders/:id/invoice — emite (o REINTENTA) la factura
-// VeriFactu de un pedido. Pensado para el caso 'error' (fiskaly caído en
-// el momento del cobro) o para forzar un 'pending' atascado con
-// { force: true }. Responde con el resultado de la emisión.
+// de un pedido. Si fiskaly esta configurado, emite VeriFactu. Si no, usa
+// la primera version local de factura simplificada. Responde con el
+// resultado de la emision y, cuando existe, el pedido actualizado.
 app.post('/api/admin/orders/:id/invoice', authenticateAdmin, async (req, res) => {
   try {
-    if (!isFiskalyEnabled()) {
-      return res.status(503).json({ error: 'fiskaly no está configurado (faltan FISKALY_* en el entorno)' });
-    }
     const { id } = req.params;
     const force = req.body?.force === true;
-    const result = await fiskaly.issueInvoiceForOrder(id, { force });
+    const issuer = isFiskalyEnabled() ? fiskaly : (isLocalInvoicingEnabled() ? localInvoicing : null);
+    if (!issuer) {
+      return res.status(503).json({ error: 'La facturación está desactivada (LOCAL_INVOICING_ENABLED=false y sin FISKALY_*)' });
+    }
+    const result = await issuer.issueInvoiceForOrder(id, { force });
     if (result.ok) return res.json(result);
     if (result.skipped) return res.status(409).json({ error: `No emitida: ${result.skipped}`, ...result });
     return res.status(500).json({ error: result.error || 'Emisión fallida', ...result });
   } catch (error) {
-    reportError(error, '[fiskaly] reintento manual falló');
+    reportError(error, '[invoice] reintento manual falló');
     res.status(500).json({ error: error.message });
   }
 });
@@ -2272,7 +2354,11 @@ app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) =>
       if (order.status === 'Autorizado') {
         await supabase.from('orders').update({ status: 'Procesando' }).eq('id', id);
       }
-      issueInvoiceBestEffort(id, 'captura ya realizada'); // idempotente si ya facturó
+      if (isFiskalyEnabled()) {
+        issueInvoiceBestEffort(id, 'captura ya realizada'); // idempotente si ya facturó
+      } else {
+        await issueInvoiceBestEffort(id, 'captura ya realizada');
+      }
       return res.json({ ok: true, alreadyCaptured: true });
     }
 
@@ -2283,7 +2369,7 @@ app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) =>
     }
 
     await stripe.paymentIntents.capture(order.stripe_payment_intent);
-    const { data, error: uErr } = await supabase
+    let { data, error: uErr } = await supabase
       .from('orders')
       .update({ status: 'Procesando' })
       .eq('id', id)
@@ -2292,7 +2378,12 @@ app.post('/api/admin/orders/:id/capture', authenticateAdmin, async (req, res) =>
     if (uErr) throw uErr;
 
     // El dinero acaba de moverse de verdad → momento de la factura.
-    issueInvoiceBestEffort(id, 'captura de autorización');
+    if (isFiskalyEnabled()) {
+      issueInvoiceBestEffort(id, 'captura de autorización');
+    } else {
+      const invoiceResult = await issueInvoiceBestEffort(id, 'captura de autorización');
+      if (invoiceResult?.order) data = invoiceResult.order;
+    }
 
     console.log('[stripe] pago cobrado (capturado) para pedido:', id);
     return res.json({ ok: true, order: data });

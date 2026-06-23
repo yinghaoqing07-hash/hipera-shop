@@ -159,6 +159,18 @@ export function buildTicket(order, config) {
   const discount = Number(order.discount) || 0;
   const shipping = Math.max(0, Math.round((total - subtotal + discount) * 100) / 100);
   const pay = resolvePayment(order);
+  const hasFiscalInvoice = Boolean(order.invoice_full_number && order.invoice_issued_at);
+  const taxRows = Array.isArray(order.tax_breakdown?.rates)
+    ? order.tax_breakdown.rates
+      .map((r) => ({
+        rate: Number(r.rate),
+        base: Number(r.base) || 0,
+        cuota: Number(r.cuota) || 0,
+        total: Number(r.total) || 0,
+      }))
+      .filter((r) => [4, 10, 21].includes(r.rate) && r.total > 0)
+      .sort((a, b) => a.rate - b.rate)
+    : [];
 
   const fmt = (n) => (Number(n) || 0).toFixed(2) + ' EUR';
   const shortId = String(order.id || '').slice(0, 8).toUpperCase();
@@ -167,6 +179,8 @@ export function buildTicket(order, config) {
   // --- Cabecera (datos de la tienda, configurables) ---
   t.align(1).bold(true).size(true, true).line(config?.storeName || 'HIPERA');
   t.normal().align(1);
+  if (config?.storeLegalName) t.line(config.storeLegalName);
+  if (config?.storeNif) t.line('NIF: ' + config.storeNif);
   if (config?.storeAddr1) t.line(config.storeAddr1);
   if (config?.storeAddr2) t.line(config.storeAddr2);
   if (config?.storePhone) t.line('Tel: ' + config.storePhone);
@@ -175,8 +189,12 @@ export function buildTicket(order, config) {
   // --- Datos del pedido ---
   t.align(0).bold(true).line('Pedido: #' + shortId).bold(false);
   t.line('Fecha: ' + when);
-  t.align(1).bold(true).line('JUSTIFICANTE DE PEDIDO').bold(false);
-  t.line('No valido como factura fiscal');
+  t.align(1).bold(true).line(hasFiscalInvoice ? 'FACTURA SIMPLIFICADA' : 'JUSTIFICANTE DE PEDIDO').bold(false);
+  if (hasFiscalInvoice) {
+    t.line('Factura: ' + order.invoice_full_number);
+  } else {
+    t.line('No valido como factura fiscal');
+  }
 
   // --- Modalidad de entrega (grande, para verlo de un vistazo) ---
   t.hr('=');
@@ -234,6 +252,14 @@ export function buildTicket(order, config) {
   t.bold(true).size(false, true);
   t.lineLR('TOTAL:', total.toFixed(2));
   t.normal();
+  if (hasFiscalInvoice && taxRows.length > 0) {
+    t.hr('-');
+    t.bold(true).line('Desglose IVA:').bold(false);
+    for (const r of taxRows) {
+      t.lineLR(`${r.rate}% Base ${r.base.toFixed(2)}`, `IVA ${r.cuota.toFixed(2)}`);
+    }
+    t.line('Precios con IVA incluido');
+  }
   t.hr('-');
 
   // --- Datos de contacto / entrega ---

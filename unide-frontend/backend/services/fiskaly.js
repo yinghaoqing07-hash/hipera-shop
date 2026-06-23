@@ -156,7 +156,7 @@ export async function fiskalyFetch(path, { method = 'GET', body } = {}) {
 // que fiskaly registra en AEAT.
 //
 // Devuelve { content, breakdown }; lanza si el pedido no es facturable.
-export function buildInvoiceContent(order, { series, number } = {}) {
+export function buildInvoiceContent(order, { series, number, strictTaxRates = false } = {}) {
   const items = Array.isArray(order?.items) ? order.items : [];
   const totalCents = Math.round(Number(order?.total) * 100);
   if (!Number.isFinite(totalCents) || totalCents <= 0) {
@@ -170,9 +170,12 @@ export function buildInvoiceContent(order, { series, number } = {}) {
     const price = Number(it?.price);
     const qty = Number(it?.quantity) || 0;
     if (!Number.isFinite(price) || price <= 0 || qty <= 0) continue;
-    const rate = Number.isFinite(Number(it?.tax_rate)) && Number(it.tax_rate) >= 0
-      ? Number(it.tax_rate)
-      : FALLBACK_VAT_RATE;
+    const rawRate = Number(it?.tax_rate);
+    const hasValidRate = [4, 10, 21].includes(rawRate);
+    if (!hasValidRate && strictTaxRates && !it?.isService) {
+      throw new Error(`pedido ${order?.id}: falta IVA en "${it?.name || 'Artículo'}"`);
+    }
+    const rate = hasValidRate ? rawRate : FALLBACK_VAT_RATE;
     lines.push({
       text: String(it?.name || 'Artículo').slice(0, 480),
       qty,

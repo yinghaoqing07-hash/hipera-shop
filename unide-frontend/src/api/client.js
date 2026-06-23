@@ -289,6 +289,13 @@ class ApiClient {
     });
   }
 
+  async issueOrderInvoice(orderId, opts = {}) {
+    return this.request(`/admin/orders/${orderId}/invoice`, {
+      method: 'POST',
+      body: JSON.stringify(opts),
+    });
+  }
+
   async getAdminProducts() {
     return this.request('/admin/products');
   }
