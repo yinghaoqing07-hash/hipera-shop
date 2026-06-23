@@ -53,11 +53,16 @@ async function fetchOrder(supabase, orderId) {
   return data;
 }
 
-export function createLocalInvoiceService({ supabase, reportError = () => {} }) {
+export function createLocalInvoiceService({
+  supabase,
+  reportError = () => {},
+  prepareOrderForInvoice = async (order) => order,
+}) {
   async function issueInvoiceForOrder(orderId) {
     if (!isLocalInvoicingEnabled()) return { ok: false, skipped: 'local_disabled' };
 
-    const order = await fetchOrder(supabase, orderId);
+    let order = await fetchOrder(supabase, orderId);
+    order = await prepareOrderForInvoice(order);
     if (order.invoice_full_number && order.invoice_number) {
       return { ok: true, already: true, provider: 'local', order };
     }

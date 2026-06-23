@@ -321,21 +321,26 @@ export function buildInvoiceContent(order, { series, number, strictTaxRates = fa
 // ---------------------------------------------------------------------
 // Servicio con dependencias inyectadas (supabase del server, reportError)
 // ---------------------------------------------------------------------
-export function createFiskalyService({ supabase, reportError }) {
+export function createFiskalyService({
+  supabase,
+  reportError,
+  prepareOrderForInvoice = async (order) => order,
+}) {
   // Emite (o reintenta) la factura de un pedido. Idempotente y seguro
   // ante triggers concurrentes. `force` permite reintentar pedidos
   // atascados en 'pending' (p. ej. proceso muerto entre claim y respuesta).
   async function issueInvoiceForOrder(orderId, { force = false } = {}) {
     if (!isFiskalyEnabled()) return { ok: false, skipped: 'disabled' };
 
-    const { data: order, error: fErr } = await supabase
+    const { data: fetchedOrder, error: fErr } = await supabase
       .from('orders')
       .select('*')
       .eq('id', orderId)
       .single();
-    if (fErr || !order) {
+    if (fErr || !fetchedOrder) {
       throw new Error(`[fiskaly] pedido no encontrado: ${orderId} ${fErr?.message || ''}`);
     }
+    const order = await prepareOrderForInvoice(fetchedOrder);
     if (order.status === 'Cancelado') return { ok: false, skipped: 'cancelado' };
     if (order.verifactu_status === 'issued') return { ok: true, already: true };
     if (!(Number(order.total) > 0)) return { ok: false, skipped: 'total_cero' };
@@ -382,6 +387,7 @@ export function createFiskalyService({ supabase, reportError }) {
       const { content, breakdown } = buildInvoiceContent(order, {
         series: `${series}-${year}`,
         number: String(number),
+        strictTaxRates: true,
       });
 
       let resp = await fiskalyFetch(`/clients/${process.env.FISKALY_CLIENT_ID}/invoices/${order.id}`, {

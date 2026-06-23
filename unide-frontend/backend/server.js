@@ -426,8 +426,8 @@ const supabase = createClient(
 // Siempre best-effort: una caída de fiskaly NUNCA bloquea el pedido; el
 // estado queda en 'error' y se reintenta desde el panel
 // (POST /api/admin/orders/:id/invoice).
-const fiskaly = createFiskalyService({ supabase, reportError });
-const localInvoicing = createLocalInvoiceService({ supabase, reportError });
+const fiskaly = createFiskalyService({ supabase, reportError, prepareOrderForInvoice });
+const localInvoicing = createLocalInvoiceService({ supabase, reportError, prepareOrderForInvoice });
 
 function issueInvoiceBestEffort(orderId, trigger) {
   const issuerName = isFiskalyEnabled() ? 'fiskaly' : 'invoice-local';
@@ -1198,6 +1198,42 @@ async function snapshotItemTaxRates(items) {
     if (!it || !it.id || it.isService || !rateById.has(it.id)) return it;
     return { ...it, tax_rate: rateById.get(it.id) };
   });
+}
+
+function hasValidItemTaxRate(item) {
+  return [4, 10, 21].includes(Number(item?.tax_rate));
+}
+
+function shouldBackfillOrderTaxRates(order) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  return items.some((it) => {
+    if (!it || it.isGift || it.isService) return false;
+    const price = Number(it.price);
+    const qty = Number(it.quantity) || 0;
+    return Number.isFinite(price) && price > 0 && qty > 0 && !hasValidItemTaxRate(it);
+  });
+}
+
+async function prepareOrderForInvoice(order) {
+  if (!shouldBackfillOrderTaxRates(order)) return order;
+
+  const items = Array.isArray(order.items) ? order.items : [];
+  const hydratedItems = await snapshotItemTaxRates(items);
+  const changed = JSON.stringify(hydratedItems) !== JSON.stringify(items);
+  if (!changed) return order;
+
+  const { data, error } = await supabase
+    .from('orders')
+    .update({ items: hydratedItems })
+    .eq('id', order.id)
+    .select('*')
+    .single();
+  if (error) {
+    throw new Error(`[tax] no se pudo guardar IVA congelado antes de facturar: ${error.message}`);
+  }
+
+  console.log(`[tax] IVA de pedido antiguo completado antes de facturar: ${String(order.id).slice(0, 8)}`);
+  return data || { ...order, items: hydratedItems };
 }
 
 // =====================================================================
