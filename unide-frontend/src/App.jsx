@@ -3557,28 +3557,6 @@ export default function App() {
                )}
             </div>
 
-             {checkoutNeedsTermsCheckbox && (
-               <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-white">
-                 <input
-                   type="checkbox"
-                   checked={checkoutTermsAccepted}
-                   onChange={e => setCheckoutTermsAccepted(e.target.checked)}
-                   className="mt-1 h-4 w-4 accent-red-600 cursor-pointer flex-shrink-0"
-                 />
-                 <span className="text-xs text-gray-600 leading-relaxed">
-                   He leído y acepto la{' '}
-                   <button type="button" onClick={() => { setLegalType('privacidad'); navTo('legal'); }} className="text-red-600 font-medium underline">
-                     Política de Privacidad
-                   </button>{' '}
-                   y los{' '}
-                   <button type="button" onClick={() => { setLegalType('terminos'); navTo('legal'); }} className="text-red-600 font-medium underline">
-                     Términos y Condiciones
-                   </button>
-                   .
-                 </span>
-               </label>
-             )}
-
              {/* Resumen del pedido: visible justo antes de pagar para que
                  el cliente confirme productos e importe sin volver atrás. */}
              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-3 border border-gray-100">
@@ -3692,13 +3670,36 @@ export default function App() {
                </div>
              </div>
 
+            {/* Consentimiento JUSTO encima del botón de pago: el cliente
+                acepta y paga sin que el checkbox quede perdido en medio. */}
+            {checkoutNeedsTermsCheckbox && (
+              <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-white">
+                <input
+                  type="checkbox"
+                  checked={checkoutTermsAccepted}
+                  onChange={e => setCheckoutTermsAccepted(e.target.checked)}
+                  className="mt-1 h-4 w-4 accent-red-600 cursor-pointer flex-shrink-0"
+                />
+                <span className="text-xs text-gray-600 leading-relaxed">
+                  He leído y acepto la{' '}
+                  <button type="button" onClick={() => { setLegalType('privacidad'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                    Política de Privacidad
+                  </button>{' '}
+                  y los{' '}
+                  <button type="button" onClick={() => { setLegalType('terminos'); navTo('legal'); }} className="text-red-600 font-medium underline">
+                    Términos y Condiciones
+                  </button>
+                  .
+                </span>
+              </label>
+            )}
+
             {/* Botón de acción.
                 Decisión UX (2026-05-26): NO usamos `disabled` nativo (salvo
-                mientras procesa). Si el botón quedaba bloqueado el cliente no
-                veía por qué; en su lugar `handleInitiateCheckout` muestra
-                toasts específicos por cada requisito faltante (email,
-                dirección, teléfono, consentimiento, método de pago).
-                Mantenemos el efecto visual de "no listo" con opacidad. */}
+                mientras procesa), para poder mostrar el motivo. Si falta algo,
+                el botón se ve "no listo" (opacidad) Y debajo se lista QUÉ falta
+                (antes solo se sabía al pulsar). `handleInitiateCheckout`
+                mantiene además los toasts específicos como red de seguridad. */}
             {(() => {
               // En store_pickup no se exige address. El resto de campos +
               // método de pago son obligatorios para considerar "listo".
@@ -3709,6 +3710,15 @@ export default function App() {
                 isPhoneFormatOk(checkoutForm.phone) &&
                 (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted) &&
                 !!selectedPayment;
+              // Lista concreta de lo que falta, para decir POR QUÉ el botón
+              // está en gris ANTES de que el cliente lo pulse.
+              const missing = [];
+              if (!selectedPayment) missing.push('elige un método de pago');
+              if (!isEmailFormatOk(checkoutForm.email)) missing.push('un email válido');
+              if (!isStorePickup && !isAddressFormatOk(checkoutForm.address)) missing.push('tu dirección completa');
+              else if (!isStorePickup && !isDeliveryAddressAllowed) missing.push('una dirección dentro de la zona de reparto');
+              if (!isPhoneFormatOk(checkoutForm.phone)) missing.push('un teléfono válido');
+              if (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted) missing.push('aceptar la política');
               const label = isProcessingPayment
                 ? 'Procesando…'
                 : !selectedPayment
@@ -3719,19 +3729,26 @@ export default function App() {
                       ? `Confirmar Pedido €${total.toFixed(2)}`
                       : `Confirmar con Bizum €${total.toFixed(2)}`;
               return (
-                <button
-                  onClick={handleInitiateCheckout}
-                  disabled={isProcessingPayment}
-                  aria-disabled={!checkoutReady}
-                  className={`w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 active:scale-95 transition-transform flex justify-center items-center gap-2 disabled:active:scale-100 ${checkoutReady && !isProcessingPayment ? '' : 'opacity-50 shadow-none cursor-not-allowed'}`}
-                >
-                  {isProcessingPayment
-                    ? <Loader2 size={20} className="animate-spin"/>
-                    : selectedPayment === 'stripe'
-                      ? <Lock size={18}/>
-                      : <Wallet size={20}/>}
-                  {label}
-                </button>
+                <>
+                  <button
+                    onClick={handleInitiateCheckout}
+                    disabled={isProcessingPayment}
+                    aria-disabled={!checkoutReady}
+                    className={`w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-red-200 active:scale-95 transition-transform flex justify-center items-center gap-2 disabled:active:scale-100 ${checkoutReady && !isProcessingPayment ? '' : 'opacity-50 shadow-none cursor-not-allowed'}`}
+                  >
+                    {isProcessingPayment
+                      ? <Loader2 size={20} className="animate-spin"/>
+                      : selectedPayment === 'stripe'
+                        ? <Lock size={18}/>
+                        : <Wallet size={20}/>}
+                    {label}
+                  </button>
+                  {!isProcessingPayment && !checkoutReady && missing.length > 0 && (
+                    <p className="text-xs text-red-600 text-center mt-2 font-medium">
+                      Para continuar, falta: {missing.join('; ')}.
+                    </p>
+                  )}
+                </>
               );
             })()}
             {/* Cloudflare Turnstile montado al entrar al checkout para
