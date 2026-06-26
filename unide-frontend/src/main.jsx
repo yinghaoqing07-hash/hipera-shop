@@ -64,7 +64,7 @@ root.render(
 
           {/* 受保护的后台 (admin role check + JWT) */}
           <Route
-            path="/admin"
+            path="/admin/*"
             element={
               <AdminProtectedRoute>
                 <AdminApp />

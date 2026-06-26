@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase, clearSupabaseLocalSession } from './supabaseClient'; // 保留用于用户认证
 import { apiClient } from './api/client'; // 新增：API客户端
 import { 
@@ -10,12 +11,13 @@ import {
   ChevronRight, ChevronDown, FolderPlus, ImageIcon, LogOut, Upload, Wrench,
   CheckCircle, Clock, Gift, Printer, Menu, FileText, FileSpreadsheet, GripVertical,
   Bell, BellOff, Download, TrendingUp, Eye, EyeOff, MapPin, Phone, Mail, CreditCard, StickyNote,
-  Truck, Store, Smartphone, CalendarCheck, ScanLine
+  Truck, Store, Smartphone, CalendarCheck, ScanLine, Coins
 } from "lucide-react";
 import toast, { Toaster } from 'react-hot-toast';
 import { useNewOrdersAlert } from './hooks/useNewOrdersAlert';
 import IvaLookup from './components/IvaLookup';
 import EanIvaScanner from './components/EanIvaScanner';
+import CoinCounter from './components/CoinCounter';
 import {
   fiscalDocumentTitle,
   fiscalFooterText,
@@ -194,6 +196,11 @@ function productDisplayName(product) {
   return (product?.shortName || product?.short_name || product?.name || '').trim();
 }
 
+function adminTabFromPath(pathname) {
+  if (pathname === '/admin/caja/monedas') return 'coins';
+  return 'dashboard';
+}
+
 
 function resolveTaxCategoryFromSuggestion(suggestion) {
   const raw = suggestion?.suggested_tax_category || '';
@@ -264,7 +271,9 @@ function mapHeadersToFields(headers) {
 }
 
 export default function AdminApp() {
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState(() => adminTabFromPath(location.pathname));
 
   
   // Data
@@ -326,6 +335,12 @@ export default function AdminApp() {
   const RETRY_DELAYS = [5000, 15000, 35000]; // 3 reintentos: 5s, 15s, 35s (cold start ~60s)
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const goToTab = (tab, path = '/admin') => {
+    setActiveTab(tab);
+    setSidebarOpen(false);
+    if (location.pathname !== path) navigate(path);
+  };
+
   // Importar CSV
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importPreview, setImportPreview] = useState(null); // { headers, rows }
@@ -346,6 +361,12 @@ export default function AdminApp() {
 
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    if (location.pathname === '/admin/caja/monedas') {
+      setActiveTab('coins');
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -458,6 +479,11 @@ export default function AdminApp() {
         case '4': setActiveTab('repairs'); return;
         case '5': setActiveTab('orders'); return;
         case '6': setActiveTab('iva'); return;
+        case '7':
+          setActiveTab('coins');
+          setSidebarOpen(false);
+          if (location.pathname !== '/admin/caja/monedas') navigate('/admin/caja/monedas');
+          return;
         case 'r': e.preventDefault(); fetchData(); toast.success('Datos actualizados'); return;
         default: break;
       }
@@ -478,7 +504,7 @@ export default function AdminApp() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTab, detailOrder, refundTarget, refundWaModal, pickupWaModal, collectTarget, collectBusy, isEditing, importModalOpen, bulkResultModal.open, sidebarOpen, helpOpen, uploading, removingBg, generatingDesc, centeringProduct, orders]);
+  }, [activeTab, detailOrder, refundTarget, refundWaModal, pickupWaModal, collectTarget, collectBusy, isEditing, importModalOpen, bulkResultModal.open, sidebarOpen, helpOpen, uploading, removingBg, generatingDesc, centeringProduct, orders, location.pathname, navigate]);
 
   // =================================================================
   // Alerta de pedidos nuevos (sonido + badge + notificación)
@@ -3656,7 +3682,7 @@ const renderRepairs = () => (
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
             <Group title="Navegación" rows={[
-              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd><Kbd>6</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos / Consulta IVA'],
+              [<><Kbd>1</Kbd><Kbd>2</Kbd><Kbd>3</Kbd><Kbd>4</Kbd><Kbd>5</Kbd><Kbd>6</Kbd><Kbd>7</Kbd></>, 'Dashboard / Productos / Categorías / Reparaciones / Pedidos / Consulta IVA / Contador monedas'],
             ]}/>
             <Group title="En cada sección" rows={[
               [<Kbd>/</Kbd>, 'Enfocar el buscador'],
@@ -4221,18 +4247,19 @@ const renderRepairs = () => (
           </button>
         </div>
         <nav className="flex-1 space-y-1 px-2">
-            <button onClick={() => { setActiveTab("dashboard"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='dashboard'?'bg-red-600':'hover:bg-gray-800'}`}><LayoutDashboard size={20}/><span>Dashboard</span></button>
-            <button onClick={() => { setActiveTab("products"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='products'?'bg-red-600':'hover:bg-gray-800'}`}><Package size={20}/><span>Productos</span></button>
-            <button onClick={() => { setActiveTab("categories"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='categories'?'bg-red-600':'hover:bg-gray-800'}`}><List size={20}/><span>Categorías</span></button>
-            <button onClick={() => { setActiveTab("repairs"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='repairs'?'bg-red-600':'hover:bg-gray-800'}`}><Wrench size={20}/><span>Reparaciones</span></button>
-            <button onClick={() => { setActiveTab("citas"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='citas'?'bg-red-600':'hover:bg-gray-800'}`}>
+            <button onClick={() => goToTab("dashboard")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='dashboard'?'bg-red-600':'hover:bg-gray-800'}`}><LayoutDashboard size={20}/><span>Dashboard</span></button>
+            <button onClick={() => goToTab("products")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='products'?'bg-red-600':'hover:bg-gray-800'}`}><Package size={20}/><span>Productos</span></button>
+            <button onClick={() => goToTab("categories")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='categories'?'bg-red-600':'hover:bg-gray-800'}`}><List size={20}/><span>Categorías</span></button>
+            <button onClick={() => goToTab("repairs")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='repairs'?'bg-red-600':'hover:bg-gray-800'}`}><Wrench size={20}/><span>Reparaciones</span></button>
+            <button onClick={() => goToTab("citas")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='citas'?'bg-red-600':'hover:bg-gray-800'}`}>
               <CalendarCheck size={20}/><span className="flex-1 text-left">Citas</span>
               {bookings.filter(b => b.status === 'Nueva').length > 0 && (
                 <span className="text-[11px] font-black bg-white text-red-600 rounded-full px-2 py-0.5">{bookings.filter(b => b.status === 'Nueva').length}</span>
               )}
             </button>
-            <button onClick={() => { setActiveTab("orders"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
-            <button onClick={() => { setActiveTab("iva"); setSidebarOpen(false); }} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='iva'?'bg-red-600':'hover:bg-gray-800'}`}><ScanLine size={20}/><span>Consulta IVA</span></button>
+            <button onClick={() => goToTab("orders")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='orders'?'bg-red-600':'hover:bg-gray-800'}`}><ShoppingBag size={20}/><span>Pedidos</span></button>
+            <button onClick={() => goToTab("iva")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='iva'?'bg-red-600':'hover:bg-gray-800'}`}><ScanLine size={20}/><span>Consulta IVA</span></button>
+            <button onClick={() => goToTab("coins", "/admin/caja/monedas")} className={`w-full p-3 px-4 flex items-center gap-3 rounded-xl ${activeTab==='coins'?'bg-red-600':'hover:bg-gray-800'}`}><Coins size={20}/><span>Contador monedas</span></button>
         </nav>
         <div className="px-4 pt-4 border-t border-gray-800 space-y-2">
           {/* Controles de alerta sonora de pedidos nuevos.
@@ -4349,6 +4376,7 @@ const renderRepairs = () => (
             {activeTab === 'citas' && renderBookings()}
             {activeTab === 'orders' && renderOrders()}
             {activeTab === 'iva' && <IvaLookup />}
+            {activeTab === 'coins' && <CoinCounter />}
           </>
         )}
       </main>
