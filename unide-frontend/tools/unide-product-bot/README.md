@@ -280,4 +280,4 @@ codigo: 620475
 margen: 30
 ```
 
-如果写 `margen`，程序会直接把这个百分比填入 `P.defecto`。如果只写 `precio` 或 `precio: auto`，程序会按 `(目标 P.TPV - 成本) / 成本 * 100` 计算要填的 `P.defecto%`。
+如果写 `margen`，程序会直接把这个百分比填入 `P.defecto`。如果只写 `precio` 或 `precio: auto`，程序会按 UnideGes 公式 `(目标 P.TPV / (1 + IVA%) - 成本) / 目标 P.TPV * 100` 计算要填的 `P.defecto%`。

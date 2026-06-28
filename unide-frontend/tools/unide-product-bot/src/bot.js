@@ -147,9 +147,12 @@ function buildPricePlan(session, read) {
   const bloqVentaChecked = Boolean(values.bloqVentaChecked);
   const item = session.item;
   const supplierPvp = suggestedPrice(session.supplier?.product);
+  const ivaInfo = getIvaInfo(session);
+  const iva = ivaInfo.value;
   let pDefecto;
   let mode;
   let target;
+  let targetWithoutIva = NaN;
   if (item.margen?.mode === 'manual') {
     const margin = item.margen.value;
     if (margin <= 0 || margin >= 95) return { ok: false, error: `margen 不合理：${margin}` };
@@ -160,7 +163,9 @@ function buildPricePlan(session, read) {
     if (!Number.isFinite(cost) || cost <= 0) return { ok: false, error: '没有可用成本。桌面 PC Medio/PC Último 为空，供应商表也没有 PVD。' };
     const targetPtpv = item.precio?.mode === 'manual' ? item.precio.value : supplierPvp;
     if (!Number.isFinite(targetPtpv) || targetPtpv <= 0) return { ok: false, error: '没有可用价格。请写 precio: 2,69 或 margen: 30。' };
-    pDefecto = ((targetPtpv - cost) / cost) * 100;
+    if (!Number.isFinite(iva) || iva < 0) return { ok: false, error: '没有可用 IVA，不能计算 P.defecto%。' };
+    targetWithoutIva = targetPtpv / (1 + iva / 100);
+    pDefecto = ((targetWithoutIva - cost) / targetPtpv) * 100;
     mode = 'ptpv';
     target = `${formatMoney(targetPtpv)} P.TPV`;
   }
@@ -171,6 +176,9 @@ function buildPricePlan(session, read) {
     pcUltimo: formatNumber(pcUltimo),
     cost: formatNumber(cost),
     costSource: costInfo.source,
+    iva: formatNumber(iva),
+    ivaSource: ivaInfo.source,
+    targetWithoutIva: formatNumber(targetWithoutIva),
     pDefecto: formatNumber(pDefecto),
     price: formatNumber(item.precio?.value || supplierPvp || 0),
     marginPct: formatNumber(item.margen?.value || 0),
@@ -181,16 +189,18 @@ function buildPricePlan(session, read) {
 function formatPlan(plan) {
   return [
     '准备处理商品：',
-    `计算方式：${plan.mode === 'margen' ? '直接填写 P.defecto 百分比' : '按 P.TPV 比成本高多少来算 P.defecto%'}`,
+    `计算方式：${plan.mode === 'margen' ? '直接填写 P.defecto 百分比' : '按 UnideGes 公式计算 P.defecto%'}`,
     `目标：${plan.target}`,
     `PC Medio: ${plan.pcMedio}`,
     `PC Último: ${plan.pcUltimo}`,
+    `IVA: ${plan.iva}%（${plan.ivaSource}）`,
+    plan.targetWithoutIva ? `P.TPV sin IVA: ${plan.targetWithoutIva}` : null,
     `采用成本: ${plan.cost || '-'}（${plan.costSource}）`,
     `将填 P.defecto: ${plan.pDefecto}%`,
     `Bloq.Venta: ${plan.bloqVentaChecked ? '已勾选，将取消勾选' : '未勾选，不动'}`,
     '',
     '确认后才会写入桌面程序。'
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function saveSession(session) {
@@ -213,6 +223,13 @@ function getCostInfo(session, pcMedio, pcUltimo) {
   const storeMedio = parseNumber(session.store?.product?.coste_medio);
   if (Number.isFinite(storeMedio) && storeMedio > 0) return { value: storeMedio, source: '店内缓存 coste_medio' };
   return { value: NaN, source: '未找到' };
+}
+function getIvaInfo(session) {
+  const storeIva = parseNumber(session.store?.product?.iva);
+  if (Number.isFinite(storeIva) && storeIva >= 0) return { value: storeIva, source: '店内缓存' };
+  const configured = parseNumber(config.processing?.defaultIva ?? 10);
+  if (Number.isFinite(configured) && configured >= 0) return { value: configured, source: '默认配置' };
+  return { value: 10, source: '默认10' };
 }
 function parseNumber(value) { const n = Number.parseFloat(String(value ?? '').replace(',', '.').replace(/[^\d.-]/g, '')); return Number.isFinite(n) ? n : NaN; }
 function formatNumber(value) { const n = Number(value); if (!Number.isFinite(n)) return ''; return n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ','); }

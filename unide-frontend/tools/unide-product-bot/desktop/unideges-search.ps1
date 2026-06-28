@@ -89,20 +89,22 @@ function Copy-Field([int]$X, [int]$Y) {
 }
 
 function Test-CheckboxChecked([int]$X, [int]$Y, [int]$Size = 12) {
+  if ($Size -lt 18) { $Size = 18 }
   $half = [Math]::Floor($Size / 2)
   $bitmap = New-Object System.Drawing.Bitmap $Size, $Size
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   $graphics.CopyFromScreen($X - $half, $Y - $half, 0, 0, $bitmap.Size)
-  $dark = 0
-  for ($ix = 2; $ix -lt ($Size - 2); $ix++) {
-    for ($iy = 2; $iy -lt ($Size - 2); $iy++) {
+  $ink = 0
+  for ($ix = 4; $ix -lt ($Size - 4); $ix++) {
+    for ($iy = 4; $iy -lt ($Size - 4); $iy++) {
       $p = $bitmap.GetPixel($ix, $iy)
-      if ($p.R -lt 90 -and $p.G -lt 90 -and $p.B -lt 90) { $dark++ }
+      $brightness = (($p.R * 0.299) + ($p.G * 0.587) + ($p.B * 0.114))
+      if ($brightness -lt 170) { $ink++ }
     }
   }
   $graphics.Dispose()
   $bitmap.Dispose()
-  return ($dark -ge 3)
+  return ($ink -ge 6)
 }
 
 function Take-Screenshot([string]$Directory, [string]$QueryText) {

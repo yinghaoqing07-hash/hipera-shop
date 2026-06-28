@@ -44,6 +44,7 @@
 - 查 EAN。
 - 查 PVP1/PVP2/PVD。
 - 当桌面 `PC Medio/PC Último` 为空时，用 `pvd_promocion/pvd` 做成本兜底。
+- 计算 `P.defecto%` 时按 UnideGes 公式：`(目标 P.TPV / (1 + IVA%) - 成本) / 目标 P.TPV * 100`。
 
 如果桌面 `Artículos` 查得到，就以桌面系统为准。
 如果桌面查不到，再看供应商表。
