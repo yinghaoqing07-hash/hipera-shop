@@ -19,7 +19,13 @@
     ],
     "priceApplySteps": [
       { "type": "conditionalClick", "if": "bloqVentaChecked", "name": "Uncheck Bloq.Venta", "x": 0, "y": 0 },
+      { "type": "wait", "ms": 300 },
+      { "type": "setField", "name": "PC Medio", "x": 0, "y": 0, "value": "{{pcMedio}}" },
+      { "type": "wait", "ms": 300 },
+      { "type": "setField", "name": "PC Último", "x": 0, "y": 0, "value": "{{pcUltimo}}" },
+      { "type": "wait", "ms": 300 },
       { "type": "setField", "name": "P.defecto %", "x": 0, "y": 0, "value": "{{pDefecto}}" },
+      { "type": "wait", "ms": 300 },
       { "type": "click", "name": "Save", "x": 0, "y": 0 },
       { "type": "wait", "ms": 1500 },
       { "type": "screenshot", "name": "Price changed screenshot" }

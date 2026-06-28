@@ -121,7 +121,7 @@ async function handleApply(chatId, callbackId, id) {
   await telegram.answerCallbackQuery(callbackId, '正在写入');
   const result = await applyPriceDesktop(session.plan, config, logger);
   const text = result.status === 'ok'
-    ? '写入：已执行。请看截图确认 P.defecto、P.TPV、Bloq.Venta 和保存状态。'
+    ? '写入：已执行。请看截图确认 PC Medio、PC Último、P.defecto、P.TPV、Bloq.Venta 和保存状态。'
     : `写入失败：\n${result.error || result.reason || '未知错误'}`;
   if (result.status === 'ok' && result.screenshot && fs.existsSync(result.screenshot)) await telegram.sendPhoto(chatId, result.screenshot, text);
   else await telegram.sendMessage(chatId, text);

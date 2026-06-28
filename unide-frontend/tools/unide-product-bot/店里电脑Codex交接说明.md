@@ -44,6 +44,7 @@
 - 查 EAN。
 - 查 PVP1/PVP2/PVD。
 - 改价时统一用供应商表 `pvd_promocion/pvd` 作为 `PC Medio/PC Último` 成本，不再依赖桌面复制 PC 成本字段。
+- 写入时会把供应商 PVD 同时填进桌面 `PC Medio` 和 `PC Último`。
 - 计算 `P.defecto%` 时按 UnideGes 公式：`(目标 P.TPV / (1 + IVA%) - 成本) / 目标 P.TPV * 100`。
 
 如果桌面 `Artículos` 查得到，就以桌面系统为准。

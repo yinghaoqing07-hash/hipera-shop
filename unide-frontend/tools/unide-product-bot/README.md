@@ -254,7 +254,7 @@ powershell -ExecutionPolicy Bypass -File update-bot.ps1 -DryRun
 需要在 `config.local.json` 里校准：
 
 - `desktop.priceReadSteps`：只需要 `Bloq.Venta` 勾选框中心坐标；旧配置里保留 `PC Medio/PC Último` 也不会再用于计算。
-- `desktop.priceApplySteps`：`Bloq.Venta` 勾选框中心坐标，`P.defecto%` 输入框坐标，保存按钮坐标。
+- `desktop.priceApplySteps`：`Bloq.Venta` 勾选框中心坐标，`PC Medio` 输入框坐标，`PC Último` 输入框坐标，`P.defecto%` 输入框坐标，保存按钮坐标。
 
 成本选择顺序：
 
