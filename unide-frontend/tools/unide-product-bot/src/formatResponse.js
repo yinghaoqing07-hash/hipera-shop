@@ -25,7 +25,7 @@ export function formatProductResponse({ item, supplier, store, desktop, index, t
   lines.push('');
   lines.push(formatSupplier(supplier, item));
   lines.push('');
-  lines.push('安全状态：第一版只查询，不会改价/保存/确认/打印。');
+  lines.push('安全状态：不会自动写入；必须先点确认处理，再点确认写入。');
   return lines.join('\n');
 }
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
 import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
-import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice } from './supplierLookup.js';
+import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
@@ -142,26 +142,25 @@ function buildPricePlan(session, read) {
   const values = read.values || {};
   const pcMedio = parseNumber(values.pcMedio);
   const pcUltimo = parseNumber(values.pcUltimo);
-  const cost = Number.isFinite(pcUltimo) && pcUltimo > 0 ? pcUltimo : pcMedio;
+  const costInfo = getCostInfo(session, pcMedio, pcUltimo);
+  const cost = costInfo.value;
   const bloqVentaChecked = Boolean(values.bloqVentaChecked);
   const item = session.item;
   const supplierPvp = suggestedPrice(session.supplier?.product);
-  const storeIva = parseNumber(session.store?.product?.iva);
-  const iva = Number.isFinite(storeIva) ? storeIva : Number(config.processing?.defaultIva ?? 10);
   let pDefecto;
   let mode;
   let target;
   if (item.margen?.mode === 'manual') {
-    if (!Number.isFinite(cost) || cost <= 0) return { ok: false, error: '无法读取 PC Medio/PC Último，不能按 margen 计算。' };
     const margin = item.margen.value;
     if (margin <= 0 || margin >= 95) return { ok: false, error: `margen 不合理：${margin}` };
-    pDefecto = cost / (1 - margin / 100);
+    pDefecto = margin;
     mode = 'margen';
-    target = `${formatNumber(margin)}%`;
+    target = `P.defecto ${formatNumber(margin)}%`;
   } else {
+    if (!Number.isFinite(cost) || cost <= 0) return { ok: false, error: '没有可用成本。桌面 PC Medio/PC Último 为空，供应商表也没有 PVD。' };
     const targetPtpv = item.precio?.mode === 'manual' ? item.precio.value : supplierPvp;
     if (!Number.isFinite(targetPtpv) || targetPtpv <= 0) return { ok: false, error: '没有可用价格。请写 precio: 2,69 或 margen: 30。' };
-    pDefecto = targetPtpv / (1 + iva / 100);
+    pDefecto = ((targetPtpv - cost) / cost) * 100;
     mode = 'ptpv';
     target = `${formatMoney(targetPtpv)} P.TPV`;
   }
@@ -170,7 +169,8 @@ function buildPricePlan(session, read) {
     target,
     pcMedio: formatNumber(pcMedio),
     pcUltimo: formatNumber(pcUltimo),
-    iva: formatNumber(iva),
+    cost: formatNumber(cost),
+    costSource: costInfo.source,
     pDefecto: formatNumber(pDefecto),
     price: formatNumber(item.precio?.value || supplierPvp || 0),
     marginPct: formatNumber(item.margen?.value || 0),
@@ -181,12 +181,12 @@ function buildPricePlan(session, read) {
 function formatPlan(plan) {
   return [
     '准备处理商品：',
-    `计算方式：${plan.mode === 'margen' ? '按 margen 计算 P.defecto' : '按 P.TPV/IVA 反算 P.defecto'}`,
+    `计算方式：${plan.mode === 'margen' ? '直接填写 P.defecto 百分比' : '按 P.TPV 比成本高多少来算 P.defecto%'}`,
     `目标：${plan.target}`,
     `PC Medio: ${plan.pcMedio}`,
     `PC Último: ${plan.pcUltimo}`,
-    `IVA: ${plan.iva}%`,
-    `将填 P.defecto: ${plan.pDefecto}`,
+    `采用成本: ${plan.cost || '-'}（${plan.costSource}）`,
+    `将填 P.defecto: ${plan.pDefecto}%`,
     `Bloq.Venta: ${plan.bloqVentaChecked ? '已勾选，将取消勾选' : '未勾选，不动'}`,
     '',
     '确认后才会写入桌面程序。'
@@ -203,6 +203,17 @@ function saveSession(session) {
 function makeRepeatItem(query) { return { raw: query, codigo: query, ean: '', nombre: '', precio: { mode: 'auto', raw: 'auto' }, margen: { mode: 'missing', raw: '' }, desbloquear: true, etiqueta: false, nota: 'button repeat' }; }
 function makeResultButtons(id) { return { inline_keyboard: [[{ text: '再查一次', callback_data: `repeat:${id}` }], [{ text: '确认处理', callback_data: `process:${id}` }, { text: '标签', callback_data: `todo:label:${id}` }]] }; }
 function futureActionLabel(action) { if (action.startsWith('label')) return '生成 etiqueta'; return '这个功能'; }
+function getCostInfo(session, pcMedio, pcUltimo) {
+  if (Number.isFinite(pcUltimo) && pcUltimo > 0) return { value: pcUltimo, source: 'PC Último 桌面' };
+  if (Number.isFinite(pcMedio) && pcMedio > 0) return { value: pcMedio, source: 'PC Medio 桌面' };
+  const supplier = supplierCost(session.supplier?.product);
+  if (Number.isFinite(supplier) && supplier > 0) return { value: supplier, source: '供应商表 PVD' };
+  const storeUltimo = parseNumber(session.store?.product?.coste_ultimo);
+  if (Number.isFinite(storeUltimo) && storeUltimo > 0) return { value: storeUltimo, source: '店内缓存 coste_ultimo' };
+  const storeMedio = parseNumber(session.store?.product?.coste_medio);
+  if (Number.isFinite(storeMedio) && storeMedio > 0) return { value: storeMedio, source: '店内缓存 coste_medio' };
+  return { value: NaN, source: '未找到' };
+}
 function parseNumber(value) { const n = Number.parseFloat(String(value ?? '').replace(',', '.').replace(/[^\d.-]/g, '')); return Number.isFinite(n) ? n : NaN; }
 function formatNumber(value) { const n = Number(value); if (!Number.isFinite(n)) return ''; return n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ','); }
 function formatMoney(value) { return `${Number(value).toFixed(2).replace('.', ',')}`; }

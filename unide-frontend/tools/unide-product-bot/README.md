@@ -1,17 +1,14 @@
 ﻿# Unide 商品 Telegram 查询助手
 
-第一版目标：**只查询，不自动改价、不保存、不确认、不打印**。
+当前目标：**先查询，确认后才允许写入价格/解锁；不会自动确认或打印**。
 
 Telegram 收到商品模板后，程序会：
 
 1. 解析商品编码、条码、价格、是否要 desbloquear / etiqueta。
 2. 优先调用店里电脑上的 UnideGes 桌面 `Artículos` 查询脚本。
 3. 把查询后的截图发回 Telegram。
-4. 顺手查一下供应商商品表，给出建议价参考。
-
-## 为什么先做查询版
-
-桌面程序没有导入功能，最终会靠模拟点击处理商品。这个动作风险比较高，所以第一版只负责把“找商品”这一步自动化起来。等查询稳定，再加“确认后修改”的第二版。
+4. 顺手查一下供应商商品表，给出建议价和 PVD 成本参考。
+5. 点 `确认处理` 后读取桌面成本并计算要填的 `P.defecto%`；点 `确认写入` 后才会操作桌面程序。
 
 ## 准备
 
@@ -148,7 +145,7 @@ etiqueta: si
 
 第一版批量默认最多处理 5 个，避免桌面查询卡住。
 
-## 第一版的回复怎么理解
+## 回复怎么理解
 
 如果桌面查询开启，bot 会发截图。你看截图确认：
 
@@ -162,8 +159,9 @@ etiqueta: si
 ## 安全规则
 
 - `allowedChatIds` 不为空时，只接受这些 Telegram 聊天。
-- 这版不会点击 `Guardar`、`Confirmar`、`Enviar cambios`。
-- 这版不会自动打印 etiqueta。
+- 查询后不会自动写入；必须先点 `确认处理`，再点 `确认写入`。
+- 不会点击 `Confirmar`、`Enviar cambios`。
+- 不会自动打印 etiqueta。
 - 每次桌面查询都会保留截图和日志。
 
 ## 本地测试解析
@@ -198,36 +196,11 @@ powershell -ExecutionPolicy Bypass -File make-store-pc-package.ps1
 
 ## Telegram 按钮
 
-查询结果下面会显示两行按钮：
+查询结果下面会显示按钮：
 
 - `再查一次`：用同一个商品码/条码重新查。
-- `清零`：执行 `config.local.json` 里的 `desktop.clearSteps`。
-- `改价`：未来入口，现在只提示，不执行。
-- `解锁`：未来入口，现在只提示，不执行。
+- `确认处理`：读取 `PC Medio`、`PC Último`、`Bloq.Venta`，计算要填的 `P.defecto%`。
 - `标签`：未来入口，现在只提示，不执行。
-
-`清零` 按钮需要在 `config.local.json` 里配置：
-
-```json
-"clearSteps": [
-  {
-    "type": "click",
-    "name": "Clear current article",
-    "x": 你的清零x,
-    "y": 你的清零y
-  },
-  {
-    "type": "wait",
-    "ms": 800
-  },
-  {
-    "type": "screenshot",
-    "name": "Clear screenshot"
-  }
-]
-```
-
-如果没配置 `clearSteps`，按钮不会乱点，会返回失败提示。
 
 
 ## Telegram 发 zip 更新
@@ -251,10 +224,10 @@ powershell -ExecutionPolicy Bypass -File make-store-pc-package.ps1
 update-bot.cmd
 ```
 
-它会从 `update-url.txt` 里的 GitHub Release 地址下载最新版：
+它会从 `update-url.txt` 里的 GitHub 地址下载最新版：
 
 ```text
-https://github.com/yinghaoqing07-hash/hipera-shop/releases/latest/download/unide-product-bot-store-pc.zip
+https://raw.githubusercontent.com/yinghaoqing07-hash/hipera-shop/main/unide-frontend/tools/unide-product-bot-store-pc.zip
 ```
 
 更新规则：
@@ -262,7 +235,7 @@ https://github.com/yinghaoqing07-hash/hipera-shop/releases/latest/download/unide
 - 更新前先关掉正在运行的 `start-bot.cmd` 黑窗口。
 - 更新会保留 `.env` 和 `config.local.json`。
 - 更新完重新双击 `start-bot.cmd`。
-- 如果 GitHub Release 还没有发布新版 zip，下载会失败，这是正常的，需要先发布 zip。
+- 如果 GitHub 还没有推送新版 zip，下载会失败，这是正常的，需要先发布 zip。
 
 也可以测试更新脚本但不下载：
 
@@ -275,13 +248,21 @@ powershell -ExecutionPolicy Bypass -File update-bot.ps1 -DryRun
 改价使用两步确认：
 
 1. 查询商品后点 `确认处理`。
-2. bot 读取 `PC Medio`、`PC Último`、`Bloq.Venta` 状态并计算 `P.defecto`。
+2. bot 读取 `PC Medio`、`PC Último`、`Bloq.Venta` 状态并计算 `P.defecto%`。
 3. Telegram 显示计划，点 `确认写入` 后才会真正写桌面程序。
 
 需要在 `config.local.json` 里校准：
 
 - `desktop.priceReadSteps`：`PC Medio`、`PC Último` 输入框坐标，`Bloq.Venta` 勾选框中心坐标。
-- `desktop.priceApplySteps`：`Bloq.Venta` 勾选框中心坐标，`P.defecto` 输入框坐标，保存按钮坐标。
+- `desktop.priceApplySteps`：`Bloq.Venta` 勾选框中心坐标，`P.defecto%` 输入框坐标，保存按钮坐标。
+
+成本选择顺序：
+
+1. 桌面 `PC Último`
+2. 桌面 `PC Medio`
+3. 供应商表 `pvd_promocion`
+4. 供应商表 `pvd`
+5. 店内缓存 `coste_ultimo/coste_medio`
 
 模板可以写最终售价：
 
@@ -299,4 +280,4 @@ codigo: 620475
 margen: 30
 ```
 
-如果写 `margen`，程序会按 `PC Último / (1 - margen/100)` 计算 `P.defecto`。如果只写 `precio` 或 `precio: auto`，程序会按 `P.TPV / (1 + IVA/100)` 反算 `P.defecto`。
+如果写 `margen`，程序会直接把这个百分比填入 `P.defecto`。如果只写 `precio` 或 `precio: auto`，程序会按 `(目标 P.TPV - 成本) / 成本 * 100` 计算要填的 `P.defecto%`。

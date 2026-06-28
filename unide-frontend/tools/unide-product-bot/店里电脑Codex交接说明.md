@@ -1,6 +1,6 @@
 # 店里电脑 Codex 交接说明
 
-这是 UnideGes 商品 Telegram 查询助手第一版。
+这是 UnideGes 商品 Telegram 半自动查询/改价助手。
 
 ## 当前目标
 
@@ -10,21 +10,23 @@
 - 优先去 UnideGes 桌面程序 `Artículos` 页面用望远镜查询商品。
 - 把查询截图发回 Telegram。
 - 同时查本地供应商商品表，给 PVP/PVD 参考。
+- 用户点 `确认处理` 后读取成本并计算 `P.defecto%`。
+- 用户再点 `确认写入` 后才写入桌面程序。
 
-## 第一版安全边界
+## 安全边界
 
-第一版只查询，不自动修改。
+默认只查询，不自动修改。所有写入动作都必须经过 Telegram 二次确认。
 
 不要让程序执行这些动作：
 
-- 不改 PVP。
-- 不取消 `bloqueo para la venta`。
+- 不自动改 PVP。
+- 不自动取消 `bloqueo para la venta`。
 - 不点 `Guardar`。
 - 不点 `Confirmar`。
 - 不点 `Enviar cambios`。
 - 不打印 etiqueta。
 
-等桌面查询稳定后，下一版才考虑“用户 Telegram 确认后再改价/解除 bloqueo”。
+现在允许的写入路径只有：查询结果 -> `确认处理` -> 查看计划 -> `确认写入`。
 
 ## 业务判断
 
@@ -41,6 +43,7 @@
 - 查供应商有没有这个商品。
 - 查 EAN。
 - 查 PVP1/PVP2/PVD。
+- 当桌面 `PC Medio/PC Último` 为空时，用 `pvd_promocion/pvd` 做成本兜底。
 
 如果桌面 `Artículos` 查得到，就以桌面系统为准。
 如果桌面查不到，再看供应商表。
@@ -108,11 +111,11 @@ nota: FEL 92695469
 
 新版包含 `update-bot.cmd`。
 
-店里电脑以后可以双击 `update-bot.cmd`，从 `update-url.txt` 里的 GitHub Release 下载最新版 zip，并调用 `apply-update.ps1` 更新程序。
+店里电脑以后可以双击 `update-bot.cmd`，从 `update-url.txt` 里的 GitHub 下载最新版 zip，并调用 `apply-update.ps1` 更新程序。
 
 注意：
 
 - 更新前先关掉 `start-bot.cmd`。
 - `.env` 和 `config.local.json` 会保留。
 - 更新完成后重新启动 `start-bot.cmd`。
-- GitHub Release 必须已有 `unide-product-bot-store-pc.zip` 这个资产。
+- GitHub 仓库必须已经推送 `unide-product-bot-store-pc.zip`。

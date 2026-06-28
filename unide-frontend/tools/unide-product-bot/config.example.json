@@ -21,7 +21,7 @@
     ],
     "priceApplySteps": [
       { "type": "conditionalClick", "if": "bloqVentaChecked", "name": "Uncheck Bloq.Venta", "x": 0, "y": 0 },
-      { "type": "setField", "name": "P.defecto", "x": 0, "y": 0, "value": "{{pDefecto}}" },
+      { "type": "setField", "name": "P.defecto %", "x": 0, "y": 0, "value": "{{pDefecto}}" },
       { "type": "click", "name": "Save", "x": 0, "y": 0 },
       { "type": "wait", "ms": 1500 },
       { "type": "screenshot", "name": "Price changed screenshot" }

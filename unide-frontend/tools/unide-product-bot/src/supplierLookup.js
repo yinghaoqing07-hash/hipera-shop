@@ -112,6 +112,11 @@ export function suggestedPrice(product) {
   return firstPositiveNumber(product.pvp1, product.pvp2, product.pvp3);
 }
 
+export function supplierCost(product) {
+  if (!product) return null;
+  return firstPositiveNumber(product.pvd_promocion, product.pvd);
+}
+
 function firstPositiveNumber(...values) {
   for (const value of values) {
     const number = Number.parseFloat(String(value || '').replace(',', '.'));
