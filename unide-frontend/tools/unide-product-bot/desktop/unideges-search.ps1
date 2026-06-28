@@ -169,7 +169,11 @@ try {
         Send-Text (Resolve-Template ([string]$step.value))
       }
       "copyField" { $values[[string]$step.name] = Copy-Field ([int]$step.x) ([int]$step.y) }
-      "checkboxState" { $values[[string]$step.name] = Test-CheckboxChecked ([int]$step.x) ([int]$step.y) ([int]($step.size ?? 12)) }
+      "checkboxState" {
+        $size = 12
+        if ($step.PSObject.Properties.Name -contains "size") { $size = [int]$step.size }
+        $values[[string]$step.name] = Test-CheckboxChecked ([int]$step.x) ([int]$step.y) $size
+      }
       "screenshot" { $screenshotPath = Take-Screenshot $OutDir $Query }
       default { Add-WarningText "Unknown desktop step type: $($step.type)" }
     }
