@@ -10,6 +10,12 @@ $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+try {
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+} catch {
+  # Some locked-down Windows setups may not expose UI Automation assemblies.
+}
 
 Add-Type @"
 using System;
@@ -79,6 +85,9 @@ function Resolve-Template([string]$Text) {
 }
 
 function Copy-Field([int]$X, [int]$Y) {
+  $automationValue = Read-ValueAtPoint $X $Y
+  if ($automationValue) { return $automationValue }
+
   Click-Point $X $Y
   Start-Sleep -Milliseconds 120
   Send-StepKeys "^a"
@@ -86,6 +95,26 @@ function Copy-Field([int]$X, [int]$Y) {
   Send-StepKeys "^c"
   Start-Sleep -Milliseconds 150
   return (Get-Clipboard -Raw).Trim()
+}
+
+function Read-ValueAtPoint([int]$X, [int]$Y) {
+  try {
+    $point = New-Object System.Windows.Point($X, $Y)
+    $element = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    if (-not $element) { return $null }
+
+    $pattern = $null
+    if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+      $value = ([string]$pattern.Current.Value).Trim()
+      if ($value) { return $value }
+    }
+
+    $name = ([string]$element.Current.Name).Trim()
+    if ($name) { return $name }
+  } catch {
+    return $null
+  }
+  return $null
 }
 
 function Test-CheckboxChecked([int]$X, [int]$Y, [int]$Size = 12) {
