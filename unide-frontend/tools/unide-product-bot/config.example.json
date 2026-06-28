@@ -14,8 +14,6 @@
     "clearSteps": [],
     "steps": [],
     "priceReadSteps": [
-      { "type": "copyField", "name": "pcMedio", "x": 0, "y": 0 },
-      { "type": "copyField", "name": "pcUltimo", "x": 0, "y": 0 },
       { "type": "checkboxState", "name": "bloqVentaChecked", "x": 0, "y": 0, "size": 12 },
       { "type": "screenshot", "name": "Price read screenshot" }
     ],

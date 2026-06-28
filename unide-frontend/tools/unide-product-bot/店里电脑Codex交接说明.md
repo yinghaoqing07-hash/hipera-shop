@@ -10,7 +10,7 @@
 - 优先去 UnideGes 桌面程序 `Artículos` 页面用望远镜查询商品。
 - 把查询截图发回 Telegram。
 - 同时查本地供应商商品表，给 PVP/PVD 参考。
-- 用户点 `确认处理` 后读取成本并计算 `P.defecto%`。
+- 用户点 `确认处理` 后用供应商 PVD 作为成本并计算 `P.defecto%`。
 - 用户再点 `确认写入` 后才写入桌面程序。
 
 ## 安全边界
@@ -43,7 +43,7 @@
 - 查供应商有没有这个商品。
 - 查 EAN。
 - 查 PVP1/PVP2/PVD。
-- 当桌面 `PC Medio/PC Último` 为空时，用 `pvd_promocion/pvd` 做成本兜底。
+- 改价时统一用供应商表 `pvd_promocion/pvd` 作为 `PC Medio/PC Último` 成本，不再依赖桌面复制 PC 成本字段。
 - 计算 `P.defecto%` 时按 UnideGes 公式：`(目标 P.TPV / (1 + IVA%) - 成本) / 目标 P.TPV * 100`。
 
 如果桌面 `Artículos` 查得到，就以桌面系统为准。

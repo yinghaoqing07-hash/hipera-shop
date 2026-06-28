@@ -160,7 +160,7 @@ function buildPricePlan(session, read) {
     mode = 'margen';
     target = `P.defecto ${formatNumber(margin)}%`;
   } else {
-    if (!Number.isFinite(cost) || cost <= 0) return { ok: false, error: '没有可用成本。桌面 PC Medio/PC Último 为空，供应商表也没有 PVD。' };
+    if (!Number.isFinite(cost) || cost <= 0) return { ok: false, error: '没有可用成本。供应商表没有 PVD。' };
     const targetPtpv = item.precio?.mode === 'manual' ? item.precio.value : supplierPvp;
     if (!Number.isFinite(targetPtpv) || targetPtpv <= 0) return { ok: false, error: '没有可用价格。请写 precio: 2,69 或 margen: 30。' };
     if (!Number.isFinite(iva) || iva < 0) return { ok: false, error: '没有可用 IVA，不能计算 P.defecto%。' };
@@ -172,7 +172,7 @@ function buildPricePlan(session, read) {
         error: [
           `计算出来的 P.defecto 不合理：${formatNumber(pDefecto)}%。`,
           `目标 P.TPV: ${formatMoney(targetPtpv)}，成本: ${formatNumber(cost)}（${costInfo.source}）。`,
-          '这通常是 PC Medio/PC Último 坐标读错了，或者价格/成本不对。不会写入。'
+          '这通常是价格或供应商 PVD 不对。不会写入。'
         ].join('\n')
       };
     }
@@ -182,8 +182,8 @@ function buildPricePlan(session, read) {
   return { ok: true, plan: {
     mode,
     target,
-    pcMedio: formatNumber(pcMedio),
-    pcUltimo: formatNumber(pcUltimo),
+    pcMedio: formatNumber(costInfo.pcMedio ?? pcMedio),
+    pcUltimo: formatNumber(costInfo.pcUltimo ?? pcUltimo),
     cost: formatNumber(cost),
     costSource: costInfo.source,
     iva: formatNumber(iva),
@@ -227,16 +227,16 @@ function makeResultButtons(id) { return { inline_keyboard: [[{ text: '再查一�
 function futureActionLabel(action) { if (action.startsWith('label')) return '生成 etiqueta'; return '这个功能'; }
 function getCostInfo(session, pcMedio, pcUltimo) {
   const warnings = [];
-  if (isReasonableCost(pcUltimo)) return { value: pcUltimo, source: 'PC Último 桌面', warnings };
-  if (Number.isFinite(pcUltimo) && pcUltimo > 0) warnings.push(`忽略 PC Último=${formatNumber(pcUltimo)}，看起来不是商品成本。`);
-  if (isReasonableCost(pcMedio)) return { value: pcMedio, source: 'PC Medio 桌面', warnings };
-  if (Number.isFinite(pcMedio) && pcMedio > 0) warnings.push(`忽略 PC Medio=${formatNumber(pcMedio)}，看起来不是商品成本。`);
   const supplier = supplierCost(session.supplier?.product);
-  if (isReasonableCost(supplier)) return { value: supplier, source: '供应商表 PVD', warnings };
+  if (isReasonableCost(supplier)) {
+    if (Number.isFinite(pcUltimo) && pcUltimo > 0 && Math.abs(pcUltimo - supplier) > 0.001) warnings.push(`桌面 PC Último 已忽略，统一采用供应商 PVD。`);
+    if (Number.isFinite(pcMedio) && pcMedio > 0 && Math.abs(pcMedio - supplier) > 0.001) warnings.push(`桌面 PC Medio 已忽略，统一采用供应商 PVD。`);
+    return { value: supplier, source: '供应商表 PVD', pcMedio: supplier, pcUltimo: supplier, warnings };
+  }
   const storeUltimo = parseNumber(session.store?.product?.coste_ultimo);
-  if (isReasonableCost(storeUltimo)) return { value: storeUltimo, source: '店内缓存 coste_ultimo', warnings };
+  if (isReasonableCost(storeUltimo)) return { value: storeUltimo, source: '店内缓存 coste_ultimo', pcMedio: storeUltimo, pcUltimo: storeUltimo, warnings };
   const storeMedio = parseNumber(session.store?.product?.coste_medio);
-  if (isReasonableCost(storeMedio)) return { value: storeMedio, source: '店内缓存 coste_medio', warnings };
+  if (isReasonableCost(storeMedio)) return { value: storeMedio, source: '店内缓存 coste_medio', pcMedio: storeMedio, pcUltimo: storeMedio, warnings };
   return { value: NaN, source: '未找到', warnings };
 }
 function getIvaInfo(session) {

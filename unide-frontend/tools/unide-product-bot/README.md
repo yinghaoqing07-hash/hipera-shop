@@ -8,7 +8,7 @@ Telegram 收到商品模板后，程序会：
 2. 优先调用店里电脑上的 UnideGes 桌面 `Artículos` 查询脚本。
 3. 把查询后的截图发回 Telegram。
 4. 顺手查一下供应商商品表，给出建议价和 PVD 成本参考。
-5. 点 `确认处理` 后读取桌面成本并计算要填的 `P.defecto%`；点 `确认写入` 后才会操作桌面程序。
+5. 点 `确认处理` 后用供应商 PVD 作为成本并计算要填的 `P.defecto%`；点 `确认写入` 后才会操作桌面程序。
 
 ## 准备
 
@@ -199,7 +199,7 @@ powershell -ExecutionPolicy Bypass -File make-store-pc-package.ps1
 查询结果下面会显示按钮：
 
 - `再查一次`：用同一个商品码/条码重新查。
-- `确认处理`：读取 `PC Medio`、`PC Último`、`Bloq.Venta`，计算要填的 `P.defecto%`。
+- `确认处理`：用供应商 PVD 作为 `PC Medio/PC Último`，读取 `Bloq.Venta`，计算要填的 `P.defecto%`。
 - `标签`：未来入口，现在只提示，不执行。
 
 
@@ -248,21 +248,19 @@ powershell -ExecutionPolicy Bypass -File update-bot.ps1 -DryRun
 改价使用两步确认：
 
 1. 查询商品后点 `确认处理`。
-2. bot 读取 `PC Medio`、`PC Último`、`Bloq.Venta` 状态并计算 `P.defecto%`。
+2. bot 用供应商 PVD 作为 `PC Medio/PC Último`，读取 `Bloq.Venta` 状态并计算 `P.defecto%`。
 3. Telegram 显示计划，点 `确认写入` 后才会真正写桌面程序。
 
 需要在 `config.local.json` 里校准：
 
-- `desktop.priceReadSteps`：`PC Medio`、`PC Último` 输入框坐标，`Bloq.Venta` 勾选框中心坐标。
+- `desktop.priceReadSteps`：只需要 `Bloq.Venta` 勾选框中心坐标；旧配置里保留 `PC Medio/PC Último` 也不会再用于计算。
 - `desktop.priceApplySteps`：`Bloq.Venta` 勾选框中心坐标，`P.defecto%` 输入框坐标，保存按钮坐标。
 
 成本选择顺序：
 
-1. 桌面 `PC Último`
-2. 桌面 `PC Medio`
-3. 供应商表 `pvd_promocion`
-4. 供应商表 `pvd`
-5. 店内缓存 `coste_ultimo/coste_medio`
+1. 供应商表 `pvd_promocion`
+2. 供应商表 `pvd`
+3. 店内缓存 `coste_ultimo/coste_medio`
 
 模板可以写最终售价：
 
