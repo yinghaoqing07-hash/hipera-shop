@@ -2,8 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export function createLogger(logsDir) {
-  fs.mkdirSync(logsDir, { recursive: true });
-  const file = path.join(logsDir, `${new Date().toISOString().slice(0, 10)}.log`);
+  let file = null;
+  try {
+    fs.mkdirSync(logsDir, { recursive: true });
+    file = path.join(logsDir, `${new Date().toISOString().slice(0, 10)}.log`);
+  } catch (error) {
+    console.warn(`Log folder is not writable, continuing without file logs: ${error.message}`);
+  }
 
   function write(level, message, extra = {}) {
     const line = JSON.stringify({
@@ -12,7 +17,14 @@ export function createLogger(logsDir) {
       message,
       ...extra
     });
-    fs.appendFileSync(file, `${line}\n`, 'utf8');
+    if (file) {
+      try {
+        fs.appendFileSync(file, `${line}\n`, 'utf8');
+      } catch (error) {
+        file = null;
+        console.warn(`Log file is not writable, continuing without file logs: ${error.message}`);
+      }
+    }
     if (level === 'error') {
       console.error(message, extra);
     } else {

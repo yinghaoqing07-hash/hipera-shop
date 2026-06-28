@@ -62,10 +62,18 @@ export function loadConfig(configPath) {
   config.desktop.script = resolveToolPath(config.desktop.script);
   config.desktop.screenshotDir = resolveToolPath(config.desktop.screenshotDir);
 
-  fs.mkdirSync(config.logsDir, { recursive: true });
-  fs.mkdirSync(config.desktop.screenshotDir, { recursive: true });
+  tryMkdir(config.logsDir);
+  tryMkdir(config.desktop.screenshotDir);
 
   return config;
+}
+
+function tryMkdir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // The logger and desktop scripts will continue without blocking startup.
+  }
 }
 
 function mergeDeep(base, override) {
