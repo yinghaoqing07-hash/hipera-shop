@@ -166,6 +166,16 @@ function buildPricePlan(session, read) {
     if (!Number.isFinite(iva) || iva < 0) return { ok: false, error: '没有可用 IVA，不能计算 P.defecto%。' };
     targetWithoutIva = targetPtpv / (1 + iva / 100);
     pDefecto = ((targetWithoutIva - cost) / targetPtpv) * 100;
+    if (!isReasonableMargin(pDefecto)) {
+      return {
+        ok: false,
+        error: [
+          `计算出来的 P.defecto 不合理：${formatNumber(pDefecto)}%。`,
+          `目标 P.TPV: ${formatMoney(targetPtpv)}，成本: ${formatNumber(cost)}（${costInfo.source}）。`,
+          '这通常是 PC Medio/PC Último 坐标读错了，或者价格/成本不对。不会写入。'
+        ].join('\n')
+      };
+    }
     mode = 'ptpv';
     target = `${formatMoney(targetPtpv)} P.TPV`;
   }
@@ -182,7 +192,8 @@ function buildPricePlan(session, read) {
     pDefecto: formatNumber(pDefecto),
     price: formatNumber(item.precio?.value || supplierPvp || 0),
     marginPct: formatNumber(item.margen?.value || 0),
-    bloqVentaChecked
+    bloqVentaChecked,
+    warnings: costInfo.warnings || []
   } };
 }
 
@@ -198,6 +209,7 @@ function formatPlan(plan) {
     `采用成本: ${plan.cost || '-'}（${plan.costSource}）`,
     `将填 P.defecto: ${plan.pDefecto}%`,
     `Bloq.Venta: ${plan.bloqVentaChecked ? '已勾选，将取消勾选' : '未勾选，不动'}`,
+    ...(plan.warnings || []).map((warning) => `提醒：${warning}`),
     '',
     '确认后才会写入桌面程序。'
   ].filter(Boolean).join('\n');
@@ -214,15 +226,18 @@ function makeRepeatItem(query) { return { raw: query, codigo: query, ean: '', no
 function makeResultButtons(id) { return { inline_keyboard: [[{ text: '再查一次', callback_data: `repeat:${id}` }], [{ text: '确认处理', callback_data: `process:${id}` }, { text: '标签', callback_data: `todo:label:${id}` }]] }; }
 function futureActionLabel(action) { if (action.startsWith('label')) return '生成 etiqueta'; return '这个功能'; }
 function getCostInfo(session, pcMedio, pcUltimo) {
-  if (Number.isFinite(pcUltimo) && pcUltimo > 0) return { value: pcUltimo, source: 'PC Último 桌面' };
-  if (Number.isFinite(pcMedio) && pcMedio > 0) return { value: pcMedio, source: 'PC Medio 桌面' };
+  const warnings = [];
+  if (isReasonableCost(pcUltimo)) return { value: pcUltimo, source: 'PC Último 桌面', warnings };
+  if (Number.isFinite(pcUltimo) && pcUltimo > 0) warnings.push(`忽略 PC Último=${formatNumber(pcUltimo)}，看起来不是商品成本。`);
+  if (isReasonableCost(pcMedio)) return { value: pcMedio, source: 'PC Medio 桌面', warnings };
+  if (Number.isFinite(pcMedio) && pcMedio > 0) warnings.push(`忽略 PC Medio=${formatNumber(pcMedio)}，看起来不是商品成本。`);
   const supplier = supplierCost(session.supplier?.product);
-  if (Number.isFinite(supplier) && supplier > 0) return { value: supplier, source: '供应商表 PVD' };
+  if (isReasonableCost(supplier)) return { value: supplier, source: '供应商表 PVD', warnings };
   const storeUltimo = parseNumber(session.store?.product?.coste_ultimo);
-  if (Number.isFinite(storeUltimo) && storeUltimo > 0) return { value: storeUltimo, source: '店内缓存 coste_ultimo' };
+  if (isReasonableCost(storeUltimo)) return { value: storeUltimo, source: '店内缓存 coste_ultimo', warnings };
   const storeMedio = parseNumber(session.store?.product?.coste_medio);
-  if (Number.isFinite(storeMedio) && storeMedio > 0) return { value: storeMedio, source: '店内缓存 coste_medio' };
-  return { value: NaN, source: '未找到' };
+  if (isReasonableCost(storeMedio)) return { value: storeMedio, source: '店内缓存 coste_medio', warnings };
+  return { value: NaN, source: '未找到', warnings };
 }
 function getIvaInfo(session) {
   const storeIva = parseNumber(session.store?.product?.iva);
@@ -232,6 +247,8 @@ function getIvaInfo(session) {
   return { value: 10, source: '默认10' };
 }
 function parseNumber(value) { const n = Number.parseFloat(String(value ?? '').replace(',', '.').replace(/[^\d.-]/g, '')); return Number.isFinite(n) ? n : NaN; }
+function isReasonableCost(value) { return Number.isFinite(value) && value > 0 && value < 1000; }
+function isReasonableMargin(value) { return Number.isFinite(value) && value >= -5 && value < 95; }
 function formatNumber(value) { const n = Number(value); if (!Number.isFinite(n)) return ''; return n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ','); }
 function formatMoney(value) { return `${Number(value).toFixed(2).replace('.', ',')}`; }
 function isAllowed(chatId, userId) { const allowed = config.telegram.allowedChatIds || []; if (!allowed.length) return true; const allowedStrings = new Set(allowed.map(String)); return allowedStrings.has(String(chatId)) || allowedStrings.has(String(userId)); }
