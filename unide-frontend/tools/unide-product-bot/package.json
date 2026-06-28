@@ -1,0 +1,14 @@
+{
+  "name": "unide-product-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram helper for safe UnideGes product lookup.",
+  "scripts": {
+    "start": "node src/bot.js",
+    "test:parse": "node src/test-message.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,30 @@
+﻿{
+  "telegram": { "allowedChatIds": [], "pollTimeoutSeconds": 25, "maxItemsPerMessage": 5 },
+  "supplierCsv": "data/supplier_products_clean.csv",
+  "storeCsv": "data/store_products_clean.csv",
+  "logsDir": "logs",
+  "processing": { "defaultIva": 10 },
+  "desktop": {
+    "enabled": false,
+    "script": "desktop/unideges-search.ps1",
+    "windowTitleRegex": "UNIDEGES|Articulos|Artículos",
+    "excludedProcessNames": ["chrome", "msedge", "firefox"],
+    "screenshotDir": "screenshots",
+    "expectedScreen": { "width": 0, "height": 0 },
+    "clearSteps": [],
+    "steps": [],
+    "priceReadSteps": [
+      { "type": "copyField", "name": "pcMedio", "x": 0, "y": 0 },
+      { "type": "copyField", "name": "pcUltimo", "x": 0, "y": 0 },
+      { "type": "checkboxState", "name": "bloqVentaChecked", "x": 0, "y": 0, "size": 12 },
+      { "type": "screenshot", "name": "Price read screenshot" }
+    ],
+    "priceApplySteps": [
+      { "type": "conditionalClick", "if": "bloqVentaChecked", "name": "Uncheck Bloq.Venta", "x": 0, "y": 0 },
+      { "type": "setField", "name": "P.defecto", "x": 0, "y": 0, "value": "{{pDefecto}}" },
+      { "type": "click", "name": "Save", "x": 0, "y": 0 },
+      { "type": "wait", "ms": 1500 },
+      { "type": "screenshot", "name": "Price changed screenshot" }
+    ]
+  }
+}
