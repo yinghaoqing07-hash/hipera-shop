@@ -35,7 +35,8 @@ function formatDesktop(desktop) {
   }
   if (desktop.status === 'ok') {
     const warning = desktop.warnings?.length ? `\n提醒：${desktop.warnings.join('；')}` : '';
-    return `桌面查询：已执行，请看截图确认 Artículos 结果。${warning}`;
+    const screenshotText = desktop.screenshot ? '请看截图确认 Artículos 结果。' : '已执行，但没有返回截图路径。';
+    return `桌面查询：已执行，${screenshotText}${warning}`;
   }
   if (desktop.status === 'error') {
     return `桌面查询：失败。\n${desktop.error || '未知错误'}`;

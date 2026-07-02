@@ -127,8 +127,7 @@ async function handleOrderApply(chatId, callbackId, id) {
   const text = result.status === 'ok'
     ? '订单填入：已执行。请看截图确认订单名、商品和数量；程序没有点 Guardar，也没有点 Enviar Pedido。'
     : `订单填入失败：\n${result.error || result.reason || '未知错误'}`;
-  if (result.status === 'ok' && result.screenshot && fs.existsSync(result.screenshot)) await telegram.sendPhoto(chatId, result.screenshot, text);
-  else await telegram.sendMessage(chatId, text);
+  await sendWithOptionalScreenshot(chatId, result, text);
 }
 
 async function maybeSendOrderReminder() {
@@ -150,8 +149,7 @@ async function handleClear(chatId, callbackId) {
   await telegram.answerCallbackQuery(callbackId, '正在清零');
   const result = await clearDesktop(config, logger);
   const text = result.status === 'ok' ? '清零：已执行。' : `清零：失败。\n${result.error || result.reason || '未知错误'}`;
-  if (result.status === 'ok' && result.screenshot && fs.existsSync(result.screenshot)) await telegram.sendPhoto(chatId, result.screenshot, text);
-  else await telegram.sendMessage(chatId, text);
+  await sendWithOptionalScreenshot(chatId, result, text);
 }
 
 async function handleProcess(chatId, callbackId, id) {
@@ -181,8 +179,7 @@ async function handleApply(chatId, callbackId, id) {
   const text = result.status === 'ok'
     ? '写入：已执行。请看截图确认 PC Medio、PC Último、P.defecto、P.TPV、Bloq.Venta 和保存状态。'
     : `写入失败：\n${result.error || result.reason || '未知错误'}`;
-  if (result.status === 'ok' && result.screenshot && fs.existsSync(result.screenshot)) await telegram.sendPhoto(chatId, result.screenshot, text);
-  else await telegram.sendMessage(chatId, text);
+  await sendWithOptionalScreenshot(chatId, result, text);
 }
 
 async function sendProductResult(chatId, item, index, total) {
@@ -192,8 +189,26 @@ async function sendProductResult(chatId, item, index, total) {
   const response = formatProductResponse({ item, supplier, store, desktop, index, total });
   const id = saveSession({ item, supplier, store, desktop });
   const buttons = makeResultButtons(id);
-  if (desktop.status === 'ok' && desktop.screenshot && fs.existsSync(desktop.screenshot)) await telegram.sendPhoto(chatId, desktop.screenshot, response, { reply_markup: buttons });
-  else await telegram.sendMessage(chatId, response, { reply_markup: buttons });
+  await sendWithOptionalScreenshot(chatId, desktop, response, { reply_markup: buttons });
+}
+
+async function sendWithOptionalScreenshot(chatId, result, text, options = {}) {
+  if (result?.status === 'ok' && result.screenshot) {
+    const screenshotPath = path.resolve(result.screenshot);
+    if (fs.existsSync(screenshotPath)) {
+      try {
+        await telegram.sendPhoto(chatId, screenshotPath, text, options);
+        return;
+      } catch (error) {
+        logger.error('telegram screenshot send failed', { screenshot: screenshotPath, error: error.message });
+        await telegram.sendMessage(chatId, `${text}\n\n截图发送失败：${error.message}\n截图文件：${screenshotPath}`, options);
+        return;
+      }
+    }
+    await telegram.sendMessage(chatId, `${text}\n\n截图文件没有生成或路径不可读：${screenshotPath}`, options);
+    return;
+  }
+  await telegram.sendMessage(chatId, text, options);
 }
 
 function buildPricePlan(session, read) {

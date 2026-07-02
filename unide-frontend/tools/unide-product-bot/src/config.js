@@ -5,6 +5,26 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 export const toolRoot = path.resolve(path.dirname(__filename), '..');
 
+const defaultOrderApplySteps = [
+  { type: 'focus' },
+  { type: 'click', name: 'Nuevo pedido', x: 327, y: 177 },
+  { type: 'wait', ms: 1000 },
+  { type: 'setField', name: 'Nombre del Pedido', x: 486, y: 267, value: '{{orderName}}' },
+  { type: 'wait', ms: 300 },
+  { type: 'click', name: 'Primera linea articulo', x: 694, y: 615 },
+  { type: 'wait', ms: 200 },
+  {
+    type: 'orderLines',
+    selectKeys: '{ENTER}',
+    quantityKeys: '{TAB}',
+    finishLineKeys: '{ENTER}{ENTER}',
+    autocompleteMs: 700,
+    selectedMs: 300,
+    betweenLinesMs: 700
+  },
+  { type: 'screenshot', name: 'Order filled screenshot' }
+];
+
 const defaultConfig = {
   telegram: {
     allowedChatIds: [],
@@ -29,7 +49,7 @@ const defaultConfig = {
     screenshotDir: 'screenshots',
     expectedScreen: { width: 0, height: 0 },
     steps: [],
-    orderApplySteps: []
+    orderApplySteps: defaultOrderApplySteps
   }
 };
 
@@ -69,11 +89,24 @@ export function loadConfig(configPath) {
   config.logsDir = resolveToolPath(config.logsDir);
   config.desktop.script = resolveToolPath(config.desktop.script);
   config.desktop.screenshotDir = resolveToolPath(config.desktop.screenshotDir);
+  normalizeDesktopDefaults(config);
 
   tryMkdir(config.logsDir);
   tryMkdir(config.desktop.screenshotDir);
 
   return config;
+}
+
+function normalizeDesktopDefaults(config) {
+  if (!Array.isArray(config.desktop.orderApplySteps) || isZeroCoordinateOrderFlow(config.desktop.orderApplySteps)) {
+    config.desktop.orderApplySteps = defaultOrderApplySteps;
+  }
+}
+
+function isZeroCoordinateOrderFlow(steps) {
+  const coordinateSteps = steps.filter((step) => ['click', 'setField'].includes(step?.type));
+  if (!coordinateSteps.length) return false;
+  return coordinateSteps.every((step) => Number(step.x || 0) === 0 || Number(step.y || 0) === 0);
 }
 
 function tryMkdir(dir) {
