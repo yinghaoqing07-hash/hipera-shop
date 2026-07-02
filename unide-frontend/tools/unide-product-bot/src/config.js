@@ -98,7 +98,11 @@ export function loadConfig(configPath) {
 }
 
 function normalizeDesktopDefaults(config) {
-  if (!Array.isArray(config.desktop.orderApplySteps) || isZeroCoordinateOrderFlow(config.desktop.orderApplySteps)) {
+  if (
+    !Array.isArray(config.desktop.orderApplySteps) ||
+    isZeroCoordinateOrderFlow(config.desktop.orderApplySteps) ||
+    isLegacyOrderFlow(config.desktop.orderApplySteps)
+  ) {
     config.desktop.orderApplySteps = defaultOrderApplySteps;
   }
 }
@@ -107,6 +111,12 @@ function isZeroCoordinateOrderFlow(steps) {
   const coordinateSteps = steps.filter((step) => ['click', 'setField'].includes(step?.type));
   if (!coordinateSteps.length) return false;
   return coordinateSteps.every((step) => Number(step.x || 0) === 0 || Number(step.y || 0) === 0);
+}
+
+function isLegacyOrderFlow(steps) {
+  const hasOrderLines = steps.some((step) => step?.type === 'orderLines');
+  const hasNuevoClick = steps.some((step) => step?.type === 'click' && /nuevo/i.test(String(step.name || '')));
+  return hasOrderLines && !hasNuevoClick;
 }
 
 function tryMkdir(dir) {
