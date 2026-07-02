@@ -4,6 +4,13 @@
   "storeCsv": "data/store_products_clean.csv",
   "logsDir": "logs",
   "processing": { "defaultIva": 10 },
+  "ordering": {
+    "enabled": true,
+    "timezone": "Europe/Madrid",
+    "reminderTime": "10:00",
+    "reminderWindowMinutes": 180,
+    "reminderChatIds": []
+  },
   "desktop": {
     "enabled": false,
     "script": "desktop/unideges-search.ps1",

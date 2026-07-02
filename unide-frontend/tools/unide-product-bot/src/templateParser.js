@@ -156,6 +156,9 @@ function parseBool(value) {
 
 export function formatTemplateHelp() {
   return [
+    '常用：',
+    '/pedido  看今天叫货提醒',
+    '',
     '发这个模板给我：',
     '',
     '/articulo',

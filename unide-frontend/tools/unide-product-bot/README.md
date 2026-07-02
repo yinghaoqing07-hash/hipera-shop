@@ -113,6 +113,22 @@ calibrate-screen.cmd
 
 ## Telegram 模板
 
+叫货助手：
+
+```text
+/pedido
+```
+
+也可以发：
+
+```text
+/pedido carne
+/pedido fruta
+/pedido pda
+```
+
+`/pedido` 会按当天星期提醒：周日 PDA，周一第一轮肉类/果蔬，周三第二轮肉类/果蔬，周四可选补货。这个功能只生成提醒和清单，不会自动保存或发送订单。
+
 单个商品：
 
 ```text
@@ -242,6 +258,29 @@ https://raw.githubusercontent.com/yinghaoqing07-hash/hipera-shop/main/unide-fron
 ```powershell
 powershell -ExecutionPolicy Bypass -File update-bot.ps1 -DryRun
 ```
+
+## 叫货提醒
+
+店里电脑的 bot 开着时，会按 `config.local.json` 的 `ordering` 配置给 Telegram 发手机提醒。默认时间是西班牙时间 10:00，提醒窗口 3 小时：
+
+```json
+"ordering": {
+  "enabled": true,
+  "timezone": "Europe/Madrid",
+  "reminderTime": "10:00",
+  "reminderWindowMinutes": 180,
+  "reminderChatIds": []
+}
+```
+
+如果 `reminderChatIds` 为空，会发给 `telegram.allowedChatIds` 里的人。没有配置 chat id 时不会自动发提醒。
+
+提醒内容：
+
+- 周日：PDA / 自动导入订单，11:00 前确认。
+- 周一：第一轮肉类 + 果蔬检查，通常周三到货。
+- 周三：第二轮肉类 + 果蔬检查，通常周五到货。
+- 周四：可选补货，重点看周末到周一缺口。
 
 ## 改价处理
 

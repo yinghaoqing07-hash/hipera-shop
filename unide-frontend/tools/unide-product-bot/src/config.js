@@ -14,6 +14,13 @@ const defaultConfig = {
   supplierCsv: 'data/supplier_products_clean.csv',
   storeCsv: 'data/store_products_clean.csv',
   logsDir: 'logs',
+  ordering: {
+    enabled: true,
+    timezone: 'Europe/Madrid',
+    reminderTime: '10:00',
+    reminderWindowMinutes: 180,
+    reminderChatIds: []
+  },
   desktop: {
     enabled: false,
     script: 'desktop/unideges-search.ps1',

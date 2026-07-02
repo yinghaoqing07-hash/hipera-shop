@@ -8,6 +8,7 @@ import { applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
+import { OrderReminderScheduler, formatOrderResponse, isOrderCommand, makeOrderButtons, parseOrderMode } from './orderAssistant.js';
 
 const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
 const config = loadConfig(readArg('--config'));
@@ -21,6 +22,7 @@ if (process.argv.includes('--help')) { console.log('Usage: node src/bot.js --con
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegram = new TelegramClient(token);
+const orderReminderScheduler = new OrderReminderScheduler(config, logger);
 let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length });
@@ -29,6 +31,7 @@ while (true) {
   try {
     const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
     for (const update of updates) { offset = update.update_id + 1; await handleUpdate(update); }
+    await maybeSendOrderReminder();
   } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
 }
 
@@ -44,6 +47,7 @@ async function handleUpdate(update) {
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
+  if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
   const parsed = parseProductMessage(text);
   if (!parsed.ok) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   const maxItems = config.telegram.maxItemsPerMessage ?? 5;
@@ -80,12 +84,28 @@ async function handleCallback(callback) {
   if (!chatId) return;
   if (!isAllowed(chatId, userId)) { await telegram.answerCallbackQuery(callback.id, '没有权限'); logger.warn('blocked unauthorized callback', { chatId, userId, data }); return; }
   if (data.startsWith('repeat:')) { const id = data.slice(7); const session = sessions.get(id); await telegram.answerCallbackQuery(callback.id, '重新查询'); await sendProductResult(chatId, session?.item || makeRepeatItem(id), 0, 1); return; }
+  if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('cancel:')) { sessions.delete(data.slice(7)); await telegram.answerCallbackQuery(callback.id, '已取消'); await telegram.sendMessage(chatId, '已取消，不会执行任何桌面操作。'); return; }
   if (data.startsWith('todo:')) { const label = futureActionLabel(data.slice(5)); await telegram.answerCallbackQuery(callback.id, `${label}还没实现`); await telegram.sendMessage(chatId, `${label}：按钮入口已预留，但现在还不会执行任何桌面操作。`); return; }
   await telegram.answerCallbackQuery(callback.id, '这个按钮已经失效');
+}
+
+async function maybeSendOrderReminder() {
+  const due = orderReminderScheduler.due(new Date());
+  if (!due) return;
+  let sent = 0;
+  for (const chatId of due.chatIds) {
+    try {
+      await telegram.sendMessage(chatId, due.text, makeOrderButtons());
+      sent += 1;
+    } catch (error) {
+      logger.error('ordering reminder failed', { chatId, error: error.message });
+    }
+  }
+  if (sent > 0) orderReminderScheduler.markSent(due.key);
 }
 
 async function handleClear(chatId, callbackId) {
