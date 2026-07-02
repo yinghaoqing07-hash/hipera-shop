@@ -4,11 +4,21 @@ import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
 import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
+import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
-import { OrderReminderScheduler, formatOrderResponse, isOrderCommand, makeOrderButtons, parseOrderMode } from './orderAssistant.js';
+import {
+  OrderReminderScheduler,
+  formatOrderDraft,
+  formatOrderResponse,
+  isOrderCommand,
+  isOrderDraftCommand,
+  makeOrderButtons,
+  makeOrderDraftButtons,
+  parseOrderDraftMessage,
+  parseOrderMode
+} from './orderAssistant.js';
 
 const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
 const config = loadConfig(readArg('--config'));
@@ -47,6 +57,7 @@ async function handleUpdate(update) {
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
+  if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
   const parsed = parseProductMessage(text);
   if (!parsed.ok) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
@@ -85,12 +96,39 @@ async function handleCallback(callback) {
   if (!isAllowed(chatId, userId)) { await telegram.answerCallbackQuery(callback.id, '没有权限'); logger.warn('blocked unauthorized callback', { chatId, userId, data }); return; }
   if (data.startsWith('repeat:')) { const id = data.slice(7); const session = sessions.get(id); await telegram.answerCallbackQuery(callback.id, '重新查询'); await sendProductResult(chatId, session?.item || makeRepeatItem(id), 0, 1); return; }
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
+  if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('cancel:')) { sessions.delete(data.slice(7)); await telegram.answerCallbackQuery(callback.id, '已取消'); await telegram.sendMessage(chatId, '已取消，不会执行任何桌面操作。'); return; }
   if (data.startsWith('todo:')) { const label = futureActionLabel(data.slice(5)); await telegram.answerCallbackQuery(callback.id, `${label}还没实现`); await telegram.sendMessage(chatId, `${label}：按钮入口已预留，但现在还不会执行任何桌面操作。`); return; }
   await telegram.answerCallbackQuery(callback.id, '这个按钮已经失效');
+}
+
+async function handleOrderDraft(chatId, text) {
+  const parsed = parseOrderDraftMessage(text);
+  if (!parsed.ok) {
+    await telegram.sendMessage(chatId, `${parsed.error}\n\n${formatOrderResponse('help', new Date(), config)}`);
+    return;
+  }
+  const id = saveSession({ orderDraft: parsed.draft });
+  await telegram.sendMessage(chatId, formatOrderDraft(parsed.draft), makeOrderDraftButtons(id));
+}
+
+async function handleOrderApply(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  if (!session?.orderDraft) {
+    await telegram.answerCallbackQuery(callbackId, '记录已过期');
+    await telegram.sendMessage(chatId, '这条订单记录已过期，请重新发送 /pedido_nuevo。');
+    return;
+  }
+  await telegram.answerCallbackQuery(callbackId, '开始填入');
+  const result = await applyOrderDesktop(session.orderDraft, config, logger);
+  const text = result.status === 'ok'
+    ? '订单填入：已执行。请看截图确认订单名、商品和数量；程序没有点 Guardar，也没有点 Enviar Pedido。'
+    : `订单填入失败：\n${result.error || result.reason || '未知错误'}`;
+  if (result.status === 'ok' && result.screenshot && fs.existsSync(result.screenshot)) await telegram.sendPhoto(chatId, result.screenshot, text);
+  else await telegram.sendMessage(chatId, text);
 }
 
 async function maybeSendOrderReminder() {

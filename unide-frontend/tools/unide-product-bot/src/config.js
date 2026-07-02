@@ -28,7 +28,8 @@ const defaultConfig = {
     excludedProcessNames: ['chrome', 'msedge', 'firefox'],
     screenshotDir: 'screenshots',
     expectedScreen: { width: 0, height: 0 },
-    steps: []
+    steps: [],
+    orderApplySteps: []
   }
 };
 

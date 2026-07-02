@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "clear", "priceRead", "priceApply")][string]$Mode = "search",
+  [ValidateSet("search", "clear", "priceRead", "priceApply", "orderApply")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -84,6 +84,47 @@ function Resolve-Template([string]$Text) {
   return $out
 }
 
+function Send-OrderLines($Step) {
+  $items = @($variables.items)
+  if ($items.Count -eq 0) { throw "No order items were provided" }
+
+  if (($Step.PSObject.Properties.Name -contains "lineClickX") -and ($Step.PSObject.Properties.Name -contains "lineClickY")) {
+    $x = [int]$Step.lineClickX
+    $y = [int]$Step.lineClickY
+    if ($x -gt 0 -and $y -gt 0) { Click-Point $x $y }
+  }
+
+  $autocompleteMs = 700
+  $selectedMs = 500
+  $betweenLinesMs = 700
+  $selectKeys = "{ENTER}"
+  $quantityKeys = "{TAB}"
+  $finishLineKeys = "{ENTER}"
+  if ($Step.PSObject.Properties.Name -contains "autocompleteMs") { $autocompleteMs = [int]$Step.autocompleteMs }
+  if ($Step.PSObject.Properties.Name -contains "selectedMs") { $selectedMs = [int]$Step.selectedMs }
+  if ($Step.PSObject.Properties.Name -contains "betweenLinesMs") { $betweenLinesMs = [int]$Step.betweenLinesMs }
+  if ($Step.PSObject.Properties.Name -contains "selectKeys") { $selectKeys = [string]$Step.selectKeys }
+  if ($Step.PSObject.Properties.Name -contains "quantityKeys") { $quantityKeys = [string]$Step.quantityKeys }
+  if ($Step.PSObject.Properties.Name -contains "finishLineKeys") { $finishLineKeys = [string]$Step.finishLineKeys }
+
+  foreach ($item in $items) {
+    $code = [string]$item.code
+    $quantity = [string]$item.quantity
+    if (-not $code) { continue }
+
+    Send-Text $code
+    Start-Sleep -Milliseconds $autocompleteMs
+    if ($selectKeys) { Send-StepKeys $selectKeys }
+    Start-Sleep -Milliseconds $selectedMs
+    if ($quantityKeys) { Send-StepKeys $quantityKeys }
+    Start-Sleep -Milliseconds 120
+    Send-Text $quantity
+    Start-Sleep -Milliseconds 120
+    if ($finishLineKeys) { Send-StepKeys $finishLineKeys }
+    Start-Sleep -Milliseconds $betweenLinesMs
+  }
+}
+
 function Copy-Field([int]$X, [int]$Y) {
   $automationValue = Read-ValueAtPoint $X $Y
   if ($automationValue) { return $automationValue }
@@ -159,6 +200,7 @@ function Get-Steps($Config, [string]$ActionMode) {
   if ($ActionMode -eq "clear") { $steps = @($Config.desktop.clearSteps) }
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
   elseif ($ActionMode -eq "priceApply") { $steps = @($Config.desktop.priceApplySteps) }
+  elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
   else { $steps = @($Config.desktop.steps) }
   if ($steps.Count -eq 0) { throw "$ActionMode steps are not configured in config.local.json" }
   return $steps
@@ -200,6 +242,7 @@ try {
         Send-Text (Resolve-Template ([string]$step.value))
       }
       "copyField" { $values[[string]$step.name] = Copy-Field ([int]$step.x) ([int]$step.y) }
+      "orderLines" { Send-OrderLines $step }
       "checkboxState" {
         $size = 12
         if ($step.PSObject.Properties.Name -contains "size") { $size = [int]$step.size }

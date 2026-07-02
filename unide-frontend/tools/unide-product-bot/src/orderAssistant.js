@@ -12,6 +12,39 @@ export function isOrderCommand(text) {
     || value.includes('自动化叫货');
 }
 
+export function isOrderDraftCommand(text) {
+  return /^\/(pedido_nuevo|pedido_manual|crear_pedido|order_new)\b/i.test(String(text || '').trim());
+}
+
+export function parseOrderDraftMessage(text) {
+  const raw = String(text || '').replace(/\r\n/g, '\n').trim();
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  const draft = {
+    raw,
+    orderName: '',
+    items: []
+  };
+
+  for (const line of lines.slice(1)) {
+    const match = line.match(/^([^:：]+)[:：]\s*(.+)$/);
+    if (match) {
+      const key = normalizeKey(match[1]);
+      const value = match[2].trim();
+      if (['nombre', 'pedido', 'nombre_pedido', 'order', 'name', '订单名'].includes(key)) {
+        draft.orderName = value;
+        continue;
+      }
+    }
+
+    const item = parseOrderLine(line);
+    if (item) draft.items.push(item);
+  }
+
+  if (!draft.orderName) return { ok: false, error: '缺订单名。请写 nombre: CARNE 0207' };
+  if (!draft.items.length) return { ok: false, error: '缺商品行。每行写：商品代码 数量，例如 620002 1' };
+  return { ok: true, draft };
+}
+
 export function parseOrderMode(text) {
   const value = String(text || '').trim().toLowerCase();
   if (/help|ayuda|帮助|怎么用/.test(value)) return 'help';
@@ -34,6 +67,19 @@ export function makeOrderButtons() {
         [
           { text: 'PDA', callback_data: 'order:pda' },
           { text: '周四补货', callback_data: 'order:topup' }
+        ]
+      ]
+    }
+  };
+}
+
+export function makeOrderDraftButtons(id) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '确认填入', callback_data: `orderApply:${id}` },
+          { text: '取消', callback_data: `cancel:${id}` }
         ]
       ]
     }
@@ -220,7 +266,26 @@ function formatOrderHelp() {
     '/pedido fruta  果蔬叫货流程',
     '/pedido pda    周日 PDA 检查',
     '',
+    '让程序填订单：',
+    '/pedido_nuevo',
+    'nombre: CARNE 0207',
+    '620002 1',
+    '620006 2',
+    '609950 1',
+    '',
     '目前只做提醒和清单，不会自动提交订单。'
+  ].join('\n');
+}
+
+export function formatOrderDraft(draft) {
+  return [
+    '准备填入订单：',
+    `订单名：${draft.orderName}`,
+    `商品行：${draft.items.length} 条`,
+    '',
+    ...draft.items.map((item, index) => `${index + 1}. ${item.code}  数量 ${item.quantity}`),
+    '',
+    '确认后只会填入当前打开的订单页面并截图；不会 Guardar，也不会 Enviar Pedido。'
   ].join('\n');
 }
 
@@ -256,6 +321,26 @@ function parseTimeToMinutes(value) {
   const match = String(value || '10:00').match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return 10 * 60;
   return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function parseOrderLine(line) {
+  const normalized = line.replace(/[，,;]/g, ' ').replace(/\s+/g, ' ').trim();
+  const match = normalized.match(/^(\d{4,14})\s+([xX×\-]|\d+(?:[,.]\d+)?)\b/);
+  if (!match) return null;
+  const quantity = match[2].toLowerCase() === 'x' || match[2] === '×' || match[2] === '-'
+    ? '0'
+    : match[2].replace('.', ',');
+  return {
+    code: match[1],
+    quantity,
+    raw: line
+  };
+}
+
+function normalizeKey(value) {
+  return value.trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '_');
 }
 
 function loadSentState(logsDir, logger) {

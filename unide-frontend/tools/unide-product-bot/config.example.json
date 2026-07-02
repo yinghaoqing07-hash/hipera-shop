@@ -20,6 +20,23 @@
     "expectedScreen": { "width": 0, "height": 0 },
     "clearSteps": [],
     "steps": [],
+    "orderApplySteps": [
+      { "type": "focus" },
+      { "type": "setField", "name": "Nombre del Pedido", "x": 0, "y": 0, "value": "{{orderName}}" },
+      { "type": "wait", "ms": 300 },
+      {
+        "type": "orderLines",
+        "lineClickX": 0,
+        "lineClickY": 0,
+        "selectKeys": "{ENTER}",
+        "quantityKeys": "{TAB}",
+        "finishLineKeys": "{ENTER}",
+        "autocompleteMs": 800,
+        "selectedMs": 500,
+        "betweenLinesMs": 800
+      },
+      { "type": "screenshot", "name": "Order filled screenshot" }
+    ],
     "priceReadSteps": [
       { "type": "checkboxState", "name": "bloqVentaChecked", "x": 0, "y": 0, "size": 12 },
       { "type": "screenshot", "name": "Price read screenshot" }

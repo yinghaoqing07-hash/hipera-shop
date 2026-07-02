@@ -19,7 +19,11 @@ export async function applyPriceDesktop(plan, config, logger) {
   return runDesktopAction('priceApply', 'price', plan, config, logger);
 }
 
-async function runDesktopAction(mode, query, variables, config, logger) {
+export async function applyOrderDesktop(draft, config, logger) {
+  return runDesktopAction('orderApply', draft.orderName, draft, config, logger, { timeoutMs: 120000 });
+}
+
+async function runDesktopAction(mode, query, variables, config, logger, options = {}) {
   if (!config.desktop?.enabled) {
     return { status: 'disabled', reason: 'desktop.enabled=false' };
   }
@@ -48,7 +52,7 @@ async function runDesktopAction(mode, query, variables, config, logger) {
   ];
 
   logger?.info(`desktop ${mode} started`, { query });
-  const result = await run('powershell.exe', args, { timeoutMs: 45000 });
+  const result = await run('powershell.exe', args, { timeoutMs: options.timeoutMs ?? 45000 });
   if (result.exitCode !== 0) {
     return {
       status: 'error',

@@ -129,6 +129,23 @@ calibrate-screen.cmd
 
 `/pedido` 会按当天星期提醒：周日 PDA，周一第一轮肉类/果蔬，周三第二轮肉类/果蔬，周四可选补货。这个功能只生成提醒和清单，不会自动保存或发送订单。
 
+让 bot 填一个新订单：
+
+```text
+/pedido_nuevo
+nombre: CARNE 0207
+620002 1
+620006 2
+609950 1
+```
+
+要求：
+
+- 先在 UnideGes 网页打开一个新的 `Pedido` 页面，停在订单详情页。
+- 点 Telegram 里的 `确认填入` 后，bot 会填订单名和商品行。
+- 第一版不会点 `Guardar`，也不会点 `Enviar Pedido`。
+- 数量写 `x` 或 `-` 会当作 0；建议实际要订的才发给 bot。
+
 单个商品：
 
 ```text
@@ -294,6 +311,7 @@ powershell -ExecutionPolicy Bypass -File update-bot.ps1 -DryRun
 
 - `desktop.priceReadSteps`：只需要 `Bloq.Venta` 勾选框中心坐标；旧配置里保留 `PC Medio/PC Último` 也不会再用于计算。
 - `desktop.priceApplySteps`：`Bloq.Venta` 勾选框中心坐标，`PC Medio` 输入框坐标，`PC Último` 输入框坐标，`P.defecto%` 输入框坐标，保存按钮坐标。
+- `desktop.orderApplySteps`：网页订单详情里的 `Nombre del Pedido` 输入框坐标、第一行商品输入框坐标。默认不会保存或发送。
 
 成本选择顺序：
 
