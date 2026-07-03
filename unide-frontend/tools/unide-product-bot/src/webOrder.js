@@ -124,35 +124,100 @@ export async function inspectFormPage(config, logger) {
   }
 }
 
-// --- 2) Rellenar pedido (primera fase: Nuevo + Nombre, seguro) --------
+// --- 2) Rellenar pedido: Nuevo + Nombre + líneas de artículo ----------
+// Flujo "método A": en la fila de alta del grid (dxbl-grid-edit-new-item-row)
+// se escribe el Código Unide, el desplegable de autocompletado filtra, se
+// selecciona con Enter, se pasa a Cajas con Tab y se escribe la cantidad.
+// Reglas de seguridad:
+//   - NUNCA pulsa Guardar ni Enviar Pedido.
+//   - Enter SOLO se pulsa con el desplegable de autocompletado ABIERTO
+//     (así no puede disparar el botón por defecto del formulario).
+//   - Si un código no da resultados o da VARIOS, se detiene esa línea,
+//     hace captura y lo reporta (no adivina cuál elegir).
 export async function applyOrderWeb(draft, config, logger) {
   let browser;
   try {
     const opened = await openOrderPage(config);
     browser = opened.browser;
     const page = opened.page;
+    const w = config.webOrder || {};
+    const autocompleteMs = Number(w.autocompleteMs) || 900;
+    const betweenLinesMs = Number(w.betweenLinesMs) || 700;
 
-    // Paso 1: pulsar "Nuevo" por data-action-name (estable en XAF).
-    const clickedNuevo = await clickActionByName(page, 'Nuevo');
-    if (!clickedNuevo) {
-      return { ok: false, stage: 'nuevo', error: '没有找到 "Nuevo" 按钮。请先发 /pedido_web_test，把页面结构发我。' };
+    // Paso 1: "Nuevo" (abre el DetailView del pedido).
+    if (!(await clickActionByName(page, 'Nuevo'))) {
+      return { ok: false, stage: 'nuevo', error: '没有找到 "Nuevo" 按钮。' };
     }
-    await sleep(2800);
+    await sleep(Number(w.formRenderMs) || 2800);
 
-    // Paso 2: rellenar el nombre del pedido.
-    const filledName = await fillFieldNearLabel(page, /^nombre\b/i, draft.orderName);
-    if (!filledName) {
-      return { ok: false, stage: 'nombre', error: '点了 Nuevo，但没找到 "Nombre" 输入框。请发 /pedido_web_test 让我看结构。' };
+    // Paso 2: Nombre del Pedido (input requerido, maxlength 150).
+    if (!(await fillNombre(page, draft.orderName))) {
+      return { ok: false, stage: 'nombre', error: '没找到订单名输入框（aria-required maxlength=150）。' };
     }
-    await sleep(400);
+    await sleep(300);
 
-    // Paso 3 (grid de artículos): pendiente de selectores del volcado.
-    // De momento NO tocamos el grid para no escribir en sitio equivocado.
-    logger?.info('web order name filled; article grid pending selectors', { name: draft.orderName, lines: draft.items.length });
+    // Paso 3: líneas. Se procesan una a una; ante cualquier anomalía se
+    // para y se avisa, sin adivinar.
+    const results = [];
+    for (let i = 0; i < draft.items.length; i++) {
+      const item = draft.items[i];
+      const code = String(item.code || '').trim();
+      const qty = String(item.quantity ?? '').trim();
+      if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
+
+      const started = await startNewItemRow(page);
+      if (!started) {
+        const shot = await screenshot(page, config, 'newrow');
+        return {
+          ok: false, stage: 'newrow', screenshot: shot,
+          error: `第 ${i + 1} 行：没找到表格的“新增行”(dxbl-grid-edit-new-item-row)。前面已填的不会保存。`,
+          results
+        };
+      }
+      await sleep(300);
+      await page.keyboard.type(code, { delay: 25 });
+      await sleep(autocompleteMs);
+
+      const opts = await dropdownOptionCount(page);
+      if (opts === 0) {
+        const shot = await screenshot(page, config, `code-${code}-nomatch`);
+        const dom = await captureEditDom(page, config);
+        return {
+          ok: false, stage: 'autocomplete', screenshot: shot, domDump: dom,
+          error: `código ${code} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
+          results
+        };
+      }
+      if (opts > 1) {
+        const shot = await screenshot(page, config, `code-${code}-multi`);
+        results.push({ code, qty, ok: false, reason: `${opts} 个匹配，需人工选择` });
+        return {
+          ok: false, stage: 'ambiguous', screenshot: shot,
+          error: `código ${code} 有 ${opts} 个匹配，需要你人工选择。已停止在这一行，未保存。前面 ${i} 行已填好。`,
+          results
+        };
+      }
+
+      // Exactamente 1 opción → seleccionar con Enter (desplegable abierto).
+      await page.keyboard.press('Enter');
+      await sleep(300);
+      // Cajas: Tab desde el editor de artículo y escribir la cantidad.
+      await page.keyboard.press('Tab');
+      await sleep(200);
+      if (qty) await page.keyboard.type(qty, { delay: 25 });
+      await page.keyboard.press('Tab'); // commit por OnLostFocus (sin Enter)
+      await sleep(betweenLinesMs);
+      results.push({ code, qty, ok: true });
+    }
+
+    const shot = await screenshot(page, config, 'done');
+    const okCount = results.filter((r) => r.ok).length;
+    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length });
     return {
       ok: true,
-      partial: true,
-      message: `已点 Nuevo 并填入订单名「${draft.orderName}」。商品行（${draft.items.length} 行）还没接上——需要你先发一次 /pedido_web_test 让我拿到网页结构。程序没有点 Guardar，也没有点 Enviar Pedido。`
+      screenshot: shot,
+      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入。请看截图核对，然后人工点 Guardar。程序没有点 Guardar，也没有点 Enviar Pedido。`,
+      results
     };
   } catch (error) {
     logger?.error('web order apply failed', { stage: error.stage, error: error.message });
@@ -178,15 +243,40 @@ async function clickActionByName(page, actionName) {
   return true;
 }
 
-// Pulsa el primer elemento visible que coincida con el texto.
-async function clickByText(page, selectors, regexSource) {
-  const handle = await page.evaluateHandle((sels, reSrc, reFlags) => {
-    const re = new RegExp(reSrc, reFlags);
-    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+// Rellena el "Nombre del Pedido": input requerido de 150 chars. Se
+// escribe por teclado (no set .value) para que el binding de Blazor -que
+// es OnLostFocus- registre el cambio; el Tab final provoca el commit.
+async function fillNombre(page, name) {
+  const focused = await page.evaluate(() => {
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const els = Array.from(document.querySelectorAll(sels.join(',')));
-    return els.find((el) => isVisible(el) && re.test(clean(el.innerText))) || null;
-  }, selectors, regexSource.source, regexSource.flags);
+    const inp = Array.from(document.querySelectorAll('input[aria-required="true"][maxlength="150"]')).find(isVisible)
+      || Array.from(document.querySelectorAll('input.dxbl-text-edit-input[maxlength="150"]')).find(isVisible);
+    if (!inp) return false;
+    inp.focus();
+    return true;
+  });
+  if (!focused) return false;
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
+  await page.keyboard.type(String(name ?? ''), { delay: 20 });
+  await page.keyboard.press('Tab');
+  return true;
+}
+
+// Entra en edición en la fila de alta del grid de líneas. Hace clic en la
+// primera celda de datos editable (salta las celdas de comando/checkbox),
+// que es la del artículo (donde se escribe el Código Unide).
+async function startNewItemRow(page) {
+  const handle = await page.evaluateHandle(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const row = Array.from(document.querySelectorAll('.dxbl-grid-edit-new-item-row')).find(isVisible);
+    if (!row) return null;
+    const cells = Array.from(row.querySelectorAll('td[role="gridcell"], .dxbl-grid-cell'));
+    const target = cells.find((c) => !c.classList.contains('dxbl-grid-command-cell')
+      && !c.querySelector('input[type="checkbox"]')) || cells[0] || row;
+    return target;
+  });
   const el = handle.asElement();
   if (!el) { await handle.dispose(); return false; }
   await el.click();
@@ -194,37 +284,42 @@ async function clickByText(page, selectors, regexSource) {
   return true;
 }
 
-// Encuentra el input asociado a una etiqueta y escribe el valor.
-async function fillFieldNearLabel(page, labelRegex, value) {
-  const handle = await page.evaluateHandle((reSrc, reFlags) => {
-    const re = new RegExp(reSrc, reFlags);
-    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+// Cuenta las opciones VISIBLES del desplegable de autocompletado abierto.
+// Sirve para (a) no pulsar Enter si no hay desplegable y (b) detectar el
+// caso de varios artículos que exige elección manual.
+async function dropdownOptionCount(page) {
+  return page.evaluate(() => {
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    // 1) <label for=...>
-    for (const label of document.querySelectorAll('label')) {
-      if (!re.test(clean(label.innerText))) continue;
-      const forId = label.getAttribute('for');
-      if (forId) { const inp = document.getElementById(forId); if (inp) return inp; }
-      const inScope = label.parentElement?.querySelector('input, textarea');
-      if (inScope && isVisible(inScope)) return inScope;
-    }
-    // 2) etiqueta genérica + input hermano/cercano
-    const labelish = Array.from(document.querySelectorAll('span, div, td')).find(
-      (el) => isVisible(el) && re.test(clean(el.innerText)) && clean(el.innerText).length < 40
-    );
-    if (labelish) {
-      const container = labelish.closest('tr, div');
-      const inp = container?.querySelector('input, textarea');
-      if (inp && isVisible(inp)) return inp;
-    }
+    const sel = '[role="option"], .dxbl-listbox-item, .dxbl-dropdown-item, .dxbl-grid-dropdown-item';
+    return Array.from(document.querySelectorAll(sel)).filter(isVisible).length;
+  });
+}
+
+// Captura de pantalla del navegador (mejor que la de PowerShell). Devuelve
+// la ruta del PNG o null.
+async function screenshot(page, config, tag) {
+  try {
+    const dir = path.resolve(config.__toolRoot || '.', 'screenshots');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `weborder-${String(tag).replace(/[^\w.-]+/g, '_')}-${Date.now()}.png`);
+    await page.screenshot({ path: file });
+    return file;
+  } catch {
     return null;
-  }, labelRegex.source, labelRegex.flags);
-  const el = handle.asElement();
-  if (!el) { await handle.dispose(); return false; }
-  await el.click({ clickCount: 3 }); // seleccionar contenido existente
-  await el.type(String(value ?? ''), { delay: 20 });
-  await handle.dispose();
-  return true;
+  }
+}
+
+// Vuelca el HTML actual (útil cuando una línea falla en modo edición: así
+// se ve el editor real del artículo / el desplegable).
+async function captureEditDom(page, config) {
+  try {
+    const html = await page.content();
+    const file = path.resolve(config.__toolRoot || '.', 'order-edit-dump.html');
+    fs.writeFileSync(file, html, 'utf8');
+    return file;
+  } catch {
+    return null;
+  }
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }

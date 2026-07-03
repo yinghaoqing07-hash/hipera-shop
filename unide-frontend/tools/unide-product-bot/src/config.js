@@ -64,7 +64,12 @@ const defaultConfig = {
     enabled: false,
     debugUrl: 'http://127.0.0.1:9222',
     pageUrlIncludes: 'unideges',
-    dumpFile: 'order-page-dump.html'
+    dumpFile: 'order-page-dump.html',
+    // Tiempos de espera (ms) del rellenado de líneas. Subir si la red/el
+    // servidor van lentos y el autocompletado tarda en aparecer.
+    formRenderMs: 2800,   // tras pulsar "Nuevo", esperar el DetailView
+    autocompleteMs: 900,  // tras teclear el código, esperar el desplegable
+    betweenLinesMs: 700   // entre línea y línea
   }
 };
 
