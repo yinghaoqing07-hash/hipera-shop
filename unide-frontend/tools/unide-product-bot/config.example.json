@@ -160,6 +160,9 @@
     "enabled": false,
     "debugUrl": "http://127.0.0.1:9222",
     "pageUrlIncludes": "unideges",
-    "dumpFile": "order-page-dump.html"
+    "dumpFile": "order-page-dump.html",
+    "formRenderMs": 2800,
+    "autocompleteMs": 900,
+    "betweenLinesMs": 700
   }
 }

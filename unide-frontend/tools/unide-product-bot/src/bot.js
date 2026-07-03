@@ -134,7 +134,17 @@ async function handleOrderApply(chatId, callbackId, id) {
     const text = result.ok
       ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；程序没有点 Guardar，也没有点 Enviar Pedido。')
       : `订单填入失败（${result.stage || '?'}）：\n${result.error}`;
-    await telegram.sendMessage(chatId, text);
+    // La captura del navegador (si existe) es la mejor confirmación; el
+    // volcado de DOM solo se manda cuando una línea falla en edición.
+    if (result.screenshot) {
+      try { await telegram.sendPhoto(chatId, result.screenshot, text); }
+      catch { await telegram.sendMessage(chatId, text); }
+    } else {
+      await telegram.sendMessage(chatId, text);
+    }
+    if (result.domDump) {
+      try { await telegram.sendDocument(chatId, result.domDump, '编辑中页面结构（发给 Claude）'); } catch { /* noop */ }
+    }
     return;
   }
 
