@@ -220,7 +220,13 @@ export async function applyOrderWeb(draft, config, logger) {
       await page.keyboard.press('Tab');
       await sleep(200);
       if (qty) await page.keyboard.type(qty, { delay: 25 });
-      await page.keyboard.press('Tab'); // commit por OnLostFocus (sin Enter)
+      // Ritmo real de UnideGes (método A): tras la cantidad, DOS Enter
+      // confirman la línea y abren la siguiente fila de alta. Aquí el foco
+      // está en la celda "Cajas" del grid, así que Enter confirma la fila,
+      // no dispara Guardar (Guardar es un botón aparte del formulario).
+      await page.keyboard.press('Enter');
+      await sleep(150);
+      await page.keyboard.press('Enter');
       await sleep(betweenLinesMs);
       results.push({ code, qty, ok: true });
     }
