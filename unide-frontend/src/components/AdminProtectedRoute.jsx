@@ -10,21 +10,28 @@ export default function AdminProtectedRoute({ children }) {
 
   useEffect(() => {
     let cancelled = false;
+    let currentUserId = null; // usuario ya verificado (para ignorar re-emisiones)
 
-    const verify = async (sess) => {
+    const verify = async (sess, { silent = false } = {}) => {
       if (cancelled) return;
       setSession(sess);
       if (!sess) {
+        currentUserId = null;
         setIsAdmin(false);
         setLoading(false);
         return;
       }
+      currentUserId = sess.user?.id || null;
       try {
         const me = await apiClient.getMe();
         if (!cancelled) setIsAdmin(!!me?.isAdmin);
       } catch (e) {
         console.warn('[AdminProtectedRoute] /api/me falló:', e?.message);
-        if (!cancelled) setIsAdmin(false);
+        // En una re-verificación silenciosa (p. ej. al volver a la pestaña),
+        // un fallo transitorio de red NO debe expulsar a un admin ya
+        // verificado: conservamos el estado anterior. Solo la verificación
+        // inicial trata el fallo como "no admin".
+        if (!cancelled && !silent) setIsAdmin(false);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -32,10 +39,28 @@ export default function AdminProtectedRoute({ children }) {
 
     supabase.auth.getSession().then(({ data: { session } }) => verify(session));
 
+    // ⚠️ Fix iOS/Safari: supabase-js emite TOKEN_REFRESHED y SIGNED_IN cada
+    // vez que la pestaña vuelve a ser visible (su auto-refresh corre en
+    // visibilitychange). La versión anterior hacía setLoading(true) en CADA
+    // evento → desmontaba el panel entero → "Verificando permisos…" +
+    // remount + recarga de todos los datos. Para el usuario era
+    // indistinguible de un refresh completo al volver de otra app.
+    // Regla: los eventos que no pueden cambiar quién eres (mismo usuario)
+    // NO tocan la UI.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setLoading(true);
-        verify(session);
+      (event, session) => {
+        if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+          if (session) setSession(session); // token fresco, sin remount
+          return;
+        }
+        if (event === 'SIGNED_IN' && session?.user?.id && session.user.id === currentUserId) {
+          setSession(session); // re-emisión al re-enfocar: mismo usuario → no-op
+          return;
+        }
+        // Cambios reales: SIGNED_OUT, USER_UPDATED o un usuario distinto.
+        const sameUser = session?.user?.id && session.user.id === currentUserId;
+        if (!sameUser) setLoading(true); // solo bloquea la UI si cambió la identidad
+        verify(session, { silent: !!sameUser });
       }
     );
 
