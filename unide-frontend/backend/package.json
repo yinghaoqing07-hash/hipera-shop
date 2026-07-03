@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "dev": "node --watch server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=18"
@@ -26,5 +28,8 @@
     "resend": "^6.12.4",
     "sharp": "^0.33.0",
     "stripe": "^22.2.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
   }
 }
