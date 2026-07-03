@@ -4,37 +4,39 @@
 // Herramienta interna del panel de administración para averiguar el tipo
 // de IVA (4 % / 10 % / 21 %) de un artículo del catálogo de UNIDE.
 //
-// POR QUÉ EXISTE:
-//   Para clasificar correctamente el IVA de cada producto (requisito de
-//   VeriFactu) hay que saber qué tipo aplica a cada artículo. El dato
-//   oficial está en el listado de UNIDE (UNIDE_LISTADO.xls, ~16 900
-//   referencias). Antes había que ir a la oficina a consultarlo; ahora
-//   se consulta desde el móvil, incluso en el mostrador.
+// TRES FORMAS DE ENTRAR EL CÓDIGO (de más a menos cómoda en tienda):
+//   1. PISTOLA USB del mostrador (keyboard wedge): la pistola "teclea" los
+//      dígitos muy rápido y termina con Enter. Esta pantalla lo captura
+//      GLOBALMENTE — no hace falta tener el campo de búsqueda enfocado.
+//      Es el mismo hardware del TPV: instantáneo y sin fallos.
+//   2. Cámara del móvil: BarcodeDetector nativo (= motor ML Kit, como las
+//      apps de caja) con enfoque continuo, zoom 2× y linterna; quagga2 de
+//      fallback donde no existe (p. ej. Chrome de escritorio en Windows).
+//      Ver components/BarcodeScannerOverlay.jsx.
+//   3. Teclear el EAN o el nombre a mano.
 //
-// POR QUÉ ESCANEAR EL EAN ES LO MÁS FIABLE:
-//   Los nombres de los productos online NO coinciden con los del listado
-//   de UNIDE, así que casar por nombre puede fallar. El código de barras
-//   (EAN) es único: si escaneas el producto físico, el match es exacto y
-//   el IVA que sale es 100 % correcto. Por eso el botón de escanear es la
-//   forma recomendada de verificar.
+// MATCHING DE EAN — NORMALIZACIÓN DE CEROS:
+//   El listado UNIDE mezcla longitudes (13 dígitos EAN-13, 12 dígitos
+//   UPC-A sin el cero inicial, y códigos internos cortos). Un escáner
+//   devuelve EAN-13 con cero delante donde UNIDE guardó 12 dígitos → el
+//   match exacto fallaba aunque el código fuera correcto. Por eso el
+//   índice y las consultas comparan SIN ceros a la izquierda.
 //
-// DATOS:
-//   Se cargan de /unide-iva.json (público, ~1,3 MB) de forma diferida:
-//   sólo se descarga la primera vez que se abre esta pestaña, y el
-//   navegador lo cachea. No entra en el bundle del panel.
-//   Formato de cada item: { e: ean, d: descripción, i: iva, p: pvp, c: código }
-//
-// ESCÁNER:
-//   Usa @zxing/browser (importado dinámicamente, sólo al pulsar escanear)
-//   con la cámara trasera. Funciona en iPhone (Safari) y Android.
+// DATOS: /unide-iva.json (~1,3 MB) cargado en diferido y cacheado a nivel
+// de módulo. Formato: { e: ean, d: descripción, i: iva, p: pvp, c: código }.
 // =====================================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ScanLine, Search, X, Camera, AlertCircle } from 'lucide-react';
+import { ScanLine, Search, X, AlertCircle } from 'lucide-react';
+import BarcodeScannerOverlay from './BarcodeScannerOverlay';
 
 // Caché a nivel de módulo: si el usuario cambia de pestaña y vuelve, no
 // se vuelve a descargar ni a reindexar el JSON.
 let DATA_CACHE = null;
+
+// Clave de comparación de códigos: solo dígitos y sin ceros a la izquierda
+// (EAN-13 "0841022452044" y UPC-A "841022452044" son el mismo artículo).
+const eanKey = (s) => String(s || '').replace(/\D/g, '').replace(/^0+/, '');
 
 function ivaBadgeClasses(i) {
   if (i === 4) return 'bg-green-100 text-green-700';
@@ -49,10 +51,7 @@ export default function IvaLookup() {
   const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
   const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState('');
-
-  const videoRef = useRef(null);
-  const controlsRef = useRef(null); // IScannerControls de zxing, para parar la cámara
+  const inputRef = useRef(null);
 
   // --- Carga diferida del JSON de referencia -------------------------
   useEffect(() => {
@@ -72,22 +71,55 @@ export default function IvaLookup() {
     return () => { cancelled = true; };
   }, []);
 
-  // Índice EAN → item, para búsqueda exacta instantánea.
+  // Índice por clave normalizada → item, para match exacto instantáneo.
   const eanIndex = useMemo(() => {
     const idx = new Map();
-    if (data) for (const p of data) { if (p.e) idx.set(p.e, p); }
+    if (data) {
+      for (const p of data) {
+        const k = eanKey(p.e);
+        if (k) idx.set(k, p);
+      }
+    }
     return idx;
   }, [data]);
+
+  // --- Pistola de códigos USB (keyboard wedge) ------------------------
+  // La pistola emite los dígitos con <50 ms entre teclas y remata con
+  // Enter. Capturamos esa ráfaga a nivel de ventana: funciona aunque el
+  // campo no esté enfocado (p. ej. tras hacer scroll por los resultados).
+  // La escritura humana (>80 ms entre teclas) nunca dispara esto.
+  useEffect(() => {
+    let buf = '';
+    let last = 0;
+    const onKey = (e) => {
+      const now = performance.now();
+      if (now - last > 80) buf = '';
+      last = now;
+      if (e.key === 'Enter') {
+        if (buf.length >= 6) {
+          setQuery(buf);
+          setScanning(false); // si la cámara estaba abierta, la pistola gana
+          e.preventDefault();
+        }
+        buf = '';
+        return;
+      }
+      if (/^\d$/.test(e.key)) buf += e.key;
+      else if (e.key.length === 1) buf = ''; // letras = escritura humana
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
 
   // --- Búsqueda ------------------------------------------------------
   const results = useMemo(() => {
     const q = query.trim();
     if (!q || !data) return null;
 
-    // Si parece un EAN (sólo dígitos), priorizamos coincidencia exacta y
-    // luego por prefijo (útil cuando el escáner aún no leyó el código entero).
+    // Si parece un código (solo dígitos): match exacto normalizado y
+    // luego por prefijo (útil con códigos internos cortos de UNIDE).
     if (/^\d{4,}$/.test(q)) {
-      const exact = eanIndex.get(q);
+      const exact = eanIndex.get(eanKey(q));
       if (exact) return [exact];
       const byPrefix = data.filter(p => p.e && p.e.startsWith(q)).slice(0, 30);
       if (byPrefix.length) return byPrefix;
@@ -98,74 +130,29 @@ export default function IvaLookup() {
     return data.filter(p => words.every(w => p.d.includes(w))).slice(0, 60);
   }, [query, data, eanIndex]);
 
-  // --- Escáner de cámara (zxing) -------------------------------------
-  function stopScanner() {
-    try { controlsRef.current?.stop(); } catch (_) { /* ignore */ }
-    controlsRef.current = null;
-  }
-
-  async function startScanner() {
-    setScanError('');
-    setScanning(true);
-    try {
-      const { BrowserMultiFormatReader } = await import('@zxing/browser');
-      const reader = new BrowserMultiFormatReader();
-      // Cámara trasera (ideal) para apuntar al código de barras del producto.
-      controlsRef.current = await reader.decodeFromConstraints(
-        { video: { facingMode: { ideal: 'environment' } } },
-        videoRef.current,
-        (result) => {
-          if (result) {
-            const text = result.getText?.() ?? '';
-            if (text) {
-              setQuery(text);
-              stopScanner();
-              setScanning(false);
-            }
-          }
-        }
-      );
-    } catch (err) {
-      const name = err?.name || '';
-      if (name === 'NotAllowedError') {
-        setScanError('Permiso de cámara denegado. Actívalo en el navegador o escribe el EAN a mano.');
-      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-        setScanError('No se encontró cámara. Escribe el EAN o el nombre a mano.');
-      } else {
-        setScanError('No se pudo abrir la cámara. Escribe el EAN o el nombre a mano.');
-      }
-    }
-  }
-
-  function closeScanner() {
-    stopScanner();
-    setScanning(false);
-    setScanError('');
-  }
-
-  // Asegura que la cámara se apaga al desmontar el componente.
-  useEffect(() => () => stopScanner(), []);
-
   // --- Render --------------------------------------------------------
   return (
     <div className="max-w-3xl">
       <div className="mb-5">
         <h1 className="text-2xl font-black text-gray-900">Consulta de IVA</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Busca el tipo de IVA de un artículo por código de barras o por nombre.
-          Escanear el EAN del producto físico es la forma más fiable.
+          Busca el tipo de IVA por código de barras o por nombre. En el
+          mostrador puedes usar la pistola del TPV directamente: escanea y
+          el resultado aparece aquí.
         </p>
       </div>
 
-      {/* Barra de búsqueda + botón de escanear */}
+      {/* Barra de búsqueda + botón de escanear con cámara */}
       <div className="flex gap-2 mb-2">
         <div className="relative flex-1">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             id="search-iva"
+            ref={inputRef}
             type="text"
             inputMode="search"
             autoComplete="off"
+            autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="EAN o nombre del producto…"
@@ -174,7 +161,7 @@ export default function IvaLookup() {
           {query && (
             <button
               type="button"
-              onClick={() => setQuery('')}
+              onClick={() => { setQuery(''); inputRef.current?.focus(); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
               aria-label="Borrar"
             >
@@ -184,7 +171,7 @@ export default function IvaLookup() {
         </div>
         <button
           type="button"
-          onClick={startScanner}
+          onClick={() => setScanning(true)}
           className="flex items-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold whitespace-nowrap"
         >
           <ScanLine size={20} />
@@ -207,7 +194,7 @@ export default function IvaLookup() {
         <>
           {results === null && (
             <p className="text-sm text-gray-400 py-10 text-center">
-              Escribe para buscar entre {data ? data.length.toLocaleString('es-ES') : '—'} artículos.
+              Escribe o escanea para buscar entre {data ? data.length.toLocaleString('es-ES') : '—'} artículos.
             </p>
           )}
           {results !== null && results.length === 0 && (
@@ -245,38 +232,12 @@ export default function IvaLookup() {
         </>
       )}
 
-      {/* Modal del escáner */}
+      {/* Escáner de cámara (motor compartido) */}
       {scanning && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl overflow-hidden w-full max-w-md">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <span className="font-bold text-gray-900 flex items-center gap-2">
-                <Camera size={18} /> Escanear código de barras
-              </span>
-              <button type="button" onClick={closeScanner} className="p-1 text-gray-400 hover:text-gray-700" aria-label="Cerrar">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="relative bg-black aspect-[4/3]">
-              <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-              {/* Guía visual de encuadre */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-3/4 h-20 border-2 border-red-500 rounded-lg shadow-[0_0_0_100vmax_rgba(0,0,0,0.25)]" />
-              </div>
-            </div>
-            <div className="px-4 py-3">
-              {scanError ? (
-                <p className="text-sm text-red-600 flex items-center gap-2">
-                  <AlertCircle size={16} /> {scanError}
-                </p>
-              ) : (
-                <p className="text-xs text-gray-500 text-center">
-                  Apunta al código de barras del producto. Se detecta automáticamente.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+        <BarcodeScannerOverlay
+          onDetected={(code) => { setQuery(code); setScanning(false); }}
+          onClose={() => setScanning(false)}
+        />
       )}
     </div>
   );
