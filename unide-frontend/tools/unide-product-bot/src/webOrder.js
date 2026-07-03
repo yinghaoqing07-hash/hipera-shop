@@ -159,6 +159,7 @@ export async function applyOrderWeb(draft, config, logger) {
     // Paso 3: líneas. Se procesan una a una; ante cualquier anomalía se
     // para y se avisa, sin adivinar.
     const results = [];
+    let autoPicked = 0;
     for (let i = 0; i < draft.items.length; i++) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
@@ -188,19 +189,33 @@ export async function applyOrderWeb(draft, config, logger) {
           results
         };
       }
-      if (opts > 1) {
-        const shot = await screenshot(page, config, `code-${code}-multi`);
-        results.push({ code, qty, ok: false, reason: `${opts} 个匹配，需人工选择` });
-        return {
-          ok: false, stage: 'ambiguous', screenshot: shot,
-          error: `código ${code} 有 ${opts} 个匹配，需要你人工选择。已停止在这一行，未保存。前面 ${i} 行已填好。`,
-          results
-        };
+      if (opts === 1) {
+        // Un único resultado → Enter selecciona (desplegable abierto).
+        await page.keyboard.press('Enter');
+      } else {
+        // Varios resultados. Regla del usuario: elegir la fila cuyo Código
+        // Unide coincide EXACTAMENTE con el código tecleado (misma
+        // referencia, el resto suelen ser el mismo artículo sin Código
+        // Unide). Se busca la fila con una celda == code y se pulsa.
+        const picked = await selectDropdownRowByCode(page, code);
+        if (!picked) {
+          const shot = await screenshot(page, config, `code-${code}-multi`);
+          const dom = await captureEditDom(page, config);
+          results.push({ code, qty, ok: false, reason: `${opts} 个匹配，无法自动判断` });
+          return {
+            ok: false, stage: 'ambiguous', screenshot: shot, domDump: dom,
+            error: `código ${code} 有 ${opts} 个匹配，且没有一行的 Código Unide 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
+            results
+          };
+        }
+        autoPicked += 1;
       }
-
-      // Exactamente 1 opción → seleccionar con Enter (desplegable abierto).
-      await page.keyboard.press('Enter');
       await sleep(300);
+      // Tras seleccionar (sobre todo si fue por clic en una fila del
+      // desplegable), el foco puede quedar en la opción, no en el editor.
+      // Se devuelve el foco al editor de la fila para que el Tab siguiente
+      // llegue a "Cajas" de forma fiable.
+      await focusEditRowEditor(page);
       // Cajas: Tab desde el editor de artículo y escribir la cantidad.
       await page.keyboard.press('Tab');
       await sleep(200);
@@ -212,11 +227,12 @@ export async function applyOrderWeb(draft, config, logger) {
 
     const shot = await screenshot(page, config, 'done');
     const okCount = results.filter((r) => r.ok).length;
-    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length });
+    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked });
+    const autoNote = autoPicked > 0 ? `（其中 ${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行）` : '';
     return {
       ok: true,
       screenshot: shot,
-      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入。请看截图核对，然后人工点 Guardar。程序没有点 Guardar，也没有点 Enviar Pedido。`,
+      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。请看截图核对，然后人工点 Guardar。程序没有点 Guardar，也没有点 Enviar Pedido。`,
       results
     };
   } catch (error) {
@@ -293,6 +309,51 @@ async function dropdownOptionCount(page) {
     const sel = '[role="option"], .dxbl-listbox-item, .dxbl-dropdown-item, .dxbl-grid-dropdown-item';
     return Array.from(document.querySelectorAll(sel)).filter(isVisible).length;
   });
+}
+
+// Devuelve el foco al editor (artículo) de la fila que se está editando,
+// para que el Tab siguiente vaya a "Cajas". Devuelve true si lo logró.
+async function focusEditRowEditor(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const row = Array.from(document.querySelectorAll('.dxbl-grid-edit-new-item-row, .dxbl-grid-edit-row')).find(isVisible);
+    if (!row) return false;
+    const inp = Array.from(row.querySelectorAll('input[type="text"], input[role="combobox"]')).find(isVisible);
+    if (!inp) return false;
+    inp.focus();
+    return true;
+  });
+}
+
+// Ante VARIOS resultados en el autocompletado, selecciona la fila cuya
+// celda coincide EXACTAMENTE con el código tecleado (el Código Unide).
+// Devuelve true si encontró y pulsó exactamente UNA fila así; false si
+// hay 0 o >1 (entonces el llamador se detiene y pide elección manual).
+// Se busca dentro de los contenedores emergentes visibles para no tocar
+// por error las filas del grid principal.
+async function selectDropdownRowByCode(page, code) {
+  const handle = await page.evaluateHandle((c) => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tokens = (s) => (s || '').split(/\s+/).map((t) => t.trim()).filter(Boolean);
+    const popups = Array.from(document.querySelectorAll(
+      '.dxbl-popup, .dxbl-dropdown, .dxbl-window, [role="listbox"], .dxbl-grid-dropdown'
+    )).filter(isVisible);
+    const scopes = popups.length ? popups : [document.body];
+    let found = [];
+    for (const p of scopes) {
+      const rows = Array.from(p.querySelectorAll('[role="option"], [role="row"], .dxbl-listbox-item, .dxbl-grid-data-row, tr')).filter(isVisible);
+      for (const r of rows) if (tokens(r.innerText).includes(c)) found.push(r);
+    }
+    // Quedarse con las filas que no contienen a otra fila encontrada
+    // (evita contar fila + celda como dos).
+    found = found.filter((r) => !found.some((o) => o !== r && r.contains(o)));
+    return found.length === 1 ? found[0] : null;
+  }, code);
+  const el = handle.asElement();
+  if (!el) { await handle.dispose(); return false; }
+  await el.click();
+  await handle.dispose();
+  return true;
 }
 
 // Captura de pantalla del navegador (mejor que la de PowerShell). Devuelve
