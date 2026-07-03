@@ -13,6 +13,14 @@ if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
 } else {
   $nodeVersion = node -v
   Write-Host "Node.js: $nodeVersion" -ForegroundColor Green
+
+  Write-Host "Installing npm dependencies (puppeteer-core, for Pedidos web automation)..." -ForegroundColor Cyan
+  npm install
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "Dependencies installed." -ForegroundColor Green
+  } else {
+    Write-Host "npm install failed. Check internet connection; start-bot.cmd will retry." -ForegroundColor Yellow
+  }
 }
 
 if (-not (Test-Path ".env")) {

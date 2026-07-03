@@ -5,3 +5,7 @@ screenshots/
 node_modules/
 *.zip
 updates/
+
+# Volcado de diagnóstico de la web de Pedidos (/pedido_web_test)
+order-page-dump.html
+*-dump.html

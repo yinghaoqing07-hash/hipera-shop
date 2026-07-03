@@ -58,10 +58,31 @@ export class TelegramClient {
     }
 
     const body = multipartBody(fields, {
-      photo: filePath
+      photo: { path: filePath, contentType: 'image/png' }
     });
 
     const response = await fetch(`${this.baseUrl}/sendPhoto`, {
+      method: 'POST',
+      headers: { 'content-type': body.contentType },
+      body: body.buffer
+    });
+    return unwrap(await response.json());
+  }
+
+  async sendDocument(chatId, filePath, caption = '', options = {}) {
+    const fields = {
+      chat_id: String(chatId),
+      caption: truncate(caption, 1000)
+    };
+    for (const [key, value] of Object.entries(options)) {
+      fields[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    }
+
+    const body = multipartBody(fields, {
+      document: { path: filePath, contentType: 'application/octet-stream' }
+    });
+
+    const response = await fetch(`${this.baseUrl}/sendDocument`, {
       method: 'POST',
       headers: { 'content-type': body.contentType },
       body: body.buffer
@@ -104,11 +125,13 @@ function multipartBody(fields, files) {
     chunks.push(Buffer.from(`${value}\r\n`));
   }
 
-  for (const [name, filePath] of Object.entries(files)) {
+  for (const [name, file] of Object.entries(files)) {
+    const filePath = typeof file === 'string' ? file : file.path;
+    const contentType = typeof file === 'string' ? 'image/png' : (file.contentType || 'application/octet-stream');
     const filename = path.basename(filePath);
     chunks.push(Buffer.from(`--${boundary}\r\n`));
     chunks.push(Buffer.from(`Content-Disposition: form-data; name="${name}"; filename="${filename}"\r\n`));
-    chunks.push(Buffer.from('Content-Type: image/png\r\n\r\n'));
+    chunks.push(Buffer.from(`Content-Type: ${contentType}\r\n\r\n`));
     chunks.push(fs.readFileSync(filePath));
     chunks.push(Buffer.from('\r\n'));
   }

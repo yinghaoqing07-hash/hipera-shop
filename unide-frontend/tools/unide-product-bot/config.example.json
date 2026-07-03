@@ -1,9 +1,15 @@
 ﻿{
-  "telegram": { "allowedChatIds": [], "pollTimeoutSeconds": 25, "maxItemsPerMessage": 5 },
+  "telegram": {
+    "allowedChatIds": [],
+    "pollTimeoutSeconds": 25,
+    "maxItemsPerMessage": 5
+  },
   "supplierCsv": "data/supplier_products_clean.csv",
   "storeCsv": "data/store_products_clean.csv",
   "logsDir": "logs",
-  "processing": { "defaultIva": 10 },
+  "processing": {
+    "defaultIva": 10
+  },
   "ordering": {
     "enabled": true,
     "timezone": "Europe/Madrid",
@@ -15,19 +21,53 @@
     "enabled": false,
     "script": "desktop/unideges-search.ps1",
     "windowTitleRegex": "UNIDEGES|Articulos|Artículos",
-    "excludedProcessNames": ["chrome", "msedge", "firefox"],
+    "excludedProcessNames": [
+      "chrome",
+      "msedge",
+      "firefox"
+    ],
     "screenshotDir": "screenshots",
-    "expectedScreen": { "width": 0, "height": 0 },
+    "expectedScreen": {
+      "width": 0,
+      "height": 0
+    },
     "clearSteps": [],
     "steps": [],
     "orderApplySteps": [
-      { "type": "focus" },
-      { "type": "click", "name": "Nuevo pedido", "x": 327, "y": 177 },
-      { "type": "wait", "ms": 1000 },
-      { "type": "setField", "name": "Nombre del Pedido", "x": 486, "y": 267, "value": "{{orderName}}" },
-      { "type": "wait", "ms": 300 },
-      { "type": "click", "name": "Primera linea articulo", "x": 694, "y": 615 },
-      { "type": "wait", "ms": 200 },
+      {
+        "type": "focus"
+      },
+      {
+        "type": "click",
+        "name": "Nuevo pedido",
+        "x": 327,
+        "y": 177
+      },
+      {
+        "type": "wait",
+        "ms": 1000
+      },
+      {
+        "type": "setField",
+        "name": "Nombre del Pedido",
+        "x": 486,
+        "y": 267,
+        "value": "{{orderName}}"
+      },
+      {
+        "type": "wait",
+        "ms": 300
+      },
+      {
+        "type": "click",
+        "name": "Primera linea articulo",
+        "x": 694,
+        "y": 615
+      },
+      {
+        "type": "wait",
+        "ms": 200
+      },
       {
         "type": "orderLines",
         "selectKeys": "{ENTER}",
@@ -37,24 +77,89 @@
         "selectedMs": 300,
         "betweenLinesMs": 700
       },
-      { "type": "screenshot", "name": "Order filled screenshot" }
+      {
+        "type": "screenshot",
+        "name": "Order filled screenshot"
+      }
     ],
     "priceReadSteps": [
-      { "type": "checkboxState", "name": "bloqVentaChecked", "x": 0, "y": 0, "size": 12 },
-      { "type": "screenshot", "name": "Price read screenshot" }
+      {
+        "type": "checkboxState",
+        "name": "bloqVentaChecked",
+        "x": 0,
+        "y": 0,
+        "size": 12
+      },
+      {
+        "type": "screenshot",
+        "name": "Price read screenshot"
+      }
     ],
     "priceApplySteps": [
-      { "type": "conditionalClick", "if": "bloqVentaChecked", "name": "Uncheck Bloq.Venta", "x": 0, "y": 0 },
-      { "type": "wait", "ms": 300 },
-      { "type": "setField", "name": "PC Medio", "x": 0, "y": 0, "value": "{{pcMedio}}" },
-      { "type": "wait", "ms": 300 },
-      { "type": "setField", "name": "PC Último", "x": 0, "y": 0, "value": "{{pcUltimo}}" },
-      { "type": "wait", "ms": 300 },
-      { "type": "setField", "name": "P.defecto %", "x": 0, "y": 0, "value": "{{pDefecto}}" },
-      { "type": "wait", "ms": 300 },
-      { "type": "click", "name": "Save", "x": 0, "y": 0 },
-      { "type": "wait", "ms": 1500 },
-      { "type": "screenshot", "name": "Price changed screenshot" }
+      {
+        "type": "conditionalClick",
+        "if": "bloqVentaChecked",
+        "name": "Uncheck Bloq.Venta",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "type": "wait",
+        "ms": 300
+      },
+      {
+        "type": "setField",
+        "name": "PC Medio",
+        "x": 0,
+        "y": 0,
+        "value": "{{pcMedio}}"
+      },
+      {
+        "type": "wait",
+        "ms": 300
+      },
+      {
+        "type": "setField",
+        "name": "PC Último",
+        "x": 0,
+        "y": 0,
+        "value": "{{pcUltimo}}"
+      },
+      {
+        "type": "wait",
+        "ms": 300
+      },
+      {
+        "type": "setField",
+        "name": "P.defecto %",
+        "x": 0,
+        "y": 0,
+        "value": "{{pDefecto}}"
+      },
+      {
+        "type": "wait",
+        "ms": 300
+      },
+      {
+        "type": "click",
+        "name": "Save",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "type": "wait",
+        "ms": 1500
+      },
+      {
+        "type": "screenshot",
+        "name": "Price changed screenshot"
+      }
     ]
+  },
+  "webOrder": {
+    "enabled": false,
+    "debugUrl": "http://127.0.0.1:9222",
+    "pageUrlIncludes": "unideges",
+    "dumpFile": "order-page-dump.html"
   }
 }

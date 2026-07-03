@@ -50,6 +50,21 @@ const defaultConfig = {
     expectedScreen: { width: 0, height: 0 },
     steps: [],
     orderApplySteps: defaultOrderApplySteps
+  },
+  // Automatización de Pedidos por NAVEGADOR (Edge) vía CDP.
+  // Pedidos es una página web (DevExpress XAF: unideges30.unide.es),
+  // no la app de escritorio; por eso se conduce el DOM directamente,
+  // no con clics por coordenadas. Se conecta a un Edge lanzado con
+  // --remote-debugging-port (ver desktop/launch-edge-debug.cmd).
+  //   enabled            → si true, el botón "确认填入" usa el navegador.
+  //   debugUrl           → endpoint de depuración del Edge dedicado.
+  //   pageUrlIncludes    → subcadena para localizar la pestaña correcta.
+  //   dumpFile           → dónde vuelca /pedido_web_test el HTML de la página.
+  webOrder: {
+    enabled: false,
+    debugUrl: 'http://127.0.0.1:9222',
+    pageUrlIncludes: 'unideges',
+    dumpFile: 'order-page-dump.html'
   }
 };
 
