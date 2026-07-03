@@ -22,6 +22,12 @@ describe('isAlcoholCategoryName', () => {
       'Sangría',
       'Vermut',
       'Ron añejo',
+      // Subcategorías reales de hipera.es (2026-07-03)
+      'Bebidas alcohólicas',
+      'Bebidas espirituosas',
+      'Sidra',
+      'Anís',
+      'Licores',
     ]) {
       expect(isAlcoholCategoryName(name), name).toBe(true);
     }

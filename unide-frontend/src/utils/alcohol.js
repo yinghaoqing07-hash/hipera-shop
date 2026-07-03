@@ -17,7 +17,7 @@ import { normalizeText } from './shipping';
 // donde hay riesgo de falso positivo (p. ej. "ron" dentro de "macarrones",
 // "vino" está seguro: "vinagre" normaliza a "vinagre", no contiene "vino").
 const ALCOHOL_NAME_REGEX =
-  /alcohol|cervez|vino|licor|whisky|vodka|ginebra|tequila|brandy|vermut|cava|champan|sangria|\bron\b/;
+  /alcohol|cervez|vino|licor|espirituos|sidra|whisky|vodka|ginebra|tequila|brandy|vermut|cava|champan|sangria|\bron\b|\banis\b/;
 
 export function isAlcoholCategoryName(name) {
   return ALCOHOL_NAME_REGEX.test(normalizeText(name));

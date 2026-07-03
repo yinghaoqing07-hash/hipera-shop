@@ -25,7 +25,7 @@ const normalize = (value) => String(value || '')
   .toLowerCase();
 
 const ALCOHOL_NAME_REGEX =
-  /alcohol|cervez|vino|licor|whisky|vodka|ginebra|tequila|brandy|vermut|cava|champan|sangria|\bron\b/;
+  /alcohol|cervez|vino|licor|espirituos|sidra|whisky|vodka|ginebra|tequila|brandy|vermut|cava|champan|sangria|\bron\b|\banis\b/;
 
 export function isAlcoholCategoryName(name) {
   return ALCOHOL_NAME_REGEX.test(normalize(name));
