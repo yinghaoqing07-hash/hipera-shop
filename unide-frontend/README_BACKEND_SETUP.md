@@ -115,8 +115,8 @@ PRINT_AGENT_TOKEN=pon_aqui_un_secreto_largo_y_aleatorio
 
 ### 1.3 数据库迁移
 
-下面的 SQL 迁移文件需要**手动**在 Supabase → SQL Editor 中执行
-（按文件名升序执行；已执行过的可跳过）：
+SQL 迁移文件统一放在 `supabase/migrations/` 目录，需要**手动**在
+Supabase → SQL Editor 中执行（按文件名升序执行；已执行过的可跳过）：
 
 ```text
 supabase_migration_visible.sql
