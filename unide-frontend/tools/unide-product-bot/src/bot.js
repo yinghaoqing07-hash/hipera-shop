@@ -5,7 +5,7 @@ import { createLogger } from './logger.js';
 import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, applyOrderWeb } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb } from './webOrder.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
@@ -59,6 +59,7 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
+  if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
   const parsed = parseProductMessage(text);
@@ -168,6 +169,34 @@ async function handlePedidoWebTest(chatId) {
   await telegram.sendMessage(chatId, summary);
   try {
     await telegram.sendDocument(chatId, result.dumpFile, 'Pedidos 页面结构（发给 Claude）');
+  } catch (error) {
+    await telegram.sendMessage(chatId, `HTML 文件发送失败：${error.message}\n文件在店里电脑：${result.dumpFile}`);
+  }
+}
+
+// /pedido_web_form — pulsa "Nuevo" para abrir el formulario del pedido y
+// vuelca ESE HTML (donde estan el campo Nombre y el grid de articulos).
+// Deja un borrador sin guardar; no pulsa Guardar ni Enviar.
+async function handlePedidoWebForm(chatId) {
+  await telegram.sendMessage(chatId, '正在点开 "Nuevo" 并读取订单编辑表单…（会留一个未保存的空订单草稿，不会保存也不会发送）');
+  const result = await inspectFormPage(config, logger);
+  if (!result.ok) {
+    await telegram.sendMessage(chatId, `读取失败（${result.stage}）：\n${result.error}`);
+    return;
+  }
+  const i = result.info;
+  const summary = [
+    '订单表单读取成功：',
+    `网址：${i.url}`,
+    `可见文本输入框：${i.textInputs} 个`,
+    `表格/网格：${i.gridCount} 个`,
+    `按钮动作：${(i.actionNames || []).join(', ')}`,
+    '',
+    '下面把表单 HTML 作为文件发出，请转发给 Claude。'
+  ].join('\n');
+  await telegram.sendMessage(chatId, summary);
+  try {
+    await telegram.sendDocument(chatId, result.dumpFile, '订单表单结构（发给 Claude）');
   } catch (error) {
     await telegram.sendMessage(chatId, `HTML 文件发送失败：${error.message}\n文件在店里电脑：${result.dumpFile}`);
   }
