@@ -5,6 +5,7 @@ import { createLogger } from './logger.js';
 import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
+import { inspectOrderPage, applyOrderWeb } from './webOrder.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
@@ -57,6 +58,7 @@ async function handleUpdate(update) {
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
+  if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
   const parsed = parseProductMessage(text);
@@ -123,11 +125,52 @@ async function handleOrderApply(chatId, callbackId, id) {
     return;
   }
   await telegram.answerCallbackQuery(callbackId, '开始填入');
+
+  // Pedidos es una página web: si webOrder está activo, conducimos el
+  // navegador (DOM) en vez de la app de escritorio por coordenadas.
+  if (config.webOrder?.enabled) {
+    const result = await applyOrderWeb(session.orderDraft, config, logger);
+    const text = result.ok
+      ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；程序没有点 Guardar，也没有点 Enviar Pedido。')
+      : `订单填入失败（${result.stage || '?'}）：\n${result.error}`;
+    await telegram.sendMessage(chatId, text);
+    return;
+  }
+
   const result = await applyOrderDesktop(session.orderDraft, config, logger);
   const text = result.status === 'ok'
     ? '订单填入：已执行。请看截图确认订单名、商品和数量；程序没有点 Guardar，也没有点 Enviar Pedido。'
     : `订单填入失败：\n${result.error || result.reason || '未知错误'}`;
   await sendWithOptionalScreenshot(chatId, result, text);
+}
+
+// /pedido_web_test — diagnóstico de la automatización web: conecta al
+// Edge, localiza la pestaña de Pedidos, resume lo que ve y envía el HTML
+// de la página como documento (para afinar los selectores del grid).
+async function handlePedidoWebTest(chatId) {
+  await telegram.sendMessage(chatId, '正在连接 Edge 并读取 Pedidos 页面…（如果失败，请先双击 launch-edge-debug.cmd）');
+  const result = await inspectOrderPage(config, logger);
+  if (!result.ok) {
+    await telegram.sendMessage(chatId, `读取失败（${result.stage}）：\n${result.error}`);
+    return;
+  }
+  const i = result.info;
+  const summary = [
+    '网页读取成功：',
+    `标题：${i.title}`,
+    `网址：${i.url}`,
+    `找到 "Nuevo" 按钮：${i.nuevoFound ? '是' : '否'}${i.nuevoText ? `（"${i.nuevoText}" <${i.nuevoTag}>）` : ''}`,
+    `找到 "Nombre" 标签：${i.nombreLabelFound ? '是' : '否'}`,
+    `输入框 ${i.inputCount} · 按钮 ${i.buttonCount} · 表格/网格 ${i.gridCount}`,
+    '',
+    '下面把整页 HTML 作为文件发出，请把这个文件转发给 Claude。'
+  ].join('\n');
+  await telegram.sendMessage(chatId, summary);
+  try {
+    await telegram.sendDocument(chatId, result.dumpFile, 'Pedidos 页面结构（发给 Claude）');
+  } catch (error) {
+    await telegram.sendMessage(chatId, `HTML 文件发送失败：${error.message}\n文件在店里电脑：${result.dumpFile}`);
+  }
 }
 
 async function maybeSendOrderReminder() {
