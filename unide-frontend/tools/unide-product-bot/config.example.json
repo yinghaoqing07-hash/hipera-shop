@@ -162,6 +162,7 @@
     "pageUrlIncludes": "unideges",
     "dumpFile": "order-page-dump.html",
     "formRenderMs": 2800,
+    "autocompleteTimeoutMs": 5000,
     "autocompleteMs": 900,
     "betweenLinesMs": 700
   }

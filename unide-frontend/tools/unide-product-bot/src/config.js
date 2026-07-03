@@ -67,9 +67,10 @@ const defaultConfig = {
     dumpFile: 'order-page-dump.html',
     // Tiempos de espera (ms) del rellenado de líneas. Subir si la red/el
     // servidor van lentos y el autocompletado tarda en aparecer.
-    formRenderMs: 2800,   // tras pulsar "Nuevo", esperar el DetailView
-    autocompleteMs: 900,  // tras teclear el código, esperar el desplegable
-    betweenLinesMs: 700   // entre línea y línea
+    formRenderMs: 2800,        // tras pulsar "Nuevo", esperar el DetailView
+    autocompleteTimeoutMs: 5000, // espera MÁX a que aparezca el desplegable
+    autocompleteMs: 900,       // espera tras aparecer, para que cargue todo
+    betweenLinesMs: 700        // entre línea y línea
   }
 };
 

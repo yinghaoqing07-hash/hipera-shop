@@ -141,7 +141,12 @@ export async function applyOrderWeb(draft, config, logger) {
     browser = opened.browser;
     const page = opened.page;
     const w = config.webOrder || {};
+    // autocompleteMs = cuánto se espera TRAS aparecer el desplegable, para
+    // que carguen todas las opciones antes de contarlas (detección de
+    // varios resultados). autocompleteTimeoutMs = espera MÁXIMA a que el
+    // desplegable aparezca (sondeo). Subir ambos si la red va lenta.
     const autocompleteMs = Number(w.autocompleteMs) || 900;
+    const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
     const betweenLinesMs = Number(w.betweenLinesMs) || 700;
 
     // Paso 1: "Nuevo" (abre el DetailView del pedido).
@@ -177,9 +182,9 @@ export async function applyOrderWeb(draft, config, logger) {
       }
       await sleep(300);
       await page.keyboard.type(code, { delay: 25 });
-      await sleep(autocompleteMs);
-
-      const opts = await dropdownOptionCount(page);
+      // Sondear hasta que el desplegable aparezca (la red/servidor pueden
+      // tardar), en vez de una espera fija que a veces se queda corta.
+      const opts = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
       if (opts === 0) {
         const shot = await screenshot(page, config, `code-${code}-nomatch`);
         const dom = await captureEditDom(page, config);
@@ -304,6 +309,24 @@ async function startNewItemRow(page) {
   await el.click();
   await handle.dispose();
   return true;
+}
+
+// Espera (sondeando) a que aparezca el desplegable de autocompletado.
+// Devuelve el número de opciones una vez estabilizado. Poll cada 150 ms
+// hasta timeoutMs; en cuanto hay ≥1 opción, espera settleMs para que
+// terminen de cargar todas (así se detecta bien el caso de varias) y
+// vuelve a contar.
+async function waitForDropdownOptions(page, timeoutMs, settleMs) {
+  const start = Date.now();
+  let count = 0;
+  while (Date.now() - start < timeoutMs) {
+    count = await dropdownOptionCount(page);
+    if (count > 0) break;
+    await sleep(150);
+  }
+  if (count === 0) return 0;
+  await sleep(settleMs);
+  return dropdownOptionCount(page);
 }
 
 // Cuenta las opciones VISIBLES del desplegable de autocompletado abierto.
