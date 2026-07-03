@@ -128,6 +128,8 @@ supabase_migration_orders_customer_email.sql       ← 订单邮件确认
 supabase_migration_orders_delivery_method.sql      ← 到店自取
 supabase_migration_orders_stripe.sql               ← Stripe 付款
 supabase_migration_orders_printed.sql              ← 新增（自动打印小票）
+supabase_migration_rls_policy_cleanup.sql          ← 清理遗留 RLS 策略（2026-07-03 已在线上执行）
+supabase_migration_orders_age_confirmation.sql     ← 酒类订单 +18 声明时间戳
 ```
 
 `orders_customer_email` 添加 `customer_email` 列（nullable）用于：

@@ -12,7 +12,7 @@ const router = Router();
 // payment_method + status permiten al agente decidir la etiqueta de
 // "estado de pago" (PAGADO vs COBRAR AL ENTREGAR).
 const PRINT_ORDER_FIELDS =
-  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent, coupon_code, discount, invoice_full_number, invoice_issued_at, tax_breakdown, verifactu_qr';
+  'id, created_at, confirmed_at, delivery_method, items, total, address, phone, note, payment_method, status, stripe_payment_intent, coupon_code, discount, age_confirmed_at, invoice_full_number, invoice_issued_at, tax_breakdown, verifactu_qr';
 
 // GET /api/print/pending — cola de impresión.
 // Devuelve pedidos confirmados (confirmed_at no nulo) y aún no impresos

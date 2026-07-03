@@ -99,16 +99,24 @@ export default function TerminosCondiciones() {
         <Subsection title="2.2 Verificación de edad para productos restringidos">
           <p>
             La venta de bebidas alcohólicas y otros productos sujetos a restricción
-            por edad está limitada a personas mayores de la edad legal aplicable.
-            HIPERA sólo comercializa productos sujetos a restricción de edad cuando
-            está legalmente habilitada para ello y aplica los mecanismos de
-            verificación exigidos por la normativa aplicable.
+            por edad está limitada a personas <strong>mayores de 18 años</strong>,
+            conforme a la <Lit>Ley 5/2002 de la Comunidad de Madrid</Lit>, aplicable
+            también a la venta a distancia. HIPERA sólo comercializa productos
+            sujetos a restricción de edad cuando está legalmente habilitada para
+            ello y aplica los mecanismos de verificación exigidos por la normativa
+            aplicable.
+          </p>
+          <p>
+            Cuando un pedido incluye bebidas alcohólicas, el proceso de compra exige
+            marcar una <strong>declaración expresa de mayoría de edad</strong> antes
+            de confirmar el pedido; sin ella el pedido no puede completarse. La
+            fecha y hora de dicha declaración quedan registradas junto al pedido.
           </p>
           <p>
             HIPERA se reserva el derecho de solicitar verificación documental de la
-            edad en el momento de la entrega y, en su caso, de rechazar la entrega
-            cuando el destinatario no acredite la edad requerida, reembolsando el
-            importe del producto restringido.
+            edad en el momento de la entrega o recogida y, en su caso, de rechazar
+            la entrega cuando el destinatario no acredite la edad requerida,
+            reembolsando el importe del producto restringido.
           </p>
         </Subsection>
         <Subsection title="2.3 Archivo y reproducción del contrato">

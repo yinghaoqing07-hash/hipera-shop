@@ -215,6 +215,23 @@ export const generateTicketPDF = async (order) => {
     doc.setFont("helvetica", "normal");
   }
 
+  // Aviso +18: el pedido contiene bebidas alcohólicas (el cliente ya
+  // declaró su mayoría de edad en el checkout — age_confirmed_at). El
+  // personal debe verificar la edad en la entrega/recogida si hay duda
+  // (Ley 5/2002 CAM; T&C §2.2).
+  if (order.age_confirmed_at) {
+    doc.setLineWidth(0.8);
+    doc.rect(5, y - 1, 70, 9);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("CONTIENE ALCOHOL — VERIFICAR +18", centerX, y + 2.5, { align: 'center' });
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    doc.text("Pedir documento si hay duda de edad", centerX, y + 6, { align: 'center' });
+    doc.setLineWidth(0.5);
+    y += 12;
+  }
+
   // Código de recogida (solo pedidos de recogida en tienda). Destacado
   // para que el personal de mostrador lo compare con el que enseña el
   // cliente (mismo número que recibe por email/WhatsApp).

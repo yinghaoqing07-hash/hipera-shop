@@ -59,6 +59,7 @@ import { StoreInfoBar, AfterHoursNotice } from './components/StoreStatus';
 import { getPickupReadinessNote } from './utils/storeStatus';
 import FaqSection from './components/FaqSection';
 import { IconByName } from './components/CategoryIcon';
+import { cartContainsAlcohol } from './utils/alcohol';
 import { resolveCategoryIcon } from './utils/categoryIcon';
 import LegalPage from './components/LegalPage';
 import AnalyticsConsentBridge from './components/AnalyticsConsentBridge';
@@ -151,6 +152,9 @@ export default function App() {
   // o nunca aceptó). Para invitados, también obliga a marcar.
   const [latestTermsAcceptance, setLatestTermsAcceptance] = useState(null);
   const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
+  // Declaración de mayoría de edad (+18) cuando el carrito contiene
+  // bebidas alcohólicas (Ley 5/2002 CAM; T&C §2.2). Se exige por pedido.
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
 
   // Cupón de descuento (campaña de lanzamiento). `couponInput` es el texto
   // que el cliente escribe; `appliedCoupon` queda fijado tras validarlo en
@@ -736,6 +740,13 @@ export default function App() {
   // Mostrar checkbox de aceptación si: a) usuario invitado, b) usuario
   // logueado pero sin aceptación previa, o c) la versión vigente subió.
   const checkoutNeedsTermsCheckbox = !user || needsTermsReacceptance(latestTermsAcceptance);
+  // ¿Hay alcohol en el carrito (incluido el regalo elegido)? El backend
+  // repite esta comprobación de forma autoritativa contra el catálogo.
+  const cartHasAlcohol = cartContainsAlcohol(
+    selectedGift ? [...cart, selectedGift] : cart,
+    categories,
+    subCategories
+  );
 
   // Validador mínimo de email (mismo criterio que el backend: requiere
   // arroba). El input HTML type="email" ya hace una validación más
@@ -872,6 +883,10 @@ export default function App() {
       toast.error("Debes aceptar la Política de Privacidad y los Términos y Condiciones.");
       return;
     }
+    if (cartHasAlcohol && !ageConfirmed) {
+      toast.error("Tu pedido incluye bebidas alcohólicas: confirma que eres mayor de 18 años.");
+      return;
+    }
     // El método de pago ahora se elige en la propia página (sin modal).
     // Exigimos selección explícita antes de confirmar.
     if (!selectedPayment) {
@@ -992,6 +1007,7 @@ export default function App() {
           delivery_method: checkoutForm.deliveryMethod,
           items: finalCart,
           turnstile_token: turnstileToken,
+          age_confirmed: cartHasAlcohol && ageConfirmed,
         });
         if (!url) throw new Error('No se pudo iniciar el pago. Inténtalo de nuevo.');
         // Marca para mostrar feedback al volver y limpiar el carrito.
@@ -1024,6 +1040,7 @@ export default function App() {
         delivery_method: checkoutForm.deliveryMethod,
         items: finalCart,
         turnstile_token: turnstileToken,
+        age_confirmed: cartHasAlcohol && ageConfirmed,
       });
 
       // Conversión GA4: pedido completado (Bizum / contra reembolso). El
@@ -1042,6 +1059,7 @@ export default function App() {
       
       // 重置免费商品选择
       setSelectedGift(null);
+      setAgeConfirmed(false); // la declaración +18 es por pedido
       
       // 询问用户是否下载订单凭证
       if(window.confirm("Pago completado. ¿Quieres descargar los justificantes de pedido?")) {
@@ -2936,6 +2954,26 @@ export default function App() {
               </label>
             )}
 
+            {/* Declaración +18: obligatoria cuando el carrito contiene
+                bebidas alcohólicas (Ley 5/2002 CAM; T&C §2.2). El backend
+                también la exige (AGE_CONFIRMATION_REQUIRED). */}
+            {cartHasAlcohol && (
+              <label className="flex items-start gap-3 p-3 rounded-xl border border-amber-300 bg-amber-50">
+                <input
+                  type="checkbox"
+                  checked={ageConfirmed}
+                  onChange={e => setAgeConfirmed(e.target.checked)}
+                  className="mt-1 h-4 w-4 accent-red-600 cursor-pointer flex-shrink-0"
+                />
+                <span className="text-xs text-amber-900 leading-relaxed">
+                  <strong>Tu pedido incluye bebidas alcohólicas.</strong>{' '}
+                  Declaro que soy mayor de 18 años. La venta de alcohol a menores
+                  está prohibida; podremos pedir un documento de identidad en la
+                  entrega o recogida.
+                </span>
+              </label>
+            )}
+
             {/* Botón de acción.
                 Decisión UX (2026-05-26): NO usamos `disabled` nativo (salvo
                 mientras procesa), para poder mostrar el motivo. Si falta algo,
@@ -2951,6 +2989,7 @@ export default function App() {
                 isDeliveryAddressAllowed &&
                 isPhoneFormatOk(checkoutForm.phone) &&
                 (!checkoutNeedsTermsCheckbox || checkoutTermsAccepted) &&
+                (!cartHasAlcohol || ageConfirmed) &&
                 !!selectedPayment;
               // Lista concreta de lo que falta, para decir POR QUÉ el botón
               // está en gris ANTES de que el cliente lo pulse.
@@ -2961,6 +3000,7 @@ export default function App() {
               else if (!isStorePickup && !isDeliveryAddressAllowed) missing.push('una dirección dentro de la zona de reparto');
               if (!isPhoneFormatOk(checkoutForm.phone)) missing.push('un teléfono válido');
               if (checkoutNeedsTermsCheckbox && !checkoutTermsAccepted) missing.push('aceptar la política');
+              if (cartHasAlcohol && !ageConfirmed) missing.push('confirmar que eres mayor de 18 años');
               const label = isProcessingPayment
                 ? 'Procesando…'
                 : !selectedPayment

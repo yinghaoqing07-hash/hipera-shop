@@ -151,9 +151,21 @@
 // "requiere pago" a gratuita (favorable al Cliente) y el servicio a domicilio
 // es opcional y adicional; no se agravan obligaciones, garantías ni la base
 // económica del contrato.
+// 1.6 → 1.7 (2026-07-03): §2.2 pasa de descripción genérica a reflejar el
+// mecanismo REAL de verificación de edad implementado en el checkout:
+// (a) se cita la Ley 5/2002 de la Comunidad de Madrid y el umbral de 18
+// años; (b) se describe la declaración expresa de mayoría de edad
+// (checkbox obligatorio cuando el pedido contiene bebidas alcohólicas,
+// exigida también por el backend con código AGE_CONFIRMATION_REQUIRED)
+// y su registro con fecha/hora junto al pedido (orders.age_confirmed_at);
+// (c) la verificación documental en entrega/recogida ya estaba prevista.
+// NO requiere re-aceptación (TERMS_VERSION se mantiene): la restricción
+// deriva directamente de la ley (no del contrato) y el documento pasa a
+// describir con precisión un mecanismo que protege al consumidor; no se
+// agravan obligaciones, garantías ni la base económica del contrato.
 export const TERMS_VERSION = 3;
-export const TERMS_DOCUMENT_VERSION = '1.6';
-export const TERMS_UPDATED_AT = '2026-06-10';
+export const TERMS_DOCUMENT_VERSION = '1.7';
+export const TERMS_UPDATED_AT = '2026-07-03';
 
 // --- Política de Privacidad ---
 // 1.2 → 1.3 (2026-05-26): revisión correctiva no material que

@@ -22,6 +22,7 @@ import { adjustStockCas, deductStockForItems, restockItems } from './services/st
 import { snapshotItemTaxRates, prepareOrderForInvoice } from './services/orderTax.js';
 import { buildRefundWhatsappLink, buildPickupReadyWhatsappLink } from './services/whatsapp.js';
 import { isSpanishPhoneOk } from './services/phone.js';
+import { orderContainsAlcohol } from './services/alcohol.js';
 import catalogRoutes from './routes/catalog.js';
 import repairBookingRoutes from './routes/repairBookings.js';
 import printRoutes from './routes/print.js';
@@ -237,6 +238,20 @@ const VALID_DELIVERY_METHODS = ['home_delivery', 'store_pickup'];
 // una salida válida del flujo).
 // =====================================================================
 const UNCOMPLETED_ORDER_STATUSES = ['Procesando', 'Pendiente de Pago'];
+
+// Inserta la fila del pedido tolerando que la columna age_confirmed_at
+// aún no exista (migración supabase_migration_orders_age_confirmation.sql
+// pendiente de ejecutar): en ese caso reintenta sin el campo para no
+// bloquear ventas entre el deploy y la migración.
+async function insertOrderRow(row) {
+  let { data, error } = await supabase.from('orders').insert([row]).select().single();
+  if (error && row.age_confirmed_at && /age_confirmed_at/i.test(error.message || '')) {
+    console.warn('[orders] columna age_confirmed_at ausente; ejecutar la migración. Insertando sin ella.');
+    const { age_confirmed_at: _omit, ...rest } = row;
+    ({ data, error } = await supabase.from('orders').insert([rest]).select().single());
+  }
+  return { data, error };
+}
 const MAX_UNCOMPLETED_PER_PHONE_24H = 2;
 
 // =====================================================================
@@ -623,6 +638,7 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
       delivery_method,
       turnstile_token,
       coupon_code,
+      age_confirmed,
     } = req.body;
 
     // =================================================================
@@ -749,6 +765,26 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
       console.warn('[anti-abuse] phone check unexpected:', e?.message || e);
     }
 
+    // =================================================================
+    // Venta de alcohol: declaración de mayoría de edad (+18)
+    // =================================================================
+    // Ley 5/2002 de la Comunidad de Madrid + T&C §2.2: prohibida la
+    // venta de bebidas alcohólicas a menores, también a distancia. La
+    // detección es autoritativa (catálogo real, no los campos del
+    // carrito). Si hay alcohol y el cliente no marcó la casilla,
+    // rechazamos con un código que el frontend traduce a su checkbox.
+    let ageConfirmedAt = null;
+    const hasAlcohol = await orderContainsAlcohol(items);
+    if (hasAlcohol) {
+      if (age_confirmed !== true) {
+        return res.status(400).json({
+          error: 'Tu pedido incluye bebidas alcohólicas. Debes confirmar que eres mayor de 18 años para continuar.',
+          code: 'AGE_CONFIRMATION_REQUIRED',
+        });
+      }
+      ageConfirmedAt = new Date().toISOString();
+    }
+
     // Para recogida en tienda, normalizamos address a una etiqueta
     // estable que aclara dónde se recoge el pedido. Así los registros
     // antiguos del back-office (tickets PDF, listados) muestran texto
@@ -830,27 +866,24 @@ app.post('/api/orders', orderHourlyLimiter, orderDailyLimiter, async (req, res) 
     // de inmediato (comportamiento previo a Stripe). Sólo el flujo Stripe
     // ('Esperando pago') deja confirmed_at en NULL hasta cobrar.
     const nowIso = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('orders')
-      .insert([{
-        user_id: user_id || null,
-        address: finalAddress,
-        phone,
-        note,
-        total: finalTotal,
-        status: status || 'Procesando',
-        payment_method: payment_method || 'Pendiente',
-        items: itemsForOrder,
-        customer_email: hasValidEmail ? normalizedEmail : null,
-        delivery_method: resolvedDeliveryMethod,
-        ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
-        coupon_code: appliedCoupon,
-        discount,
-        created_at: nowIso,
-        confirmed_at: nowIso
-      }])
-      .select()
-      .single();
+    const { data, error } = await insertOrderRow({
+      user_id: user_id || null,
+      address: finalAddress,
+      phone,
+      note,
+      total: finalTotal,
+      status: status || 'Procesando',
+      payment_method: payment_method || 'Pendiente',
+      items: itemsForOrder,
+      customer_email: hasValidEmail ? normalizedEmail : null,
+      delivery_method: resolvedDeliveryMethod,
+      ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
+      ...(ageConfirmedAt ? { age_confirmed_at: ageConfirmedAt } : {}),
+      coupon_code: appliedCoupon,
+      discount,
+      created_at: nowIso,
+      confirmed_at: nowIso
+    });
 
     if (error) throw error;
 
@@ -935,6 +968,7 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
       delivery_method,
       turnstile_token,
       coupon_code,
+      age_confirmed,
     } = req.body;
 
     // Anti-abuso 0: Turnstile (permisivo si no hay secret configurado).
@@ -1014,6 +1048,26 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
       console.warn('[stripe] phone check:', e?.message || e);
     }
 
+    // =================================================================
+    // Venta de alcohol: declaración de mayoría de edad (+18)
+    // =================================================================
+    // Ley 5/2002 de la Comunidad de Madrid + T&C §2.2: prohibida la
+    // venta de bebidas alcohólicas a menores, también a distancia. La
+    // detección es autoritativa (catálogo real, no los campos del
+    // carrito). Si hay alcohol y el cliente no marcó la casilla,
+    // rechazamos con un código que el frontend traduce a su checkbox.
+    let ageConfirmedAt = null;
+    const hasAlcohol = await orderContainsAlcohol(items);
+    if (hasAlcohol) {
+      if (age_confirmed !== true) {
+        return res.status(400).json({
+          error: 'Tu pedido incluye bebidas alcohólicas. Debes confirmar que eres mayor de 18 años para continuar.',
+          code: 'AGE_CONFIRMATION_REQUIRED',
+        });
+      }
+      ageConfirmedAt = new Date().toISOString();
+    }
+
     const finalAddress = isStorePickup
       ? 'Recogida en tienda — Paseo del Sol 1, 28880 Meco (Madrid)'
       : address;
@@ -1044,26 +1098,23 @@ app.post('/api/checkout/stripe-session', orderHourlyLimiter, orderDailyLimiter, 
     const itemsForOrder = await snapshotItemTaxRates(items);
 
     // 1) Crear el pedido en 'Esperando pago' (sin descontar stock).
-    const { data: order, error: insErr } = await supabase
-      .from('orders')
-      .insert([{
-        user_id: user_id || null,
-        address: finalAddress,
-        phone,
-        note,
-        total: finalTotal,
-        status: 'Esperando pago',
-        payment_method: 'Tarjeta (Stripe)', // provisional; el webhook lo afina al método real
-        items: itemsForOrder,
-        customer_email: normalizedEmail,
-        delivery_method: resolvedDeliveryMethod,
-        ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
-        coupon_code: appliedCoupon,
-        discount,
-        created_at: new Date().toISOString(),
-      }])
-      .select()
-      .single();
+    const { data: order, error: insErr } = await insertOrderRow({
+      user_id: user_id || null,
+      address: finalAddress,
+      phone,
+      note,
+      total: finalTotal,
+      status: 'Esperando pago',
+      payment_method: 'Tarjeta (Stripe)', // provisional; el webhook lo afina al método real
+      items: itemsForOrder,
+      customer_email: normalizedEmail,
+      delivery_method: resolvedDeliveryMethod,
+      ...(resolvedDeliveryMethod === 'store_pickup' ? { pickup_code: generatePickupCode() } : {}),
+      ...(ageConfirmedAt ? { age_confirmed_at: ageConfirmedAt } : {}),
+      coupon_code: appliedCoupon,
+      discount,
+      created_at: new Date().toISOString(),
+    });
     if (insErr) throw insErr;
 
     // 2) Construir line_items (cuadran exactamente con el total final, ya
