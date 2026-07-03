@@ -334,20 +334,18 @@ async function focusEditRowEditor(page) {
 async function selectDropdownRowByCode(page, code) {
   const handle = await page.evaluateHandle((c) => {
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const tokens = (s) => (s || '').split(/\s+/).map((t) => t.trim()).filter(Boolean);
-    const popups = Array.from(document.querySelectorAll(
-      '.dxbl-popup, .dxbl-dropdown, .dxbl-window, [role="listbox"], .dxbl-grid-dropdown'
-    )).filter(isVisible);
-    const scopes = popups.length ? popups : [document.body];
-    let found = [];
-    for (const p of scopes) {
-      const rows = Array.from(p.querySelectorAll('[role="option"], [role="row"], .dxbl-listbox-item, .dxbl-grid-data-row, tr')).filter(isVisible);
-      for (const r of rows) if (tokens(r.innerText).includes(c)) found.push(r);
-    }
-    // Quedarse con las filas que no contienen a otra fila encontrada
-    // (evita contar fila + celda como dos).
-    found = found.filter((r) => !found.some((o) => o !== r && r.contains(o)));
-    return found.length === 1 ? found[0] : null;
+    // separadores: espacios normales, nbsp, tab y salto de línea (así las
+    // celdas de la fila del desplegable se separan en tokens).
+    const tokens = (s) => (s || '').split(/[\s ]+/).map((t) => t.trim()).filter(Boolean);
+    // Las opciones del desplegable tienen role="option" (exclusivo del
+    // popup: las filas del grid principal son role="row"). Se deduplica
+    // por referencia con Set para que la anidación de contenedores de XAF
+    // no cuente la misma fila varias veces.
+    const opts = [...new Set(Array.from(document.querySelectorAll(
+      '[role="option"], .dxbl-listbox-item, .dxbl-list-box-item, .dxbl-grid-dropdown-item'
+    )))].filter(isVisible);
+    const matches = opts.filter((o) => tokens(o.innerText).includes(c));
+    return matches.length === 1 ? matches[0] : null;
   }, code);
   const el = handle.asElement();
   if (!el) { await handle.dispose(); return false; }
