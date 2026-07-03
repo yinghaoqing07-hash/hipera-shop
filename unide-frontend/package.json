@@ -10,11 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ericblade/quagga2": "^1.12.1",
     "@googlemaps/js-api-loader": "^2.0.2",
     "@sentry/react": "^10.57.0",
     "@supabase/supabase-js": "^2.90.1",
     "@tailwindcss/postcss": "^4.1.18",
+    "barcode-detector": "^3.2.0",
     "cors": "^2.8.5",
     "jspdf": "^4.0.0",
     "jspdf-autotable": "^5.0.7",

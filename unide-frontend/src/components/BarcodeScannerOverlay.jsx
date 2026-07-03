@@ -2,22 +2,23 @@
 // BarcodeScannerOverlay — escáner de códigos de barras a pantalla completa
 // =====================================================================
 // Motor compartido por EanIvaScanner (revisión de productos) e IvaLookup
-// (pestaña Consulta IVA). Dos caminos de detección:
+// (pestaña Consulta IVA). UN solo camino de código con dos motores:
 //
-//   1. BarcodeDetector nativo (Android Chrome = ML Kit, iOS 17+): el mismo
-//      motor que usan las apps nativas de caja. Casi instantáneo.
-//   2. @ericblade/quagga2 (fallback, p. ej. Chrome de escritorio en
-//      Windows, donde BarcodeDetector no existe): decodificador 1D
-//      especializado en EAN/UPC.
+//   - BarcodeDetector NATIVO donde existe (Android Chrome = ML Kit, el
+//     mismo decodificador que las apps de caja). Badge "Modo rápido".
+//   - Ponyfill `barcode-detector` (zxing-wasm, ZXing C++ compilado a
+//     WebAssembly) donde no: iPhone/Safari y Chrome de escritorio en
+//     Windows. Misma API, calidad de decodificación de nivel SDK — el
+//     sustituto de quagga2, que en condiciones reales de tienda fallaba
+//     (probado en iPhone: "escaneo y no entra").
 //
-// Mejoras de cámara respecto a la versión anterior (la queja real era
-// "escaneo y no entra"):
-//   - Resolución ideal 1920×1080 (con `ideal`, nunca `exact`, para no
-//     provocar OverconstrainedError ni el bug portrait/landscape).
-//   - Enfoque continuo (focusMode: continuous) si la cámara lo soporta:
-//     sin esto muchos Android quedan desenfocados a distancia de código.
-//   - Zoom inicial 2× cuando la cámara lo permite (los códigos pequeños a
-//     un palmo de distancia son ilegibles a 1×) + control manual.
+// Mejoras de cámara (aplican a ambos motores):
+//   - Resolución ideal 1920×1080 (`ideal`, nunca `exact`: no provoca
+//     OverconstrainedError ni el bug portrait/landscape).
+//   - Enfoque continuo si la cámara lo expone (muchos Android); el iPhone
+//     ya enfoca continuo por defecto.
+//   - Zoom inicial 2× cuando la cámara lo permite (los EAN pequeños a un
+//     palmo son ilegibles a 1×) + control manual. iOS 17+ expone zoom.
 //   - Linterna (torch) para estanterías oscuras, si el hardware la tiene.
 //
 // Props:
@@ -28,6 +29,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, AlertCircle, Zap, ZoomIn, ZoomOut, Flashlight } from 'lucide-react';
 
+const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'];
+
+// Devuelve la clase detectora: nativa si existe Y decodifica EAN-13;
+// si no, el ponyfill WASM (import diferido: solo se paga al escanear).
+async function resolveDetectorClass() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const supported = await window.BarcodeDetector.getSupportedFormats();
+      if (supported?.includes('ean_13')) {
+        return { Detector: window.BarcodeDetector, native: true };
+      }
+    } catch { /* raro: nativo roto → ponyfill */ }
+  }
+  const { BarcodeDetector } = await import('barcode-detector/ponyfill');
+  return { Detector: BarcodeDetector, native: false };
+}
+
 export default function BarcodeScannerOverlay({ onDetected, onClose }) {
   const [scanError, setScanError] = useState('');
   const [usingNative, setUsingNative] = useState(false);
@@ -37,7 +55,6 @@ export default function BarcodeScannerOverlay({ onDetected, onClose }) {
   const [zoom, setZoom] = useState(1);
 
   const videoRef = useRef(null);
-  const containerRef = useRef(null); // quagga2 inyecta su <video> aquí
   const stopRef = useRef(null);
   const trackRef = useRef(null);
   const firedRef = useRef(false); // garantiza onDetected una sola vez
@@ -62,121 +79,82 @@ export default function BarcodeScannerOverlay({ onDetected, onClose }) {
     };
 
     (async () => {
-      const native = 'BarcodeDetector' in window;
-      setUsingNative(native);
-      // Espera a que React monte el <video>/container.
+      // Motor de detección (nativo o WASM) y cámara en paralelo.
+      let DetectorInfo;
+      try { DetectorInfo = await resolveDetectorClass(); }
+      catch { fail('error'); return; }
+      if (cancelled) return;
+      setUsingNative(DetectorInfo.native);
+
+      // Espera a que React monte el <video>.
       await new Promise((r) => setTimeout(r, 50));
       if (cancelled) return;
+      const el = videoRef.current;
+      if (!el) return;
 
-      if (native) {
-        // ── Camino 1: BarcodeDetector nativo, stream propio ────────────
-        const el = videoRef.current;
-        if (!el) return;
-        let stream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { ideal: 'environment' },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-            },
-          });
-        } catch (err) { fail(err?.name); return; }
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        });
+      } catch (err) { fail(err?.name); return; }
+      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
 
-        el.srcObject = stream;
-        await el.play().catch(() => {});
+      el.srcObject = stream;
+      await el.play().catch(() => {});
 
-        // Mejoras de cámara (best-effort: cada una en su try, hay cámaras
-        // que soportan una y no la otra).
-        const track = stream.getVideoTracks()[0];
-        trackRef.current = track;
-        const caps = track.getCapabilities?.() || {};
-        try {
-          if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-            await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-          }
-        } catch { /* sin autofocus configurable */ }
-        if (caps.torch) setTorchAvailable(true);
-        if (caps.zoom && caps.zoom.max > caps.zoom.min) {
-          setZoomCaps(caps.zoom);
-          // Zoom inicial 2× (o el máximo si es menor): el punto dulce para
-          // códigos EAN a 15-25 cm sin tener que acercar el móvil.
-          const initial = Math.min(2, caps.zoom.max);
-          if (initial > caps.zoom.min) {
-            try { await track.applyConstraints({ advanced: [{ zoom: initial }] }); setZoom(initial); }
-            catch { /* ignore */ }
-          }
+      // Mejoras de cámara (best-effort: cada una en su try, hay cámaras
+      // que soportan una y no la otra).
+      const track = stream.getVideoTracks()[0];
+      trackRef.current = track;
+      const caps = track.getCapabilities?.() || {};
+      try {
+        if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
         }
-
-        let detector;
-        try {
-          detector = new window.BarcodeDetector({
-            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'],
-          });
-        } catch { detector = new window.BarcodeDetector(); }
-
-        let active = true;
-        const poll = async () => {
-          if (!active || cancelled) return;
-          if (el.readyState >= 2) {
-            try {
-              const hits = await detector.detect(el);
-              if (hits?.length > 0 && active) { active = false; fire(hits[0].rawValue); return; }
-            } catch { /* frame descartado */ }
-          }
-          setTimeout(poll, 80);
-        };
-        poll();
-
-        stopRef.current = () => {
-          active = false;
-          stream.getTracks().forEach((t) => t.stop());
-          if (videoRef.current) videoRef.current.srcObject = null;
-        };
-      } else {
-        // ── Camino 2: quagga2 (gestiona su propio stream) ──────────────
-        const container = containerRef.current;
-        if (!container) return;
-        try {
-          const { default: Quagga } = await import('@ericblade/quagga2');
-          await new Promise((resolve, reject) => {
-            Quagga.init(
-              {
-                inputStream: {
-                  type: 'LiveStream',
-                  target: container,
-                  constraints: {
-                    facingMode: 'environment',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                  },
-                },
-                locate: true,
-                decoder: {
-                  readers: ['ean_reader', 'ean_8_reader', 'upc_reader', 'code_128_reader'],
-                  multiple: false,
-                },
-                numOfWorkers: 0, // sin workers: evita problemas CORS en Safari
-                frequency: 10,
-              },
-              (err) => (err ? reject(err) : resolve())
-            );
-          });
-          if (cancelled) { try { Quagga.stop(); } catch { /* ignore */ } return; }
-          Quagga.start();
-
-          const handler = ({ codeResult }) => {
-            if (codeResult?.code) fire(codeResult.code);
-          };
-          Quagga.onDetected(handler);
-          stopRef.current = () => {
-            try { Quagga.offDetected(handler); Quagga.stop(); } catch { /* ignore */ }
-          };
-        } catch (err) {
-          fail(err?.name || (err?.message?.includes('Permission') ? 'NotAllowedError' : 'error'));
+      } catch { /* sin autofocus configurable */ }
+      if (caps.torch) setTorchAvailable(true);
+      if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+        setZoomCaps(caps.zoom);
+        // Zoom inicial 2× (o el máximo si es menor): el punto dulce para
+        // códigos EAN a 15-25 cm sin tener que acercar el móvil.
+        const initial = Math.min(2, caps.zoom.max);
+        if (initial > caps.zoom.min) {
+          try { await track.applyConstraints({ advanced: [{ zoom: initial }] }); setZoom(initial); }
+          catch { /* ignore */ }
         }
       }
+
+      let detector;
+      try { detector = new DetectorInfo.Detector({ formats: FORMATS }); }
+      catch { detector = new DetectorInfo.Detector(); }
+
+      // Bucle de detección SECUENCIAL: se lanza el siguiente frame cuando
+      // termina el anterior (el detect del WASM puede tardar más que el
+      // nativo; así nunca se encolan detecciones).
+      let active = true;
+      const DELAY = DetectorInfo.native ? 80 : 60;
+      const poll = async () => {
+        if (!active || cancelled) return;
+        if (el.readyState >= 2) {
+          try {
+            const hits = await detector.detect(el);
+            if (hits?.length > 0 && active) { active = false; fire(hits[0].rawValue); return; }
+          } catch { /* frame descartado */ }
+        }
+        setTimeout(poll, DELAY);
+      };
+      poll();
+
+      stopRef.current = () => {
+        active = false;
+        stream.getTracks().forEach((t) => t.stop());
+        if (videoRef.current) videoRef.current.srcObject = null;
+      };
     })();
 
     return () => {
@@ -210,25 +188,12 @@ export default function BarcodeScannerOverlay({ onDetected, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[60] bg-black" style={{ touchAction: 'none' }}>
-      {/* Vídeo (camino nativo) */}
       <video
         ref={videoRef}
-        className={`absolute inset-0 w-full h-full object-cover${usingNative ? '' : ' hidden'}`}
+        className="absolute inset-0 w-full h-full object-cover"
         muted
         playsInline
       />
-
-      {/* Container quagga2 */}
-      {!usingNative && (
-        <>
-          <style>{`
-            .qs-container video,
-            .qs-container canvas { position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:cover!important; }
-            .qs-container canvas { opacity:0.35; }
-          `}</style>
-          <div ref={containerRef} className="qs-container absolute inset-0 overflow-hidden" />
-        </>
-      )}
 
       {/* Esquinas del visor */}
       {[
@@ -261,7 +226,7 @@ export default function BarcodeScannerOverlay({ onDetected, onClose }) {
         )}
       </div>
 
-      {/* Controles de cámara (solo camino nativo y si el hardware los tiene) */}
+      {/* Controles de cámara (si el hardware los expone) */}
       {(torchAvailable || zoomCaps) && (
         <div className="absolute bottom-28 left-0 right-0 z-10 flex items-center justify-center gap-3">
           {zoomCaps && (
