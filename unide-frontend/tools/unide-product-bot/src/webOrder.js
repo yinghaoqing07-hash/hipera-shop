@@ -79,6 +79,51 @@ export async function inspectOrderPage(config, logger) {
   }
 }
 
+// --- 1b) Inspección del FORMULARIO (tras pulsar Nuevo) ---------------
+// Pulsa "Nuevo" para abrir el DetailView del pedido y vuelca su HTML, que
+// es donde viven el campo "Nombre del Pedido" y el grid de artículos.
+// Es un borrador sin guardar; NO se pulsa Guardar ni Enviar.
+export async function inspectFormPage(config, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+
+    const clicked = await clickActionByName(page, 'Nuevo');
+    if (!clicked) {
+      return { ok: false, stage: 'nuevo', error: '没找到 data-action-name="Nuevo" 的按钮。请确认页面是订单列表页。' };
+    }
+    await sleep(2800); // esperar a que Blazor renderice el DetailView
+
+    const info = await page.evaluate(() => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const textInputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type]), textarea')).filter(isVisible).length;
+      const actionNames = Array.from(document.querySelectorAll('[data-action-name]'))
+        .map((e) => e.getAttribute('data-action-name'))
+        .filter((v, i, a) => v && a.indexOf(v) === i);
+      return {
+        title: document.title,
+        url: location.href,
+        textInputs,
+        gridCount: document.querySelectorAll('.dxbl-grid, [role="grid"]').length,
+        actionNames
+      };
+    });
+
+    const html = await page.content();
+    const dumpFile = path.resolve(config.__toolRoot || '.', 'order-form-dump.html');
+    fs.writeFileSync(dumpFile, html, 'utf8');
+    logger?.info('web form inspect ok', { url: info.url, bytes: html.length });
+    return { ok: true, info, dumpFile };
+  } catch (error) {
+    logger?.error('web form inspect failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'inspectForm', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
 // --- 2) Rellenar pedido (primera fase: Nuevo + Nombre, seguro) --------
 export async function applyOrderWeb(draft, config, logger) {
   let browser;
@@ -87,12 +132,12 @@ export async function applyOrderWeb(draft, config, logger) {
     browser = opened.browser;
     const page = opened.page;
 
-    // Paso 1: pulsar "Nuevo" (por texto, robusto entre versiones de XAF).
-    const clickedNuevo = await clickByText(page, ['button', 'a', '[role="button"]', '[role="menuitem"]'], /^\s*nuevo\b/i);
+    // Paso 1: pulsar "Nuevo" por data-action-name (estable en XAF).
+    const clickedNuevo = await clickActionByName(page, 'Nuevo');
     if (!clickedNuevo) {
-      return { ok: false, stage: 'nuevo', error: '没有找到 "Nuevo" 按钮。请先发 /pedido_web_test，把页面结构发我，我来补选择器。' };
+      return { ok: false, stage: 'nuevo', error: '没有找到 "Nuevo" 按钮。请先发 /pedido_web_test，把页面结构发我。' };
     }
-    await sleep(1200);
+    await sleep(2800);
 
     // Paso 2: rellenar el nombre del pedido.
     const filledName = await fillFieldNearLabel(page, /^nombre\b/i, draft.orderName);
@@ -118,6 +163,21 @@ export async function applyOrderWeb(draft, config, logger) {
 }
 
 // --- helpers ---------------------------------------------------------
+// Pulsa un botón de acción de XAF por su data-action-name (estable),
+// eligiendo el visible (ignora la copia __virtual del menú de overflow).
+async function clickActionByName(page, actionName) {
+  const handle = await page.evaluateHandle((name) => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const els = Array.from(document.querySelectorAll('[data-action-name="' + name + '"]'));
+    return els.find((el) => isVisible(el)) || els[0] || null;
+  }, actionName);
+  const el = handle.asElement();
+  if (!el) { await handle.dispose(); return false; }
+  await el.click();
+  await handle.dispose();
+  return true;
+}
+
 // Pulsa el primer elemento visible que coincida con el texto.
 async function clickByText(page, selectors, regexSource) {
   const handle = await page.evaluateHandle((sels, reSrc, reFlags) => {
