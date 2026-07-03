@@ -22,18 +22,26 @@ if not exist "config.local.json" (
   exit /b 1
 )
 
-rem La automatizacion web de Pedidos usa puppeteer-core (dependencia npm).
-rem Si node_modules no existe (primer arranque tras descomprimir), se
+rem La automatizacion web de Pedidos usa puppeteer-core, una dependencia
+rem npm. Si node_modules no existe -primer arranque tras descomprimir- se
 rem instala aqui una sola vez. Necesita conexion a internet.
-if not exist "node_modules" (
-  echo Installing dependencies for the first time (puppeteer-core)...
-  call npm install
-  if errorlevel 1 (
-    echo npm install failed. Check your internet connection and run start-bot.cmd again.
-    pause
-    exit /b 1
-  )
-)
+rem IMPORTANTE: sin parentesis en los echo dentro de bloques if, porque un
+rem ) suelto cierra el bloque y rompe el script.
+if not exist "node_modules" goto npm_install
+goto run
 
+:npm_install
+echo Instalando dependencias por primera vez. Necesita internet y tarda un poco...
+call npm install
+if errorlevel 1 goto npm_failed
+
+:run
 node src\bot.js --config config.local.json
 pause
+exit /b 0
+
+:npm_failed
+echo.
+echo npm install fallo. Revisa la conexion a internet y vuelve a abrir start-bot.cmd.
+pause
+exit /b 1
