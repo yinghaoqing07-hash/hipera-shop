@@ -171,12 +171,13 @@ export async function applyOrderWeb(draft, config, logger) {
       const qty = String(item.quantity ?? '').trim();
       if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
-      const started = await startNewItemRow(page);
+      const started = await startNewItemRow(page, autocompleteTimeoutMs);
       if (!started) {
         const shot = await screenshot(page, config, 'newrow');
+        const dom = await captureEditDom(page, config);
         return {
-          ok: false, stage: 'newrow', screenshot: shot,
-          error: `第 ${i + 1} 行：没找到表格的“新增行”(dxbl-grid-edit-new-item-row)。前面已填的不会保存。`,
+          ok: false, stage: 'newrow', screenshot: shot, domDump: dom,
+          error: `第 ${i + 1} 行：没找到表格的“新增行”/“编辑行”。前面已填的不会保存。（已把当时页面结构发给 Claude）`,
           results
         };
       }
@@ -291,24 +292,32 @@ async function fillNombre(page, name) {
   return true;
 }
 
-// Entra en edición en la fila de alta del grid de líneas. Hace clic en la
-// primera celda de datos editable (salta las celdas de comando/checkbox),
-// que es la del artículo (donde se escribe el Código Unide).
-async function startNewItemRow(page) {
-  const handle = await page.evaluateHandle(() => {
-    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const row = Array.from(document.querySelectorAll('.dxbl-grid-edit-new-item-row')).find(isVisible);
-    if (!row) return null;
-    const cells = Array.from(row.querySelectorAll('td[role="gridcell"], .dxbl-grid-cell'));
-    const target = cells.find((c) => !c.classList.contains('dxbl-grid-command-cell')
-      && !c.querySelector('input[type="checkbox"]')) || cells[0] || row;
-    return target;
-  });
-  const el = handle.asElement();
-  if (!el) { await handle.dispose(); return false; }
-  await el.click();
-  await handle.dispose();
-  return true;
+// Entra en edición en la fila de alta del grid de líneas. Sondea hasta
+// timeoutMs porque, tras confirmar una línea (Enter Enter), la nueva fila
+// tarda un poco en renderizarse en el servidor real. Acepta tanto la fila
+// de alta (dxbl-grid-edit-new-item-row) como una fila que ya esté en modo
+// edición (dxbl-grid-edit-row), y hace clic en su primera celda de datos
+// editable (la del artículo; salta comando/checkbox).
+async function startNewItemRow(page, timeoutMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const handle = await page.evaluateHandle(() => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const row = Array.from(document.querySelectorAll(
+        '.dxbl-grid-edit-new-item-row, .dxbl-grid-edit-row'
+      )).find(isVisible);
+      if (!row) return null;
+      const cells = Array.from(row.querySelectorAll('td[role="gridcell"], .dxbl-grid-cell'));
+      const target = cells.find((c) => !c.classList.contains('dxbl-grid-command-cell')
+        && !c.querySelector('input[type="checkbox"]')) || cells[0] || row;
+      return target;
+    });
+    const el = handle.asElement();
+    if (el) { await el.click(); await handle.dispose(); return true; }
+    await handle.dispose();
+    await sleep(200);
+  }
+  return false;
 }
 
 // Espera (sondeando) a que aparezca el desplegable de autocompletado.
