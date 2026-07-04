@@ -285,53 +285,48 @@ async function clickActionByName(page, actionName) {
 
 async function ensurePedidoPage(page, config) {
   let state = await getPedidoPageState(page);
-  if (state.isPedidoDetail || state.isPedidosList) return state;
+  if (state.isPedidosList) return state;
 
-  const nav = await navigateToPedidos(page, config, state);
-  if (nav.ok) return nav.state;
+  // Navegación DETERMINISTA: en vez de clicar el menú lateral (frágil en el
+  // treeview de XAF; a veces caía en Incidencias), se navega directamente a
+  // la URL de la lista de Pedidos con un page.goto (recarga dura). Eso ni
+  // siquiera dispara el guard de "cambios sin guardar" de la SPA de XAF; el
+  // único aviso posible es el beforeunload NATIVO, que auto-aceptamos.
+  // Cualquier formulario/borrador abierto se descarta (nunca guardamos), así
+  // que siempre partimos de una lista limpia.
+  const listUrl = pedidoListUrl(page, config);
+  const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+  const onDialog = (d) => { d.accept().catch(() => {}); };
+  page.on('dialog', onDialog);
+  try {
+    await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout });
+  } catch {
+    // Blazor puede reportar la navegación como fallida aunque cargue; se
+    // comprueba el estado real a continuación.
+  } finally {
+    page.off('dialog', onDialog);
+  }
 
-  const err = new Error(nav.error || '没有识别到 Pedidos 页面，也没能自动进入 Pedidos。');
+  state = await waitForPedidoPage(page, timeout);
+  if (state.isPedidosList || state.isPedidoDetail) return state;
+
+  const err = new Error(
+    `没能进入 Pedidos 列表页（已直接跳转到 ${listUrl}）。请确认自动化 Edge 已登录 UnideGes。当前：caption=${state.caption || '-'}, url=${state.url || '-'}`
+  );
   err.stage = 'pedidoPage';
   throw err;
 }
 
-async function navigateToPedidos(page, config, initialState) {
-  const state = initialState || await getPedidoPageState(page);
-
-  // Si estamos editando otra cosa, no se navega automáticamente: puede
-  // aparecer una confirmación de cambios sin guardar.
-  if (state.hasEditToolbar && !state.isPedidoDetail && !state.isPedidosList) {
-    return {
-      ok: false,
-      state,
-      error: `当前页面像是另一个编辑表单（${state.caption || state.title || '未知页面'}），为了避免丢失未保存内容，我不会自动跳转。请先保存/退出这个页面，再重试。`
-    };
+// URL de la lista de Pedidos. Se deriva del origen de la pestaña actual
+// (robusto ante cambios de dominio) y se puede fijar en config.webOrder.pedidoListUrl.
+function pedidoListUrl(page, config) {
+  const configured = config.webOrder?.pedidoListUrl;
+  if (configured) return configured;
+  try {
+    return new URL(page.url()).origin + '/OrderT_ListView';
+  } catch {
+    return 'https://unideges30.unide.es/OrderT_ListView';
   }
-
-  let clicked = await clickNavigationItem(page, 'Pedidos');
-  if (!clicked) {
-    // 如果左侧树折叠了，先展开 Gestión Tiendas，再找 Pedidos。
-    await clickNavigationItem(page, 'Gestión Tiendas');
-    await sleep(600);
-    clicked = await clickNavigationItem(page, 'Pedidos');
-  }
-
-  if (!clicked) {
-    return {
-      ok: false,
-      state,
-      error: '当前不在 Pedidos 页面，而且左侧菜单里没有找到 “Pedidos”。请确认自动化 Edge 已登录 UnideGes，并且左侧菜单可见。'
-    };
-  }
-
-  const ready = await waitForPedidoPage(page, Number(config.webOrder?.pageNavigationTimeoutMs) || 10000);
-  if (ready.isPedidoDetail || ready.isPedidosList) return { ok: true, state: ready };
-
-  return {
-    ok: false,
-    state: ready,
-    error: `已点击左侧 Pedidos，但没有识别到 Pedidos 页面。当前识别：caption=${ready.caption || '-'}, url=${ready.url || '-'}`
-  };
 }
 
 async function waitForPedidoPage(page, timeoutMs) {
@@ -347,37 +342,6 @@ async function waitForPedidoPage(page, timeoutMs) {
     await sleep(250);
   }
   return last;
-}
-
-async function clickNavigationItem(page, label) {
-  return page.evaluate((target) => {
-    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-    const isVisible = (el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-
-    // Ojo: no se debe buscar "span descendiente" desde el padre, porque un
-    // nodo padre como "Gestión Tiendas" contiene también los spans de sus
-    // hijos. Se parte del span exacto y se sube a SU enlace.
-    const labels = Array.from(document.querySelectorAll('.xaf-nav-link span'))
-      .filter((el) => isVisible(el) && clean(el.innerText) === target);
-
-    for (const labelEl of labels) {
-      const link = labelEl.closest('a[role="treeitem"], a, .dxbl-treeview-item-container, .xaf-nav-item');
-      if (!link || !isVisible(link)) continue;
-
-      const clickable = link.querySelector('.xaf-navigation-link-click-area')
-        || link.closest('a[role="treeitem"], a')
-        || link;
-      clickable.scrollIntoView({ block: 'center', inline: 'center' });
-      clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-      clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-      clickable.click();
-      return true;
-    }
-    return false;
-  }, label);
 }
 
 async function getPedidoPageState(page) {

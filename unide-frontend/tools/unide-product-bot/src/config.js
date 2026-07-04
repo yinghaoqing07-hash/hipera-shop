@@ -70,7 +70,10 @@ const defaultConfig = {
     formRenderMs: 2800,        // tras pulsar "Nuevo", esperar el DetailView
     autocompleteTimeoutMs: 5000, // espera MÁX a que aparezca el desplegable
     autocompleteMs: 900,       // espera tras aparecer, para que cargue todo
-    betweenLinesMs: 700        // entre línea y línea
+    betweenLinesMs: 700,       // entre línea y línea
+    // Navegación a la lista de Pedidos (page.goto directo, no clic en menú).
+    pageNavigationTimeoutMs: 20000, // espera MÁX a que cargue la lista
+    pedidoListUrl: ''          // vacío = derivar del origen + /OrderT_ListView
   }
 };
 
