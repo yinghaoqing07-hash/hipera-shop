@@ -181,6 +181,10 @@ export async function applyOrderWeb(draft, config, logger) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
       const qty = String(item.quantity ?? '').trim();
+      // Si el código corto se convirtió a EAN, en los mensajes de error se
+      // muestran ambos (original → EAN) para saber qué se buscó de verdad.
+      const original = String(item.originalCode || '').trim();
+      const codeLabel = original && original !== code ? `${original} → EAN ${code}` : code;
       if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
       const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
@@ -203,7 +207,7 @@ export async function applyOrderWeb(draft, config, logger) {
         const dom = await captureEditDom(page, config);
         return {
           ok: false, stage: 'autocomplete', screenshot: shot, domDump: dom,
-          error: `código ${code} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
+          error: `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
           results
         };
       }
@@ -222,7 +226,7 @@ export async function applyOrderWeb(draft, config, logger) {
           results.push({ code, qty, ok: false, reason: `${opts} 个匹配，无法自动判断` });
           return {
             ok: false, stage: 'ambiguous', screenshot: shot, domDump: dom,
-            error: `código ${code} 有 ${opts} 个匹配，且没有一行的 Código Unide 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
+            error: `código ${codeLabel} 有 ${opts} 个匹配，且没有一行的 Código Unide 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
             results
           };
         }
