@@ -294,22 +294,28 @@ const SHORT_CODE_MAX_LEN = 5;
 // No toca códigos largos (ya buscan bien), ni los que no estén en la tabla o
 // no tengan EAN. Con la tabla vacía es un no-op. Devuelve el draft
 // enriquecido y la lista de conversiones (para el mensaje de confirmación).
-export function enrichOrderItems(draft, storeIndex, options = {}) {
+export function enrichOrderItems(draft, storeIndex, supplierIndex = null, options = {}) {
   const maxLen = Number(options.maxLen) || SHORT_CODE_MAX_LEN;
-  const byCode = storeIndex?.byCode;
   const conversions = [];
   const items = (draft.items || []).map((item) => {
     const typed = String(item.code || '').trim();
     const out = { ...item };
-    if (!byCode || !/^\d+$/.test(typed)) return out;
-    const row = byCode.get(typed);
-    if (!row) return out;
+    if (!/^\d+$/.test(typed)) return out;
+    // Primero la tabla de la tienda; si el código no está ahí (p. ej. un
+    // producto que la tienda no tiene dado de alta), se recurre al catálogo
+    // completo del proveedor. Así más líneas obtienen nombre y EAN.
+    const storeRow = storeIndex?.byCode?.get(typed) || null;
+    const supRow = supplierIndex?.byCode?.get(typed) || null;
+    if (!storeRow && !supRow) return out;
     // El código tecleado ES el Código Unide (se buscó en byCode): sirve de
     // ancla para desambiguar en la web aunque luego busquemos por EAN/nombre.
     out.anchorCode = typed;
-    const nombre = String(row.articulo_tienda || row.articulo || '').trim();
+    const nombre = firstNonEmpty(
+      storeRow?.articulo_tienda, storeRow?.articulo,
+      supRow?.articulo_tienda, supRow?.articulo
+    );
     if (nombre) out.nombre = nombre;
-    const ean = String(row.ean || '').replace(/[^\d]/g, '');
+    const ean = normalizeEan(storeRow?.ean) || normalizeEan(supRow?.ean);
     if (ean && ean.length >= 8 && ean !== typed && typed.length <= maxLen) {
       out.code = ean;
       out.originalCode = typed;
@@ -319,6 +325,18 @@ export function enrichOrderItems(draft, storeIndex, options = {}) {
     return out;
   });
   return { draft: { ...draft, items }, conversions };
+}
+
+function firstNonEmpty(...values) {
+  for (const v of values) {
+    const s = String(v || '').trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+function normalizeEan(value) {
+  return String(value || '').replace(/[^\d]/g, '');
 }
 
 export function formatOrderDraft(draft) {
