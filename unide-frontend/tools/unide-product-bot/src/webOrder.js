@@ -149,9 +149,11 @@ export async function applyOrderWeb(draft, config, logger) {
     const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
     const betweenLinesMs = Number(w.betweenLinesMs) || 700;
 
-    // Paso 1: "Nuevo" (abre el DetailView del pedido).
-    if (!(await clickActionByName(page, 'Nuevo'))) {
-      return { ok: false, stage: 'nuevo', error: '没有找到 "Nuevo" 按钮。' };
+    // Paso 1: "Nuevo" (abre el DetailView del pedido). Si un intento
+    // anterior dejó un formulario abierto, volvemos a la lista y reintentamos.
+    const openedNewOrder = await openNewOrderForm(page);
+    if (!openedNewOrder.ok) {
+      return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
     await sleep(Number(w.formRenderMs) || 2800);
 
@@ -171,7 +173,9 @@ export async function applyOrderWeb(draft, config, logger) {
       const qty = String(item.quantity ?? '').trim();
       if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
-      const started = await startNewItemRow(page, autocompleteTimeoutMs);
+      const started = i === 0
+        ? await startNewItemRow(page, autocompleteTimeoutMs)
+        : await ensureArticleEditorReady(page, autocompleteTimeoutMs);
       if (!started) {
         const shot = await screenshot(page, config, 'newrow');
         const dom = await captureEditDom(page, config);
@@ -271,6 +275,34 @@ async function clickActionByName(page, actionName) {
   return true;
 }
 
+async function openNewOrderForm(page) {
+  if (await clickActionByName(page, 'Nuevo')) return { ok: true };
+
+  if (await isOrderFormOpen(page)) {
+    const wentBack = await clickActionByName(page, 'Volver');
+    if (wentBack) {
+      await sleep(1500);
+      if (await clickActionByName(page, 'Nuevo')) return { ok: true };
+    }
+
+    return {
+      ok: false,
+      error: '没有找到 "Nuevo" 按钮。页面看起来停在一个已打开的订单表单上，但自动返回列表失败；请在自动化 Edge 里点 Volver 回到 Pedidos 列表页，再点“确认填入”。'
+    };
+  }
+
+  return { ok: false, error: '没有找到 "Nuevo" 按钮。请确认自动化 Edge 里打开的是 Pedidos 列表页。' };
+}
+
+async function isOrderFormOpen(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const nameInput = Array.from(document.querySelectorAll('input[aria-required="true"][maxlength="150"], input.dxbl-text-edit-input[maxlength="150"]')).find(isVisible);
+    const lineGrid = Array.from(document.querySelectorAll('.dxbl-grid, [role="grid"]')).find(isVisible);
+    return Boolean(nameInput && lineGrid);
+  });
+}
+
 // Rellena el "Nombre del Pedido": input requerido de 150 chars. Se
 // escribe por teclado (no set .value) para que el binding de Blazor -que
 // es OnLostFocus- registre el cambio; el Tab final provoca el commit.
@@ -318,6 +350,42 @@ async function startNewItemRow(page, timeoutMs = 4000) {
     await sleep(200);
   }
   return false;
+}
+
+// Después de confirmar una línea con Enter Enter, UnideGes suele dejar el
+// foco ya dentro del artículo de la siguiente línea. En ese caso NO se debe
+// clicar otra vez: el clic extra puede romper el editor/autocompletado.
+// Solo si el foco no está en la primera celda editable se usa el clic como
+// recuperación.
+async function ensureArticleEditorReady(page, timeoutMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await isArticleEditorFocused(page)) return true;
+    await sleep(150);
+  }
+  return startNewItemRow(page, timeoutMs);
+}
+
+async function isArticleEditorFocused(page) {
+  return page.evaluate(() => {
+    const active = document.activeElement;
+    if (!active) return false;
+    const row = active.closest('.dxbl-grid-edit-new-item-row, .dxbl-grid-edit-row');
+    if (!row) return false;
+
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    if (!isVisible(row)) return false;
+
+    const cells = Array.from(row.querySelectorAll('td[role="gridcell"], .dxbl-grid-cell'));
+    const articleCell = cells.find((c) => !c.classList.contains('dxbl-grid-command-cell')
+      && !c.querySelector('input[type="checkbox"]'));
+    if (!articleCell || !articleCell.contains(active)) return false;
+
+    const editor = active.matches('input, textarea, [contenteditable="true"]')
+      ? active
+      : active.closest('input, textarea, [contenteditable="true"]');
+    return Boolean(editor);
+  });
 }
 
 // Espera (sondeando) a que aparezca el desplegable de autocompletado.
