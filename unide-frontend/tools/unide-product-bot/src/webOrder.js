@@ -99,7 +99,7 @@ export async function inspectFormPage(config, logger) {
     browser = opened.browser;
     const page = opened.page;
 
-    const openedNewOrder = await openNewOrderForm(page);
+    const openedNewOrder = await openNewOrderForm(page, Number(config.webOrder?.pageNavigationTimeoutMs) || 20000);
     if (!openedNewOrder.ok) {
       return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
@@ -161,7 +161,7 @@ export async function applyOrderWeb(draft, config, logger) {
     // Paso 1: "Nuevo" (abre el DetailView del pedido). Si ya estamos en
     // un formulario abierto, se continúa ahí. No se pulsa Volver: UnideGes
     // puede mostrar una confirmación por cambios sin guardar.
-    const openedNewOrder = await openNewOrderForm(page);
+    const openedNewOrder = await openNewOrderForm(page, Number(w.pageNavigationTimeoutMs) || 20000);
     if (!openedNewOrder.ok) {
       return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
@@ -270,17 +270,24 @@ export async function applyOrderWeb(draft, config, logger) {
 // --- helpers ---------------------------------------------------------
 // Pulsa un botón de acción de XAF por su data-action-name (estable),
 // eligiendo el visible (ignora la copia __virtual del menú de overflow).
-async function clickActionByName(page, actionName) {
-  const handle = await page.evaluateHandle((name) => {
-    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const els = Array.from(document.querySelectorAll('[data-action-name="' + name + '"]'));
-    return els.find((el) => isVisible(el)) || els[0] || null;
-  }, actionName);
-  const el = handle.asElement();
-  if (!el) { await handle.dispose(); return false; }
-  await el.click();
-  await handle.dispose();
-  return true;
+// Pulsa un botón de acción de XAF por su data-action-name. Si timeoutMs>0,
+// SONDEA hasta que el botón esté VISIBLE (tras un page.goto, la barra de
+// herramientas de Blazor tarda en renderizarse, así que "Nuevo" no existe
+// todavía cuando la URL ya es la de la lista).
+async function clickActionByName(page, actionName, timeoutMs = 0) {
+  const start = Date.now();
+  for (;;) {
+    const handle = await page.evaluateHandle((name) => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const els = Array.from(document.querySelectorAll('[data-action-name="' + name + '"]'));
+      return els.find((el) => isVisible(el)) || null;
+    }, actionName);
+    const el = handle.asElement();
+    if (el) { await el.click(); await handle.dispose(); return true; }
+    await handle.dispose();
+    if (Date.now() - start >= timeoutMs) return false;
+    await sleep(200);
+  }
 }
 
 async function ensurePedidoPage(page, config) {
@@ -402,7 +409,7 @@ async function getPedidoPageState(page) {
   });
 }
 
-async function openNewOrderForm(page) {
+async function openNewOrderForm(page, nuevoWaitMs = 15000) {
   const state = await getPedidoPageState(page);
 
   if (state.isPedidoDetail) {
@@ -416,11 +423,13 @@ async function openNewOrderForm(page) {
     };
   }
 
-  if (await clickActionByName(page, 'Nuevo')) return { ok: true, mode: 'clickedNuevo' };
+  // Sondear a que aparezca "Nuevo": tras el page.goto, la barra de XAF
+  // (Blazor) tarda en renderizar aunque la URL ya sea la de la lista.
+  if (await clickActionByName(page, 'Nuevo', nuevoWaitMs)) return { ok: true, mode: 'clickedNuevo' };
 
   if (await isOrderFormOpen(page)) return { ok: true, mode: 'existingForm' };
 
-  return { ok: false, error: '已经识别为 Pedidos 列表页，但没找到 "Nuevo" 按钮。请确认页面加载完成，或手动刷新后重试。' };
+  return { ok: false, error: '已经识别为 Pedidos 列表页，但等了很久也没出现 "Nuevo" 按钮。请确认页面加载完成，或手动刷新后重试。' };
 }
 
 async function isOrderFormOpen(page) {
