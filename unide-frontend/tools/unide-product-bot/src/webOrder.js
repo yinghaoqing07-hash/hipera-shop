@@ -204,26 +204,31 @@ export async function applyOrderWeb(draft, config, logger) {
       }
       await sleep(Number(w.nextLineReadyMs) || 120);
 
-      // Datos de ancla/respaldo que adjunta enrichOrderItems desde la tabla
-      // local: anchorCode = el Código Unide conocido (para elegir la fila
-      // exacta si el autocompletado saca varias); nombre = término de
-      // búsqueda de respaldo si el código/EAN no encuentra o queda ambiguo.
+      // anchorCode = el Código Unide conocido, para elegir la fila exacta si
+      // el autocompletado saca varias. La búsqueda se intenta en cadena hasta
+      // que una funciona:
+      //   1) término principal (EAN si se convirtió, o el código, o el nombre
+      //      de una línea por nombre);
+      //   2) el código corto ORIGINAL (p. ej. 3701) por si su EAN no está
+      //      indexado en la web —el código sí es un identificador válido—;
+      //   3) el nombre de la tabla local (limpio, sin el punto de truncado).
+      // Todos anclados en anchorCode: nunca confirman "el primer parecido".
       const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
+      const attempts = [{ term: searchTerm, requireAnchor: false }];
+      if (original && original !== searchTerm) attempts.push({ term: original, requireAnchor: false, via: 'code' });
+      if (nombre && nombre !== searchTerm) attempts.push({ term: nombre, requireAnchor: true, via: 'name' });
 
-      // Intento 1: buscar por el término principal (código/EAN, o el nombre
-      // si la línea era por nombre sin código).
-      let sel = await searchAndSelect(page, searchTerm, anchorCode, autocompleteTimeoutMs, autocompleteMs, false);
-
-      // Intento 2 (respaldo por NOMBRE): si el código/EAN no encontró o
-      // quedó ambiguo y tenemos el nombre en la tabla local, se reescribe el
-      // nombre y se elige la fila cuyo Código Unide == anchorCode. Al anclar
-      // en el código conocido, nunca confirma "el primer nombre parecido".
-      if (sel.status !== 'ok' && nombre && nombre !== searchTerm) {
-        await clearArticleEditor(page);
-        const byName = await searchAndSelect(page, nombre, anchorCode, autocompleteTimeoutMs, autocompleteMs, true);
-        if (byName.status === 'ok') { sel = { ...byName, viaName: true }; }
-        else { sel = { ...sel, nameTried: true }; }
+      let sel = { status: 'nomatch' };
+      let triedName = false;
+      for (let t = 0; t < attempts.length; t += 1) {
+        if (t > 0) await clearArticleEditor(page);
+        const at = attempts[t];
+        if (at.via === 'name') triedName = true;
+        const r = await searchAndSelect(page, at.term, anchorCode, autocompleteTimeoutMs, autocompleteMs, at.requireAnchor);
+        if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
+        sel = r;
       }
+      if (sel.status !== 'ok' && triedName) sel.nameTried = true;
 
       if (sel.status !== 'ok') {
         const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';

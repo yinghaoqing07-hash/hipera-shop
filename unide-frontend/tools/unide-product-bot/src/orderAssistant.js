@@ -77,7 +77,7 @@ export function resolveNameItem(item, chosen) {
   const ean = String(chosen?.ean || '').replace(/[^\d]/g, '');
   const code = String(chosen?.code || '').replace(/[^\d]/g, '');
   const search = ean || code;
-  const out = { ...item, resolved: true, nombre: String(chosen?.name || chosen?.text || '').trim() };
+  const out = { ...item, resolved: true, nombre: cleanName(chosen?.name || chosen?.text) };
   if (search) { out.code = search; out.anchorCode = code || search; }
   return out;
 }
@@ -347,10 +347,10 @@ export function enrichOrderItems(draft, storeIndex, supplierIndex = null, option
     // El código tecleado ES el Código Unide (se buscó en byCode): sirve de
     // ancla para desambiguar en la web aunque luego busquemos por EAN/nombre.
     out.anchorCode = typed;
-    const nombre = firstNonEmpty(
+    const nombre = cleanName(firstNonEmpty(
       storeRow?.articulo_tienda, storeRow?.articulo,
       supRow?.articulo_tienda, supRow?.articulo
-    );
+    ));
     if (nombre) out.nombre = nombre;
     const ean = normalizeEan(storeRow?.ean) || normalizeEan(supRow?.ean);
     if (ean && ean.length >= 8 && ean !== typed && typed.length <= maxLen) {
@@ -370,6 +370,13 @@ function firstNonEmpty(...values) {
     if (s) return s;
   }
   return '';
+}
+
+// Los nombres de la tabla local vienen truncados con un punto/espacio final
+// (p. ej. "ENSALADA FLORETTE ."). Ese sufijo ensucia la confirmación y, sobre
+// todo, hace fallar la búsqueda por nombre en la web (devuelve "sin datos").
+function cleanName(value) {
+  return String(value || '').replace(/\s+/g, ' ').replace(/[\s.·,;:|]+$/, '').trim();
 }
 
 function normalizeEan(value) {
