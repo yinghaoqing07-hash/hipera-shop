@@ -291,21 +291,22 @@ async function clickActionByName(page, actionName, timeoutMs = 0) {
 }
 
 async function ensurePedidoPage(page, config) {
-  let state = await getPedidoPageState(page);
-  if (state.isPedidosList) return state;
-
-  // Navegación DETERMINISTA: en vez de clicar el menú lateral (frágil en el
-  // treeview de XAF; a veces caía en Incidencias), se navega directamente a
-  // la URL de la lista de Pedidos con un page.goto (recarga dura). Eso ni
-  // siquiera dispara el guard de "cambios sin guardar" de la SPA de XAF; el
-  // único aviso posible es el beforeunload NATIVO, que auto-aceptamos.
-  // Cualquier formulario/borrador abierto se descarta (nunca guardamos), así
-  // que siempre partimos de una lista limpia.
+  // Navegación DETERMINISTA por URL (page.goto), SIEMPRE — incluso si ya
+  // parece que estamos en Pedidos. Así cada ejecución empieza en un estado
+  // fresco y consistente (la barra con "Nuevo" se vuelve a renderizar),
+  // sin depender de restos de un formulario anterior ni de un DOM "ya
+  // cargado" que a veces no tenía el botón clicable. Antes había un atajo
+  // ("si ya es la lista, no navego") que hacía fallar el caso de estar ya
+  // en Pedidos. Como nunca guardamos, cualquier borrador abierto se
+  // descarta sin problema.
   const listUrl = pedidoListUrl(page, config);
   const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
   const onDialog = (d) => { d.accept().catch(() => {}); };
   page.on('dialog', onDialog);
   try {
+    // Quitar el aviso de "cambios sin guardar" para que el goto no se quede
+    // esperando un diálogo del navegador.
+    try { await page.evaluate(() => { window.onbeforeunload = null; }); } catch { /* noop */ }
     await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout });
   } catch {
     // Blazor puede reportar la navegación como fallida aunque cargue; se
@@ -314,7 +315,7 @@ async function ensurePedidoPage(page, config) {
     page.off('dialog', onDialog);
   }
 
-  state = await waitForPedidoPage(page, timeout);
+  const state = await waitForPedidoPage(page, timeout);
   if (state.isPedidosList || state.isPedidoDetail) return state;
 
   const err = new Error(
