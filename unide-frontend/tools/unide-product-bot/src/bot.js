@@ -172,7 +172,7 @@ async function resolveNextNameLine(chatId, id) {
   if (res.screenshot) {
     try { await telegram.sendPhoto(chatId, res.screenshot, `第 ${idx + 1} 行「${item.name}」的网页搜索结果`); } catch { /* noop */ }
   }
-  const list = res.options.map((o, i) => `[${i + 1}] ${o.text}`).join('\n');
+  const list = res.options.map((o, i) => `[${i + 1}] ${o.name || o.text}`).join('\n');
   const body = `第 ${idx + 1} 行「${item.name}」找到 ${res.options.length} 个（数量 ${item.quantity}），点一个：\n${list}`;
   await telegram.sendMessage(chatId, body, makeNamePickButtons(id, idx, res.options.length));
 }
@@ -189,8 +189,8 @@ async function handleNamePick(chatId, callbackId, payload) {
   session.orderDraft.items[idx] = resolveNameItem(session.orderDraft.items[idx], chosen);
   if (session.nameOptions) delete session.nameOptions[idx];
   sessions.set(id, session);
-  const codeNote = chosen.code ? `código ${chosen.code}` : '（这个选项没读到 código，填入时会按名字搜）';
-  await telegram.sendMessage(chatId, `第 ${idx + 1} 行 → ${chosen.text}  ${codeNote}`);
+  const idNote = chosen.ean ? `EAN ${chosen.ean}` : (chosen.code ? `código ${chosen.code}` : '按名字填入');
+  await telegram.sendMessage(chatId, `第 ${idx + 1} 行 → ${chosen.name || chosen.text}（${idNote}）`);
   await resolveNextNameLine(chatId, id);
 }
 
