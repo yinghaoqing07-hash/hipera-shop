@@ -4,8 +4,9 @@
 // Dos funciones:
 //   1) inspectOrderPage()  → herramienta de diagnóstico. Se conecta,
 //      localiza la pestaña de Pedidos y vuelca el HTML de la página a un
-//      fichero para poder escribir/afinar los selectores. Es de SOLO
-//      LECTURA: no pulsa nada.
+//      fichero para poder escribir/afinar los selectores. No rellena ni
+//      guarda nada; como mucho navega a Pedidos si UnideGes está en otra
+//      lista segura.
 //   2) applyOrderWeb(draft) → rellena un pedido nuevo conduciendo el DOM.
 //      Reglas de seguridad (idénticas a la versión de escritorio):
 //        - NUNCA pulsa Guardar / Enviar Pedido.
@@ -18,17 +19,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
 
-// Sube (o localiza) la pestaña de Pedidos y la trae al frente.
+// Sube (o localiza) la pestaña de UnideGes, la trae al frente y se asegura
+// de que estamos en Pedidos. Esto evita pulsar por error un "Nuevo" de otra
+// sección que tenga botones parecidos.
 async function openOrderPage(config) {
   const browser = await connectBrowser(config);
   const page = await findOrderPage(browser, config);
   if (!page) {
     try { browser.disconnect(); } catch { /* noop */ }
-    const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认那个 Edge 窗口里打开了 Pedidos 页面（网址含 unideges）。');
+    const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认那个 Edge 窗口里打开了 UnideGes（网址含 unideges）。');
     err.stage = 'findPage';
     throw err;
   }
   try { await page.bringToFront(); } catch { /* noop */ }
+  try {
+    await ensurePedidoPage(page, config);
+  } catch (error) {
+    try { browser.disconnect(); } catch { /* noop */ }
+    throw error;
+  }
   return { browser, page };
 }
 
@@ -90,9 +99,9 @@ export async function inspectFormPage(config, logger) {
     browser = opened.browser;
     const page = opened.page;
 
-    const clicked = await clickActionByName(page, 'Nuevo');
-    if (!clicked) {
-      return { ok: false, stage: 'nuevo', error: '没找到 data-action-name="Nuevo" 的按钮。请确认页面是订单列表页。' };
+    const openedNewOrder = await openNewOrderForm(page);
+    if (!openedNewOrder.ok) {
+      return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
     await sleep(2800); // esperar a que Blazor renderice el DetailView
 
@@ -274,23 +283,182 @@ async function clickActionByName(page, actionName) {
   return true;
 }
 
-async function openNewOrderForm(page) {
-  if (await clickActionByName(page, 'Nuevo')) return { ok: true, mode: 'clickedNuevo' };
+async function ensurePedidoPage(page, config) {
+  let state = await getPedidoPageState(page);
+  if (state.isPedidoDetail || state.isPedidosList) return state;
 
-  if (await isOrderFormOpen(page)) {
+  const nav = await navigateToPedidos(page, config, state);
+  if (nav.ok) return nav.state;
+
+  const err = new Error(nav.error || '没有识别到 Pedidos 页面，也没能自动进入 Pedidos。');
+  err.stage = 'pedidoPage';
+  throw err;
+}
+
+async function navigateToPedidos(page, config, initialState) {
+  const state = initialState || await getPedidoPageState(page);
+
+  // Si estamos editando otra cosa, no se navega automáticamente: puede
+  // aparecer una confirmación de cambios sin guardar.
+  if (state.hasEditToolbar && !state.isPedidoDetail && !state.isPedidosList) {
+    return {
+      ok: false,
+      state,
+      error: `当前页面像是另一个编辑表单（${state.caption || state.title || '未知页面'}），为了避免丢失未保存内容，我不会自动跳转。请先保存/退出这个页面，再重试。`
+    };
+  }
+
+  let clicked = await clickNavigationItem(page, 'Pedidos');
+  if (!clicked) {
+    // 如果左侧树折叠了，先展开 Gestión Tiendas，再找 Pedidos。
+    await clickNavigationItem(page, 'Gestión Tiendas');
+    await sleep(600);
+    clicked = await clickNavigationItem(page, 'Pedidos');
+  }
+
+  if (!clicked) {
+    return {
+      ok: false,
+      state,
+      error: '当前不在 Pedidos 页面，而且左侧菜单里没有找到 “Pedidos”。请确认自动化 Edge 已登录 UnideGes，并且左侧菜单可见。'
+    };
+  }
+
+  const ready = await waitForPedidoPage(page, Number(config.webOrder?.pageNavigationTimeoutMs) || 10000);
+  if (ready.isPedidoDetail || ready.isPedidosList) return { ok: true, state: ready };
+
+  return {
+    ok: false,
+    state: ready,
+    error: `已点击左侧 Pedidos，但没有识别到 Pedidos 页面。当前识别：caption=${ready.caption || '-'}, url=${ready.url || '-'}`
+  };
+}
+
+async function waitForPedidoPage(page, timeoutMs) {
+  const start = Date.now();
+  let last = {};
+  while (Date.now() - start < timeoutMs) {
+    try {
+      last = await getPedidoPageState(page);
+      if (last.isPedidoDetail || last.isPedidosList) return last;
+    } catch {
+      // Durante la navegación XAF puede destruir el contexto JS; se reintenta.
+    }
+    await sleep(250);
+  }
+  return last;
+}
+
+async function clickNavigationItem(page, label) {
+  return page.evaluate((target) => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+
+    const navItems = Array.from(document.querySelectorAll(
+      '.xaf-nav-item, a[role="treeitem"], .dxbl-treeview-item-container'
+    )).filter(isVisible);
+
+    for (const item of navItems) {
+      const labels = Array.from(item.querySelectorAll('.xaf-nav-link span, span')).filter(isVisible);
+      if (!labels.some((el) => clean(el.innerText) === target)) continue;
+
+      const clickable = item.querySelector('a[role="treeitem"], a, .xaf-navigation-link-click-area')
+        || item;
+      clickable.scrollIntoView({ block: 'center', inline: 'center' });
+      clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      clickable.click();
+      return true;
+    }
+    return false;
+  }, label);
+}
+
+async function getPedidoPageState(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const visible = (sel) => Array.from(document.querySelectorAll(sel)).filter(isVisible);
+    const hasAction = (name) => visible(`[data-action-name="${name}"]`).length > 0;
+
+    const caption = clean(visible('.xaf-view-caption-sm')[0]?.innerText);
+    const title = document.title || '';
+    const url = location.href || '';
+
+    const activeNav = (() => {
+      const active = visible('.xaf-nav-item.dxbl-active, a.dxbl-active, a[aria-current="true"]')[0];
+      if (!active) return '';
+      const label = Array.from(active.querySelectorAll('.xaf-nav-link span, span')).find(isVisible);
+      return clean(label?.innerText);
+    })();
+
+    const itemNames = Array.from(document.querySelectorAll('[data-item-name]'))
+      .map((el) => clean(el.getAttribute('data-item-name')));
+    const frameNames = Array.from(document.querySelectorAll('[data-frame-name]'))
+      .map((el) => clean(el.getAttribute('data-frame-name')));
+    const bodyText = clean(document.body?.innerText || '');
+
+    const hasPedidoNameField = itemNames.includes('Nombre del Pedido')
+      || /Nombre del Pedido:\*/i.test(bodyText);
+    const hasPedidoLinesGrid = itemNames.includes('Líneas del Pedido')
+      || frameNames.includes('Líneas del Pedido')
+      || /Líneas del Pedido/i.test(bodyText);
+    const hasPedidoListColumns = /Nombre del Pedido/i.test(bodyText)
+      && /Estado de Pedido/i.test(bodyText)
+      && /Fecha de Creaci/i.test(bodyText);
+
+    const isPedidoDetail = /^Pedido$/i.test(caption)
+      || /^Pedido\s+-/i.test(title)
+      || (hasPedidoNameField && hasPedidoLinesGrid && hasAction('Guardar'));
+    const isPedidosList = /^Pedidos$/i.test(caption)
+      || /OrderT_ListView|Pedidos?_ListView|Pedido.*ListView/i.test(url)
+      || (activeNav === 'Pedidos' && hasAction('Nuevo') && hasPedidoListColumns && !isPedidoDetail);
+
+    return {
+      title,
+      url,
+      caption,
+      activeNav,
+      hasNuevo: hasAction('Nuevo'),
+      hasGuardar: hasAction('Guardar'),
+      hasVolver: hasAction('Volver'),
+      hasEditToolbar: hasAction('Guardar') || hasAction('Guardar y Nuevo') || hasAction('Volver'),
+      isPedidoDetail,
+      isPedidosList
+    };
+  });
+}
+
+async function openNewOrderForm(page) {
+  const state = await getPedidoPageState(page);
+
+  if (state.isPedidoDetail) {
     return { ok: true, mode: 'existingForm' };
   }
 
-  return { ok: false, error: '没有找到 "Nuevo" 按钮，也没有识别到已经打开的订单表单。请确认自动化 Edge 里打开的是 Pedidos 列表页或 Pedido 新建/编辑页。' };
+  if (!state.isPedidosList) {
+    return {
+      ok: false,
+      error: `当前没有识别为 Pedidos 列表页，所以不会点 Nuevo，避免点到其他页面的 Nuevo。当前识别：caption=${state.caption || '-'}, nav=${state.activeNav || '-'}, url=${state.url || '-'}`
+    };
+  }
+
+  if (await clickActionByName(page, 'Nuevo')) return { ok: true, mode: 'clickedNuevo' };
+
+  if (await isOrderFormOpen(page)) return { ok: true, mode: 'existingForm' };
+
+  return { ok: false, error: '已经识别为 Pedidos 列表页，但没找到 "Nuevo" 按钮。请确认页面加载完成，或手动刷新后重试。' };
 }
 
 async function isOrderFormOpen(page) {
-  return page.evaluate(() => {
-    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const nameInput = Array.from(document.querySelectorAll('input[aria-required="true"][maxlength="150"], input.dxbl-text-edit-input[maxlength="150"]')).find(isVisible);
-    const lineGrid = Array.from(document.querySelectorAll('.dxbl-grid, [role="grid"]')).find(isVisible);
-    return Boolean(nameInput && lineGrid);
-  });
+  const state = await getPedidoPageState(page);
+  return state.isPedidoDetail;
 }
 
 // Rellena el "Nombre del Pedido": input requerido de 150 chars. Se
