@@ -71,12 +71,14 @@ export function isPendingNameItem(item) {
 }
 
 // Aplica la opción elegida (del desplegable de la web) a la línea por nombre:
-// queda resuelta y, si la opción trae Código Unide, pasa a rellenarse por ese
-// código exacto (con el propio código como ancla de desambiguación).
+// queda resuelta y pasa a rellenarse por el EAN (identificador único) si lo
+// hay, o por el Código Unide; el Código Unide queda como ancla de respaldo.
 export function resolveNameItem(item, chosen) {
+  const ean = String(chosen?.ean || '').replace(/[^\d]/g, '');
   const code = String(chosen?.code || '').replace(/[^\d]/g, '');
-  const out = { ...item, resolved: true, nombre: String(chosen?.text || '').trim() };
-  if (code) { out.code = code; out.anchorCode = code; }
+  const search = ean || code;
+  const out = { ...item, resolved: true, nombre: String(chosen?.name || chosen?.text || '').trim() };
+  if (search) { out.code = search; out.anchorCode = code || search; }
   return out;
 }
 

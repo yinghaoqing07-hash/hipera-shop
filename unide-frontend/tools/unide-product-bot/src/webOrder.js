@@ -323,8 +323,13 @@ export async function searchArticleOptions(config, name, logger) {
   }
 }
 
-// Lee las opciones VISIBLES del desplegable abierto. Deduplica por texto y,
-// de cada opción, extrae el primer bloque de 4+ dígitos como Código Unide.
+// Lee las opciones VISIBLES del desplegable abierto y las DESGLOSA para que
+// la lista que ve el usuario sea legible:
+//   name → el nombre del producto (lo que va antes del primer número largo).
+//   ean  → el primer EAN (12-14 díg): identificador ÚNICO para rellenar.
+//   code → el Código Unide (se prefiere el de 6 díg): ancla de respaldo.
+// El texto crudo trae muchos números (referencia interna, Código Unide y
+// varios EAN) que no hace falta mostrar.
 async function captureDropdownOptions(page, max) {
   return page.evaluate((limit) => {
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
@@ -337,8 +342,14 @@ async function captureDropdownOptions(page, max) {
       const text = (o.innerText || '').replace(/\s+/g, ' ').trim();
       if (!text || seen.has(text)) continue;
       seen.add(text);
-      const m = text.match(/\b(\d{4,})\b/);
-      out.push({ code: m ? m[1] : '', text });
+      // Nombre = lo que va antes del primer bloque de 4+ dígitos (código/EAN).
+      const firstNum = text.search(/\d{4,}/);
+      const name = (firstNum > 0 ? text.slice(0, firstNum) : text).replace(/[;·|,\s]+$/, '').trim();
+      const nums = text.match(/\d{4,}/g) || [];
+      const eans = nums.filter((n) => n.length >= 12 && n.length <= 14);
+      const codes = nums.filter((n) => n.length >= 5 && n.length <= 8);
+      const code = codes.find((n) => n.length === 6) || codes[0] || '';
+      out.push({ name: name || text, code, ean: eans[0] || '', text });
       if (out.length >= limit) break;
     }
     return out;
