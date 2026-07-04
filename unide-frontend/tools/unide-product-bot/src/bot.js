@@ -118,7 +118,7 @@ async function handleOrderDraft(chatId, text) {
   // Enriquecer con la tabla local: nombre (para mostrar y como búsqueda de
   // respaldo), Código Unide de ancla, y EAN para códigos cortos (búsqueda
   // exacta). Todo se muestra en la confirmación (no es una caja negra).
-  const { draft } = enrichOrderItems(parsed.draft, storeIndex);
+  const { draft } = enrichOrderItems(parsed.draft, storeIndex, supplierIndex);
   const id = saveSession({ orderDraft: draft });
   await telegram.sendMessage(chatId, formatOrderDraft(draft), makeOrderDraftButtons(id));
 }
