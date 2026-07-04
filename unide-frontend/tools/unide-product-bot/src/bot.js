@@ -5,7 +5,7 @@ import { createLogger } from './logger.js';
 import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions } from './webOrder.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
@@ -16,10 +16,12 @@ import {
   formatOrderResponse,
   isOrderCommand,
   isOrderDraftCommand,
+  isPendingNameItem,
   makeOrderButtons,
   makeOrderDraftButtons,
   parseOrderDraftMessage,
-  parseOrderMode
+  parseOrderMode,
+  resolveNameItem
 } from './orderAssistant.js';
 
 const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
@@ -100,6 +102,7 @@ async function handleCallback(callback) {
   if (!isAllowed(chatId, userId)) { await telegram.answerCallbackQuery(callback.id, '没有权限'); logger.warn('blocked unauthorized callback', { chatId, userId, data }); return; }
   if (data.startsWith('repeat:')) { const id = data.slice(7); const session = sessions.get(id); await telegram.answerCallbackQuery(callback.id, '重新查询'); await sendProductResult(chatId, session?.item || makeRepeatItem(id), 0, 1); return; }
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
+  if (data.startsWith('np:')) { await handleNamePick(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
@@ -120,7 +123,75 @@ async function handleOrderDraft(chatId, text) {
   // exacta). Todo se muestra en la confirmación (no es una caja negra).
   const { draft } = enrichOrderItems(parsed.draft, storeIndex, supplierIndex);
   const id = saveSession({ orderDraft: draft });
+
+  // Si hay líneas por NOMBRE (no sabes el código), primero se resuelven una a
+  // una: el bot busca el nombre en la web y te manda TODAS las opciones para
+  // que elijas tú (no adivina). Cuando están todas elegidas, sale la
+  // confirmación final con el botón de填入.
+  if (draft.items.some(isPendingNameItem)) {
+    await telegram.sendMessage(chatId, `${formatOrderDraft(draft)}\n\n有按名字的行，先帮你在网页搜、你来选。`);
+    await resolveNextNameLine(chatId, id);
+    return;
+  }
   await telegram.sendMessage(chatId, formatOrderDraft(draft), makeOrderDraftButtons(id));
+}
+
+// Resuelve la SIGUIENTE línea por nombre pendiente: busca en la web y manda
+// las opciones para elegir. Si ya no queda ninguna, muestra la confirmación
+// final con el botón de llenado.
+async function resolveNextNameLine(chatId, id) {
+  const session = sessions.get(id);
+  if (!session?.orderDraft) return;
+  const idx = session.orderDraft.items.findIndex(isPendingNameItem);
+  if (idx === -1) {
+    await telegram.sendMessage(chatId, `都选好了：\n${formatOrderDraft(session.orderDraft)}`, makeOrderDraftButtons(id));
+    return;
+  }
+  const item = session.orderDraft.items[idx];
+  if (!config.webOrder?.enabled) {
+    await telegram.sendMessage(chatId, `第 ${idx + 1} 行是商品名「${item.name}」，但网页自动化没启用，没法按名字搜。请改用 código 重发整单。`);
+    return;
+  }
+  await telegram.sendMessage(chatId, `正在网页搜第 ${idx + 1} 行「${item.name}」…`);
+  const res = await searchArticleOptions(config, item.name, logger);
+  if (!res.ok) {
+    await telegram.sendMessage(chatId, `搜「${item.name}」失败（${res.stage || '?'}）：\n${res.error}`);
+    return;
+  }
+  if (!res.options.length) {
+    const msg = `网页没搜到「${item.name}」。换个关键词，重发整单 /pedido_nuevo。`;
+    if (res.screenshot) { try { await telegram.sendPhoto(chatId, res.screenshot, msg); } catch { await telegram.sendMessage(chatId, msg); } }
+    else await telegram.sendMessage(chatId, msg);
+    return;
+  }
+  session.nameOptions = session.nameOptions || {};
+  session.nameOptions[idx] = res.options;
+  sessions.set(id, session);
+  // La captura va aparte (el pie de foto se corta a ~1000 chars); la lista y
+  // los botones van en un mensaje normal (hasta 4096).
+  if (res.screenshot) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, `第 ${idx + 1} 行「${item.name}」的网页搜索结果`); } catch { /* noop */ }
+  }
+  const list = res.options.map((o, i) => `[${i + 1}] ${o.text}`).join('\n');
+  const body = `第 ${idx + 1} 行「${item.name}」找到 ${res.options.length} 个（数量 ${item.quantity}），点一个：\n${list}`;
+  await telegram.sendMessage(chatId, body, makeNamePickButtons(id, idx, res.options.length));
+}
+
+async function handleNamePick(chatId, callbackId, payload) {
+  const [id, idxStr, optStr] = payload.split(':');
+  const session = sessions.get(id);
+  if (!session?.orderDraft) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); return; }
+  const idx = Number(idxStr);
+  const opt = Number(optStr);
+  const chosen = session.nameOptions?.[idx]?.[opt];
+  if (!chosen) { await telegram.answerCallbackQuery(callbackId, '选项已失效'); return; }
+  await telegram.answerCallbackQuery(callbackId, `已选 [${opt + 1}]`);
+  session.orderDraft.items[idx] = resolveNameItem(session.orderDraft.items[idx], chosen);
+  if (session.nameOptions) delete session.nameOptions[idx];
+  sessions.set(id, session);
+  const codeNote = chosen.code ? `código ${chosen.code}` : '（这个选项没读到 código，填入时会按名字搜）';
+  await telegram.sendMessage(chatId, `第 ${idx + 1} 行 → ${chosen.text}  ${codeNote}`);
+  await resolveNextNameLine(chatId, id);
 }
 
 async function handleOrderApply(chatId, callbackId, id) {
@@ -384,6 +455,19 @@ function saveSession(session) {
 
 function makeRepeatItem(query) { return { raw: query, codigo: query, ean: '', nombre: '', precio: { mode: 'auto', raw: 'auto' }, margen: { mode: 'missing', raw: '' }, desbloquear: true, etiqueta: false, nota: 'button repeat' }; }
 function makeResultButtons(id) { return { inline_keyboard: [[{ text: '再查一次', callback_data: `repeat:${id}` }], [{ text: '确认处理', callback_data: `process:${id}` }, { text: '标签', callback_data: `todo:label:${id}` }]] }; }
+// Botones para elegir una opción de la búsqueda por nombre: [1][2]… (5 por
+// fila) + Cancelar. callback_data = np:<sesión>:<línea>:<opción>.
+function makeNamePickButtons(id, idx, n) {
+  const rows = [];
+  let row = [];
+  for (let i = 0; i < n; i += 1) {
+    row.push({ text: `${i + 1}`, callback_data: `np:${id}:${idx}:${i}` });
+    if (row.length === 5) { rows.push(row); row = []; }
+  }
+  if (row.length) rows.push(row);
+  rows.push([{ text: '取消', callback_data: `cancel:${id}` }]);
+  return { reply_markup: { inline_keyboard: rows } };
+}
 function futureActionLabel(action) { if (action.startsWith('label')) return '生成 etiqueta'; return '这个功能'; }
 function getCostInfo(session, pcMedio, pcUltimo) {
   const warnings = [];

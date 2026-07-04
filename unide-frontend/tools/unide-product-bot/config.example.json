@@ -166,6 +166,7 @@
     "autocompleteMs": 900,
     "betweenLinesMs": 700,
     "pageNavigationTimeoutMs": 20000,
-    "pedidoListUrl": ""
+    "pedidoListUrl": "",
+    "maxSearchOptions": 20
   }
 }
