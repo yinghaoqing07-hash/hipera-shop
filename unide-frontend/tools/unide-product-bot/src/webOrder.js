@@ -99,7 +99,7 @@ export async function inspectFormPage(config, logger) {
     browser = opened.browser;
     const page = opened.page;
 
-    const openedNewOrder = await openNewOrderForm(page);
+    const openedNewOrder = await openNewOrderForm(page, Number(config.webOrder?.pageNavigationTimeoutMs) || 20000);
     if (!openedNewOrder.ok) {
       return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
@@ -161,7 +161,7 @@ export async function applyOrderWeb(draft, config, logger) {
     // Paso 1: "Nuevo" (abre el DetailView del pedido). Si ya estamos en
     // un formulario abierto, se continúa ahí. No se pulsa Volver: UnideGes
     // puede mostrar una confirmación por cambios sin guardar.
-    const openedNewOrder = await openNewOrderForm(page);
+    const openedNewOrder = await openNewOrderForm(page, Number(w.pageNavigationTimeoutMs) || 20000);
     if (!openedNewOrder.ok) {
       return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
@@ -180,8 +180,11 @@ export async function applyOrderWeb(draft, config, logger) {
     for (let i = 0; i < draft.items.length; i++) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
+      const codeLabel = item.originalCode && String(item.originalCode) !== code
+        ? `${item.originalCode}->${code}`
+        : code;
       const qty = String(item.quantity ?? '').trim();
-      if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
+      if (!code) { results.push({ code: codeLabel, qty, ok: false, reason: 'sin código' }); continue; }
 
       const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
       if (!prepared) {
@@ -203,7 +206,7 @@ export async function applyOrderWeb(draft, config, logger) {
         const dom = await captureEditDom(page, config);
         return {
           ok: false, stage: 'autocomplete', screenshot: shot, domDump: dom,
-          error: `código ${code} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
+          error: `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
           results
         };
       }
@@ -219,10 +222,10 @@ export async function applyOrderWeb(draft, config, logger) {
         if (!picked) {
           const shot = await screenshot(page, config, `code-${code}-multi`);
           const dom = await captureEditDom(page, config);
-          results.push({ code, qty, ok: false, reason: `${opts} 个匹配，无法自动判断` });
+          results.push({ code: codeLabel, qty, ok: false, reason: `${opts} 个匹配，无法自动判断` });
           return {
             ok: false, stage: 'ambiguous', screenshot: shot, domDump: dom,
-            error: `código ${code} 有 ${opts} 个匹配，且没有一行的 Código Unide 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
+            error: `código ${codeLabel} 有 ${opts} 个匹配，且没有一行的 Código/EAN 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
             results
           };
         }
@@ -246,7 +249,7 @@ export async function applyOrderWeb(draft, config, logger) {
       await sleep(150);
       await page.keyboard.press('Enter');
       await sleep(betweenLinesMs);
-      results.push({ code, qty, ok: true });
+      results.push({ code: codeLabel, qty, ok: true });
     }
 
     const shot = await screenshot(page, config, 'done');
@@ -270,68 +273,71 @@ export async function applyOrderWeb(draft, config, logger) {
 // --- helpers ---------------------------------------------------------
 // Pulsa un botón de acción de XAF por su data-action-name (estable),
 // eligiendo el visible (ignora la copia __virtual del menú de overflow).
-async function clickActionByName(page, actionName) {
-  const handle = await page.evaluateHandle((name) => {
-    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const els = Array.from(document.querySelectorAll('[data-action-name="' + name + '"]'));
-    return els.find((el) => isVisible(el)) || els[0] || null;
-  }, actionName);
-  const el = handle.asElement();
-  if (!el) { await handle.dispose(); return false; }
-  await el.click();
-  await handle.dispose();
-  return true;
+// Pulsa un botón de acción de XAF por su data-action-name. Si timeoutMs>0,
+// SONDEA hasta que el botón esté VISIBLE (tras un page.goto, la barra de
+// herramientas de Blazor tarda en renderizarse, así que "Nuevo" no existe
+// todavía cuando la URL ya es la de la lista).
+async function clickActionByName(page, actionName, timeoutMs = 0) {
+  const start = Date.now();
+  for (;;) {
+    const handle = await page.evaluateHandle((name) => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const els = Array.from(document.querySelectorAll('[data-action-name="' + name + '"]'));
+      return els.find((el) => isVisible(el)) || null;
+    }, actionName);
+    const el = handle.asElement();
+    if (el) { await el.click(); await handle.dispose(); return true; }
+    await handle.dispose();
+    if (Date.now() - start >= timeoutMs) return false;
+    await sleep(200);
+  }
 }
 
 async function ensurePedidoPage(page, config) {
-  let state = await getPedidoPageState(page);
-  if (state.isPedidoDetail || state.isPedidosList) return state;
+  // Navegación DETERMINISTA por URL (page.goto), SIEMPRE — incluso si ya
+  // parece que estamos en Pedidos. Así cada ejecución empieza en un estado
+  // fresco y consistente (la barra con "Nuevo" se vuelve a renderizar),
+  // sin depender de restos de un formulario anterior ni de un DOM "ya
+  // cargado" que a veces no tenía el botón clicable. Antes había un atajo
+  // ("si ya es la lista, no navego") que hacía fallar el caso de estar ya
+  // en Pedidos. Como nunca guardamos, cualquier borrador abierto se
+  // descarta sin problema.
+  const listUrl = pedidoListUrl(page, config);
+  const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+  const onDialog = (d) => { d.accept().catch(() => {}); };
+  page.on('dialog', onDialog);
+  try {
+    // Quitar el aviso de "cambios sin guardar" para que el goto no se quede
+    // esperando un diálogo del navegador.
+    try { await page.evaluate(() => { window.onbeforeunload = null; }); } catch { /* noop */ }
+    await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout });
+  } catch {
+    // Blazor puede reportar la navegación como fallida aunque cargue; se
+    // comprueba el estado real a continuación.
+  } finally {
+    page.off('dialog', onDialog);
+  }
 
-  const nav = await navigateToPedidos(page, config, state);
-  if (nav.ok) return nav.state;
+  const state = await waitForPedidoPage(page, timeout);
+  if (state.isPedidosList || state.isPedidoDetail) return state;
 
-  const err = new Error(nav.error || '没有识别到 Pedidos 页面，也没能自动进入 Pedidos。');
+  const err = new Error(
+    `没能进入 Pedidos 列表页（已直接跳转到 ${listUrl}）。请确认自动化 Edge 已登录 UnideGes。当前：caption=${state.caption || '-'}, url=${state.url || '-'}`
+  );
   err.stage = 'pedidoPage';
   throw err;
 }
 
-async function navigateToPedidos(page, config, initialState) {
-  const state = initialState || await getPedidoPageState(page);
-
-  // Si estamos editando otra cosa, no se navega automáticamente: puede
-  // aparecer una confirmación de cambios sin guardar.
-  if (state.hasEditToolbar && !state.isPedidoDetail && !state.isPedidosList) {
-    return {
-      ok: false,
-      state,
-      error: `当前页面像是另一个编辑表单（${state.caption || state.title || '未知页面'}），为了避免丢失未保存内容，我不会自动跳转。请先保存/退出这个页面，再重试。`
-    };
+// URL de la lista de Pedidos. Se deriva del origen de la pestaña actual
+// (robusto ante cambios de dominio) y se puede fijar en config.webOrder.pedidoListUrl.
+function pedidoListUrl(page, config) {
+  const configured = config.webOrder?.pedidoListUrl;
+  if (configured) return configured;
+  try {
+    return new URL(page.url()).origin + '/OrderT_ListView';
+  } catch {
+    return 'https://unideges30.unide.es/OrderT_ListView';
   }
-
-  let clicked = await clickNavigationItem(page, 'Pedidos');
-  if (!clicked) {
-    // 如果左侧树折叠了，先展开 Gestión Tiendas，再找 Pedidos。
-    await clickNavigationItem(page, 'Gestión Tiendas');
-    await sleep(600);
-    clicked = await clickNavigationItem(page, 'Pedidos');
-  }
-
-  if (!clicked) {
-    return {
-      ok: false,
-      state,
-      error: '当前不在 Pedidos 页面，而且左侧菜单里没有找到 “Pedidos”。请确认自动化 Edge 已登录 UnideGes，并且左侧菜单可见。'
-    };
-  }
-
-  const ready = await waitForPedidoPage(page, Number(config.webOrder?.pageNavigationTimeoutMs) || 10000);
-  if (ready.isPedidoDetail || ready.isPedidosList) return { ok: true, state: ready };
-
-  return {
-    ok: false,
-    state: ready,
-    error: `已点击左侧 Pedidos，但没有识别到 Pedidos 页面。当前识别：caption=${ready.caption || '-'}, url=${ready.url || '-'}`
-  };
 }
 
 async function waitForPedidoPage(page, timeoutMs) {
@@ -347,37 +353,6 @@ async function waitForPedidoPage(page, timeoutMs) {
     await sleep(250);
   }
   return last;
-}
-
-async function clickNavigationItem(page, label) {
-  return page.evaluate((target) => {
-    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-    const isVisible = (el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-
-    // Ojo: no se debe buscar "span descendiente" desde el padre, porque un
-    // nodo padre como "Gestión Tiendas" contiene también los spans de sus
-    // hijos. Se parte del span exacto y se sube a SU enlace.
-    const labels = Array.from(document.querySelectorAll('.xaf-nav-link span'))
-      .filter((el) => isVisible(el) && clean(el.innerText) === target);
-
-    for (const labelEl of labels) {
-      const link = labelEl.closest('a[role="treeitem"], a, .dxbl-treeview-item-container, .xaf-nav-item');
-      if (!link || !isVisible(link)) continue;
-
-      const clickable = link.querySelector('.xaf-navigation-link-click-area')
-        || link.closest('a[role="treeitem"], a')
-        || link;
-      clickable.scrollIntoView({ block: 'center', inline: 'center' });
-      clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-      clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-      clickable.click();
-      return true;
-    }
-    return false;
-  }, label);
 }
 
 async function getPedidoPageState(page) {
@@ -438,7 +413,7 @@ async function getPedidoPageState(page) {
   });
 }
 
-async function openNewOrderForm(page) {
+async function openNewOrderForm(page, nuevoWaitMs = 15000) {
   const state = await getPedidoPageState(page);
 
   if (state.isPedidoDetail) {
@@ -452,11 +427,13 @@ async function openNewOrderForm(page) {
     };
   }
 
-  if (await clickActionByName(page, 'Nuevo')) return { ok: true, mode: 'clickedNuevo' };
+  // Sondear a que aparezca "Nuevo": tras el page.goto, la barra de XAF
+  // (Blazor) tarda en renderizar aunque la URL ya sea la de la lista.
+  if (await clickActionByName(page, 'Nuevo', nuevoWaitMs)) return { ok: true, mode: 'clickedNuevo' };
 
   if (await isOrderFormOpen(page)) return { ok: true, mode: 'existingForm' };
 
-  return { ok: false, error: '已经识别为 Pedidos 列表页，但没找到 "Nuevo" 按钮。请确认页面加载完成，或手动刷新后重试。' };
+  return { ok: false, error: '已经识别为 Pedidos 列表页，但等了很久也没出现 "Nuevo" 按钮。请确认页面加载完成，或手动刷新后重试。' };
 }
 
 async function isOrderFormOpen(page) {

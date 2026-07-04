@@ -114,8 +114,9 @@ async function handleOrderDraft(chatId, text) {
     await telegram.sendMessage(chatId, `${parsed.error}\n\n${formatOrderResponse('help', new Date(), config)}`);
     return;
   }
-  const id = saveSession({ orderDraft: parsed.draft });
-  await telegram.sendMessage(chatId, formatOrderDraft(parsed.draft), makeOrderDraftButtons(id));
+  const draft = enrichOrderDraftForWeb(parsed.draft);
+  const id = saveSession({ orderDraft: draft });
+  await telegram.sendMessage(chatId, formatOrderDraft(draft), makeOrderDraftButtons(id));
 }
 
 async function handleOrderApply(chatId, callbackId, id) {
@@ -375,6 +376,35 @@ function saveSession(session) {
   sessions.set(id, { ...session, createdAt: Date.now() });
   for (const [key, value] of sessions) if (Date.now() - value.createdAt > 30 * 60 * 1000) sessions.delete(key);
   return id;
+}
+
+function enrichOrderDraftForWeb(draft) {
+  if (!config.webOrder?.enabled) return draft;
+  return {
+    ...draft,
+    items: draft.items.map(enrichOrderItemForWeb)
+  };
+}
+
+function enrichOrderItemForWeb(item) {
+  const originalCode = normalizeOrderIdentifier(item.code);
+  if (!originalCode || originalCode.length > 4) return item;
+
+  const store = lookupStore(storeIndex, { codigo: originalCode });
+  const supplier = enrichSupplierLookup(supplierIndex, { codigo: originalCode }, store);
+  const ean = normalizeOrderIdentifier(store?.product?.ean || supplier?.product?.ean);
+
+  if (ean.length < 8 || ean === originalCode) return item;
+  return {
+    ...item,
+    originalCode,
+    code: ean,
+    searchSource: store?.status === 'found' ? '店内缓存 EAN' : '供应商表 EAN'
+  };
+}
+
+function normalizeOrderIdentifier(value) {
+  return String(value || '').replace(/[^\d]/g, '');
 }
 
 function makeRepeatItem(query) { return { raw: query, codigo: query, ean: '', nombre: '', precio: { mode: 'auto', raw: 'auto' }, margen: { mode: 'missing', raw: '' }, desbloquear: true, etiqueta: false, nota: 'button repeat' }; }

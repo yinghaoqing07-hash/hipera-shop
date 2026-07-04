@@ -278,15 +278,24 @@ function formatOrderHelp() {
 }
 
 export function formatOrderDraft(draft) {
+  const converted = draft.items.filter((item) => item.originalCode && item.originalCode !== item.code);
   return [
     '准备填入订单：',
     `订单名：${draft.orderName}`,
     `商品行：${draft.items.length} 条`,
     '',
-    ...draft.items.map((item, index) => `${index + 1}. ${item.code}  数量 ${item.quantity}`),
+    ...draft.items.map((item, index) => {
+      const code = item.originalCode && item.originalCode !== item.code
+        ? `${item.originalCode} -> ${item.code}`
+        : item.code;
+      const note = item.searchSource ? `（${item.searchSource}）` : '';
+      return `${index + 1}. ${code}  数量 ${item.quantity}${note}`;
+    }),
+    converted.length ? '' : null,
+    converted.length ? `已自动把 ${converted.length} 个短码换成 EAN，减少网页自动补全多选。` : null,
     '',
     '确认后只会填入当前打开的订单页面并截图；不会 Guardar，也不会 Enviar Pedido。'
-  ].join('\n');
+  ].filter((line) => line !== null).join('\n');
 }
 
 function reminderChatIds(config) {
