@@ -172,8 +172,9 @@ async function resolveNextNameLine(chatId, id) {
   if (res.screenshot) {
     try { await telegram.sendPhoto(chatId, res.screenshot, `第 ${idx + 1} 行「${item.name}」的网页搜索结果`); } catch { /* noop */ }
   }
-  const list = res.options.map((o, i) => `[${i + 1}] ${o.name || o.text}`).join('\n');
-  const body = `第 ${idx + 1} 行「${item.name}」找到 ${res.options.length} 个（数量 ${item.quantity}），点一个：\n${list}`;
+  // Una línea en blanco entre opciones para que se lean sueltas.
+  const list = res.options.map((o, i) => `[${i + 1}] ${o.name || o.text}`).join('\n\n');
+  const body = `第 ${idx + 1} 行「${item.name}」找到 ${res.options.length} 个（数量 ${item.quantity}），点一个：\n\n${list}`;
   await telegram.sendMessage(chatId, body, makeNamePickButtons(id, idx, res.options.length));
 }
 
