@@ -37,12 +37,47 @@ export function parseOrderDraftMessage(text) {
     }
 
     const item = parseOrderLine(line);
-    if (item) draft.items.push(item);
+    if (item) { draft.items.push(item); continue; }
+    // Si no es una línea por código, puede ser una línea por NOMBRE: cuando
+    // no sabes el código, escribes el nombre del producto (+ cantidad). Se
+    // resolverá luego buscándolo en la web y eligiendo tú entre las opciones.
+    const named = parseNameLine(line);
+    if (named) draft.items.push(named);
   }
 
   if (!draft.orderName) return { ok: false, error: '缺订单名。请写 nombre: CARNE 0207' };
-  if (!draft.items.length) return { ok: false, error: '缺商品行。每行写：商品代码 数量，例如 620002 1' };
+  if (!draft.items.length) return { ok: false, error: '缺商品行。每行写：商品代码 数量（如 620002 1），或不知道代码时写商品名（如 ensalada florette 2）。' };
   return { ok: true, draft };
+}
+
+// Una línea es "por nombre" si contiene letras (no es solo un código). La
+// cantidad va al final (ensalada florette 2 / coca cola 2l x6); sin cantidad
+// se asume 1. La resolución (elegir el producto concreto) se hace después.
+function parseNameLine(line) {
+  const normalized = String(line || '').replace(/\s+/g, ' ').trim();
+  if (!/\p{L}/u.test(normalized)) return null; // debe tener letras
+  let name = normalized;
+  let quantity = '1';
+  const qm = normalized.match(/^(.*\S)\s+[xX×]?\s*(\d+(?:[.,]\d+)?)$/);
+  if (qm) { name = qm[1].trim(); quantity = qm[2].replace('.', ','); }
+  if (!name) return null;
+  return { name, quantity, raw: line };
+}
+
+// ¿Es una línea por nombre todavía sin resolver (falta que elijas el
+// producto)? Se usa para lanzar el flujo de selección y para el preview.
+export function isPendingNameItem(item) {
+  return Boolean(item?.name) && !item?.resolved;
+}
+
+// Aplica la opción elegida (del desplegable de la web) a la línea por nombre:
+// queda resuelta y, si la opción trae Código Unide, pasa a rellenarse por ese
+// código exacto (con el propio código como ancla de desambiguación).
+export function resolveNameItem(item, chosen) {
+  const code = String(chosen?.code || '').replace(/[^\d]/g, '');
+  const out = { ...item, resolved: true, nombre: String(chosen?.text || '').trim() };
+  if (code) { out.code = code; out.anchorCode = code; }
+  return out;
 }
 
 export function parseOrderMode(text) {
@@ -269,11 +304,11 @@ function formatOrderHelp() {
     '让程序填订单：',
     '/pedido_nuevo',
     'nombre: CARNE 0207',
-    '620002 1',
+    '620002 1        ← 知道代码就写代码 数量',
     '620006 2',
-    '609950 1',
+    'ensalada florette 2   ← 不知道代码就写商品名 数量，程序会在网页搜、把选项发给你点',
     '',
-    '目前只做提醒和清单，不会自动提交订单。'
+    '目前只做提醒和填入草稿，不会点 Guardar，也不会 Enviar Pedido。'
   ].join('\n');
 }
 
@@ -346,6 +381,9 @@ export function formatOrderDraft(draft) {
     `商品行：${draft.items.length} 条`,
     '',
     ...draft.items.map((item, index) => {
+      if (isPendingNameItem(item)) {
+        return `${index + 1}. 🔍 待选：${item.name}  数量 ${item.quantity}`;
+      }
       const typed = item.originalCode || item.code;
       let line = `${index + 1}. ${typed}  数量 ${item.quantity}`;
       if (item.converted) line += `  →  网页搜 EAN ${item.code}`;

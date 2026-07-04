@@ -182,11 +182,15 @@ export async function applyOrderWeb(draft, config, logger) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
       const qty = String(item.quantity ?? '').trim();
+      const nombre = String(item.nombre || '').trim();
+      // Término de búsqueda: el código/EAN si lo hay; si no (línea por nombre
+      // resuelta cuya opción no traía código), el propio nombre exacto.
+      const searchTerm = code || nombre || String(item.name || '').trim();
       // Si el código corto se convirtió a EAN, en los mensajes de error se
       // muestran ambos (original → EAN) para saber qué se buscó de verdad.
       const original = String(item.originalCode || '').trim();
-      const codeLabel = original && original !== code ? `${original} → EAN ${code}` : code;
-      if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
+      const codeLabel = original && original !== code ? `${original} → EAN ${code}` : (code || searchTerm);
+      if (!searchTerm) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
       const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
       if (!prepared) {
@@ -205,16 +209,16 @@ export async function applyOrderWeb(draft, config, logger) {
       // exacta si el autocompletado saca varias); nombre = término de
       // búsqueda de respaldo si el código/EAN no encuentra o queda ambiguo.
       const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
-      const nombre = String(item.nombre || '').trim();
 
-      // Intento 1: buscar por código/EAN.
-      let sel = await searchAndSelect(page, code, anchorCode, autocompleteTimeoutMs, autocompleteMs, false);
+      // Intento 1: buscar por el término principal (código/EAN, o el nombre
+      // si la línea era por nombre sin código).
+      let sel = await searchAndSelect(page, searchTerm, anchorCode, autocompleteTimeoutMs, autocompleteMs, false);
 
       // Intento 2 (respaldo por NOMBRE): si el código/EAN no encontró o
       // quedó ambiguo y tenemos el nombre en la tabla local, se reescribe el
       // nombre y se elige la fila cuyo Código Unide == anchorCode. Al anclar
       // en el código conocido, nunca confirma "el primer nombre parecido".
-      if (sel.status !== 'ok' && nombre) {
+      if (sel.status !== 'ok' && nombre && nombre !== searchTerm) {
         await clearArticleEditor(page);
         const byName = await searchAndSelect(page, nombre, anchorCode, autocompleteTimeoutMs, autocompleteMs, true);
         if (byName.status === 'ok') { sel = { ...byName, viaName: true }; }
@@ -277,6 +281,68 @@ export async function applyOrderWeb(draft, config, logger) {
   } finally {
     try { browser?.disconnect(); } catch { /* noop */ }
   }
+}
+
+// --- 3) Búsqueda por NOMBRE: devolver TODAS las opciones -------------
+// Cuando no se sabe el Código Unide de un producto, se escribe su nombre y
+// esto abre un formulario de PRUEBA (Nuevo), teclea el nombre en el editor
+// de artículo y CAPTURA todas las opciones del desplegable (con su Código
+// Unide) para que el usuario elija en Telegram. No selecciona ni guarda
+// nada; el borrador de prueba se descarta en la siguiente navegación (cada
+// openOrderPage hace un page.goto que lo tira).
+export async function searchArticleOptions(config, name, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const autocompleteMs = Number(w.autocompleteMs) || 900;
+    const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
+
+    const openedNew = await openNewOrderForm(page, Number(w.pageNavigationTimeoutMs) || 20000);
+    if (!openedNew.ok) return { ok: false, stage: 'nuevo', error: openedNew.error };
+    await sleep(Number(w.formRenderMs) || 2800);
+
+    const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
+    if (!prepared) return { ok: false, stage: 'newrow', error: '没找到可输入的 artículo 编辑框。' };
+
+    await page.keyboard.type(String(name), { delay: 25 });
+    const count = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
+    const shot = await screenshot(page, config, `search-${name}`);
+    if (count === 0) return { ok: true, options: [], screenshot: shot };
+
+    const options = await captureDropdownOptions(page, Number(w.maxSearchOptions) || 20);
+    logger?.info('web search options', { name, count: options.length });
+    return { ok: true, options, screenshot: shot };
+  } catch (error) {
+    logger?.error('web search failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'search', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+// Lee las opciones VISIBLES del desplegable abierto. Deduplica por texto y,
+// de cada opción, extrae el primer bloque de 4+ dígitos como Código Unide.
+async function captureDropdownOptions(page, max) {
+  return page.evaluate((limit) => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const opts = [...new Set(Array.from(document.querySelectorAll(
+      '[role="option"], .dxbl-listbox-item, .dxbl-list-box-item, .dxbl-grid-dropdown-item'
+    )))].filter(isVisible);
+    const seen = new Set();
+    const out = [];
+    for (const o of opts) {
+      const text = (o.innerText || '').replace(/\s+/g, ' ').trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      const m = text.match(/\b(\d{4,})\b/);
+      out.push({ code: m ? m[1] : '', text });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }, max);
 }
 
 // --- helpers ---------------------------------------------------------

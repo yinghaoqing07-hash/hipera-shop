@@ -73,7 +73,9 @@ const defaultConfig = {
     betweenLinesMs: 700,       // entre línea y línea
     // Navegación a la lista de Pedidos (page.goto directo, no clic en menú).
     pageNavigationTimeoutMs: 20000, // espera MÁX a que cargue la lista
-    pedidoListUrl: ''          // vacío = derivar del origen + /OrderT_ListView
+    pedidoListUrl: '',         // vacío = derivar del origen + /OrderT_ListView
+    // Búsqueda por nombre: máximo de opciones a devolver para que elijas.
+    maxSearchOptions: 20
   }
 };
 
