@@ -177,6 +177,7 @@ export async function applyOrderWeb(draft, config, logger) {
     // para y se avisa, sin adivinar.
     const results = [];
     let autoPicked = 0;
+    let namePicked = 0;
     for (let i = 0; i < draft.items.length; i++) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
@@ -198,40 +199,44 @@ export async function applyOrderWeb(draft, config, logger) {
         };
       }
       await sleep(Number(w.nextLineReadyMs) || 120);
-      await page.keyboard.type(code, { delay: 25 });
-      // Sondear hasta que el desplegable aparezca (la red/servidor pueden
-      // tardar), en vez de una espera fija que a veces se queda corta.
-      const opts = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
-      if (opts === 0) {
-        const shot = await screenshot(page, config, `code-${code}-nomatch`);
+
+      // Datos de ancla/respaldo que adjunta enrichOrderItems desde la tabla
+      // local: anchorCode = el Código Unide conocido (para elegir la fila
+      // exacta si el autocompletado saca varias); nombre = término de
+      // búsqueda de respaldo si el código/EAN no encuentra o queda ambiguo.
+      const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
+      const nombre = String(item.nombre || '').trim();
+
+      // Intento 1: buscar por código/EAN.
+      let sel = await searchAndSelect(page, code, anchorCode, autocompleteTimeoutMs, autocompleteMs, false);
+
+      // Intento 2 (respaldo por NOMBRE): si el código/EAN no encontró o
+      // quedó ambiguo y tenemos el nombre en la tabla local, se reescribe el
+      // nombre y se elige la fila cuyo Código Unide == anchorCode. Al anclar
+      // en el código conocido, nunca confirma "el primer nombre parecido".
+      if (sel.status !== 'ok' && nombre) {
+        await clearArticleEditor(page);
+        const byName = await searchAndSelect(page, nombre, anchorCode, autocompleteTimeoutMs, autocompleteMs, true);
+        if (byName.status === 'ok') { sel = { ...byName, viaName: true }; }
+        else { sel = { ...sel, nameTried: true }; }
+      }
+
+      if (sel.status !== 'ok') {
+        const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
+        const shot = await screenshot(page, config, `code-${code}-${tag}`);
         const dom = await captureEditDom(page, config);
+        const nameNote = sel.nameTried ? `（也试了按商品名「${nombre}」搜，仍无法确定）` : '';
+        const detail = sel.status === 'nomatch'
+          ? `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）${nameNote}。已停止，未保存。`
+          : `código ${codeLabel} 有多个匹配，且没有一行的 Código Unide 正好等于 ${anchorCode}${nameNote}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`;
+        results.push({ code, qty, ok: false, reason: sel.status });
         return {
-          ok: false, stage: 'autocomplete', screenshot: shot, domDump: dom,
-          error: `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
-          results
+          ok: false, stage: sel.status === 'nomatch' ? 'autocomplete' : 'ambiguous',
+          screenshot: shot, domDump: dom, error: detail, results
         };
       }
-      if (opts === 1) {
-        // Un único resultado → Enter selecciona (desplegable abierto).
-        await page.keyboard.press('Enter');
-      } else {
-        // Varios resultados. Regla del usuario: elegir la fila cuyo Código
-        // Unide coincide EXACTAMENTE con el código tecleado (misma
-        // referencia, el resto suelen ser el mismo artículo sin Código
-        // Unide). Se busca la fila con una celda == code y se pulsa.
-        const picked = await selectDropdownRowByCode(page, code);
-        if (!picked) {
-          const shot = await screenshot(page, config, `code-${code}-multi`);
-          const dom = await captureEditDom(page, config);
-          results.push({ code, qty, ok: false, reason: `${opts} 个匹配，无法自动判断` });
-          return {
-            ok: false, stage: 'ambiguous', screenshot: shot, domDump: dom,
-            error: `código ${codeLabel} 有 ${opts} 个匹配，且没有一行的 Código Unide 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
-            results
-          };
-        }
-        autoPicked += 1;
-      }
+      if (sel.via === 'anchor') autoPicked += 1;
+      if (sel.viaName) namePicked += 1;
       await sleep(300);
       // Tras seleccionar (sobre todo si fue por clic en una fila del
       // desplegable), el foco puede quedar en la opción, no en el editor.
@@ -255,8 +260,11 @@ export async function applyOrderWeb(draft, config, logger) {
 
     const shot = await screenshot(page, config, 'done');
     const okCount = results.filter((r) => r.ok).length;
-    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked });
-    const autoNote = autoPicked > 0 ? `（其中 ${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行）` : '';
+    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked });
+    const notes = [];
+    if (autoPicked > 0) notes.push(`${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行`);
+    if (namePicked > 0) notes.push(`${namePicked} 行代码没搜到，已改用商品名搜到并按 Código Unide 选中`);
+    const autoNote = notes.length ? `（${notes.join('；')}）` : '';
     return {
       ok: true,
       screenshot: shot,
@@ -595,6 +603,39 @@ async function selectDropdownRowByCode(page, code) {
   return true;
 }
 
+// Teclea `term` en el editor de artículo, espera el desplegable y selecciona.
+//   - requireAnchor=false (búsqueda por código/EAN): un único resultado se
+//     acepta con Enter; con varios, se elige la fila cuyo Código Unide ==
+//     anchorCode.
+//   - requireAnchor=true (búsqueda por NOMBRE): NUNCA se acepta a ciegas; se
+//     exige que UNA fila tenga el Código Unide == anchorCode. Así el respaldo
+//     por nombre jamás confirma "el primer nombre parecido".
+// Devuelve { status: 'ok'|'nomatch'|'ambiguous', via }.
+async function searchAndSelect(page, term, anchorCode, timeoutMs, settleMs, requireAnchor) {
+  await page.keyboard.type(String(term), { delay: 25 });
+  const count = await waitForDropdownOptions(page, timeoutMs, settleMs);
+  if (count === 0) return { status: 'nomatch' };
+  if (count === 1 && !requireAnchor) {
+    await page.keyboard.press('Enter');
+    return { status: 'ok', via: 'single' };
+  }
+  const picked = anchorCode ? await selectDropdownRowByCode(page, anchorCode) : false;
+  if (picked) return { status: 'ok', via: 'anchor' };
+  return { status: 'ambiguous' };
+}
+
+// Limpia el editor de artículo (borra el código que no encontró) para poder
+// reintentar la búsqueda por nombre. Reenfoca el input y hace Ctrl+A +
+// Backspace; volver a teclear reemplaza cualquier desplegable abierto.
+async function clearArticleEditor(page) {
+  await focusArticleEditor(page);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Backspace');
+  await sleep(150);
+}
+
 // Captura de pantalla del navegador (mejor que la de PowerShell). Devuelve
 // la ruta del PNG o null.
 async function screenshot(page, config, tag) {
@@ -623,3 +664,6 @@ async function captureEditDom(page, config) {
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// Solo para pruebas: helpers internos del rellenado por navegador.
+export const __test = { searchAndSelect, clearArticleEditor, selectDropdownRowByCode, focusArticleEditor };

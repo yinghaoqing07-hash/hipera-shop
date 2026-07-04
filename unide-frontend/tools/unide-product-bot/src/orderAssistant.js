@@ -283,27 +283,40 @@ function formatOrderHelp() {
 // Pedidos dispara búsqueda DIFUSA y saca decenas de opciones parecidas.
 const SHORT_CODE_MAX_LEN = 5;
 
-// Sustituye los códigos cortos por su EAN (de la tabla local de la tienda)
-// para que la búsqueda en la web de Pedidos sea EXACTA en vez de difusa.
-// El usuario sigue escribiendo "3700 2"; el bot busca en la web
-// "8414516001017", que devuelve un único resultado y evita las listas de
-// diez y pico opciones. No toca los códigos largos (ya buscan bien) ni los
-// que no estén en la tabla o no tengan EAN. Devuelve el draft enriquecido y
-// la lista de conversiones para mostrarlas en la confirmación.
-export function applyEanForShortCodes(draft, storeIndex, options = {}) {
+// Enriquece cada línea del pedido con datos de la tabla local de la tienda:
+//   - nombre     → nombre del producto (para mostrar en la confirmación y
+//                  como término de búsqueda de respaldo en la web).
+//   - anchorCode → el Código Unide conocido, para elegir en la web la fila
+//                  EXACTA cuando el autocompletado saca varias opciones.
+//   - code/originalCode/converted → si es un código corto con EAN, se busca
+//                  en la web por EAN (exacto) en vez de por el código corto
+//                  (que dispara búsqueda difusa con decenas de opciones).
+// No toca códigos largos (ya buscan bien), ni los que no estén en la tabla o
+// no tengan EAN. Con la tabla vacía es un no-op. Devuelve el draft
+// enriquecido y la lista de conversiones (para el mensaje de confirmación).
+export function enrichOrderItems(draft, storeIndex, options = {}) {
   const maxLen = Number(options.maxLen) || SHORT_CODE_MAX_LEN;
   const byCode = storeIndex?.byCode;
   const conversions = [];
   const items = (draft.items || []).map((item) => {
     const typed = String(item.code || '').trim();
-    if (!byCode || !/^\d+$/.test(typed) || typed.length > maxLen) return item;
+    const out = { ...item };
+    if (!byCode || !/^\d+$/.test(typed)) return out;
     const row = byCode.get(typed);
-    if (!row) return item;
+    if (!row) return out;
+    // El código tecleado ES el Código Unide (se buscó en byCode): sirve de
+    // ancla para desambiguar en la web aunque luego busquemos por EAN/nombre.
+    out.anchorCode = typed;
+    const nombre = String(row.articulo_tienda || row.articulo || '').trim();
+    if (nombre) out.nombre = nombre;
     const ean = String(row.ean || '').replace(/[^\d]/g, '');
-    if (!ean || ean.length < 8 || ean === typed) return item;
-    const articulo = String(row.articulo_tienda || row.articulo || '').trim();
-    conversions.push({ original: typed, ean, articulo });
-    return { ...item, code: ean, originalCode: typed, converted: true, articulo };
+    if (ean && ean.length >= 8 && ean !== typed && typed.length <= maxLen) {
+      out.code = ean;
+      out.originalCode = typed;
+      out.converted = true;
+      conversions.push({ original: typed, ean, articulo: nombre });
+    }
+    return out;
   });
   return { draft: { ...draft, items }, conversions };
 }
@@ -316,10 +329,10 @@ export function formatOrderDraft(draft) {
     '',
     ...draft.items.map((item, index) => {
       const typed = item.originalCode || item.code;
-      const base = `${index + 1}. ${typed}  数量 ${item.quantity}`;
-      if (!item.converted) return base;
-      const name = item.articulo ? `（${item.articulo}）` : '';
-      return `${base}  →  网页搜 EAN ${item.code}${name}`;
+      let line = `${index + 1}. ${typed}  数量 ${item.quantity}`;
+      if (item.converted) line += `  →  网页搜 EAN ${item.code}`;
+      if (item.nombre) line += `（${item.nombre}）`;
+      return line;
     }),
     '',
     '确认后只会填入当前打开的订单页面并截图；不会 Guardar，也不会 Enviar Pedido。'

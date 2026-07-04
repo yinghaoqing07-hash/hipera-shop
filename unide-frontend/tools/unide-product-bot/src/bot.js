@@ -11,7 +11,7 @@ import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
 import {
   OrderReminderScheduler,
-  applyEanForShortCodes,
+  enrichOrderItems,
   formatOrderDraft,
   formatOrderResponse,
   isOrderCommand,
@@ -115,10 +115,10 @@ async function handleOrderDraft(chatId, text) {
     await telegram.sendMessage(chatId, `${parsed.error}\n\n${formatOrderResponse('help', new Date(), config)}`);
     return;
   }
-  // Códigos cortos (p. ej. 3700) → EAN de la tabla local, para que la
-  // búsqueda en la web sea exacta y no saque decenas de opciones. La
-  // conversión se muestra en la confirmación (no es una caja negra).
-  const { draft } = applyEanForShortCodes(parsed.draft, storeIndex);
+  // Enriquecer con la tabla local: nombre (para mostrar y como búsqueda de
+  // respaldo), Código Unide de ancla, y EAN para códigos cortos (búsqueda
+  // exacta). Todo se muestra en la confirmación (no es una caja negra).
+  const { draft } = enrichOrderItems(parsed.draft, storeIndex);
   const id = saveSession({ orderDraft: draft });
   await telegram.sendMessage(chatId, formatOrderDraft(draft), makeOrderDraftButtons(id));
 }
