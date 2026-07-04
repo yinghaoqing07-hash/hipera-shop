@@ -149,8 +149,9 @@ export async function applyOrderWeb(draft, config, logger) {
     const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
     const betweenLinesMs = Number(w.betweenLinesMs) || 700;
 
-    // Paso 1: "Nuevo" (abre el DetailView del pedido). Si un intento
-    // anterior dejó un formulario abierto, volvemos a la lista y reintentamos.
+    // Paso 1: "Nuevo" (abre el DetailView del pedido). Si ya estamos en
+    // un formulario abierto, se continúa ahí. No se pulsa Volver: UnideGes
+    // puede mostrar una confirmación por cambios sin guardar.
     const openedNewOrder = await openNewOrderForm(page);
     if (!openedNewOrder.ok) {
       return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
@@ -274,22 +275,13 @@ async function clickActionByName(page, actionName) {
 }
 
 async function openNewOrderForm(page) {
-  if (await clickActionByName(page, 'Nuevo')) return { ok: true };
+  if (await clickActionByName(page, 'Nuevo')) return { ok: true, mode: 'clickedNuevo' };
 
   if (await isOrderFormOpen(page)) {
-    const wentBack = await clickActionByName(page, 'Volver');
-    if (wentBack) {
-      await sleep(1500);
-      if (await clickActionByName(page, 'Nuevo')) return { ok: true };
-    }
-
-    return {
-      ok: false,
-      error: '没有找到 "Nuevo" 按钮。页面看起来停在一个已打开的订单表单上，但自动返回列表失败；请在自动化 Edge 里点 Volver 回到 Pedidos 列表页，再点“确认填入”。'
-    };
+    return { ok: true, mode: 'existingForm' };
   }
 
-  return { ok: false, error: '没有找到 "Nuevo" 按钮。请确认自动化 Edge 里打开的是 Pedidos 列表页。' };
+  return { ok: false, error: '没有找到 "Nuevo" 按钮，也没有识别到已经打开的订单表单。请确认自动化 Edge 里打开的是 Pedidos 列表页或 Pedido 新建/编辑页。' };
 }
 
 async function isOrderFormOpen(page) {
