@@ -173,25 +173,17 @@ export async function applyOrderWeb(draft, config, logger) {
       const qty = String(item.quantity ?? '').trim();
       if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
-      if (i === 0) {
-        const started = await startNewItemRow(page, autocompleteTimeoutMs);
-        if (!started) {
-          const shot = await screenshot(page, config, 'newrow');
-          const dom = await captureEditDom(page, config);
-          return {
-            ok: false, stage: 'newrow', screenshot: shot, domDump: dom,
-            error: `第 ${i + 1} 行：没找到表格的“新增行”/“编辑行”。前面已填的不会保存。（已把当时页面结构发给 Claude）`,
-            results
-          };
-        }
-        await sleep(300);
-      } else {
-        // Después del doble Enter de la línea anterior, UnideGes ya deja el
-        // foco en el artículo de la siguiente línea. No se comprueba ni se
-        // clica nada aquí: esa espera/recuperación era lo que dejaba el bot
-        // parado varios segundos antes de fallar.
-        await sleep(Number(w.nextLineReadyMs) || 150);
+      const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
+      if (!prepared) {
+        const shot = await screenshot(page, config, 'newrow');
+        const dom = await captureEditDom(page, config);
+        return {
+          ok: false, stage: 'newrow', screenshot: shot, domDump: dom,
+          error: `第 ${i + 1} 行：没找到可输入的 artículo 编辑框，也没能打开“新增行”。前面已填的不会保存。（已保存页面结构）`,
+          results
+        };
       }
+      await sleep(Number(w.nextLineReadyMs) || 120);
       await page.keyboard.type(code, { delay: 25 });
       // Sondear hasta que el desplegable aparezca (la red/servidor pueden
       // tardar), en vez de una espera fija que a veces se queda corta.
@@ -330,32 +322,64 @@ async function fillNombre(page, name) {
   return true;
 }
 
-// Entra en edición en la fila de alta del grid de líneas. Sondea hasta
-// timeoutMs porque, tras confirmar una línea (Enter Enter), la nueva fila
-// tarda un poco en renderizarse en el servidor real. Acepta tanto la fila
-// de alta (dxbl-grid-edit-new-item-row) como una fila que ya esté en modo
-// edición (dxbl-grid-edit-row), y hace clic en su primera celda de datos
-// editable (la del artículo; salta comando/checkbox).
-async function startNewItemRow(page, timeoutMs = 4000) {
+// Prepara la celda de artículo antes de escribir un código. Si el doble
+// Enter anterior ya dejó abierta una fila en edición, solo enfoca ese
+// editor. Si en cambio el grid volvió a la fila "Haga clic aquí para
+// agregar...", se pulsa esa fila para abrir una nueva línea. La clave es
+// no clicar sobre una fila que ya está editándose.
+async function prepareItemEditor(page, timeoutMs = 4000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const handle = await page.evaluateHandle(() => {
-      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-      const row = Array.from(document.querySelectorAll(
-        '.dxbl-grid-edit-new-item-row, .dxbl-grid-edit-row'
-      )).find(isVisible);
-      if (!row) return null;
-      const cells = Array.from(row.querySelectorAll('td[role="gridcell"], .dxbl-grid-cell'));
-      const target = cells.find((c) => !c.classList.contains('dxbl-grid-command-cell')
-        && !c.querySelector('input[type="checkbox"]')) || cells[0] || row;
-      return target;
-    });
-    const el = handle.asElement();
-    if (el) { await el.click(); await handle.dispose(); return true; }
-    await handle.dispose();
-    await sleep(200);
+    if (await focusArticleEditor(page)) return true;
+
+    const opened = await openAddNewItemRow(page);
+    if (opened) {
+      const ready = await waitForArticleEditor(page, Math.min(1800, timeoutMs));
+      if (ready) return true;
+    }
+
+    await sleep(150);
   }
   return false;
+}
+
+async function waitForArticleEditor(page, timeoutMs = 1800) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await focusArticleEditor(page)) return true;
+    await sleep(100);
+  }
+  return false;
+}
+
+async function focusArticleEditor(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const rows = Array.from(document.querySelectorAll('.dxbl-grid-edit-row, .dxbl-grid-edit-new-item-row')).filter(isVisible);
+    for (const row of rows) {
+      const inputs = Array.from(row.querySelectorAll('input[role="combobox"], input[type="text"], input:not([type]), textarea'));
+      const input = inputs.find((el) => isVisible(el) && !el.disabled && !el.closest('.dxbl-pager-page-size-selector'));
+      if (input) {
+        input.focus();
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
+async function openAddNewItemRow(page) {
+  const handle = await page.evaluateHandle(() => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const rows = Array.from(document.querySelectorAll('.dxbl-grid-edit-new-item-row')).filter(isVisible);
+    return rows.find((row) => !row.querySelector('input, textarea') && /agregar una nueva fila/i.test(clean(row.innerText))) || null;
+  });
+  const el = handle.asElement();
+  if (!el) { await handle.dispose(); return false; }
+  await el.click();
+  await handle.dispose();
+  return true;
 }
 
 // Espera (sondeando) a que aparezca el desplegable de autocompletado.
