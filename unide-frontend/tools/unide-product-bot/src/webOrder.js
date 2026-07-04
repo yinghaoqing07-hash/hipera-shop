@@ -357,16 +357,19 @@ async function clickNavigationItem(page, label) {
       return r.width > 0 && r.height > 0;
     };
 
-    const navItems = Array.from(document.querySelectorAll(
-      '.xaf-nav-item, a[role="treeitem"], .dxbl-treeview-item-container'
-    )).filter(isVisible);
+    // Ojo: no se debe buscar "span descendiente" desde el padre, porque un
+    // nodo padre como "Gestión Tiendas" contiene también los spans de sus
+    // hijos. Se parte del span exacto y se sube a SU enlace.
+    const labels = Array.from(document.querySelectorAll('.xaf-nav-link span'))
+      .filter((el) => isVisible(el) && clean(el.innerText) === target);
 
-    for (const item of navItems) {
-      const labels = Array.from(item.querySelectorAll('.xaf-nav-link span, span')).filter(isVisible);
-      if (!labels.some((el) => clean(el.innerText) === target)) continue;
+    for (const labelEl of labels) {
+      const link = labelEl.closest('a[role="treeitem"], a, .dxbl-treeview-item-container, .xaf-nav-item');
+      if (!link || !isVisible(link)) continue;
 
-      const clickable = item.querySelector('a[role="treeitem"], a, .xaf-navigation-link-click-area')
-        || item;
+      const clickable = link.querySelector('.xaf-navigation-link-click-area')
+        || link.closest('a[role="treeitem"], a')
+        || link;
       clickable.scrollIntoView({ block: 'center', inline: 'center' });
       clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
       clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
