@@ -173,19 +173,25 @@ export async function applyOrderWeb(draft, config, logger) {
       const qty = String(item.quantity ?? '').trim();
       if (!code) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
-      const started = i === 0
-        ? await startNewItemRow(page, autocompleteTimeoutMs)
-        : await ensureArticleEditorReady(page, autocompleteTimeoutMs);
-      if (!started) {
-        const shot = await screenshot(page, config, 'newrow');
-        const dom = await captureEditDom(page, config);
-        return {
-          ok: false, stage: 'newrow', screenshot: shot, domDump: dom,
-          error: `第 ${i + 1} 行：没找到表格的“新增行”/“编辑行”。前面已填的不会保存。（已把当时页面结构发给 Claude）`,
-          results
-        };
+      if (i === 0) {
+        const started = await startNewItemRow(page, autocompleteTimeoutMs);
+        if (!started) {
+          const shot = await screenshot(page, config, 'newrow');
+          const dom = await captureEditDom(page, config);
+          return {
+            ok: false, stage: 'newrow', screenshot: shot, domDump: dom,
+            error: `第 ${i + 1} 行：没找到表格的“新增行”/“编辑行”。前面已填的不会保存。（已把当时页面结构发给 Claude）`,
+            results
+          };
+        }
+        await sleep(300);
+      } else {
+        // Después del doble Enter de la línea anterior, UnideGes ya deja el
+        // foco en el artículo de la siguiente línea. No se comprueba ni se
+        // clica nada aquí: esa espera/recuperación era lo que dejaba el bot
+        // parado varios segundos antes de fallar.
+        await sleep(Number(w.nextLineReadyMs) || 150);
       }
-      await sleep(300);
       await page.keyboard.type(code, { delay: 25 });
       // Sondear hasta que el desplegable aparezca (la red/servidor pueden
       // tardar), en vez de una espera fija que a veces se queda corta.
@@ -350,42 +356,6 @@ async function startNewItemRow(page, timeoutMs = 4000) {
     await sleep(200);
   }
   return false;
-}
-
-// Después de confirmar una línea con Enter Enter, UnideGes suele dejar el
-// foco ya dentro del artículo de la siguiente línea. En ese caso NO se debe
-// clicar otra vez: el clic extra puede romper el editor/autocompletado.
-// Solo si el foco no está en la primera celda editable se usa el clic como
-// recuperación.
-async function ensureArticleEditorReady(page, timeoutMs = 4000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await isArticleEditorFocused(page)) return true;
-    await sleep(150);
-  }
-  return startNewItemRow(page, timeoutMs);
-}
-
-async function isArticleEditorFocused(page) {
-  return page.evaluate(() => {
-    const active = document.activeElement;
-    if (!active) return false;
-    const row = active.closest('.dxbl-grid-edit-new-item-row, .dxbl-grid-edit-row');
-    if (!row) return false;
-
-    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    if (!isVisible(row)) return false;
-
-    const cells = Array.from(row.querySelectorAll('td[role="gridcell"], .dxbl-grid-cell'));
-    const articleCell = cells.find((c) => !c.classList.contains('dxbl-grid-command-cell')
-      && !c.querySelector('input[type="checkbox"]'));
-    if (!articleCell || !articleCell.contains(active)) return false;
-
-    const editor = active.matches('input, textarea, [contenteditable="true"]')
-      ? active
-      : active.closest('input, textarea, [contenteditable="true"]');
-    return Boolean(editor);
-  });
 }
 
 // Espera (sondeando) a que aparezca el desplegable de autocompletado.
