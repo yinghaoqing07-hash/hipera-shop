@@ -277,13 +277,50 @@ function formatOrderHelp() {
   ].join('\n');
 }
 
+// Longitud máxima de un "código corto". Los Código Unide reales de la
+// tienda son de 6+ dígitos y los EAN de 13; un código de <=5 dígitos es un
+// código de artículo interno (p. ej. 3700/3701/3702) que en la web de
+// Pedidos dispara búsqueda DIFUSA y saca decenas de opciones parecidas.
+const SHORT_CODE_MAX_LEN = 5;
+
+// Sustituye los códigos cortos por su EAN (de la tabla local de la tienda)
+// para que la búsqueda en la web de Pedidos sea EXACTA en vez de difusa.
+// El usuario sigue escribiendo "3700 2"; el bot busca en la web
+// "8414516001017", que devuelve un único resultado y evita las listas de
+// diez y pico opciones. No toca los códigos largos (ya buscan bien) ni los
+// que no estén en la tabla o no tengan EAN. Devuelve el draft enriquecido y
+// la lista de conversiones para mostrarlas en la confirmación.
+export function applyEanForShortCodes(draft, storeIndex, options = {}) {
+  const maxLen = Number(options.maxLen) || SHORT_CODE_MAX_LEN;
+  const byCode = storeIndex?.byCode;
+  const conversions = [];
+  const items = (draft.items || []).map((item) => {
+    const typed = String(item.code || '').trim();
+    if (!byCode || !/^\d+$/.test(typed) || typed.length > maxLen) return item;
+    const row = byCode.get(typed);
+    if (!row) return item;
+    const ean = String(row.ean || '').replace(/[^\d]/g, '');
+    if (!ean || ean.length < 8 || ean === typed) return item;
+    const articulo = String(row.articulo_tienda || row.articulo || '').trim();
+    conversions.push({ original: typed, ean, articulo });
+    return { ...item, code: ean, originalCode: typed, converted: true, articulo };
+  });
+  return { draft: { ...draft, items }, conversions };
+}
+
 export function formatOrderDraft(draft) {
   return [
     '准备填入订单：',
     `订单名：${draft.orderName}`,
     `商品行：${draft.items.length} 条`,
     '',
-    ...draft.items.map((item, index) => `${index + 1}. ${item.code}  数量 ${item.quantity}`),
+    ...draft.items.map((item, index) => {
+      const typed = item.originalCode || item.code;
+      const base = `${index + 1}. ${typed}  数量 ${item.quantity}`;
+      if (!item.converted) return base;
+      const name = item.articulo ? `（${item.articulo}）` : '';
+      return `${base}  →  网页搜 EAN ${item.code}${name}`;
+    }),
     '',
     '确认后只会填入当前打开的订单页面并截图；不会 Guardar，也不会 Enviar Pedido。'
   ].join('\n');
