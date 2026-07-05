@@ -46,7 +46,14 @@ logger.info('unide product bot started', { desktopEnabled: config.desktop.enable
 while (true) {
   try {
     const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
-    for (const update of updates) { offset = update.update_id + 1; await handleUpdate(update); }
+    for (const update of updates) {
+      offset = update.update_id + 1;
+      // Aislar cada update: si uno falla (botón caducado, error puntual de
+      // una acción), se registra y se sigue con el resto, sin abortar el
+      // lote ni castigar el bucle con la espera de "polling error".
+      try { await handleUpdate(update); }
+      catch (error) { logger.error('update error', { updateId: update.update_id, error: error.message }); }
+    }
     await maybeSendOrderReminder();
     await maybePrintArrivalChecklist();
   } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }

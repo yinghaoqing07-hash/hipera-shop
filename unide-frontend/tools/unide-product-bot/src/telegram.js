@@ -91,16 +91,26 @@ export class TelegramClient {
   }
 
   async answerCallbackQuery(callbackQueryId, text = '') {
-    const response = await fetch(`${this.baseUrl}/answerCallbackQuery`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        callback_query_id: callbackQueryId,
-        text: truncate(text, 180),
-        show_alert: false
-      })
-    });
-    return unwrap(await response.json());
+    // Mejor esfuerzo: Telegram caduca los botones a los ~15 s. Si el bot
+    // estaba ocupado (p. ej. esperando al navegador) y responde tarde, la
+    // API devuelve "query is too old / query ID is invalid". Ese acuse
+    // fallido es IRRELEVANTE (la acción del botón se procesa igual), así
+    // que aquí nunca se lanza error: antes tumbaba el bucle de sondeo y el
+    // bot se quedaba en "polling error" en cadena.
+    try {
+      const response = await fetch(`${this.baseUrl}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          text: truncate(text, 180),
+          show_alert: false
+        })
+      });
+      return unwrap(await response.json());
+    } catch {
+      return null;
+    }
   }
 }
 
