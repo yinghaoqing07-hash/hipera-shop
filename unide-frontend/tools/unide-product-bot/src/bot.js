@@ -13,6 +13,7 @@ import { applyUpdatePackage } from './updater.js';
 import {
   OrderReminderScheduler,
   enrichOrderItems,
+  formatFruitPriceFlow,
   formatOrderDraft,
   formatOrderResponse,
   isOrderCommand,
@@ -73,6 +74,7 @@ async function handleUpdate(update) {
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
+  if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await telegram.sendMessage(chatId, formatFruitPriceFlow()); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
