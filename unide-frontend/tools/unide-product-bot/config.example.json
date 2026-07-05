@@ -17,6 +17,15 @@
     "reminderWindowMinutes": 180,
     "reminderChatIds": []
   },
+  "arrival": {
+    "enabled": true,
+    "printTime": "08:30",
+    "windowMinutes": 180,
+    "offsetDays": 2,
+    "printerName": "",
+    "autoPrint": true,
+    "chatIds": []
+  },
   "desktop": {
     "enabled": false,
     "script": "desktop/unideges-search.ps1",
