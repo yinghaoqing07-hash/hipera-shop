@@ -180,6 +180,8 @@
     "betweenLinesMs": 700,
     "pageNavigationTimeoutMs": 20000,
     "pedidoListUrl": "",
-    "maxSearchOptions": 20
+    "maxSearchOptions": 20,
+    "protocolTimeoutMs": 90000,
+    "connectRetries": 2
   }
 }

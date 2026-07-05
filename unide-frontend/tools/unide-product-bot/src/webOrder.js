@@ -23,14 +23,34 @@ import { connectBrowser, findOrderPage } from './webBrowser.js';
 // de que estamos en Pedidos. Esto evita pulsar por error un "Nuevo" de otra
 // sección que tenga botones parecidos.
 async function openOrderPage(config) {
-  const browser = await connectBrowser(config);
-  const page = await findOrderPage(browser, config);
-  if (!page) {
-    try { browser.disconnect(); } catch { /* noop */ }
-    const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认那个 Edge 窗口里打开了 UnideGes（网址含 unideges）。');
-    err.stage = 'findPage';
-    throw err;
+  // Conectar + localizar la pestaña, con REINTENTO: si la pestaña estaba
+  // dormida (Edge la suspende tras un rato inactiva), el primer intento
+  // puede fallar con "Network.enable timed out" mientras el renderer
+  // despierta; a la segunda suele responder.
+  const attempts = Number(config.webOrder?.connectRetries) || 2;
+  let browser = null;
+  let page = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      browser = await connectBrowser(config);
+      page = await findOrderPage(browser, config);
+      if (page) break;
+      try { browser.disconnect(); } catch { /* noop */ }
+      browser = null;
+      const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认那个 Edge 窗口里打开了 UnideGes（网址含 unideges）。');
+      err.stage = 'findPage';
+      lastError = err;
+    } catch (error) {
+      lastError = error;
+      try { browser?.disconnect(); } catch { /* noop */ }
+      browser = null;
+      page = null;
+    }
+    if (attempt < attempts) await sleep(2000);
   }
+  if (!page) throw lastError || Object.assign(new Error('无法连接 Edge。'), { stage: 'connect' });
+
   try { await page.bringToFront(); } catch { /* noop */ }
   try {
     await ensurePedidoPage(page, config);

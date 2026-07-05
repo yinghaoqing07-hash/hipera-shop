@@ -29,7 +29,10 @@ if exist "%LocalAppData%\Microsoft\Edge\Application\msedge.exe" set "EDGE=%Local
 if not defined EDGE goto no_edge
 
 echo Lanzando Edge -perfil de automatizacion- con el puerto 9222...
-start "" "%EDGE%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" "%URL%"
+rem Las banderas extra evitan que Edge DUERMA la pestana de UnideGes al
+rem estar un rato inactiva. Una pestana dormida hace fallar la conexion
+rem del bot con "Network.enable timed out".
+start "" "%EDGE%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --disable-features=msSleepingTabs,SleepingTabs --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding "%URL%"
 
 echo.
 echo En la ventana de Edge que se acaba de abrir:
