@@ -6,7 +6,7 @@ import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
-import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
+import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
@@ -65,7 +65,7 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
-  if (text === '/llegada' || text === '/llegada_hoy') { await handleArrivalChecklist(chatId); return; }
+  if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -347,13 +347,23 @@ async function maybePrintArrivalChecklist() {
   if (delivered) arrivalScheduler.markSent(due.key);
 }
 
-// /llegada — saca la lista de hoy a demanda (imprime + Telegram).
-async function handleArrivalChecklist(chatId) {
-  const dateStr = todayString(config);
-  await telegram.sendMessage(chatId, '正在查今天预计到货的订单…');
+// /llegada [fecha] — saca la lista a demanda (imprime + Telegram). Sin
+// fecha usa hoy; con fecha ("/llegada 1/7") esa fecha se toma como día de
+// LLEGADA (útil para probar con pedidos pasados).
+async function handleArrivalChecklist(chatId, text = '') {
+  const today = todayString(config);
+  const arg = String(text || '').replace(/^\/llegada(?:_hoy)?\s*/i, '').trim();
+  const requested = parseDateArg(arg, today);
+  if (arg && !requested) {
+    await telegram.sendMessage(chatId, `没看懂日期「${arg}」。可以写 /llegada（今天）、/llegada 1/7 或 /llegada 2026-07-01。`);
+    return;
+  }
+  const dateStr = requested || today;
+  const label = dateStr === today ? '今天' : dateStr;
+  await telegram.sendMessage(chatId, `正在查${label}预计到货的订单…`);
   const collected = await collectArrivalOrders(dateStr);
   if (!collected.orders.length) {
-    await telegram.sendMessage(chatId, `今天（${dateStr}）没有预计到货的订单${arrivalSourceNote(collected)}。到货日按下单日 +${config.arrival?.offsetDays ?? 2} 天算。`);
+    await telegram.sendMessage(chatId, `${label}（${dateStr}）没有预计到货的订单${arrivalSourceNote(collected)}。到货日按下单日 +${config.arrival?.offsetDays ?? 2} 天算。`);
     return;
   }
   await sendAndPrintChecklist([chatId], collected, dateStr);
