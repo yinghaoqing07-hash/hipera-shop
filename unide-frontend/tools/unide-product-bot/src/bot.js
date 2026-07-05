@@ -5,8 +5,8 @@ import { createLogger } from './logger.js';
 import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions } from './webOrder.js';
-import { ArrivalChecklistScheduler, formatChecklist, ordersArrivingOn, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
+import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
@@ -311,28 +311,58 @@ async function maybeSendOrderReminder() {
   if (sent > 0) orderReminderScheduler.markSent(due.key);
 }
 
+// Junta los pedidos que llegan en dateStr. Primero la WEB de Pedidos (así
+// entran también los pedidos hechos a mano o importados desde la PDA); si
+// la web falla o está desactivada, el historial local (solo pedidos que
+// rellenó el bot) como respaldo.
+async function collectArrivalOrders(dateStr) {
+  const offset = Number.isFinite(Number(config.arrival?.offsetDays)) ? Number(config.arrival.offsetDays) : 2;
+  if (config.webOrder?.enabled) {
+    const creationDate = addDays(dateStr, -offset);
+    const res = await fetchArrivingOrders(config, creationDate, logger);
+    if (res.ok) return { source: 'web', orders: res.orders };
+    logger.warn('web arrival fetch failed, using local history', { error: res.error });
+    return { source: 'local', orders: ordersArrivingOn(config, dateStr), webError: res.error };
+  }
+  return { source: 'local', orders: ordersArrivingOn(config, dateStr) };
+}
+
+function arrivalSourceNote(collected) {
+  if (collected.source === 'web') return '（从 Pedidos 网页抓取，含 PDA/手工单）';
+  const err = collected.webError ? `网页抓取失败：${collected.webError}，` : '';
+  return `（${err}用了本地记录，只含 bot 填过的单）`;
+}
+
 // Impresión automática de la lista de comprobación el día de llegada.
 async function maybePrintArrivalChecklist() {
   const due = arrivalScheduler.due(new Date());
   if (!due) return;
-  const delivered = await sendAndPrintChecklist(arrivalChatIds(), due.orders, due.dateStr);
+  const collected = await collectArrivalOrders(due.dateStr);
+  if (!collected.orders.length) {
+    // Hoy no llega nada: se marca para no volver a mirar en cada poll.
+    arrivalScheduler.markSent(due.key);
+    return;
+  }
+  const delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
   if (delivered) arrivalScheduler.markSent(due.key);
 }
 
 // /llegada — saca la lista de hoy a demanda (imprime + Telegram).
 async function handleArrivalChecklist(chatId) {
   const dateStr = todayString(config);
-  const orders = ordersArrivingOn(config, dateStr);
-  if (!orders.length) {
-    await telegram.sendMessage(chatId, `今天（${dateStr}）没有预计到货的订单。只有用 bot 填过的订单才会被记录（提前 ${config.arrival?.offsetDays ?? 2} 天下的单）。`);
+  await telegram.sendMessage(chatId, '正在查今天预计到货的订单…');
+  const collected = await collectArrivalOrders(dateStr);
+  if (!collected.orders.length) {
+    await telegram.sendMessage(chatId, `今天（${dateStr}）没有预计到货的订单${arrivalSourceNote(collected)}。到货日按下单日 +${config.arrival?.offsetDays ?? 2} 天算。`);
     return;
   }
-  await sendAndPrintChecklist([chatId], orders, dateStr);
+  await sendAndPrintChecklist([chatId], collected, dateStr);
 }
 
 // Manda la lista por Telegram y la imprime (si autoPrint). Devuelve true
 // si al menos un envío/impresión salió bien (para markSent).
-async function sendAndPrintChecklist(chatIds, orders, dateStr) {
+async function sendAndPrintChecklist(chatIds, collected, dateStr) {
+  const orders = collected.orders;
   const checklist = formatChecklist(orders, dateStr);
   const names = orders.map((o) => o.orderName).join('、');
   let delivered = false;
@@ -345,7 +375,7 @@ async function sendAndPrintChecklist(chatIds, orders, dateStr) {
     else printNote = `打印失败：${printed.error}`;
   }
 
-  const header = `今天预计到货：${names}（共 ${orders.length} 单）。${printNote}\n核对清单：`;
+  const header = `今天预计到货：${names}（共 ${orders.length} 单）${arrivalSourceNote(collected)}。${printNote}\n核对清单：`;
   for (const id of chatIds) {
     try {
       await telegram.sendMessage(id, `${header}\n\n${checklist}`);

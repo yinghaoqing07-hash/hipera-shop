@@ -70,7 +70,8 @@ export function formatChecklist(orders, dateStr) {
   lines.push('='.repeat(46));
   for (const order of orders) {
     lines.push('');
-    lines.push(`PEDIDO: ${order.orderName}   (pedido el ${prettyDate(order.orderDate)})`);
+    const estado = order.estado ? `, ${order.estado}` : '';
+    lines.push(`PEDIDO: ${order.orderName}   (pedido el ${prettyDate(order.orderDate)}${estado})`);
     lines.push('-'.repeat(46));
     for (const item of order.items || []) {
       const qty = item.quantity || '?';
@@ -132,7 +133,9 @@ export class ArrivalChecklistScheduler {
     this.sent = loadSentState(config.logsDir, logger);
   }
 
-  // Devuelve { key, dateStr, orders } si toca imprimir ahora; null si no.
+  // Devuelve { key, dateStr } si toca generar la lista ahora; null si no.
+  // Solo decide el CUÁNDO (hora + una vez al día); el llamador busca los
+  // pedidos (web o historial local) y marca la clave al terminar.
   due(now = new Date()) {
     const arrival = this.config.arrival || {};
     if (!arrival.enabled) return null;
@@ -145,13 +148,7 @@ export class ArrivalChecklistScheduler {
 
     const key = `llegada|${parts.date}`;
     if (this.sent[key]) return null;
-    const orders = ordersArrivingOn(this.config, parts.date);
-    if (!orders.length) {
-      // Nada que comprobar hoy: se marca para no re-evaluar cada poll.
-      this.markSent(key);
-      return null;
-    }
-    return { key, dateStr: parts.date, orders };
+    return { key, dateStr: parts.date };
   }
 
   markSent(key) {
@@ -203,7 +200,7 @@ function zonedParts(date, timeZone) {
 }
 
 // Suma días a 'YYYY-MM-DD' sin líos de zona (mediodía UTC evita saltos DST).
-function addDays(dateStr, days) {
+export function addDays(dateStr, days) {
   const base = new Date(`${dateStr}T12:00:00Z`);
   if (Number.isNaN(base.getTime())) return '';
   base.setUTCDate(base.getUTCDate() + days);

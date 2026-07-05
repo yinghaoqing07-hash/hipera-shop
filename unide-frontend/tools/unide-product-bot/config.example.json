@@ -24,7 +24,11 @@
     "offsetDays": 2,
     "printerName": "",
     "autoPrint": true,
-    "chatIds": []
+    "chatIds": [],
+    "excludeStates": [
+      "Alta"
+    ],
+    "maxOrders": 8
   },
   "desktop": {
     "enabled": false,

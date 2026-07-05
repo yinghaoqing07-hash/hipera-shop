@@ -53,7 +53,9 @@ const defaultConfig = {
     offsetDays: 2,             // pedido lunes → llega miércoles, etc.
     printerName: '',           // '' = impresora predeterminada de Windows
     autoPrint: true,           // false = solo Telegram, sin imprimir
-    chatIds: []                // vacío = los de ordering.reminderChatIds
+    chatIds: [],               // vacío = los de ordering.reminderChatIds
+    excludeStates: ['Alta'],   // estados que NO llegan (Alta = borrador)
+    maxOrders: 8               // tope de pedidos a abrir por día
   },
   desktop: {
     enabled: false,
