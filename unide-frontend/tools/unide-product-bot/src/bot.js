@@ -2,7 +2,8 @@
 import path from 'node:path';
 import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
-import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
+import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
+import { parseFruitCommandArg, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
@@ -74,7 +75,8 @@ async function handleUpdate(update) {
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
-  if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await telegram.sendMessage(chatId, formatFruitPriceFlow()); return; }
+  if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
+  if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -116,6 +118,7 @@ async function handleCallback(callback) {
   if (data.startsWith('repeat:')) { const id = data.slice(7); const session = sessions.get(id); await telegram.answerCallbackQuery(callback.id, '重新查询'); await sendProductResult(chatId, session?.item || makeRepeatItem(id), 0, 1); return; }
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
   if (data.startsWith('np:')) { await handleNamePick(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('fp:')) { await handleFruitPick(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
@@ -206,6 +209,92 @@ async function handleNamePick(chatId, callbackId, payload) {
   const idNote = chosen.ean ? `EAN ${chosen.ean}` : (chosen.code ? `código ${chosen.code}` : '按名字填入');
   await telegram.sendMessage(chatId, `第 ${idx + 1} 行 → ${chosen.name || chosen.text}（${idNote}）`);
   await resolveNextNameLine(chatId, id);
+}
+
+// /precio_fruta [nombre] [precio] — cambio de precio de fruta/verdura.
+// Sin argumentos: recuerda el flujo manual. Con nombre: resuelve el código
+// (diccionario aprendido → tablas locales → botones para elegir). Con
+// nombre + precio: además lanza el flujo de escritorio existente (buscar en
+// Artículos → captura → 确认处理 → 确认写入), que ya pide confirmación en
+// cada paso arriesgado. La impresión de la etiqueta queda manual.
+async function handleFruitPrice(chatId, text) {
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
+  if (!arg) {
+    await telegram.sendMessage(chatId, `${formatFruitPriceFlow()}\n\n偷懒用法：/precio_fruta melocotón 2,99 → 我帮你查 código 并在桌面 Artículos 里填好价格（写入前都要你确认）。`);
+    return;
+  }
+  const { name, priceRaw } = parseFruitCommandArg(arg);
+  const resolved = resolveFruitCode(config, storeIndex, supplierIndex, name);
+  if (resolved.status === 'found') {
+    await startFruitPriceChange(chatId, name, resolved, priceRaw);
+    return;
+  }
+  if (resolved.status === 'candidates') {
+    const id = saveSession({ fruitPick: { name, priceRaw, candidates: resolved.candidates } });
+    const list = resolved.candidates.map((c, i) => `[${i + 1}] ${c.articulo}（${c.codigo}）`).join('\n\n');
+    const rows = [];
+    let row = [];
+    for (let i = 0; i < resolved.candidates.length; i += 1) {
+      row.push({ text: `${i + 1}`, callback_data: `fp:${id}:${i}` });
+      if (row.length === 5) { rows.push(row); row = []; }
+    }
+    if (row.length) rows.push(row);
+    rows.push([{ text: '取消', callback_data: `cancel:${id}` }]);
+    await telegram.sendMessage(chatId, `「${name}」在本地表里有 ${resolved.candidates.length} 个可能，点对的那个（我会记住，下次不再问）：\n\n${list}`, { reply_markup: { inline_keyboard: rows } });
+    return;
+  }
+  await telegram.sendMessage(chatId, `本地表里没搜到「${name}」。如果你在 Diseño Pantalla 的 Acción 页看到了它的 código，可以登记一次：\n/fruta_add ${name} 12345\n以后就能直接 /precio_fruta ${name} 2,99 了。`);
+}
+
+async function handleFruitPick(chatId, callbackId, payload) {
+  const [id, idxStr] = payload.split(':');
+  const session = sessions.get(id);
+  const pick = session?.fruitPick;
+  const chosen = pick?.candidates?.[Number(idxStr)];
+  if (!chosen) { await telegram.answerCallbackQuery(callbackId, '选项已失效'); return; }
+  await telegram.answerCallbackQuery(callbackId, `已选 ${chosen.codigo}`);
+  saveFruitEntry(config, pick.name, chosen.codigo, chosen.articulo, logger);
+  await telegram.sendMessage(chatId, `记住了：「${pick.name}」= ${chosen.articulo}（código ${chosen.codigo}）。`);
+  await startFruitPriceChange(chatId, pick.name, { codigo: chosen.codigo, articulo: chosen.articulo }, pick.priceRaw);
+}
+
+async function startFruitPriceChange(chatId, name, resolved, priceRaw) {
+  if (!priceRaw) {
+    await telegram.sendMessage(chatId, `「${name}」的 código 是 ${resolved.codigo}${resolved.articulo ? `（${resolved.articulo}）` : ''}。\n要我帮你改价的话发：/precio_fruta ${name} 2,99`);
+    return;
+  }
+  if (!config.desktop?.enabled) {
+    await telegram.sendMessage(chatId, `código ${resolved.codigo}，新价格 ${priceRaw} €。桌面自动化没启用（desktop.enabled=false），请手动去 Artículos 改。`);
+    return;
+  }
+  await telegram.sendMessage(chatId, `「${name}」→ código ${resolved.codigo}，新价格 ${priceRaw} €。正在桌面 Artículos 里搜索…`);
+  const item = {
+    raw: `fruta ${name} ${priceRaw}`,
+    codigo: resolved.codigo,
+    ean: '',
+    nombre: resolved.articulo || name,
+    precio: parsePrice(priceRaw),
+    margen: { mode: 'missing', raw: '' },
+    desbloquear: false,
+    etiqueta: true,
+    nota: `precio fruta ${name}`,
+    labelReminder: true
+  };
+  await sendProductResult(chatId, item, 0, 1);
+}
+
+// /fruta_add <nombre> <codigo> — registrar a mano un nombre → código.
+async function handleFruitAdd(chatId, text) {
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
+  const match = arg.match(/^(.*\S)\s+(\d{4,})$/);
+  if (!match) {
+    await telegram.sendMessage(chatId, '格式：/fruta_add 名字 código\n例如：/fruta_add melocotón rojo 123456');
+    return;
+  }
+  const ok = saveFruitEntry(config, match[1], match[2], match[1], logger);
+  await telegram.sendMessage(chatId, ok
+    ? `记住了：「${match[1]}」= código ${match[2]}。以后可以直接 /precio_fruta ${match[1]} 2,99`
+    : '没存上（写文件失败），再试一次。');
 }
 
 async function handleOrderApply(chatId, callbackId, id) {
@@ -460,6 +549,17 @@ async function handleApply(chatId, callbackId, id) {
     ? '写入：已执行。请看截图确认 PC Medio、PC Último、P.defecto、P.TPV、Bloq.Venta 和保存状态。'
     : `写入失败：\n${result.error || result.reason || '未知错误'}`;
   await sendWithOptionalScreenshot(chatId, result, text);
+  // Cambio de precio de fruta: recordar los pasos MANUALES de la etiqueta
+  // (imprimir es acción de alto riesgo; no se automatiza).
+  if (result.status === 'ok' && session.item?.labelReminder) {
+    await telegram.sendMessage(chatId, [
+      '接下来打印新价签（手动）：',
+      '1. 关闭商品窗口 → 会弹出 Etiquetas 页面',
+      '2. 点 Etiq. Especiales',
+      '3. 勾选 Imprimir；Tipo Etiqueta 全改成 Tipo Display 8 A4 vertical',
+      '4. 点 Imprimir'
+    ].join('\n'));
+  }
 }
 
 async function sendProductResult(chatId, item, index, total) {

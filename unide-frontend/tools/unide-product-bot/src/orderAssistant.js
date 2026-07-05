@@ -331,7 +331,7 @@ function formatOrderHelp() {
     '/pedido fruta  果蔬叫货流程',
     '/pedido pda    周日 PDA 检查（含扫货后完整流程）',
     '/llegada       打印今天的到货核对清单',
-    '/precio_fruta  水果蔬菜换价格流程',
+    '/precio_fruta melocotón 2,99  自动改水果价格（不带参数=看手动流程）',
     '',
     '让程序填订单：',
     '/pedido_nuevo',
