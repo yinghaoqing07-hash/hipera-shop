@@ -108,8 +108,11 @@ export function formatChecklist(orders, dateStr) {
 
 // Imprime texto en la impresora del PC (Windows): se escribe a un archivo
 // temporal UTF-8 con BOM y se manda con Out-Printer (impresora
-// predeterminada, o la de config.arrival.printerName). En otros sistemas
-// se omite con aviso (el texto siempre llega también por Telegram).
+// predeterminada, o la de config.arrival.printerName). Antes se comprueba
+// si la impresora está APAGADA/desconectada (WorkOffline): el trabajo se
+// encola igual —Windows lo imprime solo al encenderla—, pero se devuelve
+// queuedOffline=true para avisar por Telegram de que hay que encenderla.
+// En otros sistemas se omite con aviso.
 export function printText(config, text, logger) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
@@ -123,15 +126,27 @@ export function printText(config, text, logger) {
       const file = path.join(dir, `llegada-${Date.now()}.txt`);
       fs.writeFileSync(file, '\uFEFF' + text, 'utf8'); // BOM explícito: PowerShell lee bien UTF-8
       const printerName = String(config.arrival?.printerName || '').trim();
-      const nameArg = printerName ? ` -Name '${printerName.replace(/'/g, "''")}'` : '';
-      const command = `Get-Content -LiteralPath '${file.replace(/'/g, "''")}' -Encoding UTF8 | Out-Printer${nameArg}`;
+      const psName = printerName.replace(/'/g, "''").replace(/"/g, '');
+      const nameArg = printerName ? ` -Name '${psName}'` : '';
+      const getPrinter = printerName
+        ? `Get-CimInstance Win32_Printer -Filter "Name='${psName}'"`
+        : 'Get-CimInstance Win32_Printer -Filter "Default=TRUE"';
+      // Primero el estado (marcador en stdout), después la impresión.
+      const command = [
+        `$p = ${getPrinter} | Select-Object -First 1`,
+        "if ($p -and $p.WorkOffline) { Write-Output 'PRINTER_OFFLINE' } else { Write-Output 'PRINTER_ONLINE' }",
+        `Get-Content -LiteralPath '${file.replace(/'/g, "''")}' -Encoding UTF8 | Out-Printer${nameArg}`
+      ].join('; ');
       const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true });
       let stderr = '';
+      let stdout = '';
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
       child.stderr.on('data', (chunk) => { stderr += chunk; });
       child.on('error', (error) => resolve({ ok: false, error: error.message }));
       child.on('close', (code) => {
-        if (code === 0) resolve({ ok: true });
-        else resolve({ ok: false, error: stderr.trim() || `powershell salió con código ${code}` });
+        const queuedOffline = /PRINTER_OFFLINE/.test(stdout);
+        if (code === 0) resolve({ ok: true, queuedOffline });
+        else resolve({ ok: false, queuedOffline, error: stderr.trim() || `powershell salió con código ${code}` });
       });
     } catch (error) {
       resolve({ ok: false, error: error.message });

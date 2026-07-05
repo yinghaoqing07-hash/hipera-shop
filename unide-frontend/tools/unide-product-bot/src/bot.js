@@ -369,26 +369,37 @@ async function handleArrivalChecklist(chatId, text = '') {
   await sendAndPrintChecklist([chatId], collected, dateStr);
 }
 
-// Manda la lista por Telegram y la imprime (si autoPrint). Devuelve true
-// si al menos un envío/impresión salió bien (para markSent).
+// Imprime la lista y manda por Telegram solo una CONFIRMACIÓN corta (la
+// lista entera en el chat era demasiado larga). El texto completo solo se
+// manda como respaldo si la impresión no salió (no-Windows, error o
+// autoPrint desactivado). Devuelve true si algo llegó (para markSent).
 async function sendAndPrintChecklist(chatIds, collected, dateStr) {
   const orders = collected.orders;
   const checklist = formatChecklist(orders, dateStr);
-  const names = orders.map((o) => o.orderName).join('、');
+  const names = orders.map((o) => `${o.orderName}（${o.items?.length ?? 0} 行）`).join('、');
+  const summary = `到货核对清单：${names}，共 ${orders.length} 单${arrivalSourceNote(collected)}。`;
   let delivered = false;
 
-  let printNote = '';
+  let text;
   if (config.arrival?.autoPrint !== false) {
     const printed = await printText(config, checklist, logger);
-    if (printed.ok) { printNote = '已发到打印机。'; delivered = true; }
-    else if (printed.skipped) printNote = '这台机器不能打印（非 Windows），只发文字版。';
-    else printNote = `打印失败：${printed.error}`;
+    if (printed.ok && !printed.queuedOffline) {
+      delivered = true;
+      text = `${summary}\n🖨 已打印，去打印机拿纸核对就行。`;
+    } else if (printed.ok && printed.queuedOffline) {
+      delivered = true;
+      text = `${summary}\n⚠️ 打印机好像没开机。清单已排进打印队列，开一下打印机就会自动打出来。`;
+    } else {
+      const reason = printed.skipped ? '这台机器不能打印（非 Windows）' : `打印失败：${printed.error}`;
+      text = `${summary}\n${reason}，先发文字版：\n\n${checklist}`;
+    }
+  } else {
+    text = `${summary}\n（自动打印已关闭）\n\n${checklist}`;
   }
 
-  const header = `今天预计到货：${names}（共 ${orders.length} 单）${arrivalSourceNote(collected)}。${printNote}\n核对清单：`;
   for (const id of chatIds) {
     try {
-      await telegram.sendMessage(id, `${header}\n\n${checklist}`);
+      await telegram.sendMessage(id, text);
       delivered = true;
     } catch (error) {
       logger.error('arrival checklist send failed', { chatId: id, error: error.message });
