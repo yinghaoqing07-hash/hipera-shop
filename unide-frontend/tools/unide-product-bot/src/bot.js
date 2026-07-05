@@ -6,6 +6,7 @@ import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions } from './webOrder.js';
+import { ArrivalChecklistScheduler, formatChecklist, ordersArrivingOn, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
@@ -37,6 +38,7 @@ if (process.argv.includes('--help')) { console.log('Usage: node src/bot.js --con
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegram = new TelegramClient(token);
 const orderReminderScheduler = new OrderReminderScheduler(config, logger);
+const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
 let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length });
@@ -46,6 +48,7 @@ while (true) {
     const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
     for (const update of updates) { offset = update.update_id + 1; await handleUpdate(update); }
     await maybeSendOrderReminder();
+    await maybePrintArrivalChecklist();
   } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
 }
 
@@ -62,6 +65,7 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
+  if (text === '/llegada' || text === '/llegada_hoy') { await handleArrivalChecklist(chatId); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -208,6 +212,9 @@ async function handleOrderApply(chatId, callbackId, id) {
   // navegador (DOM) en vez de la app de escritorio por coordenadas.
   if (config.webOrder?.enabled) {
     const result = await applyOrderWeb(session.orderDraft, config, logger);
+    // Registrar el pedido rellenado para la lista de comprobación del día
+    // de llegada (solo si todas las líneas entraron bien).
+    if (result.ok) recordFilledOrder(config, session.orderDraft, logger);
     const text = result.ok
       ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；程序没有点 Guardar，也没有点 Enviar Pedido。')
       : `订单填入失败（${result.stage || '?'}）：\n${result.error}`;
@@ -302,6 +309,60 @@ async function maybeSendOrderReminder() {
     }
   }
   if (sent > 0) orderReminderScheduler.markSent(due.key);
+}
+
+// Impresión automática de la lista de comprobación el día de llegada.
+async function maybePrintArrivalChecklist() {
+  const due = arrivalScheduler.due(new Date());
+  if (!due) return;
+  const delivered = await sendAndPrintChecklist(arrivalChatIds(), due.orders, due.dateStr);
+  if (delivered) arrivalScheduler.markSent(due.key);
+}
+
+// /llegada — saca la lista de hoy a demanda (imprime + Telegram).
+async function handleArrivalChecklist(chatId) {
+  const dateStr = todayString(config);
+  const orders = ordersArrivingOn(config, dateStr);
+  if (!orders.length) {
+    await telegram.sendMessage(chatId, `今天（${dateStr}）没有预计到货的订单。只有用 bot 填过的订单才会被记录（提前 ${config.arrival?.offsetDays ?? 2} 天下的单）。`);
+    return;
+  }
+  await sendAndPrintChecklist([chatId], orders, dateStr);
+}
+
+// Manda la lista por Telegram y la imprime (si autoPrint). Devuelve true
+// si al menos un envío/impresión salió bien (para markSent).
+async function sendAndPrintChecklist(chatIds, orders, dateStr) {
+  const checklist = formatChecklist(orders, dateStr);
+  const names = orders.map((o) => o.orderName).join('、');
+  let delivered = false;
+
+  let printNote = '';
+  if (config.arrival?.autoPrint !== false) {
+    const printed = await printText(config, checklist, logger);
+    if (printed.ok) { printNote = '已发到打印机。'; delivered = true; }
+    else if (printed.skipped) printNote = '这台机器不能打印（非 Windows），只发文字版。';
+    else printNote = `打印失败：${printed.error}`;
+  }
+
+  const header = `今天预计到货：${names}（共 ${orders.length} 单）。${printNote}\n核对清单：`;
+  for (const id of chatIds) {
+    try {
+      await telegram.sendMessage(id, `${header}\n\n${checklist}`);
+      delivered = true;
+    } catch (error) {
+      logger.error('arrival checklist send failed', { chatId: id, error: error.message });
+    }
+  }
+  return delivered;
+}
+
+function arrivalChatIds() {
+  const configured = config.arrival?.chatIds || [];
+  const fallback = config.ordering?.reminderChatIds || [];
+  const last = config.telegram?.allowedChatIds || [];
+  const ids = configured.length ? configured : (fallback.length ? fallback : last);
+  return ids.map(String).filter(Boolean);
 }
 
 async function handleClear(chatId, callbackId) {

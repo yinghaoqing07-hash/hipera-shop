@@ -302,6 +302,7 @@ function formatOrderHelp() {
     '/pedido carne  肉类叫货流程',
     '/pedido fruta  果蔬叫货流程',
     '/pedido pda    周日 PDA 检查',
+    '/llegada       打印今天的到货核对清单',
     '',
     '让程序填订单：',
     '/pedido_nuevo',

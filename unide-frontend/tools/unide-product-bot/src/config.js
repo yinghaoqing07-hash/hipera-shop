@@ -41,6 +41,20 @@ const defaultConfig = {
     reminderWindowMinutes: 180,
     reminderChatIds: []
   },
+  // Lista de comprobación de LLEGADA: los pedidos que el bot rellena se
+  // registran en logs/orders-history.json; el día estimado de llegada
+  // (fecha del pedido + offsetDays) se imprime una lista con casillas en
+  // la impresora del PC y se manda también por Telegram. /llegada la
+  // saca a demanda.
+  arrival: {
+    enabled: true,
+    printTime: '08:30',        // hora local (Europe/Madrid) de impresión
+    windowMinutes: 180,        // margen si el PC estaba apagado a esa hora
+    offsetDays: 2,             // pedido lunes → llega miércoles, etc.
+    printerName: '',           // '' = impresora predeterminada de Windows
+    autoPrint: true,           // false = solo Telegram, sin imprimir
+    chatIds: []                // vacío = los de ordering.reminderChatIds
+  },
   desktop: {
     enabled: false,
     script: 'desktop/unideges-search.ps1',
