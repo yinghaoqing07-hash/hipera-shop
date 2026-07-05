@@ -91,7 +91,10 @@ const defaultConfig = {
     pageNavigationTimeoutMs: 20000, // espera MÁX a que cargue la lista
     pedidoListUrl: '',         // vacío = derivar del origen + /OrderT_ListView
     // Búsqueda por nombre: máximo de opciones a devolver para que elijas.
-    maxSearchOptions: 20
+    maxSearchOptions: 20,
+    // Conexión CDP: margen por si la pestaña estaba dormida y reintentos.
+    protocolTimeoutMs: 90000,
+    connectRetries: 2
   }
 };
 
