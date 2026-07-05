@@ -273,6 +273,21 @@ nombre: CARNE 0307
 - 价格没变或货架已正确，可以不打。
 - 真的要换价签时再打印。
 
+### 水果/蔬菜换价格完整流程（2026-07 店主口述确认）
+
+1. 在桌面打开 `Diseño Pantalla Unide`。
+2. 进 `Frutas` 或 `Verduras` 面板。
+3. 右键要换价格的水果/蔬菜，点 `Editar`。
+4. 进 `Acción` 页，抄下它的 `código`。
+5. 拿着 código 去 UnideGes 的 `Artículos` 搜这个 código，改价格。
+6. 改完点关闭，会自动弹出跳转 `Etiquetas` 页面打印新价签。
+7. 在标签页面点 `Etiq. Especiales`。
+8. 勾选 `Imprimir`；`Tipo Etiqueta` 全部改成 `Tipo Display 8 A4 vertical`。
+9. 最后点 `Imprimir` 打印。
+
+注意：水果/蔬菜的价格入口在 Diseño Pantalla（触摸屏面板），不能只在
+Artículos 里搜名字——先从面板拿准确的 código 再去改，避免改错品种。
+
 ## 商品资料判断
 
 数据源优先级：

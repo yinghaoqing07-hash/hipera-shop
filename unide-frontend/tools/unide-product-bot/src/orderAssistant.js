@@ -254,6 +254,27 @@ function formatProduce(parts) {
   ].join('\n');
 }
 
+// /precio_fruta — flujo completo para cambiar el precio de una fruta o
+// verdura (dictado por el dueño; también está en el manual). Es solo un
+// recordatorio de pasos manuales: el bot no toca precios.
+export function formatFruitPriceFlow() {
+  return [
+    '水果/蔬菜换价格流程：',
+    '',
+    '1. 桌面打开 Diseño Pantalla Unide。',
+    '2. 进 Frutas 或 Verduras 面板。',
+    '3. 右键要换价的水果/蔬菜 → Editar。',
+    '4. 进 Acción 页，抄下它的 código。',
+    '5. 去 UnideGes 的 Artículos 搜这个 código，改价格。',
+    '6. 改完点关闭 → 自动弹出 Etiquetas 页面打印新价签。',
+    '7. 点 Etiq. Especiales。',
+    '8. 勾选 Imprimir；Tipo Etiqueta 全改成 Tipo Display 8 A4 vertical。',
+    '9. 点 Imprimir 打印。',
+    '',
+    '注意：一定先从面板拿 código 再去 Artículos 改，避免改错品种。'
+  ].join('\n');
+}
+
 function formatPda(parts) {
   return [
     `今天是${DAY_NAMES[parts.day]}：PDA / 自动导入订单检查。重点是 11:00 前确认。`,
@@ -308,8 +329,9 @@ function formatOrderHelp() {
     '/pedido        看今天该做什么',
     '/pedido carne  肉类叫货流程',
     '/pedido fruta  果蔬叫货流程',
-    '/pedido pda    周日 PDA 检查',
+    '/pedido pda    周日 PDA 检查（含扫货后完整流程）',
     '/llegada       打印今天的到货核对清单',
+    '/precio_fruta  水果蔬菜换价格流程',
     '',
     '让程序填订单：',
     '/pedido_nuevo',
