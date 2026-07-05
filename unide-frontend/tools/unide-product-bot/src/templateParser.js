@@ -128,7 +128,7 @@ function onlyDigits(value) {
   return String(value || '').replace(/[^\d]/g, '');
 }
 
-function parsePrice(value) {
+export function parsePrice(value) {
   const raw = String(value || '').trim();
   if (!raw || raw === '-') return { mode: 'missing', raw };
   if (/^auto$/i.test(raw)) return { mode: 'auto', raw };

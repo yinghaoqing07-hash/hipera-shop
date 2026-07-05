@@ -288,6 +288,16 @@ nombre: CARNE 0307
 注意：水果/蔬菜的价格入口在 Diseño Pantalla（触摸屏面板），不能只在
 Artículos 里搜名字——先从面板拿准确的 código 再去改，避免改错品种。
 
+半自动化（2026-07 起，bot 命令 /precio_fruta）：
+
+- `/precio_fruta melocotón 2,99`：bot 查 código（本地表搜索 + 你点选确认，
+  选过一次就记住存进 data/frutas-codigos.json），然后走桌面 Artículos 的
+  坐标流水线把价格填好，截图给你，「确认写入」才真正写。
+- 第 6-9 步（Etiquetas 打印）保持手动，写入成功后 bot 会把打印步骤发给你。
+- `/fruta_add 名字 código`：手动登记一个面板 código（本地表搜不到时用）。
+- 水果/蔬菜可以走这个自动化；当初"改价自动化暂停"针对的是资料不一致的
+  普通商品，不适用于果蔬。
+
 ## 商品资料判断
 
 数据源优先级：
