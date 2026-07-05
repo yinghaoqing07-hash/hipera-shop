@@ -258,13 +258,20 @@ function formatPda(parts) {
   return [
     `今天是${DAY_NAMES[parts.day]}：PDA / 自动导入订单检查。重点是 11:00 前确认。`,
     '',
+    'PDA 扫完货之后的完整流程：',
+    '1. PDA 上点 Generar fichero（生成文件）。',
+    '2. 把 PDA 和电脑接上（底座/接线）。',
+    '3. 电脑上打开 COMPC 程序（把 PDA 文件传到电脑）。',
+    '4. 网页 Gestión Tiendas > Pedidos，点工具栏 Cargar Pedido。',
+    '5. 核对加载进来的订单：Estado、重量、金额、行数。',
+    '6. 没问题再人工点 Enviar Pedido。',
+    '顺序不能乱：没点 Generar fichero 或没开 COMPC，Cargar Pedido 会加载不到东西。',
+    '',
     '检查：',
     '- Pedidos 列表有没有最新 Pedido importado desde PDA Nro.',
     '- 通常可能有两张，一大一小，别漏一张。',
     '- Estado、Peso Total、Importe Total 有没有明显异常。',
-    '- 如果没生成，先查 PDA/导入流程，不要急着手工补整单。',
-    '',
-    '入口：Gestión Tiendas > Pedidos。'
+    '- 如果没生成，先查 PDA/导入流程，不要急着手工补整单。'
   ].join('\n');
 }
 

@@ -70,6 +70,19 @@ PDA：
 - 检查状态、重量、金额是否明显异常。
 - 如果没有生成，不要急着手工补整单，先确认 PDA/导入流程。
 
+PDA 扫货后的完整操作流程（2026-07 店主口述确认）：
+
+1. 在 PDA 上扫完所有要叫的商品。
+2. 在 PDA 上点 `Generar fichero`（生成文件）。
+3. 把 PDA 和电脑连接（放回底座/接线）。
+4. 在电脑上打开 `COMPC` 程序（负责把 PDA 里的文件传到电脑）。
+5. 打开网页 `Gestión Tiendas > Pedidos`，点工具栏的 `Cargar Pedido`（加载订单）。
+6. 订单加载进来后照常核对：状态、重量、金额、行数。
+7. 确认无误后人工点 `Enviar Pedido` 发出。
+
+注意：顺序不能乱——没点 `Generar fichero` 就连电脑，或者没开 `COMPC`
+就去点 `Cargar Pedido`，都会加载不到东西。
+
 EXTRA / HUEVOS：
 
 - `EXTRA` 多半是临时补单，不当作规律。
