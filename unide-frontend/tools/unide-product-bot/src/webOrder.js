@@ -328,6 +328,182 @@ export async function searchArticleOptions(config, name, logger) {
   }
 }
 
+// --- 4) LLEGADA: leer pedidos de la lista y sus líneas (solo lectura) --
+// Para la lista de comprobación del día de llegada se leen los pedidos
+// REALES de la web (así entran también los hechos a mano o importados
+// desde la PDA, no solo los que rellenó el bot). Todo es de solo lectura:
+// se abre cada pedido con un clic en su fila, se copian las líneas y se
+// vuelve a la lista con page.goto. No se pulsa Nuevo/Guardar/Enviar.
+//   creationDate: 'YYYY-MM-DD' — se buscan pedidos CREADOS ese día (los
+//   que llegan hoy = creados hace offsetDays).
+export async function fetchArrivingOrders(config, creationDate, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const timeout = Number(w.pageNavigationTimeoutMs) || 20000;
+
+    const rows = await waitForListRows(page, timeout);
+    if (!rows.length) {
+      return { ok: true, orders: [], totalListed: 0, matched: 0 };
+    }
+
+    const excludeStates = (config.arrival?.excludeStates || ['Alta']).map((s) => String(s).toLowerCase());
+    const matches = rows.filter((r) => r.fechaIso === creationDate
+      && !excludeStates.includes(String(r.estado || '').toLowerCase()));
+    const cap = Number(config.arrival?.maxOrders) || 8;
+    const selected = matches.slice(0, cap);
+
+    const orders = [];
+    for (const target of selected) {
+      const openedDetail = await openOrderDetailByRow(page, target, timeout);
+      if (!openedDetail) {
+        logger?.warn('could not open order detail', { id: target.id, nombre: target.nombre });
+        await ensurePedidoPage(page, config);
+        continue;
+      }
+      await sleep(Number(w.formRenderMs) || 2800);
+      const items = await scrapeOrderLines(page);
+      orders.push({ orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items });
+      // Volver a la lista (recarga dura; no hay nada que guardar).
+      await ensurePedidoPage(page, config);
+    }
+    logger?.info('arriving orders fetched', { creationDate, listed: rows.length, matched: matches.length, scraped: orders.length });
+    return { ok: true, orders, totalListed: rows.length, matched: matches.length };
+  } catch (error) {
+    logger?.error('fetch arriving orders failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'fetchLlegada', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+// Espera (sondeando) a que la lista de Pedidos tenga filas y las devuelve
+// como { index, id, nombre, fecha, fechaIso, estado }. Se localiza la
+// tabla por sus CABECERAS (no por posición), así aguanta cambios de orden
+// de columnas.
+async function waitForListRows(page, timeoutMs) {
+  const start = Date.now();
+  for (;;) {
+    const rows = await page.evaluate(() => {
+      const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+      for (const table of tables) {
+        const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+        const idxNombre = headers.findIndex((h) => /^nombre del pedido$/i.test(h));
+        if (idxNombre === -1) continue;
+        const idxId = headers.findIndex((h) => /^id$/i.test(h));
+        const idxFecha = headers.findIndex((h) => /fecha de creaci/i.test(h));
+        const idxEstado = headers.findIndex((h) => /estado de pedido/i.test(h));
+        const out = [];
+        const trs = Array.from(table.querySelectorAll('tr[role="row"]'));
+        for (let i = 0; i < trs.length; i += 1) {
+          const cells = Array.from(trs[i].querySelectorAll('td')).map((td) => clean(td.innerText));
+          if (!cells.length || !cells.some(Boolean)) continue;
+          const nombre = cells[idxNombre] || '';
+          if (!nombre) continue;
+          out.push({
+            index: i,
+            id: idxId >= 0 ? (cells[idxId] || '') : '',
+            nombre,
+            fecha: idxFecha >= 0 ? (cells[idxFecha] || '') : '',
+            estado: idxEstado >= 0 ? (cells[idxEstado] || '') : ''
+          });
+        }
+        return out;
+      }
+      return [];
+    });
+    if (rows.length) {
+      for (const row of rows) row.fechaIso = spanishDateToIso(row.fecha);
+      return rows;
+    }
+    if (Date.now() - start >= timeoutMs) return [];
+    await sleep(300);
+  }
+}
+
+// '24/6/2026' (con o sin hora detrás) → '2026-06-24'.
+function spanishDateToIso(value) {
+  const match = String(value || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!match) return '';
+  const [, d, m, y] = match;
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+// Abre el detalle de un pedido pulsando la celda de su nombre en la fila
+// que coincide en nombre (y, si hay, en Id). XAF abre el DetailView con un
+// clic simple en la celda; si no navega, se reintenta con doble clic.
+async function openOrderDetailByRow(page, target, timeoutMs) {
+  for (const clickCount of [1, 2]) {
+    const handle = await page.evaluateHandle((wanted) => {
+      const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const trs = Array.from(document.querySelectorAll('tr[role="row"]')).filter(isVisible);
+      for (const tr of trs) {
+        const texts = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!texts.includes(wanted.nombre)) continue;
+        if (wanted.id && !texts.includes(wanted.id)) continue;
+        // La celda del nombre (evitando el enlace de la tienda, que
+        // navegaría a Store_DetailView).
+        const cell = Array.from(tr.querySelectorAll('td')).find((td) => clean(td.innerText) === wanted.nombre && !td.querySelector('a'));
+        return cell || tr;
+      }
+      return null;
+    }, { nombre: target.nombre, id: target.id });
+    const el = handle.asElement();
+    if (!el) { await handle.dispose(); return false; }
+    await el.click({ clickCount });
+    await handle.dispose();
+
+    const deadline = Date.now() + Math.min(6000, timeoutMs);
+    while (Date.now() < deadline) {
+      try {
+        const state = await getPedidoPageState(page);
+        if (state.isPedidoDetail) return true;
+      } catch { /* navegación en curso */ }
+      await sleep(250);
+    }
+  }
+  return false;
+}
+
+// Copia las líneas del pedido abierto (grid con cabecera "Código Unide").
+// Devuelve [{ code, nombre, quantity }] con quantity = Cajas.
+async function scrapeOrderLines(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxArticulo = headers.findIndex((h) => /^art[ií]culo$/i.test(h));
+      const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+      const out = [];
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const code = cells[idxCodigo] || '';
+        const nombre = idxArticulo >= 0 ? (cells[idxArticulo] || '') : '';
+        if (!code && !nombre) continue;
+        if (cells.some((c) => /^suma:/i.test(c))) continue; // fila de totales
+        out.push({
+          code,
+          nombre,
+          quantity: idxCajas >= 0 ? (cells[idxCajas] || '') : ''
+        });
+      }
+      return out;
+    }
+    return [];
+  });
+}
+
 // Lee las opciones VISIBLES del desplegable abierto y las DESGLOSA para que
 // la lista que ve el usuario sea legible:
 //   name → el nombre del producto (lo que va antes del primer número largo).
@@ -748,4 +924,7 @@ async function captureEditDom(page, config) {
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 // Solo para pruebas: helpers internos del rellenado por navegador.
-export const __test = { searchAndSelect, clearArticleEditor, selectDropdownRowByCode, focusArticleEditor };
+export const __test = {
+  searchAndSelect, clearArticleEditor, selectDropdownRowByCode, focusArticleEditor,
+  waitForListRows, scrapeOrderLines, openOrderDetailByRow, spanishDateToIso
+};
