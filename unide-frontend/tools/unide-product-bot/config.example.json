@@ -30,6 +30,18 @@
     ],
     "maxOrders": 8
   },
+  "promotions": {
+    "listUrl": "",
+    "candidatePaths": [],
+    "maxPreview": 25,
+    "maxPages": 50,
+    "maxDetailPromotions": 500,
+    "detailOpenMs": 400,
+    "pageTurnMs": 1200,
+    "detailPageTurnMs": 1600,
+    "detailRowsTimeoutMs": 9000,
+    "outputDir": "promotions"
+  },
   "desktop": {
     "enabled": false,
     "script": "desktop/unideges-search.ps1",

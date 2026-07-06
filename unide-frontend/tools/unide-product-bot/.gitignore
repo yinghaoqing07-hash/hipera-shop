@@ -9,3 +9,6 @@ updates/
 # Volcado de diagnóstico de la web de Pedidos (/pedido_web_test)
 order-page-dump.html
 *-dump.html
+
+# CSV de /promociones
+promotions/

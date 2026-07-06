@@ -57,6 +57,23 @@ const defaultConfig = {
     excludeStates: ['Alta'],   // estados que NO llegan (Alta = borrador)
     maxOrders: 8               // tope de pedidos a abrir por día
   },
+  // /promociones: lee la lista de Promociones de UnideGes, filtra las NO
+  // caducadas (por fecha Hasta/Fin) y abre cada una para sacar sus
+  // artículos; escribe un CSV y manda un resumen. Solo lectura: nunca
+  // guarda ni modifica. Los tiempos son configurables por si la red va
+  // lenta; los que preceden a una espera con sondeo se dejan cortos.
+  promotions: {
+    listUrl: '',               // vacío = probar menú + URLs candidatas
+    candidatePaths: [],        // vacío = lista interna de rutas *_ListView
+    maxPreview: 25,            // filas de muestra en el mensaje (el CSV va completo)
+    maxPages: 50,              // tope de páginas de la lista
+    maxDetailPromotions: 500,  // tope de promociones que se abren al detalle
+    detailOpenMs: 400,         // gracia tras abrir el detalle (luego se sondea)
+    pageTurnMs: 1200,          // entre páginas de la lista
+    detailPageTurnMs: 1600,    // entre páginas del detalle (evita releer la página vieja)
+    detailRowsTimeoutMs: 9000, // espera MÁX a que aparezcan las filas del detalle
+    outputDir: 'promotions'    // carpeta del CSV (junto al bot)
+  },
   desktop: {
     enabled: false,
     script: 'desktop/unideges-search.ps1',
