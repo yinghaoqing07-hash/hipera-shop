@@ -42,6 +42,9 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
     const details = await scrapeActivePromotionDetails(page, config, active, listUrl, logger);
     const outputFile = writePromotionItemsCsv(config, details.items, active, refIso);
     const screenshotPath = await screenshot(page, config, 'items');
+    // Si no salió ningún artículo, adjuntar un par de volcados de detalle
+    // para poder afinar los selectores del grid de artículos.
+    const detailDumpFiles = details.failures.map((f) => f.dumpFile).filter(Boolean).slice(0, 2);
 
     logger?.info('promotions fetched', {
       total: rows.length,
@@ -62,6 +65,7 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
       expired: enriched.length - active.length,
       unknownEndDate: enriched.filter((row) => !row.endIso).length,
       outputFile,
+      detailDumpFiles,
       screenshot: screenshotPath,
       pageInfo
     };
@@ -578,8 +582,12 @@ async function scrapePromotionDetailItems(page, promo) {
   return out;
 }
 
-function enrichPromotionRow(fields, index, referenceDateIso) {
-  const entries = Object.entries(fields || {});
+function enrichPromotionRow(row, index, referenceDateIso) {
+  // scrapePromotionRows devuelve { fields, cells }; antes esta función usaba
+  // el objeto entero como si fuese "fields", así que la descripción salía
+  // como "[object Object]" en el CSV. Se toma fields (o el objeto si ya lo es).
+  const fields = row?.fields || row || {};
+  const entries = Object.entries(fields);
   const pick = picker(entries);
   const code = pick([/c[oó]digo/i, /^id$/i, /referencia/i]);
   const description = pick([/descrip/i, /nombre/i, /promoc/i, /oferta/i]) || firstNonEmpty(...entries.map(([, v]) => v));
