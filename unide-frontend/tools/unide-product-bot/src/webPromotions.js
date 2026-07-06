@@ -1,0 +1,933 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { connectBrowser, findOrderPage } from './webBrowser.js';
+
+const DEFAULT_CANDIDATE_PATHS = [
+  '/Promocion_ListView',
+  '/Promociones_ListView',
+  '/Promotion_ListView',
+  '/PromocionT_ListView',
+  '/PromotionT_ListView',
+  '/Promo_ListView'
+];
+
+export async function fetchActivePromotions(config, referenceDateIso, logger) {
+  let browser;
+  try {
+    const opened = await openPromotionsPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const refIso = normalizeIsoDate(referenceDateIso) || todayIso(config);
+    const listUrl = page.url();
+
+    const pageInfo = await getPromotionPageState(page);
+    const rows = await scrapeAllPromotionRows(page, config);
+    if (!rows.length) {
+      const screenshotPath = await screenshot(page, config, 'empty');
+      const dumpFile = await dumpHtml(page, config, 'promociones-page-dump.html');
+      return {
+        ok: false,
+        stage: 'scrape',
+        error: 'Promociones 页面打开了，但没有识别到列表表格。已保存页面结构，方便继续调选择器。',
+        screenshot: screenshotPath,
+        dumpFile,
+        pageInfo
+      };
+    }
+
+    const enriched = rows.map((row, index) => enrichPromotionRow(row, index, refIso));
+    const active = enriched.filter((row) => row.active);
+    active.sort(comparePromotions);
+
+    const details = await scrapeActivePromotionDetails(page, config, active, listUrl, logger);
+    const outputFile = writePromotionItemsCsv(config, details.items, active, refIso);
+    const screenshotPath = await screenshot(page, config, 'items');
+
+    logger?.info('promotions fetched', {
+      total: rows.length,
+      active: active.length,
+      items: details.items.length,
+      failedDetails: details.failures.length,
+      referenceDate: refIso,
+      url: pageInfo.url
+    });
+
+    return {
+      ok: true,
+      referenceDate: refIso,
+      totalRows: rows.length,
+      active,
+      items: details.items,
+      failedDetails: details.failures,
+      expired: enriched.length - active.length,
+      unknownEndDate: enriched.filter((row) => !row.endIso).length,
+      outputFile,
+      screenshot: screenshotPath,
+      pageInfo
+    };
+  } catch (error) {
+    logger?.error('promotions fetch failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'promotions', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+export function formatPromotionsSummary(result, config) {
+  const maxPreview = Number(config.promotions?.maxPreview) || 25;
+  const lines = [
+    `Promociones 未过期：${result.active.length} 个；商品明细：${result.items?.length || 0} 行（读取外层 ${result.totalRows} 行，按 ${result.referenceDate} 判断）`
+  ];
+  if (result.unknownEndDate) lines.push(`提醒：${result.unknownEndDate} 个 promoción 没识别到 Hasta/Fin 日期，已按“未过期”保留。`);
+  if (result.failedDetails?.length) lines.push(`提醒：${result.failedDetails.length} 个 promoción 明细没抓完整，CSV 里会保留失败摘要。`);
+  lines.push('');
+
+  if (!result.active.length) {
+    lines.push('没有找到还没过期的 promociones。');
+    return lines.join('\n');
+  }
+
+  if (!result.items?.length) {
+    lines.push('找到未过期 promociones，但还没有抓到里面的商品明细。请把页面截图/HTML 发给我继续调。');
+    return lines.join('\n');
+  }
+
+  const preview = result.items.slice(0, maxPreview);
+  for (const [i, item] of preview.entries()) {
+    const promo = item.promoCode ? `[${item.promoCode}] ` : '';
+    const code = item.articleCode || item.ean || '(sin codigo)';
+    const offer = item.offer ? ` · oferta ${item.offer}` : '';
+    const price = item.pvp ? ` · PVP ${item.pvp}` : '';
+    const dates = [item.startDisplay ? `desde ${item.startDisplay}` : '', item.endDisplay ? `hasta ${item.endDisplay}` : ''].filter(Boolean).join(' · ');
+    lines.push(`${i + 1}. ${promo}${code} ${item.articleName || '(sin descripcion)'}${offer}${price}${dates ? ` · ${dates}` : ''}`);
+  }
+  if (result.items.length > maxPreview) lines.push(`... 还有 ${result.items.length - maxPreview} 行商品明细，完整 CSV 已附上。`);
+
+  if (result.failedDetails?.length) {
+    lines.push('');
+    lines.push('没抓完整的 promoción：');
+    for (const failure of result.failedDetails.slice(0, 5)) {
+      const code = failure.promo?.code ? `${failure.promo.code} ` : '';
+      lines.push(`- ${code}${failure.promo?.description || ''}: ${failure.error || failure.stage || '未知原因'}`);
+    }
+    if (result.failedDetails.length > 5) lines.push(`- ... 还有 ${result.failedDetails.length - 5} 个`);
+  }
+
+  return lines.join('\n');
+}
+
+async function openPromotionsPage(config) {
+  const attempts = Number(config.webOrder?.connectRetries) || 2;
+  let browser = null;
+  let page = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      browser = await connectBrowser(config);
+      page = await findOrderPage(browser, config);
+      if (page) break;
+      try { browser.disconnect(); } catch { /* noop */ }
+      browser = null;
+      const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认自动化 Edge 里打开了 UnideGes。');
+      err.stage = 'findPage';
+      lastError = err;
+    } catch (error) {
+      lastError = error;
+      try { browser?.disconnect(); } catch { /* noop */ }
+      browser = null;
+      page = null;
+    }
+    if (attempt < attempts) await sleep(2000);
+  }
+  if (!page) throw lastError || Object.assign(new Error('无法连接 Edge。'), { stage: 'connect' });
+  try { await page.bringToFront(); } catch { /* noop */ }
+  try {
+    await ensurePromotionsPage(page, config, { forceFresh: true });
+  } catch (error) {
+    try { browser.disconnect(); } catch { /* noop */ }
+    throw error;
+  }
+  return { browser, page };
+}
+
+async function ensurePromotionsPage(page, config, options = {}) {
+  const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+  let state = await getPromotionPageState(page);
+  if (state.isPromotionsList && !options.forceFresh) return state;
+
+  if (state.hasEditToolbar && !options.allowLeavingDetail) {
+    const err = new Error(`当前页面像编辑表单（有 Guardar/Volver），为避免丢失未保存内容，不会自动跳转。请先保存或退出当前页面，再发 /promociones。当前：caption=${state.caption || '-'}, url=${state.url || '-'}`);
+    err.stage = 'unsafePage';
+    throw err;
+  }
+
+  const configured = config.promotions?.listUrl || config.webOrder?.promocionesListUrl || '';
+  if (configured) {
+    await gotoListUrl(page, absoluteListUrl(page, configured), timeout);
+    state = await waitForPromotionsPage(page, timeout);
+    if (state.isPromotionsList) return state;
+  }
+
+  if (!state.hasEditToolbar && !options.forceFresh && await clickPromotionsNav(page)) {
+    state = await waitForPromotionsPage(page, timeout);
+    if (state.isPromotionsList) return state;
+  }
+
+  const candidates = config.promotions?.candidatePaths?.length ? config.promotions.candidatePaths : DEFAULT_CANDIDATE_PATHS;
+  for (const candidate of candidates) {
+    await gotoListUrl(page, absoluteListUrl(page, candidate), timeout);
+    state = await waitForPromotionsPage(page, Math.min(timeout, 8000));
+    if (state.isPromotionsList) return state;
+  }
+
+  const err = new Error(`没有找到 Promociones 页面。已尝试左侧菜单和常见 URL。当前：caption=${state.caption || '-'}, url=${state.url || '-'}`);
+  err.stage = 'promotionsPage';
+  throw err;
+}
+
+async function gotoListUrl(page, url, timeout) {
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout }).catch(async () => {
+    await page.goto(url, { waitUntil: 'load', timeout });
+  });
+}
+
+function absoluteListUrl(page, value) {
+  const raw = String(value || '').trim();
+  if (/^https?:\/\//i.test(raw)) return raw;
+  try { return new URL(raw || '/Promocion_ListView', page.url()).href; }
+  catch { return `https://unideges30.unide.es${raw.startsWith('/') ? raw : `/${raw}`}`; }
+}
+
+async function clickPromotionsNav(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const candidates = Array.from(document.querySelectorAll('a, button, [role="treeitem"], .xaf-nav-link, .dxbl-treeview-node'))
+      .filter(isVisible)
+      .map((el) => ({ el, text: clean(el.innerText || el.textContent) }))
+      .filter((x) => /^promociones?$/i.test(x.text) || /\bpromociones?\b/i.test(x.text));
+    const target = candidates[0]?.el;
+    if (!target) return false;
+    const clickable = target.closest('a, button, [role="treeitem"]') || target;
+    clickable.click();
+    return true;
+  });
+}
+
+async function waitForPromotionsPage(page, timeoutMs) {
+  const start = Date.now();
+  let last = {};
+  while (Date.now() - start < timeoutMs) {
+    try {
+      last = await getPromotionPageState(page);
+      if (last.isPromotionsList) return last;
+    } catch { /* page navigating */ }
+    await sleep(250);
+  }
+  return last;
+}
+
+async function getPromotionPageState(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const visible = (sel) => Array.from(document.querySelectorAll(sel)).filter(isVisible);
+    const hasAction = (name) => visible(`[data-action-name="${name}"]`).length > 0;
+    const caption = clean(visible('.xaf-view-caption-sm')[0]?.innerText);
+    const title = document.title || '';
+    const url = location.href || '';
+    const bodyText = clean(document.body?.innerText || '');
+    const active = visible('.xaf-nav-item.dxbl-active, a.dxbl-active, a[aria-current="true"]')[0];
+    const activeNav = clean(active?.innerText || '');
+    const hasPromoText = /promociones?|promoci[oó]n|promotion/i.test(`${caption} ${title} ${url} ${activeNav}`);
+    const hasDateColumns = /hasta|fecha|fin|final|desde|inicio/i.test(bodyText);
+    const hasTables = document.querySelectorAll('table, [role="grid"]').length > 0;
+    const hasEditToolbar = hasAction('Guardar') || hasAction('Guardar y Nuevo') || hasAction('Volver');
+    return {
+      title,
+      url,
+      caption,
+      activeNav,
+      hasTables,
+      hasDateColumns,
+      hasEditToolbar,
+      isPromotionsList: hasPromoText && hasTables && !hasEditToolbar && hasDateColumns
+    };
+  });
+}
+
+async function getPromotionDetailState(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const visible = (sel) => Array.from(document.querySelectorAll(sel)).filter(isVisible);
+    const hasAction = (name) => visible(`[data-action-name="${name}"]`).length > 0;
+    const caption = clean(visible('.xaf-view-caption-sm')[0]?.innerText);
+    const title = document.title || '';
+    const url = location.href || '';
+    const bodyText = clean(document.body?.innerText || '');
+    const hasToolbar = hasAction('Volver') || hasAction('Guardar') || hasAction('Guardar y Nuevo');
+    const hasItemWords = /art[ií]culo|c[oó]digo\s+art|ean|pvp|precio|oferta/i.test(bodyText);
+    const hasPromoText = /promociones?|promoci[oó]n|promotion/i.test(`${caption} ${title} ${url} ${bodyText.slice(0, 500)}`);
+    return {
+      title,
+      url,
+      caption,
+      hasToolbar,
+      hasItemWords,
+      isPromotionDetail: hasPromoText && hasToolbar && hasItemWords
+    };
+  });
+}
+
+async function scrapeAllPromotionRows(page, config) {
+  const maxPages = Number(config.promotions?.maxPages) || 50;
+  const all = [];
+  const seen = new Set();
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const rows = await scrapePromotionRows(page);
+    for (const row of rows) {
+      const key = promotionKey(row);
+      if (!seen.has(key)) {
+        seen.add(key);
+        all.push(row);
+      }
+    }
+    const moved = await clickNextPromotionPage(page);
+    if (!moved) break;
+    await sleep(Number(config.promotions?.pageTurnMs) || 1200);
+  }
+
+  return all;
+}
+
+async function scrapeActivePromotionDetails(page, config, promotions, listUrl, logger) {
+  const maxDetails = Number(config.promotions?.maxDetailPromotions) || 500;
+  const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+  const items = [];
+  const failures = [];
+
+  for (const promo of promotions.slice(0, maxDetails)) {
+    try {
+      await gotoListUrl(page, listUrl, timeout);
+      await waitForPromotionsPage(page, timeout);
+      const opened = await openPromotionDetailByRow(page, promo, config);
+      if (!opened) {
+        failures.push({ promo, stage: 'open', error: '没有在 Promociones 列表里找到/打开这一行' });
+        continue;
+      }
+      await sleep(Number(config.promotions?.detailOpenMs) || 400); // gracia; el scrape que sigue ya sondea las filas
+      const detailRows = await scrapeAllPromotionDetailItems(page, promo, config);
+      if (!detailRows.length) {
+        const dumpFile = await dumpHtml(page, config, `promocion-${safeFilePart(promo.code || promo.index)}-detail-dump.html`);
+        failures.push({ promo, stage: 'detail', error: '打开了明细，但没有识别到商品表格', dumpFile });
+      } else {
+        items.push(...detailRows);
+      }
+      await returnToPromotionsList(page, config, listUrl);
+    } catch (error) {
+      logger?.error('promotion detail failed', { code: promo.code, error: error.message });
+      failures.push({ promo, stage: error.stage || 'detail', error: error.message });
+      try { await returnToPromotionsList(page, config, listUrl); } catch { /* keep going */ }
+    }
+  }
+
+  if (promotions.length > maxDetails) {
+    failures.push({ promo: { code: '', description: 'detail limit' }, stage: 'limit', error: `超过 maxDetailPromotions=${maxDetails}，后面的 promoción 没逐个打开` });
+  }
+
+  return { items, failures };
+}
+
+async function scrapeAllPromotionDetailItems(page, promo, config) {
+  const maxPages = Number(config.promotions?.maxDetailPages) || Number(config.promotions?.maxPages) || 50;
+  const pageTurnMs = Number(config.promotions?.detailPageTurnMs) || Number(config.promotions?.pageTurnMs) || 1600;
+  const all = [];
+  const seen = new Set();
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const rows = pageIndex === 0
+      ? await waitForPromotionDetailRows(page, promo, config)
+      : await waitForPromotionDetailRows(page, promo, config, Math.max(2500, pageTurnMs + 800));
+
+    for (const row of rows) {
+      const key = `${row.promoCode}|${row.articleCode}|${row.ean}|${row.articleName}|${row.offer}|${row.pvp}|${row.endDisplay}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        all.push(row);
+      }
+    }
+
+    const moved = await clickNextPromotionDetailPage(page);
+    if (!moved) break;
+    await sleep(pageTurnMs);
+  }
+
+  return all;
+}
+
+async function waitForPromotionDetailRows(page, promo, config, timeoutOverrideMs = null) {
+  const timeoutMs = timeoutOverrideMs || Number(config.promotions?.detailRowsTimeoutMs) || 9000;
+  const start = Date.now();
+  let best = [];
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const rows = await scrapePromotionDetailItems(page, promo);
+      if (rows.length) return rows;
+      best = rows;
+      // Some XAF grids render below the fold or lazy-load after scrolling.
+      await page.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); }).catch(() => {});
+    } catch { /* page still rendering */ }
+    await sleep(350);
+  }
+  return best;
+}
+async function openPromotionDetailByRow(page, promo, config) {
+  const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+  const maxPages = Number(config.promotions?.maxPages) || 50;
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    for (const clickCount of [1, 2]) {
+      const handle = await findPromotionRowHandle(page, promo);
+      const el = handle.asElement();
+      if (!el) { await handle.dispose(); break; }
+      await el.click({ clickCount });
+      await handle.dispose();
+
+      const opened = await waitForPromotionDetailPage(page, Math.min(timeout, 8000));
+      if (opened.isPromotionDetail) return true;
+      await sleep(350);
+    }
+    const moved = await clickNextPromotionPage(page);
+    if (!moved) break;
+    await sleep(Number(config.promotions?.pageTurnMs) || 1200);
+  }
+
+  return false;
+}
+
+async function findPromotionRowHandle(page, promo) {
+  return page.evaluateHandle((wanted) => {
+    const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const norm = (s) => clean(s).toLowerCase();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const code = clean(wanted.code);
+    const desc = norm(wanted.description);
+    const start = clean(wanted.startDisplay || wanted.startIso);
+    const end = clean(wanted.endDisplay || wanted.endIso);
+    let best = null;
+    let bestScore = 0;
+
+    const rows = Array.from(document.querySelectorAll('tr[role="row"], tbody tr')).filter(isVisible);
+    for (const tr of rows) {
+      const cells = Array.from(tr.querySelectorAll('td')).filter(isVisible);
+      const texts = cells.map((td) => clean(td.innerText || td.textContent));
+      if (!texts.some(Boolean)) continue;
+      const rowText = clean(texts.join(' '));
+      const rowNorm = norm(rowText);
+      let score = 0;
+      if (code && texts.includes(code)) score += 100;
+      else if (code && rowText.includes(code)) score += 60;
+      if (desc && rowNorm.includes(desc)) score += 30;
+      if (start && rowText.includes(start)) score += 10;
+      if (end && rowText.includes(end)) score += 10;
+      if (score > bestScore) {
+        const exactCell = code ? cells.find((td) => clean(td.innerText || td.textContent) === code) : null;
+        const textCell = cells.find((td) => clean(td.innerText || td.textContent) && !td.querySelector('input[type="checkbox"]'));
+        const action = tr.querySelector('a[href*="DetailView"], [data-action-name="Edit"], button[title*="Editar" i], button[aria-label*="Editar" i]');
+        best = action || exactCell || textCell || tr;
+        bestScore = score;
+      }
+    }
+    return bestScore >= 50 ? best : null;
+  }, {
+    code: promo.code || '',
+    description: promo.description || '',
+    startDisplay: promo.startDisplay || '',
+    startIso: promo.startIso || '',
+    endDisplay: promo.endDisplay || '',
+    endIso: promo.endIso || ''
+  });
+}
+
+async function waitForPromotionDetailPage(page, timeoutMs) {
+  const start = Date.now();
+  let last = {};
+  while (Date.now() - start < timeoutMs) {
+    try {
+      last = await getPromotionDetailState(page);
+      if (last.isPromotionDetail) return last;
+    } catch { /* navigating */ }
+    await sleep(250);
+  }
+  return last;
+}
+
+async function returnToPromotionsList(page, config, listUrl) {
+  const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+  if (await clickActionByName(page, 'Volver', 1200)) {
+    const state = await waitForPromotionsPage(page, Math.min(timeout, 8000));
+    if (state.isPromotionsList) return state;
+  }
+  try { await page.goBack({ waitUntil: 'domcontentloaded', timeout: Math.min(timeout, 8000) }); } catch { /* noop */ }
+  let state = await waitForPromotionsPage(page, Math.min(timeout, 8000));
+  if (state.isPromotionsList) return state;
+  await gotoListUrl(page, listUrl, timeout);
+  state = await waitForPromotionsPage(page, timeout);
+  if (state.isPromotionsList) return state;
+  return ensurePromotionsPage(page, config, { forceFresh: true, allowLeavingDetail: true });
+}
+
+async function clickActionByName(page, actionName, timeoutMs = 0) {
+  const start = Date.now();
+  for (;;) {
+    const handle = await page.evaluateHandle((name) => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const els = Array.from(document.querySelectorAll('[data-action-name="' + name + '"]'));
+      return els.find((el) => isVisible(el)) || null;
+    }, actionName);
+    const el = handle.asElement();
+    if (el) { await el.click(); await handle.dispose(); return true; }
+    await handle.dispose();
+    if (Date.now() - start >= timeoutMs) return false;
+    await sleep(200);
+  }
+}
+
+async function clickNextPromotionPage(page) {
+  return clickNextGridPage(page, 'promotions');
+}
+
+async function clickNextPromotionDetailPage(page) {
+  return clickNextGridPage(page, 'items');
+}
+
+async function clickNextGridPage(page, mode) {
+  return page.evaluate((gridMode) => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const isDisabled = (el) => {
+      const cls = String(el.className || '');
+      return el.disabled || el.getAttribute('aria-disabled') === 'true' || /disabled|dx-state-disabled/i.test(cls);
+    };
+    const inPager = (el) => Boolean(el.closest('[class*="pager" i], [class*="pagination" i], nav, [aria-label*="page" i], [aria-label*="pagin" i]'));
+    const isBadToolbarAction = (label) => /guardar|nuevo|volver|enviar|copiar|eliminar|save|new|back|delete/i.test(label);
+    const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [tabindex]'))
+      .filter((el) => isVisible(el) && !isDisabled(el))
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const label = clean([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), el.className].filter(Boolean).join(' '));
+        return { el, label, pager: inPager(el), top: r.top, left: r.left, width: r.width, height: r.height };
+      })
+      .filter((x) => x.label && !isBadToolbarAction(x.label));
+
+    // Prefer the lowest pager on the screen. Top toolbar arrows can look like
+    // "next" too, but the grid pager is normally below the table.
+    const nextCandidates = controls
+      .filter((x) => /(siguiente|next|pr[oó]xima|p[aá]gina siguiente|>|›|»|chevron-right|arrow-right)/i.test(x.label))
+      .filter((x) => x.pager || x.top > 220 || gridMode === 'items')
+      .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top || b.left - a.left);
+    if (nextCandidates.length) {
+      nextCandidates[0].el.click();
+      return true;
+    }
+
+    const pagerControls = controls.filter((x) => x.pager || /pager|pagination/i.test(x.label));
+    const numbered = pagerControls
+      .map((x) => ({ ...x, num: Number(clean(x.el.innerText || x.el.textContent)) }))
+      .filter((x) => Number.isInteger(x.num) && x.num > 0)
+      .sort((a, b) => a.num - b.num);
+    if (numbered.length) {
+      const active = numbered.find((x) => {
+        const cls = String(x.el.className || '');
+        return x.el.getAttribute('aria-current') === 'page' || /active|current|selected/i.test(cls);
+      });
+      const current = active?.num || Math.min(...numbered.map((x) => x.num));
+      const next = numbered.find((x) => x.num === current + 1) || numbered.find((x) => x.num > current);
+      if (next) {
+        next.el.click();
+        return true;
+      }
+    }
+
+    return false;
+  }, mode);
+}
+
+async function scrapePromotionRows(page) {
+  return page.evaluate(tableRowsByScore, { mode: 'promotions' });
+}
+
+async function scrapePromotionDetailItems(page, promo) {
+  const rows = await page.evaluate(tableRowsByScore, { mode: 'items' });
+  const out = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const item = enrichPromotionItem(row, promo);
+    if (!item) continue;
+    const key = `${item.promoCode}|${item.articleCode}|${item.ean}|${item.articleName}|${item.offer}|${item.pvp}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function enrichPromotionRow(fields, index, referenceDateIso) {
+  const entries = Object.entries(fields || {});
+  const pick = picker(entries);
+  const code = pick([/c[oó]digo/i, /^id$/i, /referencia/i]);
+  const description = pick([/descrip/i, /nombre/i, /promoc/i, /oferta/i]) || firstNonEmpty(...entries.map(([, v]) => v));
+  const offer = pick([/^oferta$/i, /precio.*oferta/i, /p\.?\s*oferta/i, /dto|descuento/i]);
+  const status = pick([/estado/i, /situaci/i]);
+
+  const startDisplay = pick([/desde/i, /inicio/i, /^de fecha$/i, /fecha.*inicio/i]);
+  const endDisplay = pick([/hasta/i, /fin/i, /final/i, /fecha.*fin/i, /fecha.*final/i, /caduc/i, /^a fecha$/i]);
+  const allDates = entries.flatMap(([key, value]) => parseDates(String(value || '')).map((iso) => ({ key, iso })));
+  const startIso = parseDateValue(startDisplay) || allDates.map((d) => d.iso).sort()[0] || '';
+  const endIso = parseDateValue(endDisplay) || allDates.map((d) => d.iso).sort().at(-1) || '';
+  const statusText = `${status} ${Object.values(fields).join(' ')}`.toLowerCase();
+  const disabled = /caduc|finaliz|anulad|cancel|baja|inactiv/.test(statusText);
+  const active = !disabled && (!endIso || endIso >= referenceDateIso);
+
+  return {
+    index,
+    active,
+    code,
+    description,
+    offer,
+    status,
+    startDisplay: startDisplay || displayDate(startIso),
+    endDisplay: endDisplay || displayDate(endIso),
+    startIso,
+    endIso,
+    fields
+  };
+}
+
+function enrichPromotionItem(row, promo) {
+  const fields = row.fields || {};
+  const entries = Object.entries(fields);
+  const pick = picker(entries);
+  const cells = row.cells || [];
+
+  const articleCode = pick([
+    /c[oó]d\.?\s*art/i,
+    /c[oó]digo.*art/i,
+    /c[oó]digo\s+unide/i,
+    /^art[ií]culo\s*$/i,
+    /^c[oó]digo$/i
+  ]) || firstCodeLike(cells, promo.code);
+
+  const articleName = pick([
+    /descrip.*art/i,
+    /nombre.*art/i,
+    /^art[ií]culo$/i,
+    /^descrip/i,
+    /^nombre/i,
+    /producto/i
+  ]) || firstNameLike(cells, articleCode);
+
+  const ean = pick([/^ean$/i, /c[oó]digo\s+barra/i, /barcode/i]) || firstEanLike(cells);
+  const pvp = pick([/^p\.?\s*v\.?\s*p/i, /^precio$/i, /precio\s+actual/i, /pvp\s+actual/i]);
+  const offer = pick([/^oferta$/i, /precio.*oferta/i, /p\.?\s*oferta/i, /pvp.*propuesto/i, /precio.*promo/i]);
+  const previousPrice = pick([/anterior/i, /precio.*normal/i, /pvp.*normal/i]);
+  const status = pick([/estado/i, /situaci/i]);
+  const startDisplay = pick([/desde/i, /inicio/i, /^de fecha$/i, /fecha.*inicio/i]) || promo.startDisplay || '';
+  const endDisplay = pick([/hasta/i, /fin/i, /final/i, /fecha.*fin/i, /fecha.*final/i, /^a fecha$/i]) || promo.endDisplay || '';
+  const allText = cells.join(' ');
+
+  if (/^suma:/i.test(allText) || /haga\s+clic\s+aqu/i.test(allText)) return null;
+  if (!articleCode && !articleName && !ean && !pvp && !offer) return null;
+  if (articleCode && promo.code && articleCode === promo.code && !articleName) return null;
+
+  return {
+    promoCode: promo.code || '',
+    promoDescription: promo.description || '',
+    promoStart: promo.startDisplay || displayDate(promo.startIso),
+    promoEnd: promo.endDisplay || displayDate(promo.endIso),
+    promoStartIso: promo.startIso || '',
+    promoEndIso: promo.endIso || '',
+    articleCode,
+    articleName,
+    ean,
+    pvp,
+    offer,
+    previousPrice,
+    status,
+    startDisplay,
+    endDisplay,
+    startIso: parseDateValue(startDisplay) || promo.startIso || '',
+    endIso: parseDateValue(endDisplay) || promo.endIso || '',
+    fields
+  };
+}
+
+function picker(entries) {
+  return (patterns) => {
+    for (const [key, value] of entries) {
+      if (patterns.some((pattern) => pattern.test(key))) return String(value || '').trim();
+    }
+    return '';
+  };
+}
+
+function firstCodeLike(cells, promoCode) {
+  for (const cell of cells) {
+    const text = String(cell || '').trim();
+    if (!/^\d{4,8}$/.test(text)) continue;
+    if (promoCode && text === String(promoCode)) continue;
+    return text;
+  }
+  return '';
+}
+
+function firstEanLike(cells) {
+  for (const cell of cells) {
+    const match = String(cell || '').match(/\b\d{12,14}\b/);
+    if (match) return match[0];
+  }
+  return '';
+}
+
+function firstNameLike(cells, articleCode) {
+  for (const cell of cells) {
+    const text = String(cell || '').replace(/\s+/g, ' ').trim();
+    if (!text || text === articleCode) continue;
+    if (/^\d+[,.]?\d*$/.test(text)) continue;
+    if (/^\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}$/.test(text)) continue;
+    if (/[a-záéíóúñü]{3,}/i.test(text)) return text;
+  }
+  return '';
+}
+
+function promotionKey(row) {
+  const fields = row || {};
+  const text = Object.values(fields).map((v) => String(v || '').trim()).filter(Boolean).join('|');
+  return text || JSON.stringify(fields);
+}
+
+function comparePromotions(a, b) {
+  const endA = a.endIso || '9999-12-31';
+  const endB = b.endIso || '9999-12-31';
+  if (endA !== endB) return endA.localeCompare(endB);
+  return String(a.description || '').localeCompare(String(b.description || ''), 'es');
+}
+
+function parseDates(value) {
+  const out = [];
+  const text = String(value || '');
+  const dmy = text.matchAll(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})\b/g);
+  for (const m of dmy) {
+    const year = m[3].length === 2 ? `20${m[3]}` : m[3];
+    out.push(`${year}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`);
+  }
+  const ymd = text.matchAll(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/g);
+  for (const m of ymd) out.push(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`);
+  return [...new Set(out)].filter(isValidIsoDate);
+}
+
+function parseDateValue(value) {
+  return parseDates(value)[0] || '';
+}
+
+function normalizeIsoDate(value) {
+  const text = String(value || '').trim();
+  if (isValidIsoDate(text)) return text;
+  return parseDateValue(text);
+}
+
+function isValidIsoDate(value) {
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() + 1 === m && date.getUTCDate() === d;
+}
+
+function displayDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function todayIso(config) {
+  const timeZone = config.ordering?.timezone || 'Europe/Madrid';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date()).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function writePromotionItemsCsv(config, items, promotions, referenceDateIso) {
+  const dir = path.resolve(config.__toolRoot || '.', config.promotions?.outputDir || 'promotions');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `promociones-productos-activos-${referenceDateIso}.csv`);
+  const header = [
+    'codigo_promocion',
+    'promocion',
+    'desde_promocion',
+    'hasta_promocion',
+    'codigo_articulo',
+    'descripcion_articulo',
+    'ean',
+    'pvp',
+    'oferta',
+    'precio_anterior',
+    'estado',
+    'desde_articulo',
+    'hasta_articulo',
+    'campos_articulo',
+    'campos_promocion'
+  ];
+  const lines = [header.join(';')];
+
+  if (items.length) {
+    for (const row of items) {
+      lines.push([
+        row.promoCode,
+        row.promoDescription,
+        row.promoStart,
+        row.promoEnd,
+        row.articleCode,
+        row.articleName,
+        row.ean,
+        row.pvp,
+        row.offer,
+        row.previousPrice,
+        row.status,
+        row.startDisplay,
+        row.endDisplay,
+        JSON.stringify(row.fields || {}),
+        JSON.stringify(promotions.find((p) => p.code === row.promoCode)?.fields || {})
+      ].map(csvCell).join(';'));
+    }
+  } else {
+    for (const promo of promotions) {
+      lines.push([
+        promo.code,
+        promo.description,
+        promo.startDisplay,
+        promo.endDisplay,
+        '',
+        '',
+        '',
+        '',
+        promo.offer,
+        '',
+        promo.status,
+        '',
+        '',
+        '',
+        JSON.stringify(promo.fields || {})
+      ].map(csvCell).join(';'));
+    }
+  }
+
+  fs.writeFileSync(file, `\uFEFF${lines.join('\r\n')}`, 'utf8');
+  return file;
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  if (/[";\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+async function screenshot(page, config, tag) {
+  try {
+    const dir = path.resolve(config.__toolRoot || '.', 'screenshots');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `promociones-${String(tag).replace(/[^\w.-]+/g, '_')}-${Date.now()}.png`);
+    await page.screenshot({ path: file });
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+async function dumpHtml(page, config, name) {
+  try {
+    const html = await page.content();
+    const file = path.resolve(config.__toolRoot || '.', name);
+    fs.writeFileSync(file, html, 'utf8');
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+function safeFilePart(value) {
+  return String(value || 'promo').replace(/[^a-z0-9_.-]+/gi, '_').slice(0, 80) || 'promo';
+}
+
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// Runs inside the browser context. Kept as a function declaration so
+// page.evaluate can serialize it with its helper logic.
+function tableRowsByScore(options = {}) {
+  const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const isVisible = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+  };
+  const mode = options.mode || 'items';
+  const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+  const candidates = [];
+
+  for (const table of tables) {
+    const headers = Array.from(table.querySelectorAll('th')).map((th, i) => clean(th.innerText || th.textContent) || `col${i + 1}`);
+    if (headers.length < 2) continue;
+    let score = 0;
+    for (const h of headers) {
+      if (/c[oó]digo\s+art|c[oó]d\.?\s*art|c[oó]digo\s+unide|art[ií]culo/i.test(h)) score += 5;
+      if (/descrip|nombre|producto/i.test(h)) score += 4;
+      if (/ean|barra/i.test(h)) score += 4;
+      if (/p\.?\s*v\.?\s*p|precio|oferta|dto|descuento/i.test(h)) score += 4;
+      if (/fecha|desde|hasta|inicio|fin|final/i.test(h)) score += 2;
+      if (/promoc|estado|situaci/i.test(h)) score += 2;
+      if (/selecci[oó]n|checkbox/i.test(h)) score -= 1;
+    }
+    if (mode === 'promotions') {
+      if (!headers.some((h) => /fecha|desde|hasta|inicio|fin|final/i.test(h))) score -= 5;
+      if (!headers.some((h) => /promoc|oferta|descrip|nombre|c[oó]digo|estado/i.test(h))) score -= 5;
+    } else {
+      if (!headers.some((h) => /art[ií]culo|c[oó]digo\s+art|c[oó]digo\s+unide|descrip|nombre|ean|precio|oferta|p\.?\s*v\.?\s*p/i.test(h))) score -= 8;
+    }
+    if (score < 4) continue;
+
+    const rows = [];
+    for (const tr of Array.from(table.querySelectorAll('tr[role="row"], tbody tr'))) {
+      if (!isVisible(tr)) continue;
+      const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText || td.textContent));
+      if (!cells.length || !cells.some(Boolean)) continue;
+      if (cells.some((cell) => /^suma:/i.test(cell))) continue;
+      const offset = Math.max(0, cells.length - headers.length);
+      const fields = {};
+      headers.forEach((header, i) => {
+        fields[header] = cells[i + offset] ?? cells[i] ?? '';
+      });
+      rows.push({ fields, cells });
+    }
+    if (!rows.length) continue;
+    candidates.push({ score, rows, headers });
+  }
+
+  candidates.sort((a, b) => (b.score * 100 + b.rows.length) - (a.score * 100 + a.rows.length));
+  return (candidates[0]?.rows || []).map((row) => ({ fields: row.fields, cells: row.cells }));
+}

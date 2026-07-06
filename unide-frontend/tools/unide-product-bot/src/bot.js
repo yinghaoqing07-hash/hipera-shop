@@ -5,6 +5,7 @@ import { createLogger } from './logger.js';
 import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
 import { parseFruitCommandArg, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
+import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
@@ -79,6 +80,7 @@ async function handleUpdate(update) {
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
   if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
+  if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -343,6 +345,32 @@ async function handleTallyGo(chatId, callbackId, id) {
   const { draft: enriched } = enrichOrderItems(draft, storeIndex, supplierIndex);
   const draftId = saveSession({ orderDraft: enriched });
   await telegram.sendMessage(chatId, formatOrderDraft(enriched), makeOrderDraftButtons(draftId));
+}
+
+// /promociones [fecha] — lee Promociones, filtra las no caducadas y abre
+// cada una para sacar sus artículos. Solo lectura: no guarda ni modifica.
+// Manda un resumen + CSV completo (y la captura/estructura si algo falla).
+async function handlePromotions(chatId, text = '') {
+  const today = todayString(config);
+  const arg = String(text || '').replace(/^\/(promociones|promo)(?:@\w+)?\s*/i, '').trim();
+  const requested = parseDateArg(arg, today);
+  if (arg && !requested) {
+    await telegram.sendMessage(chatId, `没看懂日期「${arg}」。可以写 /promociones（今天）或 /promociones 2026-07-06。`);
+    return;
+  }
+  const dateStr = requested || today;
+  await telegram.sendMessage(chatId, `正在读取 Promociones，筛选 ${dateStr} 未过期项目，并逐个打开抓商品明细…（Edge 要开着）`);
+  const result = await fetchActivePromotions(config, dateStr, logger);
+  if (!result.ok) {
+    await sendWithOptionalScreenshot(chatId, result, `Promociones 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`);
+    if (result.dumpFile) { try { await telegram.sendDocument(chatId, result.dumpFile, 'Promociones 页面结构（发给 Claude）'); } catch { /* noop */ } }
+    return;
+  }
+  await sendWithOptionalScreenshot(chatId, result, formatPromotionsSummary(result, config));
+  if (result.outputFile) {
+    try { await telegram.sendDocument(chatId, result.outputFile, '完整未过期 Promociones 商品明细 CSV'); }
+    catch (error) { await telegram.sendMessage(chatId, `CSV 发送失败：${error.message}\n文件在电脑：${result.outputFile}`); }
+  }
 }
 
 // /fruta_add <nombre> <codigo> — registrar a mano un nombre → código.
