@@ -90,6 +90,27 @@ export class TelegramClient {
     return unwrap(await response.json());
   }
 
+  // Actualiza SOLO los botones de un mensaje ya enviado (el recuento de
+  // carne los usa para subir la cantidad en el propio botón). Mejor
+  // esfuerzo: si Telegram responde "message is not modified" u otro error
+  // puntual, no hay que tumbar nada.
+  async editMessageReplyMarkup(chatId, messageId, replyMarkup) {
+    try {
+      const response = await fetch(`${this.baseUrl}/editMessageReplyMarkup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: replyMarkup
+        })
+      });
+      return unwrap(await response.json());
+    } catch {
+      return null;
+    }
+  }
+
   async answerCallbackQuery(callbackQueryId, text = '') {
     // Mejor esfuerzo: Telegram caduca los botones a los ~15 s. Si el bot
     // estaba ocupado (p. ej. esperando al navegador) y responde tarde, la

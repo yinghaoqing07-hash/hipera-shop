@@ -4,6 +4,7 @@ import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
 import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
 import { parseFruitCommandArg, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
+import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
@@ -77,6 +78,7 @@ async function handleUpdate(update) {
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
   if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
+  if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -119,6 +121,9 @@ async function handleCallback(callback) {
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
   if (data.startsWith('np:')) { await handleNamePick(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('fp:')) { await handleFruitPick(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('tc:')) { await handleTallyTap(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('tcgo:')) { await handleTallyGo(chatId, callback.id, data.slice(5)); return; }
+  if (data.startsWith('tcclr:')) { await handleTallyClear(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
@@ -281,6 +286,63 @@ async function startFruitPriceChange(chatId, name, resolved, priceRaw) {
     labelReminder: true
   };
   await sendProductResult(chatId, item, 0, 1);
+}
+
+// /carne — recuento con el móvil que sustituye a la hoja de papel: la
+// lista fija de carne sale como botones, cada toque suma 1 (0→…→5→0) y
+// "生成订单" convierte el recuento en el borrador de pedido de siempre
+// (misma confirmación y mismo 确认填入; aquí no se rellena nada aún).
+async function startTally(chatId, name) {
+  const template = loadTemplate(config, name);
+  if (!template) { await telegram.sendMessage(chatId, `没有「${name}」的模板。`); return; }
+  const id = saveSession({ tally: { name, template, counts: {} } });
+  const sent = await telegram.sendMessage(
+    chatId,
+    `${template.label} 点货单（代替纸质表）：\n点商品名 = 数量 +1，点到 5 再点回 0。\n全部点完按「✔ 生成订单」。`,
+    { reply_markup: buildTallyKeyboard(id, template, {}) }
+  );
+  const session = sessions.get(id);
+  if (session && sent?.message_id) { session.tally.messageId = sent.message_id; sessions.set(id, session); }
+}
+
+async function handleTallyTap(chatId, callbackId, payload) {
+  const [id, idxStr] = payload.split(':');
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  const idx = Number(idxStr);
+  const item = tally?.template?.items?.[idx];
+  if (!item) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发 /carne'); return; }
+  tally.counts[idx] = cycleCount(tally.counts[idx]);
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, `${item.nombre}: ${tally.counts[idx]}`);
+  if (tally.messageId) {
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, tally.counts));
+  }
+}
+
+async function handleTallyClear(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); return; }
+  tally.counts = {};
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, '已清零');
+  if (tally.messageId) {
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, {}));
+  }
+}
+
+async function handleTallyGo(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发 /carne'); return; }
+  const draft = buildDraftFromTally(tally.template, tally.counts, new Date(), config.ordering?.timezone || 'Europe/Madrid');
+  if (!draft.items.length) { await telegram.answerCallbackQuery(callbackId, '还没点任何商品'); return; }
+  await telegram.answerCallbackQuery(callbackId, `${draft.items.length} 行`);
+  // Mismo camino que /pedido_nuevo: enriquecer + confirmación + 确认填入.
+  const { draft: enriched } = enrichOrderItems(draft, storeIndex, supplierIndex);
+  const draftId = saveSession({ orderDraft: enriched });
+  await telegram.sendMessage(chatId, formatOrderDraft(enriched), makeOrderDraftButtons(draftId));
 }
 
 // /fruta_add <nombre> <codigo> — registrar a mano un nombre → código.
