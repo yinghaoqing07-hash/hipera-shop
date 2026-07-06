@@ -22,6 +22,9 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
 
     const pageInfo = await getPromotionPageState(page);
     const rows = await scrapeAllPromotionRows(page, config);
+    // Volcado de la lista (por si el nº leído no cuadra con lo que se ve en
+    // pantalla: paginación externa que no avanzó, grid virtualizado, etc.).
+    const listDumpFile = await dumpHtml(page, config, 'promociones-lista-dump.html');
     if (!rows.length) {
       const screenshotPath = await screenshot(page, config, 'empty');
       const dumpFile = await dumpHtml(page, config, 'promociones-page-dump.html');
@@ -66,6 +69,12 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
       unknownEndDate: enriched.filter((row) => !row.endIso).length,
       outputFile,
       detailDumpFiles,
+      listDumpFile,
+      // Señal de posible lista externa incompleta: si TODO lo leído está
+      // sin caducar, probablemente no se leyeron las promociones caducadas
+      // (que suelen estar en páginas siguientes) → la paginación externa no
+      // avanzó. Sirve para auto-mandar el volcado de la lista y diagnosticar.
+      listMaybeTruncated: rows.length > 0 && active.length === rows.length,
       screenshot: screenshotPath,
       pageInfo
     };
@@ -78,43 +87,39 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
 }
 
 export function formatPromotionsSummary(result, config) {
-  const maxPreview = Number(config.promotions?.maxPreview) || 25;
+  // Resumen CORTO: cuántas promociones y cuántas con detalle; el desglose
+  // completo (todos los artículos) va en el CSV, no en el chat.
+  const items = result.items || [];
+  const withDetail = new Set(items.map((it) => it.promoCode)).size;
+  const failed = result.failedDetails?.length || 0;
   const lines = [
-    `Promociones 未过期：${result.active.length} 个；商品明细：${result.items?.length || 0} 行（读取外层 ${result.totalRows} 行，按 ${result.referenceDate} 判断）`
+    `Promociones（按 ${result.referenceDate} 判断）`,
+    `· 外层读到：${result.totalRows} 个`,
+    `· 未过期：${result.active.length} 个`,
+    `· 已开详情页：${withDetail} 个${failed ? `（${failed} 个没抓完整）` : ''}`,
+    `· 商品明细：${items.length} 行（完整在 CSV）`
   ];
-  if (result.unknownEndDate) lines.push(`提醒：${result.unknownEndDate} 个 promoción 没识别到 Hasta/Fin 日期，已按“未过期”保留。`);
-  if (result.failedDetails?.length) lines.push(`提醒：${result.failedDetails.length} 个 promoción 明细没抓完整，CSV 里会保留失败摘要。`);
-  lines.push('');
+  if (result.unknownEndDate) lines.push(`· ${result.unknownEndDate} 个没识别到结束日期，已按未过期保留`);
 
-  if (!result.active.length) {
-    lines.push('没有找到还没过期的 promociones。');
-    return lines.join('\n');
-  }
-
-  if (!result.items?.length) {
-    lines.push('找到未过期 promociones，但还没有抓到里面的商品明细。请把页面截图/HTML 发给我继续调。');
-    return lines.join('\n');
-  }
-
-  const preview = result.items.slice(0, maxPreview);
-  for (const [i, item] of preview.entries()) {
-    const promo = item.promoCode ? `[${item.promoCode}] ` : '';
-    const code = item.articleCode || item.ean || '(sin codigo)';
-    const offer = item.offer ? ` · oferta ${item.offer}` : '';
-    const price = item.pvp ? ` · PVP ${item.pvp}` : '';
-    const dates = [item.startDisplay ? `desde ${item.startDisplay}` : '', item.endDisplay ? `hasta ${item.endDisplay}` : ''].filter(Boolean).join(' · ');
-    lines.push(`${i + 1}. ${promo}${code} ${item.articleName || '(sin descripcion)'}${offer}${price}${dates ? ` · ${dates}` : ''}`);
-  }
-  if (result.items.length > maxPreview) lines.push(`... 还有 ${result.items.length - maxPreview} 行商品明细，完整 CSV 已附上。`);
-
-  if (result.failedDetails?.length) {
+  // Una línea por promoción no caducada: código · nombre — N 商品.
+  if (result.active.length) {
+    const countByPromo = items.reduce((acc, it) => { acc[it.promoCode] = (acc[it.promoCode] || 0) + 1; return acc; }, {});
     lines.push('');
-    lines.push('没抓完整的 promoción：');
-    for (const failure of result.failedDetails.slice(0, 5)) {
-      const code = failure.promo?.code ? `${failure.promo.code} ` : '';
-      lines.push(`- ${code}${failure.promo?.description || ''}: ${failure.error || failure.stage || '未知原因'}`);
+    for (const p of result.active) {
+      const n = countByPromo[p.code] || 0;
+      const name = p.description ? ` ${p.description}` : '';
+      lines.push(`[${p.code}]${name} — ${n} 商品`);
     }
-    if (result.failedDetails.length > 5) lines.push(`- ... 还有 ${result.failedDetails.length - 5} 个`);
+  } else {
+    lines.push('', '没有找到还没过期的 promociones。');
+  }
+
+  if (failed) {
+    lines.push('', '没抓完整的：');
+    for (const f of result.failedDetails.slice(0, 5)) {
+      lines.push(`- ${f.promo?.code || ''} ${f.promo?.description || ''}: ${f.error || f.stage || '未知'}`);
+    }
+    if (failed > 5) lines.push(`- ... 还有 ${failed - 5} 个`);
   }
 
   return lines.join('\n');

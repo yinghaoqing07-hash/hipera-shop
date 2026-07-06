@@ -379,6 +379,12 @@ async function handlePromotions(chatId, text = '') {
       try { await telegram.sendDocument(chatId, dump, '促销详情页结构（发给 Claude）'); } catch { /* noop */ }
     }
   }
+  // Si la lista externa parece incompleta (solo se leyeron promos sin
+  // caducar), mandar el volcado de la lista para arreglar su paginación.
+  if (result.listMaybeTruncated && result.listDumpFile) {
+    await telegram.sendMessage(chatId, `外层只读到 ${result.totalRows} 个促销、且都未过期，可能没翻到有过期项的后续分页。附上列表页结构，发给 Claude 修外层翻页：`);
+    try { await telegram.sendDocument(chatId, result.listDumpFile, 'Promociones 列表页结构（发给 Claude）'); } catch { /* noop */ }
+  }
 }
 
 // /fruta_add <nombre> <codigo> — registrar a mano un nombre → código.
