@@ -111,7 +111,7 @@ const defaultConfig = {
     maxSearchOptions: 20,
     // Conexión CDP: margen por si la pestaña estaba dormida y reintentos.
     protocolTimeoutMs: 90000,
-    connectRetries: 2,
+    connectRetries: 3,
     // Espera tras elegir el artículo, para que Blazor enlace la fila antes
     // de confirmarla (evita líneas con Código Unide en blanco). Mantener
     // generosa: prevenir un blanco es más rápido que dispararle la reparación.
