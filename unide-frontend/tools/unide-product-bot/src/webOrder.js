@@ -23,14 +23,34 @@ import { connectBrowser, findOrderPage } from './webBrowser.js';
 // de que estamos en Pedidos. Esto evita pulsar por error un "Nuevo" de otra
 // sección que tenga botones parecidos.
 async function openOrderPage(config) {
-  const browser = await connectBrowser(config);
-  const page = await findOrderPage(browser, config);
-  if (!page) {
-    try { browser.disconnect(); } catch { /* noop */ }
-    const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认那个 Edge 窗口里打开了 UnideGes（网址含 unideges）。');
-    err.stage = 'findPage';
-    throw err;
+  // Conectar + localizar la pestaña, con REINTENTO: si la pestaña estaba
+  // dormida (Edge la suspende tras un rato inactiva), el primer intento
+  // puede fallar con "Network.enable timed out" mientras el renderer
+  // despierta; a la segunda suele responder.
+  const attempts = Number(config.webOrder?.connectRetries) || 2;
+  let browser = null;
+  let page = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      browser = await connectBrowser(config);
+      page = await findOrderPage(browser, config);
+      if (page) break;
+      try { browser.disconnect(); } catch { /* noop */ }
+      browser = null;
+      const err = new Error('连上了 Edge，但没找到 UnideGes 的标签页。请确认那个 Edge 窗口里打开了 UnideGes（网址含 unideges）。');
+      err.stage = 'findPage';
+      lastError = err;
+    } catch (error) {
+      lastError = error;
+      try { browser?.disconnect(); } catch { /* noop */ }
+      browser = null;
+      page = null;
+    }
+    if (attempt < attempts) await sleep(2000);
   }
+  if (!page) throw lastError || Object.assign(new Error('无法连接 Edge。'), { stage: 'connect' });
+
   try { await page.bringToFront(); } catch { /* noop */ }
   try {
     await ensurePedidoPage(page, config);
@@ -177,14 +197,23 @@ export async function applyOrderWeb(draft, config, logger) {
     // para y se avisa, sin adivinar.
     const results = [];
     let autoPicked = 0;
+    let namePicked = 0;
+    let repairedCount = 0;
+    let unrepairedBlanks = 0;
+    const unrepairedCodes = [];
     for (let i = 0; i < draft.items.length; i++) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
-      const codeLabel = item.originalCode && String(item.originalCode) !== code
-        ? `${item.originalCode}->${code}`
-        : code;
       const qty = String(item.quantity ?? '').trim();
-      if (!code) { results.push({ code: codeLabel, qty, ok: false, reason: 'sin código' }); continue; }
+      const nombre = String(item.nombre || '').trim();
+      // Término de búsqueda: el código/EAN si lo hay; si no (línea por nombre
+      // resuelta cuya opción no traía código), el propio nombre exacto.
+      const searchTerm = code || nombre || String(item.name || '').trim();
+      // Si el código corto se convirtió a EAN, en los mensajes de error se
+      // muestran ambos (original → EAN) para saber qué se buscó de verdad.
+      const original = String(item.originalCode || '').trim();
+      const codeLabel = original && original !== code ? `${original} → EAN ${code}` : (code || searchTerm);
+      if (!searchTerm) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
       const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
       if (!prepared) {
@@ -197,41 +226,52 @@ export async function applyOrderWeb(draft, config, logger) {
         };
       }
       await sleep(Number(w.nextLineReadyMs) || 120);
-      await page.keyboard.type(code, { delay: 25 });
-      // Sondear hasta que el desplegable aparezca (la red/servidor pueden
-      // tardar), en vez de una espera fija que a veces se queda corta.
-      const opts = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
-      if (opts === 0) {
-        const shot = await screenshot(page, config, `code-${code}-nomatch`);
+
+      // anchorCode = el Código Unide conocido, para elegir la fila exacta si
+      // el autocompletado saca varias. La búsqueda se intenta en cadena hasta
+      // que una funciona:
+      //   1) término principal (EAN si se convirtió, o el código, o el nombre
+      //      de una línea por nombre);
+      //   2) el código corto ORIGINAL (p. ej. 3701) por si su EAN no está
+      //      indexado en la web —el código sí es un identificador válido—;
+      //   3) el nombre de la tabla local (limpio, sin el punto de truncado).
+      // Todos anclados en anchorCode: nunca confirman "el primer parecido".
+      const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
+      const attempts = [{ term: searchTerm, requireAnchor: false }];
+      if (original && original !== searchTerm) attempts.push({ term: original, requireAnchor: false, via: 'code' });
+      if (nombre && nombre !== searchTerm) attempts.push({ term: nombre, requireAnchor: true, via: 'name' });
+
+      let sel = { status: 'nomatch' };
+      let triedName = false;
+      for (let t = 0; t < attempts.length; t += 1) {
+        if (t > 0) await clearArticleEditor(page);
+        const at = attempts[t];
+        if (at.via === 'name') triedName = true;
+        const r = await searchAndSelect(page, at.term, anchorCode, autocompleteTimeoutMs, autocompleteMs, at.requireAnchor);
+        if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
+        sel = r;
+      }
+      if (sel.status !== 'ok' && triedName) sel.nameTried = true;
+
+      if (sel.status !== 'ok') {
+        const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
+        const shot = await screenshot(page, config, `code-${code}-${tag}`);
         const dom = await captureEditDom(page, config);
+        const nameNote = sel.nameTried ? `（也试了按商品名「${nombre}」搜，仍无法确定）` : '';
+        const detail = sel.status === 'nomatch'
+          ? `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）${nameNote}。已停止，未保存。`
+          : `código ${codeLabel} 有多个匹配，且没有一行的 Código Unide 正好等于 ${anchorCode}${nameNote}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`;
+        results.push({ code, qty, ok: false, reason: sel.status });
         return {
-          ok: false, stage: 'autocomplete', screenshot: shot, domDump: dom,
-          error: `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）。已停止，未保存。`,
-          results
+          ok: false, stage: sel.status === 'nomatch' ? 'autocomplete' : 'ambiguous',
+          screenshot: shot, domDump: dom, error: detail, results
         };
       }
-      if (opts === 1) {
-        // Un único resultado → Enter selecciona (desplegable abierto).
-        await page.keyboard.press('Enter');
-      } else {
-        // Varios resultados. Regla del usuario: elegir la fila cuyo Código
-        // Unide coincide EXACTAMENTE con el código tecleado (misma
-        // referencia, el resto suelen ser el mismo artículo sin Código
-        // Unide). Se busca la fila con una celda == code y se pulsa.
-        const picked = await selectDropdownRowByCode(page, code);
-        if (!picked) {
-          const shot = await screenshot(page, config, `code-${code}-multi`);
-          const dom = await captureEditDom(page, config);
-          results.push({ code: codeLabel, qty, ok: false, reason: `${opts} 个匹配，无法自动判断` });
-          return {
-            ok: false, stage: 'ambiguous', screenshot: shot, domDump: dom,
-            error: `código ${codeLabel} 有 ${opts} 个匹配，且没有一行的 Código/EAN 正好等于 ${code}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`,
-            results
-          };
-        }
-        autoPicked += 1;
-      }
-      await sleep(300);
+      if (sel.via === 'anchor') autoPicked += 1;
+      if (sel.viaName) namePicked += 1;
+      // Dejar que Blazor termine de ENLAZAR el artículo elegido antes de
+      // seguir (confirmar demasiado pronto deja la fila "en blanco").
+      await sleep(Number(w.selectSettleMs) || 500);
       // Tras seleccionar (sobre todo si fue por clic en una fila del
       // desplegable), el foco puede quedar en la opción, no en el editor.
       // Se devuelve el foco al editor de la fila para que el Tab siguiente
@@ -249,13 +289,32 @@ export async function applyOrderWeb(draft, config, logger) {
       await sleep(150);
       await page.keyboard.press('Enter');
       await sleep(betweenLinesMs);
-      results.push({ code: codeLabel, qty, ok: true });
+
+      // Autocomprobación de la línea recién confirmada: si quedó "en
+      // blanco" (C.Central sin Código Unide, un fallo de enlace de Blazor
+      // al confirmar demasiado pronto), se repara con el gesto del
+      // usuario: lápiz Editar → reescribir el código → Enter Enter.
+      let repaired = false;
+      if (w.repairBlankLines !== false) {
+        const blanks = await countBlankRows(page);
+        if (blanks > unrepairedBlanks) {
+          repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, autocompleteTimeoutMs, autocompleteMs);
+          if (repaired) repairedCount += 1;
+          else { unrepairedBlanks += 1; unrepairedCodes.push(codeLabel); }
+        }
+      }
+      results.push({ code, qty, ok: true, repaired });
     }
 
     const shot = await screenshot(page, config, 'done');
     const okCount = results.filter((r) => r.ok).length;
-    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked });
-    const autoNote = autoPicked > 0 ? `（其中 ${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行）` : '';
+    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked, repairedCount, unrepairedBlanks });
+    const notes = [];
+    if (autoPicked > 0) notes.push(`${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行`);
+    if (namePicked > 0) notes.push(`${namePicked} 行代码没搜到，已改用商品名搜到并按 Código Unide 选中`);
+    if (repairedCount > 0) notes.push(`${repairedCount} 行提交后 Código Unide 显示空白，已自动重输修复`);
+    if (unrepairedCodes.length > 0) notes.push(`⚠️ ${unrepairedCodes.join('、')} 提交后显示空白且自动修复失败，请人工点铅笔重输一遍这个代码`);
+    const autoNote = notes.length ? `（${notes.join('；')}）` : '';
     return {
       ok: true,
       screenshot: shot,
@@ -268,6 +327,255 @@ export async function applyOrderWeb(draft, config, logger) {
   } finally {
     try { browser?.disconnect(); } catch { /* noop */ }
   }
+}
+
+// --- 3) Búsqueda por NOMBRE: devolver TODAS las opciones -------------
+// Cuando no se sabe el Código Unide de un producto, se escribe su nombre y
+// esto abre un formulario de PRUEBA (Nuevo), teclea el nombre en el editor
+// de artículo y CAPTURA todas las opciones del desplegable (con su Código
+// Unide) para que el usuario elija en Telegram. No selecciona ni guarda
+// nada; el borrador de prueba se descarta en la siguiente navegación (cada
+// openOrderPage hace un page.goto que lo tira).
+export async function searchArticleOptions(config, name, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const autocompleteMs = Number(w.autocompleteMs) || 900;
+    const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
+
+    const openedNew = await openNewOrderForm(page, Number(w.pageNavigationTimeoutMs) || 20000);
+    if (!openedNew.ok) return { ok: false, stage: 'nuevo', error: openedNew.error };
+    await sleep(Number(w.formRenderMs) || 2800);
+
+    const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
+    if (!prepared) return { ok: false, stage: 'newrow', error: '没找到可输入的 artículo 编辑框。' };
+
+    await page.keyboard.type(String(name), { delay: 25 });
+    const count = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
+    const shot = await screenshot(page, config, `search-${name}`);
+    if (count === 0) return { ok: true, options: [], screenshot: shot };
+
+    const options = await captureDropdownOptions(page, Number(w.maxSearchOptions) || 20);
+    logger?.info('web search options', { name, count: options.length });
+    return { ok: true, options, screenshot: shot };
+  } catch (error) {
+    logger?.error('web search failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'search', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+// --- 4) LLEGADA: leer pedidos de la lista y sus líneas (solo lectura) --
+// Para la lista de comprobación del día de llegada se leen los pedidos
+// REALES de la web (así entran también los hechos a mano o importados
+// desde la PDA, no solo los que rellenó el bot). Todo es de solo lectura:
+// se abre cada pedido con un clic en su fila, se copian las líneas y se
+// vuelve a la lista con page.goto. No se pulsa Nuevo/Guardar/Enviar.
+//   creationDate: 'YYYY-MM-DD' — se buscan pedidos CREADOS ese día (los
+//   que llegan hoy = creados hace offsetDays).
+export async function fetchArrivingOrders(config, creationDate, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const timeout = Number(w.pageNavigationTimeoutMs) || 20000;
+
+    const rows = await waitForListRows(page, timeout);
+    if (!rows.length) {
+      return { ok: true, orders: [], totalListed: 0, matched: 0 };
+    }
+
+    const excludeStates = (config.arrival?.excludeStates || ['Alta']).map((s) => String(s).toLowerCase());
+    const matches = rows.filter((r) => r.fechaIso === creationDate
+      && !excludeStates.includes(String(r.estado || '').toLowerCase()));
+    const cap = Number(config.arrival?.maxOrders) || 8;
+    const selected = matches.slice(0, cap);
+
+    const orders = [];
+    for (const target of selected) {
+      const openedDetail = await openOrderDetailByRow(page, target, timeout);
+      if (!openedDetail) {
+        logger?.warn('could not open order detail', { id: target.id, nombre: target.nombre });
+        await ensurePedidoPage(page, config);
+        continue;
+      }
+      await sleep(Number(w.formRenderMs) || 2800);
+      const items = await scrapeOrderLines(page);
+      orders.push({ orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items });
+      // Volver a la lista (recarga dura; no hay nada que guardar).
+      await ensurePedidoPage(page, config);
+    }
+    logger?.info('arriving orders fetched', { creationDate, listed: rows.length, matched: matches.length, scraped: orders.length });
+    return { ok: true, orders, totalListed: rows.length, matched: matches.length };
+  } catch (error) {
+    logger?.error('fetch arriving orders failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'fetchLlegada', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+// Espera (sondeando) a que la lista de Pedidos tenga filas y las devuelve
+// como { index, id, nombre, fecha, fechaIso, estado }. Se localiza la
+// tabla por sus CABECERAS (no por posición), así aguanta cambios de orden
+// de columnas.
+async function waitForListRows(page, timeoutMs) {
+  const start = Date.now();
+  for (;;) {
+    const rows = await page.evaluate(() => {
+      const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+      for (const table of tables) {
+        const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+        const idxNombre = headers.findIndex((h) => /^nombre del pedido$/i.test(h));
+        if (idxNombre === -1) continue;
+        const idxId = headers.findIndex((h) => /^id$/i.test(h));
+        const idxFecha = headers.findIndex((h) => /fecha de creaci/i.test(h));
+        const idxEstado = headers.findIndex((h) => /estado de pedido/i.test(h));
+        const out = [];
+        const trs = Array.from(table.querySelectorAll('tr[role="row"]'));
+        for (let i = 0; i < trs.length; i += 1) {
+          const cells = Array.from(trs[i].querySelectorAll('td')).map((td) => clean(td.innerText));
+          if (!cells.length || !cells.some(Boolean)) continue;
+          const nombre = cells[idxNombre] || '';
+          if (!nombre) continue;
+          out.push({
+            index: i,
+            id: idxId >= 0 ? (cells[idxId] || '') : '',
+            nombre,
+            fecha: idxFecha >= 0 ? (cells[idxFecha] || '') : '',
+            estado: idxEstado >= 0 ? (cells[idxEstado] || '') : ''
+          });
+        }
+        return out;
+      }
+      return [];
+    });
+    if (rows.length) {
+      for (const row of rows) row.fechaIso = spanishDateToIso(row.fecha);
+      return rows;
+    }
+    if (Date.now() - start >= timeoutMs) return [];
+    await sleep(300);
+  }
+}
+
+// '24/6/2026' (con o sin hora detrás) → '2026-06-24'.
+function spanishDateToIso(value) {
+  const match = String(value || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!match) return '';
+  const [, d, m, y] = match;
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+// Abre el detalle de un pedido pulsando la celda de su nombre en la fila
+// que coincide en nombre (y, si hay, en Id). XAF abre el DetailView con un
+// clic simple en la celda; si no navega, se reintenta con doble clic.
+async function openOrderDetailByRow(page, target, timeoutMs) {
+  for (const clickCount of [1, 2]) {
+    const handle = await page.evaluateHandle((wanted) => {
+      const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const trs = Array.from(document.querySelectorAll('tr[role="row"]')).filter(isVisible);
+      for (const tr of trs) {
+        const texts = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!texts.includes(wanted.nombre)) continue;
+        if (wanted.id && !texts.includes(wanted.id)) continue;
+        // La celda del nombre (evitando el enlace de la tienda, que
+        // navegaría a Store_DetailView).
+        const cell = Array.from(tr.querySelectorAll('td')).find((td) => clean(td.innerText) === wanted.nombre && !td.querySelector('a'));
+        return cell || tr;
+      }
+      return null;
+    }, { nombre: target.nombre, id: target.id });
+    const el = handle.asElement();
+    if (!el) { await handle.dispose(); return false; }
+    await el.click({ clickCount });
+    await handle.dispose();
+
+    const deadline = Date.now() + Math.min(6000, timeoutMs);
+    while (Date.now() < deadline) {
+      try {
+        const state = await getPedidoPageState(page);
+        if (state.isPedidoDetail) return true;
+      } catch { /* navegación en curso */ }
+      await sleep(250);
+    }
+  }
+  return false;
+}
+
+// Copia las líneas del pedido abierto (grid con cabecera "Código Unide").
+// Devuelve [{ code, nombre, quantity }] con quantity = Cajas.
+async function scrapeOrderLines(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxArticulo = headers.findIndex((h) => /^art[ií]culo$/i.test(h));
+      const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+      const out = [];
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const code = cells[idxCodigo] || '';
+        const nombre = idxArticulo >= 0 ? (cells[idxArticulo] || '') : '';
+        if (!code && !nombre) continue;
+        if (cells.some((c) => /^suma:/i.test(c))) continue; // fila de totales
+        out.push({
+          code,
+          nombre,
+          quantity: idxCajas >= 0 ? (cells[idxCajas] || '') : ''
+        });
+      }
+      return out;
+    }
+    return [];
+  });
+}
+
+// Lee las opciones VISIBLES del desplegable abierto y las DESGLOSA para que
+// la lista que ve el usuario sea legible:
+//   name → el nombre del producto (lo que va antes del primer número largo).
+//   ean  → el primer EAN (12-14 díg): identificador ÚNICO para rellenar.
+//   code → el Código Unide (se prefiere el de 6 díg): ancla de respaldo.
+// El texto crudo trae muchos números (referencia interna, Código Unide y
+// varios EAN) que no hace falta mostrar.
+async function captureDropdownOptions(page, max) {
+  return page.evaluate((limit) => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const opts = [...new Set(Array.from(document.querySelectorAll(
+      '[role="option"], .dxbl-listbox-item, .dxbl-list-box-item, .dxbl-grid-dropdown-item'
+    )))].filter(isVisible);
+    const seen = new Set();
+    const out = [];
+    for (const o of opts) {
+      const text = (o.innerText || '').replace(/\s+/g, ' ').trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      // Nombre = lo que va antes del primer bloque de 4+ dígitos (código/EAN).
+      const firstNum = text.search(/\d{4,}/);
+      const name = (firstNum > 0 ? text.slice(0, firstNum) : text).replace(/[;·|,\s]+$/, '').trim();
+      const nums = text.match(/\d{4,}/g) || [];
+      const eans = nums.filter((n) => n.length >= 12 && n.length <= 14);
+      const codes = nums.filter((n) => n.length >= 5 && n.length <= 8);
+      const code = codes.find((n) => n.length === 6) || codes[0] || '';
+      out.push({ name: name || text, code, ean: eans[0] || '', text });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }, max);
 }
 
 // --- helpers ---------------------------------------------------------
@@ -594,6 +902,134 @@ async function selectDropdownRowByCode(page, code) {
   return true;
 }
 
+// --- Reparación de líneas "en blanco" ---------------------------------
+// A veces la fila se confirma antes de que Blazor termine de enlazar el
+// artículo: la línea queda con C.Central, peso e importe correctos pero
+// con Código Unide y Artículo VACÍOS en el grid. El arreglo manual del
+// usuario (lápiz "Editar" → reescribir el código → Enter Enter) funciona
+// siempre, así que el bot lo replica solo, línea a línea, justo después
+// de confirmar cada una (así sabe QUÉ código va en la fila en blanco).
+
+// Cuenta las filas confirmadas visibles con C.Central pero sin Código
+// Unide (las "en blanco").
+async function countBlankRows(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      let count = 0;
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        const codigo = cells[idxCodigo] || '';
+        if (central && !codigo && tr.querySelector('button[title="Editar"], button[aria-label="Editar"]')) count += 1;
+      }
+      return count;
+    }
+    return 0;
+  });
+}
+
+// Botón "Editar" (lápiz) de la primera fila en blanco visible.
+async function blankRowEditButton(page) {
+  const handle = await page.evaluateHandle(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        const codigo = cells[idxCodigo] || '';
+        if (central && !codigo) {
+          const btn = tr.querySelector('button[title="Editar"], button[aria-label="Editar"]');
+          if (btn) return btn;
+        }
+      }
+    }
+    return null;
+  });
+  const el = handle.asElement();
+  if (!el) { await handle.dispose(); return null; }
+  return { el, handle };
+}
+
+// Repara la primera fila en blanco reescribiendo su artículo (el mismo
+// gesto que el usuario hace a mano). Devuelve true si tras el reintento
+// hay una fila en blanco menos.
+async function repairBlankLine(page, terms, autocompleteTimeoutMs, autocompleteMs) {
+  const before = await countBlankRows(page);
+  if (before === 0) return true;
+  const btn = await blankRowEditButton(page);
+  if (!btn) return false;
+  await btn.el.click();
+  await btn.handle.dispose();
+  const editorReady = await waitForArticleEditor(page, 4000);
+  if (!editorReady) return false;
+  await clearArticleEditor(page);
+  let sel = await searchAndSelect(page, terms.searchTerm, terms.anchorCode, autocompleteTimeoutMs, autocompleteMs, false);
+  if (sel.status !== 'ok' && terms.nombre && terms.nombre !== terms.searchTerm) {
+    await clearArticleEditor(page);
+    sel = await searchAndSelect(page, terms.nombre, terms.anchorCode, autocompleteTimeoutMs, autocompleteMs, true);
+  }
+  if (sel.status !== 'ok') return false;
+  await sleep(300);
+  await focusEditRowEditor(page);
+  // El gesto del usuario: Enter Enter para confirmar la fila reeditada
+  // (la cantidad ya estaba puesta y se conserva).
+  await page.keyboard.press('Enter');
+  await sleep(250);
+  await page.keyboard.press('Enter');
+  await sleep(400);
+  return (await countBlankRows(page)) < before;
+}
+
+// Teclea `term` en el editor de artículo, espera el desplegable y selecciona.
+//   - requireAnchor=false (búsqueda por código/EAN): un único resultado se
+//     acepta con Enter; con varios, se elige la fila cuyo Código Unide ==
+//     anchorCode.
+//   - requireAnchor=true (búsqueda por NOMBRE): NUNCA se acepta a ciegas; se
+//     exige que UNA fila tenga el Código Unide == anchorCode. Así el respaldo
+//     por nombre jamás confirma "el primer nombre parecido".
+// Devuelve { status: 'ok'|'nomatch'|'ambiguous', via }.
+async function searchAndSelect(page, term, anchorCode, timeoutMs, settleMs, requireAnchor) {
+  await page.keyboard.type(String(term), { delay: 25 });
+  const count = await waitForDropdownOptions(page, timeoutMs, settleMs);
+  if (count === 0) return { status: 'nomatch' };
+  if (count === 1 && !requireAnchor) {
+    await page.keyboard.press('Enter');
+    return { status: 'ok', via: 'single' };
+  }
+  const picked = anchorCode ? await selectDropdownRowByCode(page, anchorCode) : false;
+  if (picked) return { status: 'ok', via: 'anchor' };
+  return { status: 'ambiguous' };
+}
+
+// Limpia el editor de artículo (borra el código que no encontró) para poder
+// reintentar la búsqueda por nombre. Reenfoca el input y hace Ctrl+A +
+// Backspace; volver a teclear reemplaza cualquier desplegable abierto.
+async function clearArticleEditor(page) {
+  await focusArticleEditor(page);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Backspace');
+  await sleep(150);
+}
+
 // Captura de pantalla del navegador (mejor que la de PowerShell). Devuelve
 // la ruta del PNG o null.
 async function screenshot(page, config, tag) {
@@ -622,3 +1058,10 @@ async function captureEditDom(page, config) {
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// Solo para pruebas: helpers internos del rellenado por navegador.
+export const __test = {
+  searchAndSelect, clearArticleEditor, selectDropdownRowByCode, focusArticleEditor,
+  waitForListRows, scrapeOrderLines, openOrderDetailByRow, spanishDateToIso,
+  countBlankRows, repairBlankLine
+};

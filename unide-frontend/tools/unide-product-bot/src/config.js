@@ -41,6 +41,22 @@ const defaultConfig = {
     reminderWindowMinutes: 180,
     reminderChatIds: []
   },
+  // Lista de comprobación de LLEGADA: los pedidos que el bot rellena se
+  // registran en logs/orders-history.json; el día estimado de llegada
+  // (fecha del pedido + offsetDays) se imprime una lista con casillas en
+  // la impresora del PC y se manda también por Telegram. /llegada la
+  // saca a demanda.
+  arrival: {
+    enabled: true,
+    printTime: '08:30',        // hora local (Europe/Madrid) de impresión
+    windowMinutes: 180,        // margen si el PC estaba apagado a esa hora
+    offsetDays: 2,             // pedido lunes → llega miércoles, etc.
+    printerName: '',           // '' = impresora predeterminada de Windows
+    autoPrint: true,           // false = solo Telegram, sin imprimir
+    chatIds: [],               // vacío = los de ordering.reminderChatIds
+    excludeStates: ['Alta'],   // estados que NO llegan (Alta = borrador)
+    maxOrders: 8               // tope de pedidos a abrir por día
+  },
   desktop: {
     enabled: false,
     script: 'desktop/unideges-search.ps1',
@@ -70,7 +86,21 @@ const defaultConfig = {
     formRenderMs: 2800,        // tras pulsar "Nuevo", esperar el DetailView
     autocompleteTimeoutMs: 5000, // espera MÁX a que aparezca el desplegable
     autocompleteMs: 900,       // espera tras aparecer, para que cargue todo
-    betweenLinesMs: 700        // entre línea y línea
+    betweenLinesMs: 700,       // entre línea y línea
+    // Navegación a la lista de Pedidos (page.goto directo, no clic en menú).
+    pageNavigationTimeoutMs: 20000, // espera MÁX a que cargue la lista
+    pedidoListUrl: '',         // vacío = derivar del origen + /OrderT_ListView
+    // Búsqueda por nombre: máximo de opciones a devolver para que elijas.
+    maxSearchOptions: 20,
+    // Conexión CDP: margen por si la pestaña estaba dormida y reintentos.
+    protocolTimeoutMs: 90000,
+    connectRetries: 2,
+    // Espera tras elegir el artículo, para que Blazor enlace la fila antes
+    // de confirmarla (evita líneas con Código Unide en blanco).
+    selectSettleMs: 500,
+    // Si una línea queda en blanco igualmente, repararla sola con el gesto
+    // del usuario (lápiz Editar → reescribir código → Enter Enter).
+    repairBlankLines: true
   }
 };
 

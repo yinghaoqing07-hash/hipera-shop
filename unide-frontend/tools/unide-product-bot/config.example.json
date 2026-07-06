@@ -17,6 +17,19 @@
     "reminderWindowMinutes": 180,
     "reminderChatIds": []
   },
+  "arrival": {
+    "enabled": true,
+    "printTime": "08:30",
+    "windowMinutes": 180,
+    "offsetDays": 2,
+    "printerName": "",
+    "autoPrint": true,
+    "chatIds": [],
+    "excludeStates": [
+      "Alta"
+    ],
+    "maxOrders": 8
+  },
   "desktop": {
     "enabled": false,
     "script": "desktop/unideges-search.ps1",
@@ -164,6 +177,13 @@
     "formRenderMs": 2800,
     "autocompleteTimeoutMs": 5000,
     "autocompleteMs": 900,
-    "betweenLinesMs": 700
+    "betweenLinesMs": 700,
+    "pageNavigationTimeoutMs": 20000,
+    "pedidoListUrl": "",
+    "maxSearchOptions": 20,
+    "protocolTimeoutMs": 90000,
+    "connectRetries": 2,
+    "selectSettleMs": 500,
+    "repairBlankLines": true
   }
 }

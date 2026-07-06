@@ -37,12 +37,49 @@ export function parseOrderDraftMessage(text) {
     }
 
     const item = parseOrderLine(line);
-    if (item) draft.items.push(item);
+    if (item) { draft.items.push(item); continue; }
+    // Si no es una línea por código, puede ser una línea por NOMBRE: cuando
+    // no sabes el código, escribes el nombre del producto (+ cantidad). Se
+    // resolverá luego buscándolo en la web y eligiendo tú entre las opciones.
+    const named = parseNameLine(line);
+    if (named) draft.items.push(named);
   }
 
   if (!draft.orderName) return { ok: false, error: '缺订单名。请写 nombre: CARNE 0207' };
-  if (!draft.items.length) return { ok: false, error: '缺商品行。每行写：商品代码 数量，例如 620002 1' };
+  if (!draft.items.length) return { ok: false, error: '缺商品行。每行写：商品代码 数量（如 620002 1），或不知道代码时写商品名（如 ensalada florette 2）。' };
   return { ok: true, draft };
+}
+
+// Una línea es "por nombre" si contiene letras (no es solo un código). La
+// cantidad va al final (ensalada florette 2 / coca cola 2l x6); sin cantidad
+// se asume 1. La resolución (elegir el producto concreto) se hace después.
+function parseNameLine(line) {
+  const normalized = String(line || '').replace(/\s+/g, ' ').trim();
+  if (!/\p{L}/u.test(normalized)) return null; // debe tener letras
+  let name = normalized;
+  let quantity = '1';
+  const qm = normalized.match(/^(.*\S)\s+[xX×]?\s*(\d+(?:[.,]\d+)?)$/);
+  if (qm) { name = qm[1].trim(); quantity = qm[2].replace('.', ','); }
+  if (!name) return null;
+  return { name, quantity, raw: line };
+}
+
+// ¿Es una línea por nombre todavía sin resolver (falta que elijas el
+// producto)? Se usa para lanzar el flujo de selección y para el preview.
+export function isPendingNameItem(item) {
+  return Boolean(item?.name) && !item?.resolved;
+}
+
+// Aplica la opción elegida (del desplegable de la web) a la línea por nombre:
+// queda resuelta y pasa a rellenarse por el EAN (identificador único) si lo
+// hay, o por el Código Unide; el Código Unide queda como ancla de respaldo.
+export function resolveNameItem(item, chosen) {
+  const ean = String(chosen?.ean || '').replace(/[^\d]/g, '');
+  const code = String(chosen?.code || '').replace(/[^\d]/g, '');
+  const search = ean || code;
+  const out = { ...item, resolved: true, nombre: cleanName(chosen?.name || chosen?.text) };
+  if (search) { out.code = search; out.anchorCode = code || search; }
+  return out;
 }
 
 export function parseOrderMode(text) {
@@ -217,17 +254,45 @@ function formatProduce(parts) {
   ].join('\n');
 }
 
+// /precio_fruta — flujo completo para cambiar el precio de una fruta o
+// verdura (dictado por el dueño; también está en el manual). Es solo un
+// recordatorio de pasos manuales: el bot no toca precios.
+export function formatFruitPriceFlow() {
+  return [
+    '水果/蔬菜换价格流程：',
+    '',
+    '1. 桌面打开 Diseño Pantalla Unide。',
+    '2. 进 Frutas 或 Verduras 面板。',
+    '3. 右键要换价的水果/蔬菜 → Editar。',
+    '4. 进 Acción 页，抄下它的 código。',
+    '5. 去 UnideGes 的 Artículos 搜这个 código，改价格。',
+    '6. 改完点关闭 → 自动弹出 Etiquetas 页面打印新价签。',
+    '7. 点 Etiq. Especiales。',
+    '8. 勾选 Imprimir；Tipo Etiqueta 全改成 Tipo Display 8 A4 vertical。',
+    '9. 点 Imprimir 打印。',
+    '',
+    '注意：一定先从面板拿 código 再去 Artículos 改，避免改错品种。'
+  ].join('\n');
+}
+
 function formatPda(parts) {
   return [
     `今天是${DAY_NAMES[parts.day]}：PDA / 自动导入订单检查。重点是 11:00 前确认。`,
+    '',
+    'PDA 扫完货之后的完整流程：',
+    '1. PDA 上点 Generar fichero（生成文件）。',
+    '2. 把 PDA 和电脑接上（底座/接线）。',
+    '3. 电脑上打开 COMPC 程序（把 PDA 文件传到电脑）。',
+    '4. 网页 Gestión Tiendas > Pedidos，点工具栏 Cargar Pedido。',
+    '5. 核对加载进来的订单：Estado、重量、金额、行数。',
+    '6. 没问题再人工点 Enviar Pedido。',
+    '顺序不能乱：没点 Generar fichero 或没开 COMPC，Cargar Pedido 会加载不到东西。',
     '',
     '检查：',
     '- Pedidos 列表有没有最新 Pedido importado desde PDA Nro.',
     '- 通常可能有两张，一大一小，别漏一张。',
     '- Estado、Peso Total、Importe Total 有没有明显异常。',
-    '- 如果没生成，先查 PDA/导入流程，不要急着手工补整单。',
-    '',
-    '入口：Gestión Tiendas > Pedidos。'
+    '- 如果没生成，先查 PDA/导入流程，不要急着手工补整单。'
   ].join('\n');
 }
 
@@ -264,38 +329,110 @@ function formatOrderHelp() {
     '/pedido        看今天该做什么',
     '/pedido carne  肉类叫货流程',
     '/pedido fruta  果蔬叫货流程',
-    '/pedido pda    周日 PDA 检查',
+    '/pedido pda    周日 PDA 检查（含扫货后完整流程）',
+    '/carne         肉类点货单（代替纸质表，点一点生成订单）',
+    '/llegada       打印今天的到货核对清单',
+    '/precio_fruta melocotón 2,99  自动改水果价格（不带参数=看手动流程）',
     '',
     '让程序填订单：',
     '/pedido_nuevo',
     'nombre: CARNE 0207',
-    '620002 1',
+    '620002 1        ← 知道代码就写代码 数量',
     '620006 2',
-    '609950 1',
+    'ensalada florette 2   ← 不知道代码就写商品名 数量，程序会在网页搜、把选项发给你点',
     '',
-    '目前只做提醒和清单，不会自动提交订单。'
+    '目前只做提醒和填入草稿，不会点 Guardar，也不会 Enviar Pedido。'
   ].join('\n');
 }
 
+// Longitud máxima de un "código corto". Los Código Unide reales de la
+// tienda son de 6+ dígitos y los EAN de 13; un código de <=5 dígitos es un
+// código de artículo interno (p. ej. 3700/3701/3702) que en la web de
+// Pedidos dispara búsqueda DIFUSA y saca decenas de opciones parecidas.
+const SHORT_CODE_MAX_LEN = 5;
+
+// Enriquece cada línea del pedido con datos de la tabla local de la tienda:
+//   - nombre     → nombre del producto (para mostrar en la confirmación y
+//                  como término de búsqueda de respaldo en la web).
+//   - anchorCode → el Código Unide conocido, para elegir en la web la fila
+//                  EXACTA cuando el autocompletado saca varias opciones.
+//   - code/originalCode/converted → si es un código corto con EAN, se busca
+//                  en la web por EAN (exacto) en vez de por el código corto
+//                  (que dispara búsqueda difusa con decenas de opciones).
+// No toca códigos largos (ya buscan bien), ni los que no estén en la tabla o
+// no tengan EAN. Con la tabla vacía es un no-op. Devuelve el draft
+// enriquecido y la lista de conversiones (para el mensaje de confirmación).
+export function enrichOrderItems(draft, storeIndex, supplierIndex = null, options = {}) {
+  const maxLen = Number(options.maxLen) || SHORT_CODE_MAX_LEN;
+  const conversions = [];
+  const items = (draft.items || []).map((item) => {
+    const typed = String(item.code || '').trim();
+    const out = { ...item };
+    if (!/^\d+$/.test(typed)) return out;
+    // Primero la tabla de la tienda; si el código no está ahí (p. ej. un
+    // producto que la tienda no tiene dado de alta), se recurre al catálogo
+    // completo del proveedor. Así más líneas obtienen nombre y EAN.
+    const storeRow = storeIndex?.byCode?.get(typed) || null;
+    const supRow = supplierIndex?.byCode?.get(typed) || null;
+    if (!storeRow && !supRow) return out;
+    // El código tecleado ES el Código Unide (se buscó en byCode): sirve de
+    // ancla para desambiguar en la web aunque luego busquemos por EAN/nombre.
+    out.anchorCode = typed;
+    const nombre = cleanName(firstNonEmpty(
+      storeRow?.articulo_tienda, storeRow?.articulo,
+      supRow?.articulo_tienda, supRow?.articulo
+    ));
+    if (nombre) out.nombre = nombre;
+    const ean = normalizeEan(storeRow?.ean) || normalizeEan(supRow?.ean);
+    if (ean && ean.length >= 8 && ean !== typed && typed.length <= maxLen) {
+      out.code = ean;
+      out.originalCode = typed;
+      out.converted = true;
+      conversions.push({ original: typed, ean, articulo: nombre });
+    }
+    return out;
+  });
+  return { draft: { ...draft, items }, conversions };
+}
+
+function firstNonEmpty(...values) {
+  for (const v of values) {
+    const s = String(v || '').trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+// Los nombres de la tabla local vienen truncados con un punto/espacio final
+// (p. ej. "ENSALADA FLORETTE ."). Ese sufijo ensucia la confirmación y, sobre
+// todo, hace fallar la búsqueda por nombre en la web (devuelve "sin datos").
+function cleanName(value) {
+  return String(value || '').replace(/\s+/g, ' ').replace(/[\s.·,;:|]+$/, '').trim();
+}
+
+function normalizeEan(value) {
+  return String(value || '').replace(/[^\d]/g, '');
+}
+
 export function formatOrderDraft(draft) {
-  const converted = draft.items.filter((item) => item.originalCode && item.originalCode !== item.code);
   return [
     '准备填入订单：',
     `订单名：${draft.orderName}`,
     `商品行：${draft.items.length} 条`,
     '',
     ...draft.items.map((item, index) => {
-      const code = item.originalCode && item.originalCode !== item.code
-        ? `${item.originalCode} -> ${item.code}`
-        : item.code;
-      const note = item.searchSource ? `（${item.searchSource}）` : '';
-      return `${index + 1}. ${code}  数量 ${item.quantity}${note}`;
+      if (isPendingNameItem(item)) {
+        return `${index + 1}. 🔍 待选：${item.name}  数量 ${item.quantity}`;
+      }
+      const typed = item.originalCode || item.code;
+      let line = `${index + 1}. ${typed}  数量 ${item.quantity}`;
+      if (item.converted) line += `  →  网页搜 EAN ${item.code}`;
+      if (item.nombre) line += `（${item.nombre}）`;
+      return line;
     }),
-    converted.length ? '' : null,
-    converted.length ? `已自动把 ${converted.length} 个短码换成 EAN，减少网页自动补全多选。` : null,
     '',
     '确认后只会填入当前打开的订单页面并截图；不会 Guardar，也不会 Enviar Pedido。'
-  ].filter((line) => line !== null).join('\n');
+  ].join('\n');
 }
 
 function reminderChatIds(config) {

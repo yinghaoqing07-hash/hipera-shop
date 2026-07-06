@@ -19,7 +19,9 @@ export async function connectBrowser(config) {
     const browser = await puppeteer.connect({
       browserURL: debugUrl,
       defaultViewport: null,
-      protocolTimeout: 60000
+      // Si una pestaña estaba dormida (Edge las "duerme" tras un rato de
+      // inactividad), despertar su renderer puede tardar; margen amplio.
+      protocolTimeout: Number(config.webOrder?.protocolTimeoutMs) || 90000
     });
     return browser;
   } catch (error) {

@@ -1,24 +1,32 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
-import { formatTemplateHelp, parseProductMessage } from './templateParser.js';
+import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
+import { parseFruitCommandArg, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
+import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
+import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
+import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
 import { applyUpdatePackage } from './updater.js';
 import {
   OrderReminderScheduler,
+  enrichOrderItems,
+  formatFruitPriceFlow,
   formatOrderDraft,
   formatOrderResponse,
   isOrderCommand,
   isOrderDraftCommand,
+  isPendingNameItem,
   makeOrderButtons,
   makeOrderDraftButtons,
   parseOrderDraftMessage,
-  parseOrderMode
+  parseOrderMode,
+  resolveNameItem
 } from './orderAssistant.js';
 
 const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
@@ -34,6 +42,7 @@ if (process.argv.includes('--help')) { console.log('Usage: node src/bot.js --con
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegram = new TelegramClient(token);
 const orderReminderScheduler = new OrderReminderScheduler(config, logger);
+const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
 let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length });
@@ -41,8 +50,16 @@ logger.info('unide product bot started', { desktopEnabled: config.desktop.enable
 while (true) {
   try {
     const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
-    for (const update of updates) { offset = update.update_id + 1; await handleUpdate(update); }
+    for (const update of updates) {
+      offset = update.update_id + 1;
+      // Aislar cada update: si uno falla (botón caducado, error puntual de
+      // una acción), se registra y se sigue con el resto, sin abortar el
+      // lote ni castigar el bucle con la espera de "polling error".
+      try { await handleUpdate(update); }
+      catch (error) { logger.error('update error', { updateId: update.update_id, error: error.message }); }
+    }
     await maybeSendOrderReminder();
+    await maybePrintArrivalChecklist();
   } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
 }
 
@@ -59,6 +76,11 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
+  if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
+  if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
+  if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
+  if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
+  if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -99,6 +121,11 @@ async function handleCallback(callback) {
   if (!isAllowed(chatId, userId)) { await telegram.answerCallbackQuery(callback.id, '没有权限'); logger.warn('blocked unauthorized callback', { chatId, userId, data }); return; }
   if (data.startsWith('repeat:')) { const id = data.slice(7); const session = sessions.get(id); await telegram.answerCallbackQuery(callback.id, '重新查询'); await sendProductResult(chatId, session?.item || makeRepeatItem(id), 0, 1); return; }
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
+  if (data.startsWith('np:')) { await handleNamePick(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('fp:')) { await handleFruitPick(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('tc:')) { await handleTallyTap(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('tcgo:')) { await handleTallyGo(chatId, callback.id, data.slice(5)); return; }
+  if (data.startsWith('tcclr:')) { await handleTallyClear(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
@@ -114,9 +141,224 @@ async function handleOrderDraft(chatId, text) {
     await telegram.sendMessage(chatId, `${parsed.error}\n\n${formatOrderResponse('help', new Date(), config)}`);
     return;
   }
-  const draft = enrichOrderDraftForWeb(parsed.draft);
+  // Enriquecer con la tabla local: nombre (para mostrar y como búsqueda de
+  // respaldo), Código Unide de ancla, y EAN para códigos cortos (búsqueda
+  // exacta). Todo se muestra en la confirmación (no es una caja negra).
+  const { draft } = enrichOrderItems(parsed.draft, storeIndex, supplierIndex);
   const id = saveSession({ orderDraft: draft });
+
+  // Si hay líneas por NOMBRE (no sabes el código), primero se resuelven una a
+  // una: el bot busca el nombre en la web y te manda TODAS las opciones para
+  // que elijas tú (no adivina). Cuando están todas elegidas, sale la
+  // confirmación final con el botón de填入.
+  if (draft.items.some(isPendingNameItem)) {
+    await telegram.sendMessage(chatId, `${formatOrderDraft(draft)}\n\n有按名字的行，先帮你在网页搜、你来选。`);
+    await resolveNextNameLine(chatId, id);
+    return;
+  }
   await telegram.sendMessage(chatId, formatOrderDraft(draft), makeOrderDraftButtons(id));
+}
+
+// Resuelve la SIGUIENTE línea por nombre pendiente: busca en la web y manda
+// las opciones para elegir. Si ya no queda ninguna, muestra la confirmación
+// final con el botón de llenado.
+async function resolveNextNameLine(chatId, id) {
+  const session = sessions.get(id);
+  if (!session?.orderDraft) return;
+  const idx = session.orderDraft.items.findIndex(isPendingNameItem);
+  if (idx === -1) {
+    await telegram.sendMessage(chatId, `都选好了：\n${formatOrderDraft(session.orderDraft)}`, makeOrderDraftButtons(id));
+    return;
+  }
+  const item = session.orderDraft.items[idx];
+  if (!config.webOrder?.enabled) {
+    await telegram.sendMessage(chatId, `第 ${idx + 1} 行是商品名「${item.name}」，但网页自动化没启用，没法按名字搜。请改用 código 重发整单。`);
+    return;
+  }
+  await telegram.sendMessage(chatId, `正在网页搜第 ${idx + 1} 行「${item.name}」…`);
+  const res = await searchArticleOptions(config, item.name, logger);
+  if (!res.ok) {
+    await telegram.sendMessage(chatId, `搜「${item.name}」失败（${res.stage || '?'}）：\n${res.error}`);
+    return;
+  }
+  if (!res.options.length) {
+    const msg = `网页没搜到「${item.name}」。换个关键词，重发整单 /pedido_nuevo。`;
+    if (res.screenshot) { try { await telegram.sendPhoto(chatId, res.screenshot, msg); } catch { await telegram.sendMessage(chatId, msg); } }
+    else await telegram.sendMessage(chatId, msg);
+    return;
+  }
+  session.nameOptions = session.nameOptions || {};
+  session.nameOptions[idx] = res.options;
+  sessions.set(id, session);
+  // La captura va aparte (el pie de foto se corta a ~1000 chars); la lista y
+  // los botones van en un mensaje normal (hasta 4096).
+  if (res.screenshot) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, `第 ${idx + 1} 行「${item.name}」的网页搜索结果`); } catch { /* noop */ }
+  }
+  // Una línea en blanco entre opciones para que se lean sueltas.
+  const list = res.options.map((o, i) => `[${i + 1}] ${o.name || o.text}`).join('\n\n');
+  const body = `第 ${idx + 1} 行「${item.name}」找到 ${res.options.length} 个（数量 ${item.quantity}），点一个：\n\n${list}`;
+  await telegram.sendMessage(chatId, body, makeNamePickButtons(id, idx, res.options.length));
+}
+
+async function handleNamePick(chatId, callbackId, payload) {
+  const [id, idxStr, optStr] = payload.split(':');
+  const session = sessions.get(id);
+  if (!session?.orderDraft) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); return; }
+  const idx = Number(idxStr);
+  const opt = Number(optStr);
+  const chosen = session.nameOptions?.[idx]?.[opt];
+  if (!chosen) { await telegram.answerCallbackQuery(callbackId, '选项已失效'); return; }
+  await telegram.answerCallbackQuery(callbackId, `已选 [${opt + 1}]`);
+  session.orderDraft.items[idx] = resolveNameItem(session.orderDraft.items[idx], chosen);
+  if (session.nameOptions) delete session.nameOptions[idx];
+  sessions.set(id, session);
+  const idNote = chosen.ean ? `EAN ${chosen.ean}` : (chosen.code ? `código ${chosen.code}` : '按名字填入');
+  await telegram.sendMessage(chatId, `第 ${idx + 1} 行 → ${chosen.name || chosen.text}（${idNote}）`);
+  await resolveNextNameLine(chatId, id);
+}
+
+// /precio_fruta [nombre] [precio] — cambio de precio de fruta/verdura.
+// Sin argumentos: recuerda el flujo manual. Con nombre: resuelve el código
+// (diccionario aprendido → tablas locales → botones para elegir). Con
+// nombre + precio: además lanza el flujo de escritorio existente (buscar en
+// Artículos → captura → 确认处理 → 确认写入), que ya pide confirmación en
+// cada paso arriesgado. La impresión de la etiqueta queda manual.
+async function handleFruitPrice(chatId, text) {
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
+  if (!arg) {
+    await telegram.sendMessage(chatId, `${formatFruitPriceFlow()}\n\n偷懒用法：/precio_fruta melocotón 2,99 → 我帮你查 código 并在桌面 Artículos 里填好价格（写入前都要你确认）。`);
+    return;
+  }
+  const { name, priceRaw } = parseFruitCommandArg(arg);
+  const resolved = resolveFruitCode(config, storeIndex, supplierIndex, name);
+  if (resolved.status === 'found') {
+    await startFruitPriceChange(chatId, name, resolved, priceRaw);
+    return;
+  }
+  if (resolved.status === 'candidates') {
+    const id = saveSession({ fruitPick: { name, priceRaw, candidates: resolved.candidates } });
+    const list = resolved.candidates.map((c, i) => `[${i + 1}] ${c.articulo}（${c.codigo}）`).join('\n\n');
+    const rows = [];
+    let row = [];
+    for (let i = 0; i < resolved.candidates.length; i += 1) {
+      row.push({ text: `${i + 1}`, callback_data: `fp:${id}:${i}` });
+      if (row.length === 5) { rows.push(row); row = []; }
+    }
+    if (row.length) rows.push(row);
+    rows.push([{ text: '取消', callback_data: `cancel:${id}` }]);
+    await telegram.sendMessage(chatId, `「${name}」在本地表里有 ${resolved.candidates.length} 个可能，点对的那个（我会记住，下次不再问）：\n\n${list}`, { reply_markup: { inline_keyboard: rows } });
+    return;
+  }
+  await telegram.sendMessage(chatId, `本地表里没搜到「${name}」。如果你在 Diseño Pantalla 的 Acción 页看到了它的 código，可以登记一次：\n/fruta_add ${name} 12345\n以后就能直接 /precio_fruta ${name} 2,99 了。`);
+}
+
+async function handleFruitPick(chatId, callbackId, payload) {
+  const [id, idxStr] = payload.split(':');
+  const session = sessions.get(id);
+  const pick = session?.fruitPick;
+  const chosen = pick?.candidates?.[Number(idxStr)];
+  if (!chosen) { await telegram.answerCallbackQuery(callbackId, '选项已失效'); return; }
+  await telegram.answerCallbackQuery(callbackId, `已选 ${chosen.codigo}`);
+  saveFruitEntry(config, pick.name, chosen.codigo, chosen.articulo, logger);
+  await telegram.sendMessage(chatId, `记住了：「${pick.name}」= ${chosen.articulo}（código ${chosen.codigo}）。`);
+  await startFruitPriceChange(chatId, pick.name, { codigo: chosen.codigo, articulo: chosen.articulo }, pick.priceRaw);
+}
+
+async function startFruitPriceChange(chatId, name, resolved, priceRaw) {
+  if (!priceRaw) {
+    await telegram.sendMessage(chatId, `「${name}」的 código 是 ${resolved.codigo}${resolved.articulo ? `（${resolved.articulo}）` : ''}。\n要我帮你改价的话发：/precio_fruta ${name} 2,99`);
+    return;
+  }
+  if (!config.desktop?.enabled) {
+    await telegram.sendMessage(chatId, `código ${resolved.codigo}，新价格 ${priceRaw} €。桌面自动化没启用（desktop.enabled=false），请手动去 Artículos 改。`);
+    return;
+  }
+  await telegram.sendMessage(chatId, `「${name}」→ código ${resolved.codigo}，新价格 ${priceRaw} €。正在桌面 Artículos 里搜索…`);
+  const item = {
+    raw: `fruta ${name} ${priceRaw}`,
+    codigo: resolved.codigo,
+    ean: '',
+    nombre: resolved.articulo || name,
+    precio: parsePrice(priceRaw),
+    margen: { mode: 'missing', raw: '' },
+    desbloquear: false,
+    etiqueta: true,
+    nota: `precio fruta ${name}`,
+    labelReminder: true
+  };
+  await sendProductResult(chatId, item, 0, 1);
+}
+
+// /carne — recuento con el móvil que sustituye a la hoja de papel: la
+// lista fija de carne sale como botones, cada toque suma 1 (0→…→5→0) y
+// "生成订单" convierte el recuento en el borrador de pedido de siempre
+// (misma confirmación y mismo 确认填入; aquí no se rellena nada aún).
+async function startTally(chatId, name) {
+  const template = loadTemplate(config, name);
+  if (!template) { await telegram.sendMessage(chatId, `没有「${name}」的模板。`); return; }
+  const id = saveSession({ tally: { name, template, counts: {} } });
+  const sent = await telegram.sendMessage(
+    chatId,
+    `${template.label} 点货单（代替纸质表）：\n点商品名 = 数量 +1，点到 5 再点回 0。\n全部点完按「✔ 生成订单」。`,
+    { reply_markup: buildTallyKeyboard(id, template, {}) }
+  );
+  const session = sessions.get(id);
+  if (session && sent?.message_id) { session.tally.messageId = sent.message_id; sessions.set(id, session); }
+}
+
+async function handleTallyTap(chatId, callbackId, payload) {
+  const [id, idxStr] = payload.split(':');
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  const idx = Number(idxStr);
+  const item = tally?.template?.items?.[idx];
+  if (!item) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发 /carne'); return; }
+  tally.counts[idx] = cycleCount(tally.counts[idx]);
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, `${item.nombre}: ${tally.counts[idx]}`);
+  if (tally.messageId) {
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, tally.counts));
+  }
+}
+
+async function handleTallyClear(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); return; }
+  tally.counts = {};
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, '已清零');
+  if (tally.messageId) {
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, {}));
+  }
+}
+
+async function handleTallyGo(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发 /carne'); return; }
+  const draft = buildDraftFromTally(tally.template, tally.counts, new Date(), config.ordering?.timezone || 'Europe/Madrid');
+  if (!draft.items.length) { await telegram.answerCallbackQuery(callbackId, '还没点任何商品'); return; }
+  await telegram.answerCallbackQuery(callbackId, `${draft.items.length} 行`);
+  // Mismo camino que /pedido_nuevo: enriquecer + confirmación + 确认填入.
+  const { draft: enriched } = enrichOrderItems(draft, storeIndex, supplierIndex);
+  const draftId = saveSession({ orderDraft: enriched });
+  await telegram.sendMessage(chatId, formatOrderDraft(enriched), makeOrderDraftButtons(draftId));
+}
+
+// /fruta_add <nombre> <codigo> — registrar a mano un nombre → código.
+async function handleFruitAdd(chatId, text) {
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
+  const match = arg.match(/^(.*\S)\s+(\d{4,})$/);
+  if (!match) {
+    await telegram.sendMessage(chatId, '格式：/fruta_add 名字 código\n例如：/fruta_add melocotón rojo 123456');
+    return;
+  }
+  const ok = saveFruitEntry(config, match[1], match[2], match[1], logger);
+  await telegram.sendMessage(chatId, ok
+    ? `记住了：「${match[1]}」= código ${match[2]}。以后可以直接 /precio_fruta ${match[1]} 2,99`
+    : '没存上（写文件失败），再试一次。');
 }
 
 async function handleOrderApply(chatId, callbackId, id) {
@@ -132,6 +374,9 @@ async function handleOrderApply(chatId, callbackId, id) {
   // navegador (DOM) en vez de la app de escritorio por coordenadas.
   if (config.webOrder?.enabled) {
     const result = await applyOrderWeb(session.orderDraft, config, logger);
+    // Registrar el pedido rellenado para la lista de comprobación del día
+    // de llegada (solo si todas las líneas entraron bien).
+    if (result.ok) recordFilledOrder(config, session.orderDraft, logger);
     const text = result.ok
       ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；程序没有点 Guardar，也没有点 Enviar Pedido。')
       : `订单填入失败（${result.stage || '?'}）：\n${result.error}`;
@@ -156,6 +401,35 @@ async function handleOrderApply(chatId, callbackId, id) {
   await sendWithOptionalScreenshot(chatId, result, text);
 }
 
+
+// /promociones — lee Promociones, filtra las no caducadas y abre cada una
+// para sacar los articulos de dentro. Solo lectura: no guarda ni modifica.
+async function handlePromotions(chatId, text = '') {
+  const today = todayString(config);
+  const arg = String(text || '').replace(/^\/(promociones|promo)(?:@\w+)?\s*/i, '').trim();
+  const requested = parseDateArg(arg, today);
+  if (arg && !requested) {
+    await telegram.sendMessage(chatId, `没看懂日期「${arg}」。可以写 /promociones（今天）或 /promociones 2026-07-06。`);
+    return;
+  }
+  const dateStr = requested || today;
+  await telegram.sendMessage(chatId, `正在读取 Promociones，筛选 ${dateStr} 未过期项目，并逐个打开抓商品明细…`);
+  const result = await fetchActivePromotions(config, dateStr, logger);
+  if (!result.ok) {
+    const textOut = `Promociones 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`;
+    await sendWithOptionalScreenshot(chatId, result, textOut);
+    if (result.dumpFile) {
+      try { await telegram.sendDocument(chatId, result.dumpFile, 'Promociones 页面结构'); } catch { /* noop */ }
+    }
+    return;
+  }
+  const summary = formatPromotionsSummary(result, config);
+  await sendWithOptionalScreenshot(chatId, result, summary);
+  if (result.outputFile) {
+    try { await telegram.sendDocument(chatId, result.outputFile, '完整未过期 Promociones 商品明细 CSV'); }
+    catch (error) { await telegram.sendMessage(chatId, `CSV 文件发送失败：${error.message}\n文件在电脑：${result.outputFile}`); }
+  }
+}
 // /pedido_web_test — diagnóstico de la automatización web: conecta al
 // Edge, localiza la pestaña de Pedidos, resume lo que ve y envía el HTML
 // de la página como documento (para afinar los selectores del grid).
@@ -228,6 +502,111 @@ async function maybeSendOrderReminder() {
   if (sent > 0) orderReminderScheduler.markSent(due.key);
 }
 
+// Junta los pedidos que llegan en dateStr. Primero la WEB de Pedidos (así
+// entran también los pedidos hechos a mano o importados desde la PDA); si
+// la web falla o está desactivada, el historial local (solo pedidos que
+// rellenó el bot) como respaldo.
+async function collectArrivalOrders(dateStr) {
+  const offset = Number.isFinite(Number(config.arrival?.offsetDays)) ? Number(config.arrival.offsetDays) : 2;
+  if (config.webOrder?.enabled) {
+    const creationDate = addDays(dateStr, -offset);
+    const res = await fetchArrivingOrders(config, creationDate, logger);
+    if (res.ok) return { source: 'web', orders: res.orders };
+    logger.warn('web arrival fetch failed, using local history', { error: res.error });
+    return { source: 'local', orders: ordersArrivingOn(config, dateStr), webError: res.error };
+  }
+  return { source: 'local', orders: ordersArrivingOn(config, dateStr) };
+}
+
+function arrivalSourceNote(collected) {
+  if (collected.source === 'web') return '（从 Pedidos 网页抓取，含 PDA/手工单）';
+  const err = collected.webError ? `网页抓取失败：${collected.webError}，` : '';
+  return `（${err}用了本地记录，只含 bot 填过的单）`;
+}
+
+// Impresión automática de la lista de comprobación el día de llegada.
+async function maybePrintArrivalChecklist() {
+  const due = arrivalScheduler.due(new Date());
+  if (!due) return;
+  const collected = await collectArrivalOrders(due.dateStr);
+  if (!collected.orders.length) {
+    // Hoy no llega nada: se marca para no volver a mirar en cada poll.
+    arrivalScheduler.markSent(due.key);
+    return;
+  }
+  const delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
+  if (delivered) arrivalScheduler.markSent(due.key);
+}
+
+// /llegada [fecha] — saca la lista a demanda (imprime + Telegram). Sin
+// fecha usa hoy; con fecha ("/llegada 1/7") esa fecha se toma como día de
+// LLEGADA (útil para probar con pedidos pasados).
+async function handleArrivalChecklist(chatId, text = '') {
+  const today = todayString(config);
+  const arg = String(text || '').replace(/^\/llegada(?:_hoy)?\s*/i, '').trim();
+  const requested = parseDateArg(arg, today);
+  if (arg && !requested) {
+    await telegram.sendMessage(chatId, `没看懂日期「${arg}」。可以写 /llegada（今天）、/llegada 1/7 或 /llegada 2026-07-01。`);
+    return;
+  }
+  const dateStr = requested || today;
+  const label = dateStr === today ? '今天' : dateStr;
+  await telegram.sendMessage(chatId, `正在查${label}预计到货的订单…`);
+  const collected = await collectArrivalOrders(dateStr);
+  if (!collected.orders.length) {
+    await telegram.sendMessage(chatId, `${label}（${dateStr}）没有预计到货的订单${arrivalSourceNote(collected)}。到货日按下单日 +${config.arrival?.offsetDays ?? 2} 天算。`);
+    return;
+  }
+  await sendAndPrintChecklist([chatId], collected, dateStr);
+}
+
+// Imprime la lista y manda por Telegram solo una CONFIRMACIÓN corta (la
+// lista entera en el chat era demasiado larga). El texto completo solo se
+// manda como respaldo si la impresión no salió (no-Windows, error o
+// autoPrint desactivado). Devuelve true si algo llegó (para markSent).
+async function sendAndPrintChecklist(chatIds, collected, dateStr) {
+  const orders = collected.orders;
+  const checklist = formatChecklist(orders, dateStr);
+  const names = orders.map((o) => `${o.orderName}（${o.items?.length ?? 0} 行）`).join('、');
+  const summary = `到货核对清单：${names}，共 ${orders.length} 单${arrivalSourceNote(collected)}。`;
+  let delivered = false;
+
+  let text;
+  if (config.arrival?.autoPrint !== false) {
+    const printed = await printText(config, checklist, logger);
+    if (printed.ok && !printed.queuedOffline) {
+      delivered = true;
+      text = `${summary}\n🖨 已打印，去打印机拿纸核对就行。`;
+    } else if (printed.ok && printed.queuedOffline) {
+      delivered = true;
+      text = `${summary}\n⚠️ 打印机好像没开机。清单已排进打印队列，开一下打印机就会自动打出来。`;
+    } else {
+      const reason = printed.skipped ? '这台机器不能打印（非 Windows）' : `打印失败：${printed.error}`;
+      text = `${summary}\n${reason}，先发文字版：\n\n${checklist}`;
+    }
+  } else {
+    text = `${summary}\n（自动打印已关闭）\n\n${checklist}`;
+  }
+
+  for (const id of chatIds) {
+    try {
+      await telegram.sendMessage(id, text);
+      delivered = true;
+    } catch (error) {
+      logger.error('arrival checklist send failed', { chatId: id, error: error.message });
+    }
+  }
+  return delivered;
+}
+
+function arrivalChatIds() {
+  const configured = config.arrival?.chatIds || [];
+  const fallback = config.ordering?.reminderChatIds || [];
+  const last = config.telegram?.allowedChatIds || [];
+  const ids = configured.length ? configured : (fallback.length ? fallback : last);
+  return ids.map(String).filter(Boolean);
+}
+
 async function handleClear(chatId, callbackId) {
   await telegram.answerCallbackQuery(callbackId, '正在清零');
   const result = await clearDesktop(config, logger);
@@ -263,6 +642,17 @@ async function handleApply(chatId, callbackId, id) {
     ? '写入：已执行。请看截图确认 PC Medio、PC Último、P.defecto、P.TPV、Bloq.Venta 和保存状态。'
     : `写入失败：\n${result.error || result.reason || '未知错误'}`;
   await sendWithOptionalScreenshot(chatId, result, text);
+  // Cambio de precio de fruta: recordar los pasos MANUALES de la etiqueta
+  // (imprimir es acción de alto riesgo; no se automatiza).
+  if (result.status === 'ok' && session.item?.labelReminder) {
+    await telegram.sendMessage(chatId, [
+      '接下来打印新价签（手动）：',
+      '1. 关闭商品窗口 → 会弹出 Etiquetas 页面',
+      '2. 点 Etiq. Especiales',
+      '3. 勾选 Imprimir；Tipo Etiqueta 全改成 Tipo Display 8 A4 vertical',
+      '4. 点 Imprimir'
+    ].join('\n'));
+  }
 }
 
 async function sendProductResult(chatId, item, index, total) {
@@ -276,7 +666,7 @@ async function sendProductResult(chatId, item, index, total) {
 }
 
 async function sendWithOptionalScreenshot(chatId, result, text, options = {}) {
-  if (result?.status === 'ok' && result.screenshot) {
+  if (result?.screenshot) {
     const screenshotPath = path.resolve(result.screenshot);
     if (fs.existsSync(screenshotPath)) {
       try {
@@ -378,37 +768,21 @@ function saveSession(session) {
   return id;
 }
 
-function enrichOrderDraftForWeb(draft) {
-  if (!config.webOrder?.enabled) return draft;
-  return {
-    ...draft,
-    items: draft.items.map(enrichOrderItemForWeb)
-  };
-}
-
-function enrichOrderItemForWeb(item) {
-  const originalCode = normalizeOrderIdentifier(item.code);
-  if (!originalCode || originalCode.length > 4) return item;
-
-  const store = lookupStore(storeIndex, { codigo: originalCode });
-  const supplier = enrichSupplierLookup(supplierIndex, { codigo: originalCode }, store);
-  const ean = normalizeOrderIdentifier(store?.product?.ean || supplier?.product?.ean);
-
-  if (ean.length < 8 || ean === originalCode) return item;
-  return {
-    ...item,
-    originalCode,
-    code: ean,
-    searchSource: store?.status === 'found' ? '店内缓存 EAN' : '供应商表 EAN'
-  };
-}
-
-function normalizeOrderIdentifier(value) {
-  return String(value || '').replace(/[^\d]/g, '');
-}
-
 function makeRepeatItem(query) { return { raw: query, codigo: query, ean: '', nombre: '', precio: { mode: 'auto', raw: 'auto' }, margen: { mode: 'missing', raw: '' }, desbloquear: true, etiqueta: false, nota: 'button repeat' }; }
 function makeResultButtons(id) { return { inline_keyboard: [[{ text: '再查一次', callback_data: `repeat:${id}` }], [{ text: '确认处理', callback_data: `process:${id}` }, { text: '标签', callback_data: `todo:label:${id}` }]] }; }
+// Botones para elegir una opción de la búsqueda por nombre: [1][2]… (5 por
+// fila) + Cancelar. callback_data = np:<sesión>:<línea>:<opción>.
+function makeNamePickButtons(id, idx, n) {
+  const rows = [];
+  let row = [];
+  for (let i = 0; i < n; i += 1) {
+    row.push({ text: `${i + 1}`, callback_data: `np:${id}:${idx}:${i}` });
+    if (row.length === 5) { rows.push(row); row = []; }
+  }
+  if (row.length) rows.push(row);
+  rows.push([{ text: '取消', callback_data: `cancel:${id}` }]);
+  return { reply_markup: { inline_keyboard: rows } };
+}
 function futureActionLabel(action) { if (action.startsWith('label')) return '生成 etiqueta'; return '这个功能'; }
 function getCostInfo(session, pcMedio, pcUltimo) {
   const warnings = [];
