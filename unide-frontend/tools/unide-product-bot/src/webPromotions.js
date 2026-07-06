@@ -292,6 +292,9 @@ async function getPromotionDetailState(page) {
 async function scrapeAllPromotionRows(page, config) {
   const maxPages = Number(config.promotions?.maxPages) || 50;
   const settleTimeout = Number(config.promotions?.pageTurnTimeoutMs) || Number(config.promotions?.detailRowsTimeoutMs) || 9000;
+  // El grid puede haberse quedado en una página posterior (p. ej. la 2ª):
+  // rebobinar a la 1ª antes de leer para no saltarse filas.
+  await goToFirstPromotionListPage(page, config);
   const all = [];
   const seen = new Set();
   let prevSig = '';
@@ -616,6 +619,76 @@ async function clickNextGridPage(page, mode) {
 
     return false;
   }, mode);
+}
+
+// Va a la PRIMERA página de la lista de promociones. El grid de XAF recuerda
+// la última página vista, así que tras page.goto podía quedarse en la 2ª (y
+// se leían solo esas filas). Se pulsa "primera/anterior" hasta que el
+// contenido deja de cambiar (ya no se puede retroceder = página 1).
+async function goToFirstPromotionListPage(page, config) {
+  const settle = Math.min(Number(config.promotions?.detailRowsTimeoutMs) || 9000, 4000);
+  let prevSig = rowsSignature(await scrapePromotionRows(page).catch(() => []));
+  for (let i = 0; i < 60; i += 1) {
+    const moved = await clickPrevGridPage(page);
+    if (!moved) break;
+    const rows = await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, prevSig, settle);
+    const sig = rowsSignature(rows);
+    if (sig === prevSig) break; // no cambió → ya estamos en la primera
+    prevSig = sig;
+  }
+}
+
+// Espejo de clickNextGridPage para RETROCEDER: "primera/anterior/‹/«" o el
+// número de página inmediatamente menor.
+async function clickPrevGridPage(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const isDisabled = (el) => {
+      const cls = String(el.className || '');
+      return el.disabled || el.getAttribute('aria-disabled') === 'true' || /disabled|dx-state-disabled/i.test(cls);
+    };
+    const inPager = (el) => Boolean(el.closest('[class*="pager" i], [class*="pagination" i], nav, [aria-label*="page" i], [aria-label*="pagin" i]'));
+    const isBadToolbarAction = (label) => /guardar|nuevo|volver|enviar|copiar|eliminar|save|new|back|delete/i.test(label);
+    const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [tabindex]'))
+      .filter((el) => isVisible(el) && !isDisabled(el))
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const label = clean([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), el.className].filter(Boolean).join(' '));
+        return { el, label, pager: inPager(el), top: r.top, left: r.left };
+      })
+      .filter((x) => x.label && !isBadToolbarAction(x.label));
+
+    // Preferir "primera página" si existe (salto directo).
+    const firstCand = controls
+      .filter((x) => /(primera|first|p[aá]gina 1|inicio|‹‹|«|⟪|first-page)/i.test(x.label))
+      .filter((x) => x.pager || x.top > 220)
+      .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top);
+    if (firstCand.length) { firstCand[0].el.click(); return true; }
+
+    const prevCand = controls
+      .filter((x) => /(anterior|previous|prev|p[aá]gina anterior|<|‹|«|chevron-left|arrow-left)/i.test(x.label))
+      .filter((x) => x.pager || x.top > 220)
+      .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top || a.left - b.left);
+    if (prevCand.length) { prevCand[0].el.click(); return true; }
+
+    const pagerControls = controls.filter((x) => x.pager || /pager|pagination/i.test(x.label));
+    const numbered = pagerControls
+      .map((x) => ({ ...x, num: Number(clean(x.el.innerText || x.el.textContent)) }))
+      .filter((x) => Number.isInteger(x.num) && x.num > 0)
+      .sort((a, b) => a.num - b.num);
+    if (numbered.length) {
+      const active = numbered.find((x) => x.el.getAttribute('aria-current') === 'page' || /active|current|selected/i.test(String(x.el.className || '')));
+      const current = active?.num || Math.max(...numbered.map((x) => x.num));
+      const prev = [...numbered].reverse().find((x) => x.num < current);
+      if (prev) { prev.el.click(); return true; }
+    }
+    return false;
+  });
 }
 
 async function scrapePromotionRows(page) {
@@ -1008,4 +1081,8 @@ function tableRowsByScore(options = {}) {
   return (candidates[0]?.rows || []).map((row) => ({ fields: row.fields, cells: row.cells }));
 }
 // Solo para pruebas.
-export const __test = { scrapeAllPromotionDetailItems, waitForGridPageChange, detailSignature, rowsSignature };
+export const __test = {
+  scrapeAllPromotionDetailItems, waitForGridPageChange, detailSignature, rowsSignature,
+  scrapeAllPromotionRowsForTest: (page, config) => scrapeAllPromotionRows(page, config),
+  goToFirstPromotionListPage
+};
