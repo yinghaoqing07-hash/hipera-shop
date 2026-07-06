@@ -286,11 +286,23 @@ async function getPromotionDetailState(page) {
 
 async function scrapeAllPromotionRows(page, config) {
   const maxPages = Number(config.promotions?.maxPages) || 50;
+  const settleTimeout = Number(config.promotions?.pageTurnTimeoutMs) || Number(config.promotions?.detailRowsTimeoutMs) || 9000;
   const all = [];
   const seen = new Set();
+  let prevSig = '';
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const rows = await scrapePromotionRows(page);
+    // Tras pasar de página, NO se re-lee "en cuanto haya filas" (la página
+    // vieja sigue visible un instante y se colaría), sino en cuanto el
+    // contenido CAMBIA respecto a la página anterior. Así la paginación es
+    // estable entre ejecuciones (antes se perdían filas según el azar del
+    // tiempo de render).
+    const rows = pageIndex === 0
+      ? await scrapePromotionRows(page)
+      : await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, prevSig, settleTimeout);
+    const sig = rowsSignature(rows);
+    if (pageIndex > 0 && (!rows.length || sig === prevSig)) break;
+    prevSig = sig;
     for (const row of rows) {
       const key = promotionKey(row);
       if (!seen.has(key)) {
@@ -300,10 +312,35 @@ async function scrapeAllPromotionRows(page, config) {
     }
     const moved = await clickNextPromotionPage(page);
     if (!moved) break;
-    await sleep(Number(config.promotions?.pageTurnMs) || 1200);
   }
 
   return all;
+}
+
+// Firma del contenido de una página del grid (para detectar el cambio de
+// página): concatena las celdas de todas las filas.
+function rowsSignature(rows) {
+  return (rows || []).map((r) => (r.cells || Object.values(r.fields || {})).join('|')).join('||');
+}
+
+// Tras pulsar "siguiente", sondea hasta que la firma del grid CAMBIA (o se
+// agota el tiempo). Devuelve las filas de la nueva página; si no cambia,
+// devuelve lo último leído (el llamador corta al ver misma firma).
+async function waitForGridPageChange(page, scrapeFn, sigFn, prevSig, timeoutMs) {
+  const start = Date.now();
+  let best = [];
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const rows = await scrapeFn();
+      if (rows.length) {
+        best = rows;
+        if (sigFn(rows) !== prevSig) return rows;
+      }
+      await page.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); }).catch(() => {});
+    } catch { /* render en curso */ }
+    await sleep(200);
+  }
+  return best;
 }
 
 async function scrapeActivePromotionDetails(page, config, promotions, listUrl, logger) {
@@ -346,14 +383,22 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
 
 async function scrapeAllPromotionDetailItems(page, promo, config) {
   const maxPages = Number(config.promotions?.maxDetailPages) || Number(config.promotions?.maxPages) || 50;
-  const pageTurnMs = Number(config.promotions?.detailPageTurnMs) || Number(config.promotions?.pageTurnMs) || 1600;
+  const settleTimeout = Number(config.promotions?.detailRowsTimeoutMs) || 9000;
   const all = [];
   const seen = new Set();
+  let prevSig = '';
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    // Primera página: esperar a que aparezcan filas. Siguientes: esperar a
+    // que el contenido CAMBIE respecto a la anterior (si no, se releería la
+    // página vieja y el dedupe la descartaría → se perdían filas de las
+    // promociones con varias páginas, p. ej. 190 → 71).
     const rows = pageIndex === 0
       ? await waitForPromotionDetailRows(page, promo, config)
-      : await waitForPromotionDetailRows(page, promo, config, Math.max(2500, pageTurnMs + 800));
+      : await waitForGridPageChange(page, () => scrapePromotionDetailItems(page, promo), detailSignature, prevSig, settleTimeout);
+    const sig = detailSignature(rows);
+    if (pageIndex > 0 && (!rows.length || sig === prevSig)) break;
+    prevSig = sig;
 
     for (const row of rows) {
       const key = `${row.promoCode}|${row.articleCode}|${row.ean}|${row.articleName}|${row.offer}|${row.pvp}|${row.endDisplay}`;
@@ -365,10 +410,15 @@ async function scrapeAllPromotionDetailItems(page, promo, config) {
 
     const moved = await clickNextPromotionDetailPage(page);
     if (!moved) break;
-    await sleep(pageTurnMs);
   }
 
   return all;
+}
+
+// Firma de una página del detalle: código de artículo + precios de cada
+// fila (identifica la página sin depender del orden de render).
+function detailSignature(items) {
+  return (items || []).map((i) => `${i.articleCode}·${i.pvp}·${i.offer}`).join(',');
 }
 
 async function waitForPromotionDetailRows(page, promo, config, timeoutOverrideMs = null) {
@@ -952,3 +1002,5 @@ function tableRowsByScore(options = {}) {
   candidates.sort((a, b) => (b.score * 100 + b.rows.length) - (a.score * 100 + a.rows.length));
   return (candidates[0]?.rows || []).map((row) => ({ fields: row.fields, cells: row.cells }));
 }
+// Solo para pruebas.
+export const __test = { scrapeAllPromotionDetailItems, waitForGridPageChange, detailSignature, rowsSignature };
