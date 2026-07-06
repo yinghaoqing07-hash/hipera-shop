@@ -86,7 +86,7 @@ const defaultConfig = {
     formRenderMs: 2800,        // tras pulsar "Nuevo", esperar el DetailView
     autocompleteTimeoutMs: 5000, // espera MÁX a que aparezca el desplegable
     autocompleteMs: 900,       // espera tras aparecer, para que cargue todo
-    betweenLinesMs: 700,       // entre línea y línea
+    betweenLinesMs: 400,       // entre línea y línea (poll de la fila nueva cubre el resto)
     // Navegación a la lista de Pedidos (page.goto directo, no clic en menú).
     pageNavigationTimeoutMs: 20000, // espera MÁX a que cargue la lista
     pedidoListUrl: '',         // vacío = derivar del origen + /OrderT_ListView
@@ -96,8 +96,10 @@ const defaultConfig = {
     protocolTimeoutMs: 90000,
     connectRetries: 2,
     // Espera tras elegir el artículo, para que Blazor enlace la fila antes
-    // de confirmarla (evita líneas con Código Unide en blanco).
+    // de confirmarla (evita líneas con Código Unide en blanco). Mantener
+    // generosa: prevenir un blanco es más rápido que dispararle la reparación.
     selectSettleMs: 500,
+    nextFieldMs: 140,          // Tab artículo→Cajas antes de teclear la cantidad
     // Si una línea queda en blanco igualmente, repararla sola con el gesto
     // del usuario (lápiz Editar → reescribir código → Enter Enter).
     repairBlankLines: true
