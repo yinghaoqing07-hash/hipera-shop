@@ -194,7 +194,7 @@
     "pedidoListUrl": "",
     "maxSearchOptions": 20,
     "protocolTimeoutMs": 90000,
-    "connectRetries": 2,
+    "connectRetries": 3,
     "selectSettleMs": 500,
     "repairBlankLines": true,
     "nextFieldMs": 140
