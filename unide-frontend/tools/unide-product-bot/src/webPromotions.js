@@ -70,11 +70,11 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
       outputFile,
       detailDumpFiles,
       listDumpFile,
-      // Señal de posible lista externa incompleta: si TODO lo leído está
-      // sin caducar, probablemente no se leyeron las promociones caducadas
-      // (que suelen estar en páginas siguientes) → la paginación externa no
-      // avanzó. Sirve para auto-mandar el volcado de la lista y diagnosticar.
-      listMaybeTruncated: rows.length > 0 && active.length === rows.length,
+      // Señal de posible lista incompleta: total = múltiplo exacto del
+      // tamaño de página (25) Y todo activo → huele a páginas sin leer.
+      // (Antes bastaba "todo activo", pero hay semanas en que TODAS las
+      // promociones están vigentes de verdad y el aviso era ruido.)
+      listMaybeTruncated: rows.length > 0 && active.length === rows.length && rows.length % 25 === 0,
       screenshot: screenshotPath,
       pageInfo
     };
@@ -359,12 +359,16 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
 
   for (const promo of promotions.slice(0, maxDetails)) {
     try {
-      await gotoListUrl(page, listUrl, timeout);
-      await waitForPromotionsPage(page, timeout);
-      // El grid recuerda la última página; sin rebobinar, openPromotionDetailByRow
-      // solo alcanzaba las promociones de la página en la que se quedó (por
-      // eso fallaban justo las 25 de la 1ª página y salían bien las 8 de la
-      // 2ª). Se vuelve a la 1ª antes de buscar la fila.
+      // returnToPromotionsList ya nos dejó en la lista al final de la vuelta
+      // anterior; solo se navega si NO estamos en ella (ahorra una recarga
+      // completa por promoción). El grid recuerda la última página; sin
+      // rebobinar, openPromotionDetailByRow solo alcanzaba las promociones
+      // de la página en la que se quedó (fallaban justo las 25 de la 1ª).
+      let listState = await getPromotionPageState(page);
+      if (!listState.isPromotionsList) {
+        await gotoListUrl(page, listUrl, timeout);
+        await waitForPromotionsPage(page, timeout);
+      }
       await goToFirstPromotionListPage(page, config);
       const opened = await openPromotionDetailByRow(page, promo, config);
       if (!opened) {
@@ -401,7 +405,12 @@ async function scrapeAllPromotionDetailItems(page, promo, config) {
   const seen = new Set();
   let prevSig = '';
 
+  // Guardia de URL: pasar de página del grid NO cambia la URL; si cambia es
+  // que un clic saltó a OTRO registro (p. ej. la flecha "siguiente registro"
+  // de la barra) y estaríamos mezclando promociones. Se corta ahí mismo.
+  const detailUrl = page.url();
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    if (pageIndex > 0 && page.url() !== detailUrl) break;
     // Primera página: esperar a que aparezcan filas. Siguientes: esperar a
     // que el contenido CAMBIE respecto a la anterior (si no, se releería la
     // página vieja y el dedupe la descartaría → se perdían filas de las
@@ -409,6 +418,7 @@ async function scrapeAllPromotionDetailItems(page, promo, config) {
     const rows = pageIndex === 0
       ? await waitForPromotionDetailRows(page, promo, config)
       : await waitForGridPageChange(page, () => scrapePromotionDetailItems(page, promo), detailSignature, prevSig, settleTimeout);
+    if (pageIndex > 0 && page.url() !== detailUrl) break;
     const sig = detailSignature(rows);
     if (pageIndex > 0 && (!rows.length || sig === prevSig)) break;
     prevSig = sig;
@@ -597,7 +607,10 @@ async function clickNextGridPage(page, mode) {
     // "next" too, but the grid pager is normally below the table.
     const nextCandidates = controls
       .filter((x) => /(siguiente|next|pr[oó]xima|p[aá]gina siguiente|>|›|»|chevron-right|arrow-right)/i.test(x.label))
-      .filter((x) => x.pager || x.top > 220 || gridMode === 'items')
+      // SOLO botones dentro de un paginador real (dxbl-pager). Las flechas
+      // de la barra de XAF ("siguiente registro") también parecen "next",
+      // pero saltan a OTRA promoción y encadenaban sus artículos al actual.
+      .filter((x) => x.pager)
       .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top || b.left - a.left);
     if (nextCandidates.length) {
       nextCandidates[0].el.click();
@@ -671,13 +684,13 @@ async function clickPrevGridPage(page) {
     // Preferir "primera página" si existe (salto directo).
     const firstCand = controls
       .filter((x) => /(primera|first|p[aá]gina 1|inicio|‹‹|«|⟪|first-page)/i.test(x.label))
-      .filter((x) => x.pager || x.top > 220)
+      .filter((x) => x.pager)
       .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top);
     if (firstCand.length) { firstCand[0].el.click(); return true; }
 
     const prevCand = controls
       .filter((x) => /(anterior|previous|prev|p[aá]gina anterior|<|‹|«|chevron-left|arrow-left)/i.test(x.label))
-      .filter((x) => x.pager || x.top > 220)
+      .filter((x) => x.pager)
       .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top || a.left - b.left);
     if (prevCand.length) { prevCand[0].el.click(); return true; }
 
