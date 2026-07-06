@@ -371,10 +371,11 @@ async function handlePromotions(chatId, text = '') {
     try { await telegram.sendDocument(chatId, result.outputFile, '完整未过期 Promociones 商品明细 CSV'); }
     catch (error) { await telegram.sendMessage(chatId, `CSV 发送失败：${error.message}\n文件在电脑：${result.outputFile}`); }
   }
-  // Si no se sacó ningún artículo del detalle, mandar un volcado del detalle
-  // para poder afinar los selectores del grid de artículos.
-  if (!result.items?.length && result.detailDumpFiles?.length) {
-    await telegram.sendMessage(chatId, '详情里没抓到商品表格。附上一个促销详情页的结构，发给 Claude 调选择器：');
+  // Si hay promociones cuyo detalle salió vacío, mandar un volcado de una
+  // de ellas para distinguir "sin productos de verdad" de "no se detectó el
+  // grid", y afinar si hace falta.
+  if (result.failedDetails?.length && result.detailDumpFiles?.length) {
+    await telegram.sendMessage(chatId, `有 ${result.failedDetails.length} 个促销详情没抓到商品。附上一个的页面结构，发给 Claude 判断是本来就没商品还是要调选择器：`);
     for (const dump of result.detailDumpFiles) {
       try { await telegram.sendDocument(chatId, dump, '促销详情页结构（发给 Claude）'); } catch { /* noop */ }
     }

@@ -361,6 +361,11 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
     try {
       await gotoListUrl(page, listUrl, timeout);
       await waitForPromotionsPage(page, timeout);
+      // El grid recuerda la última página; sin rebobinar, openPromotionDetailByRow
+      // solo alcanzaba las promociones de la página en la que se quedó (por
+      // eso fallaban justo las 25 de la 1ª página y salían bien las 8 de la
+      // 2ª). Se vuelve a la 1ª antes de buscar la fila.
+      await goToFirstPromotionListPage(page, config);
       const opened = await openPromotionDetailByRow(page, promo, config);
       if (!opened) {
         failures.push({ promo, stage: 'open', error: '没有在 Promociones 列表里找到/打开这一行' });
