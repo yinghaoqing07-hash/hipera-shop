@@ -573,140 +573,87 @@ async function clickActionByName(page, actionName, timeoutMs = 0) {
 }
 
 async function clickNextPromotionPage(page) {
-  return clickNextGridPage(page, 'promotions');
+  return clickNextGridPage(page);
 }
 
 async function clickNextPromotionDetailPage(page) {
-  return clickNextGridPage(page, 'items');
+  return clickNextGridPage(page);
 }
 
-async function clickNextGridPage(page, mode) {
-  return page.evaluate((gridMode) => {
-    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-    const isVisible = (el) => {
-      const r = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    };
-    const isDisabled = (el) => {
-      const cls = String(el.className || '');
-      return el.disabled || el.getAttribute('aria-disabled') === 'true' || /disabled|dx-state-disabled/i.test(cls);
-    };
-    const inPager = (el) => Boolean(el.closest('[class*="pager" i], [class*="pagination" i], nav, [aria-label*="page" i], [aria-label*="pagin" i]'));
-    const isBadToolbarAction = (label) => /guardar|nuevo|volver|enviar|copiar|eliminar|save|new|back|delete/i.test(label);
-    const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [tabindex]'))
-      .filter((el) => isVisible(el) && !isDisabled(el))
-      .map((el) => {
-        const r = el.getBoundingClientRect();
-        const label = clean([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), el.className].filter(Boolean).join(' '));
-        return { el, label, pager: inPager(el), top: r.top, left: r.left, width: r.width, height: r.height };
-      })
-      .filter((x) => x.label && !isBadToolbarAction(x.label));
-
-    // Prefer the lowest pager on the screen. Top toolbar arrows can look like
-    // "next" too, but the grid pager is normally below the table.
-    const nextCandidates = controls
-      .filter((x) => /(siguiente|next|pr[oó]xima|p[aá]gina siguiente|>|›|»|chevron-right|arrow-right)/i.test(x.label))
-      // SOLO botones dentro de un paginador real (dxbl-pager). Las flechas
-      // de la barra de XAF ("siguiente registro") también parecen "next",
-      // pero saltan a OTRA promoción y encadenaban sus artículos al actual.
-      .filter((x) => x.pager)
-      .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top || b.left - a.left);
-    if (nextCandidates.length) {
-      nextCandidates[0].el.click();
-      return true;
-    }
-
-    const pagerControls = controls.filter((x) => x.pager || /pager|pagination/i.test(x.label));
-    const numbered = pagerControls
-      .map((x) => ({ ...x, num: Number(clean(x.el.innerText || x.el.textContent)) }))
-      .filter((x) => Number.isInteger(x.num) && x.num > 0)
-      .sort((a, b) => a.num - b.num);
-    if (numbered.length) {
-      const active = numbered.find((x) => {
-        const cls = String(x.el.className || '');
-        return x.el.getAttribute('aria-current') === 'page' || /active|current|selected/i.test(cls);
-      });
-      const current = active?.num || Math.min(...numbered.map((x) => x.num));
-      const next = numbered.find((x) => x.num === current + 1) || numbered.find((x) => x.num > current);
-      if (next) {
-        next.el.click();
-        return true;
+// Lee el paginador dxbl-pager VISIBLE del grid. Estructura real de este
+// UnideGes (confirmada en el volcado): botones numerados
+//   <button class="... dxbl-pager-page-btn ..." aria-label="Go to page N">
+// y el activo lleva "dxbl-pager-active-page-btn" + aria-current="page".
+// No hay flechas de "anterior/siguiente": la navegación es por número.
+async function readPager(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const pagers = Array.from(document.querySelectorAll('.dxbl-pager, dxbl-pager, [class*="pager" i]')).filter(isVisible);
+    for (const pager of pagers) {
+      const btns = Array.from(pager.querySelectorAll('button, a, [role="button"]')).filter(isVisible);
+      const pages = [];
+      let current = null;
+      for (const el of btns) {
+        const cls = String(el.className || '');
+        const aria = el.getAttribute('aria-label') || '';
+        const am = aria.match(/page\s+(\d+)/i);
+        if (!/pager-page-btn/i.test(cls) && !am) continue;
+        const num = am ? Number(am[1]) : Number((el.textContent || '').trim());
+        if (!Number.isInteger(num) || num <= 0) continue;
+        pages.push(num);
+        if (el.getAttribute('aria-current') === 'page' || /active-page|pager-active/i.test(cls)) current = num;
+      }
+      if (pages.length) {
+        const visible = [...new Set(pages)].sort((a, b) => a - b);
+        return { hasPager: true, current: current ?? visible[0], visible };
       }
     }
-
-    return false;
-  }, mode);
+    return { hasPager: false, current: 1, visible: [] };
+  });
 }
 
-// Va a la PRIMERA página de la lista de promociones. El grid de XAF recuerda
-// la última página vista, así que tras page.goto podía quedarse en la 2ª (y
-// se leían solo esas filas). Se pulsa "primera/anterior" hasta que el
-// contenido deja de cambiar (ya no se puede retroceder = página 1).
-async function goToFirstPromotionListPage(page, config) {
-  const settle = Math.min(Number(config.promotions?.detailRowsTimeoutMs) || 9000, 4000);
-  let prevSig = rowsSignature(await scrapePromotionRows(page).catch(() => []));
-  for (let i = 0; i < 60; i += 1) {
-    const moved = await clickPrevGridPage(page);
-    if (!moved) break;
-    const rows = await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, prevSig, settle);
-    const sig = rowsSignature(rows);
-    if (sig === prevSig) break; // no cambió → ya estamos en la primera
-    prevSig = sig;
-  }
-}
-
-// Espejo de clickNextGridPage para RETROCEDER: "primera/anterior/‹/«" o el
-// número de página inmediatamente menor.
-async function clickPrevGridPage(page) {
-  return page.evaluate(() => {
-    const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-    const isVisible = (el) => {
-      const r = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    };
-    const isDisabled = (el) => {
-      const cls = String(el.className || '');
-      return el.disabled || el.getAttribute('aria-disabled') === 'true' || /disabled|dx-state-disabled/i.test(cls);
-    };
-    const inPager = (el) => Boolean(el.closest('[class*="pager" i], [class*="pagination" i], nav, [aria-label*="page" i], [aria-label*="pagin" i]'));
-    const isBadToolbarAction = (label) => /guardar|nuevo|volver|enviar|copiar|eliminar|save|new|back|delete/i.test(label);
-    const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [tabindex]'))
-      .filter((el) => isVisible(el) && !isDisabled(el))
-      .map((el) => {
-        const r = el.getBoundingClientRect();
-        const label = clean([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), el.className].filter(Boolean).join(' '));
-        return { el, label, pager: inPager(el), top: r.top, left: r.left };
-      })
-      .filter((x) => x.label && !isBadToolbarAction(x.label));
-
-    // Preferir "primera página" si existe (salto directo).
-    const firstCand = controls
-      .filter((x) => /(primera|first|p[aá]gina 1|inicio|‹‹|«|⟪|first-page)/i.test(x.label))
-      .filter((x) => x.pager)
-      .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top);
-    if (firstCand.length) { firstCand[0].el.click(); return true; }
-
-    const prevCand = controls
-      .filter((x) => /(anterior|previous|prev|p[aá]gina anterior|<|‹|«|chevron-left|arrow-left)/i.test(x.label))
-      .filter((x) => x.pager)
-      .sort((a, b) => Number(b.pager) - Number(a.pager) || b.top - a.top || a.left - b.left);
-    if (prevCand.length) { prevCand[0].el.click(); return true; }
-
-    const pagerControls = controls.filter((x) => x.pager || /pager|pagination/i.test(x.label));
-    const numbered = pagerControls
-      .map((x) => ({ ...x, num: Number(clean(x.el.innerText || x.el.textContent)) }))
-      .filter((x) => Number.isInteger(x.num) && x.num > 0)
-      .sort((a, b) => a.num - b.num);
-    if (numbered.length) {
-      const active = numbered.find((x) => x.el.getAttribute('aria-current') === 'page' || /active|current|selected/i.test(String(x.el.className || '')));
-      const current = active?.num || Math.max(...numbered.map((x) => x.num));
-      const prev = [...numbered].reverse().find((x) => x.num < current);
-      if (prev) { prev.el.click(); return true; }
+// Pulsa el botón de la página N del dxbl-pager. true si lo encontró y pulsó.
+async function clickPagerPage(page, target) {
+  return page.evaluate((n) => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const pagers = Array.from(document.querySelectorAll('.dxbl-pager, dxbl-pager, [class*="pager" i]')).filter(isVisible);
+    for (const pager of pagers) {
+      const btns = Array.from(pager.querySelectorAll('button, a, [role="button"]')).filter(isVisible);
+      for (const el of btns) {
+        const cls = String(el.className || '');
+        const aria = el.getAttribute('aria-label') || '';
+        const am = aria.match(/page\s+(\d+)/i);
+        if (!/pager-page-btn/i.test(cls) && !am) continue;
+        const num = am ? Number(am[1]) : Number((el.textContent || '').trim());
+        if (num === n && !el.disabled) { el.click(); return true; }
+      }
     }
     return false;
-  });
+  }, target);
+}
+
+// Avanza una página: pulsa el número (página activa + 1). Si ese botón no
+// está visible (paginador con ventana "1 2 … 8"), pulsa el menor número
+// visible mayor que el actual (desplaza la ventana). false = no hay más.
+async function clickNextGridPage(page) {
+  const st = await readPager(page);
+  if (!st.hasPager) return false;
+  if (st.visible.includes(st.current + 1)) return clickPagerPage(page, st.current + 1);
+  const nextVisible = st.visible.find((n) => n > st.current);
+  if (nextVisible != null) return clickPagerPage(page, nextVisible);
+  return false;
+}
+
+// Vuelve a la PRIMERA página de la lista (el grid recuerda la última vista;
+// tras page.goto podía quedarse en la 2ª). Salto directo al botón "1".
+async function goToFirstPromotionListPage(page, config) {
+  const settle = Math.min(Number(config.promotions?.detailRowsTimeoutMs) || 9000, 4000);
+  const st = await readPager(page);
+  if (!st.hasPager || st.current === 1) return;
+  const prevSig = rowsSignature(await scrapePromotionRows(page).catch(() => []));
+  if (await clickPagerPage(page, 1)) {
+    await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, prevSig, settle);
+  }
 }
 
 async function scrapePromotionRows(page) {
