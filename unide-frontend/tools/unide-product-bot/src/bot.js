@@ -371,6 +371,14 @@ async function handlePromotions(chatId, text = '') {
     try { await telegram.sendDocument(chatId, result.outputFile, '完整未过期 Promociones 商品明细 CSV'); }
     catch (error) { await telegram.sendMessage(chatId, `CSV 发送失败：${error.message}\n文件在电脑：${result.outputFile}`); }
   }
+  // Si no se sacó ningún artículo del detalle, mandar un volcado del detalle
+  // para poder afinar los selectores del grid de artículos.
+  if (!result.items?.length && result.detailDumpFiles?.length) {
+    await telegram.sendMessage(chatId, '详情里没抓到商品表格。附上一个促销详情页的结构，发给 Claude 调选择器：');
+    for (const dump of result.detailDumpFiles) {
+      try { await telegram.sendDocument(chatId, dump, '促销详情页结构（发给 Claude）'); } catch { /* noop */ }
+    }
+  }
 }
 
 // /fruta_add <nombre> <codigo> — registrar a mano un nombre → código.
