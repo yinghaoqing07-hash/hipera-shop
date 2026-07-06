@@ -177,13 +177,14 @@
     "formRenderMs": 2800,
     "autocompleteTimeoutMs": 5000,
     "autocompleteMs": 900,
-    "betweenLinesMs": 700,
+    "betweenLinesMs": 400,
     "pageNavigationTimeoutMs": 20000,
     "pedidoListUrl": "",
     "maxSearchOptions": 20,
     "protocolTimeoutMs": 90000,
     "connectRetries": 2,
     "selectSettleMs": 500,
-    "repairBlankLines": true
+    "repairBlankLines": true,
+    "nextFieldMs": 140
   }
 }

@@ -176,7 +176,7 @@ export async function applyOrderWeb(draft, config, logger) {
     // desplegable aparezca (sondeo). Subir ambos si la red va lenta.
     const autocompleteMs = Number(w.autocompleteMs) || 900;
     const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
-    const betweenLinesMs = Number(w.betweenLinesMs) || 700;
+    const betweenLinesMs = Number(w.betweenLinesMs) || 400;
 
     // Paso 1: "Nuevo" (abre el DetailView del pedido). Si ya estamos en
     // un formulario abierto, se continúa ahí. No se pulsa Volver: UnideGes
@@ -279,7 +279,7 @@ export async function applyOrderWeb(draft, config, logger) {
       await focusEditRowEditor(page);
       // Cajas: Tab desde el editor de artículo y escribir la cantidad.
       await page.keyboard.press('Tab');
-      await sleep(200);
+      await sleep(Number(w.nextFieldMs) || 140);
       if (qty) await page.keyboard.type(qty, { delay: 25 });
       // Ritmo real de UnideGes (método A): tras la cantidad, DOS Enter
       // confirman la línea y abren la siguiente fila de alta. Aquí el foco
@@ -835,17 +835,33 @@ async function openAddNewItemRow(page) {
 // hasta timeoutMs; en cuanto hay ≥1 opción, espera settleMs para que
 // terminen de cargar todas (así se detecta bien el caso de varias) y
 // vuelve a contar.
-async function waitForDropdownOptions(page, timeoutMs, settleMs) {
+async function waitForDropdownOptions(page, timeoutMs, settleMs, floorMs = 300) {
   const start = Date.now();
   let count = 0;
   while (Date.now() - start < timeoutMs) {
     count = await dropdownOptionCount(page);
     if (count > 0) break;
-    await sleep(150);
+    await sleep(120);
   }
   if (count === 0) return 0;
-  await sleep(settleMs);
-  return dropdownOptionCount(page);
+  // Estabilización ADAPTATIVA con SUELO: se espera un mínimo (floor) para no
+  // salir antes de que lleguen opciones que aparecen con un pelín de retraso
+  // (si no, se podría contar "1" cuando en realidad hay varias → elección
+  // equivocada). Pasado el suelo, se sondea hasta que el número deja de
+  // cambiar (dos lecturas iguales), con settleMs como tope. En el caso
+  // normal (opciones que cargan rápido) se sale en ~floor+120 ms en vez de
+  // pagar los 900 ms completos, sin perder la detección de varios resultados.
+  const floor = Math.min(settleMs, Math.max(0, Number(floorMs) || 0));
+  await sleep(floor);
+  const settleDeadline = Date.now() + Math.max(0, settleMs - floor);
+  let prev = await dropdownOptionCount(page);
+  while (Date.now() < settleDeadline) {
+    await sleep(120);
+    const next = await dropdownOptionCount(page);
+    if (next === prev) return next;
+    prev = next;
+  }
+  return prev;
 }
 
 // Cuenta las opciones VISIBLES del desplegable de autocompletado abierto.
