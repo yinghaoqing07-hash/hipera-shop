@@ -589,8 +589,12 @@ function enrichPromotionRow(row, index, referenceDateIso) {
   const fields = row?.fields || row || {};
   const entries = Object.entries(fields);
   const pick = picker(entries);
-  const code = pick([/c[oó]digo/i, /^id$/i, /referencia/i]);
-  const description = pick([/descrip/i, /nombre/i, /promoc/i, /oferta/i]) || firstNonEmpty(...entries.map(([, v]) => v));
+  const code = pick([/c[oó]digo\s*promoc/i, /c[oó]digo/i, /^id$/i, /referencia/i]);
+  // OJO: no usar /promoc/i suelto — casaría con "Fecha Inicio Promocion"
+  // (una fecha) antes que con "Descripcion". Se busca la descripción real y,
+  // como respaldo, el primer valor que NO sea fecha/código/selección.
+  const description = pick([/descripci/i, /descrip/i, /nombre/i, /^promoci[oó]n$/i])
+    || firstNonEmpty(...entries.filter(([k]) => !/fecha|c[oó]digo|identificador|selecci|^id$/i.test(k)).map(([, v]) => v));
   const offer = pick([/^oferta$/i, /precio.*oferta/i, /p\.?\s*oferta/i, /dto|descuento/i]);
   const status = pick([/estado/i, /situaci/i]);
 
@@ -642,8 +646,13 @@ function enrichPromotionItem(row, promo) {
   ]) || firstNameLike(cells, articleCode);
 
   const ean = pick([/^ean$/i, /c[oó]digo\s+barra/i, /barcode/i]) || firstEanLike(cells);
-  const pvp = pick([/^p\.?\s*v\.?\s*p/i, /^precio$/i, /precio\s+actual/i, /pvp\s+actual/i]);
-  const offer = pick([/^oferta$/i, /precio.*oferta/i, /p\.?\s*oferta/i, /pvp.*propuesto/i, /precio.*promo/i]);
+  // En este UnideGes las columnas de precio del detalle son "PVD" (precio
+  // normal) y "PVD Promoción" (precio de oferta), no "PVP"/"Oferta". El
+  // orden importa: "PVD Promoción" aparece ANTES que "PVD", así que las
+  // patrones de pvp son EXACTAS para no capturar la de promoción.
+  const pvp = pick([/^pvd$/i, /^pvp$/i, /^p\.?\s*v\.?\s*p$/i, /^precio$/i, /precio\s+actual/i]);
+  const offer = pick([/pvd\s*promoc/i, /^oferta$/i, /precio.*oferta/i, /p\.?\s*oferta/i, /pvp.*propuesto/i, /precio.*promo/i]);
+  const offerText = pick([/^texto/i, /condicion/i, /^obs/i]);
   const previousPrice = pick([/anterior/i, /precio.*normal/i, /pvp.*normal/i]);
   const status = pick([/estado/i, /situaci/i]);
   const startDisplay = pick([/desde/i, /inicio/i, /^de fecha$/i, /fecha.*inicio/i]) || promo.startDisplay || '';
@@ -666,6 +675,7 @@ function enrichPromotionItem(row, promo) {
     ean,
     pvp,
     offer,
+    offerText,
     previousPrice,
     status,
     startDisplay,
@@ -796,6 +806,7 @@ function writePromotionItemsCsv(config, items, promotions, referenceDateIso) {
     'ean',
     'pvp',
     'oferta',
+    'texto_oferta',
     'precio_anterior',
     'estado',
     'desde_articulo',
@@ -817,6 +828,7 @@ function writePromotionItemsCsv(config, items, promotions, referenceDateIso) {
         row.ean,
         row.pvp,
         row.offer,
+        row.offerText,
         row.previousPrice,
         row.status,
         row.startDisplay,
@@ -837,6 +849,7 @@ function writePromotionItemsCsv(config, items, promotions, referenceDateIso) {
         '',
         '',
         promo.offer,
+        '',
         '',
         promo.status,
         '',
