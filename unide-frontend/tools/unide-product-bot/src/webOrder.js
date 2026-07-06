@@ -198,6 +198,9 @@ export async function applyOrderWeb(draft, config, logger) {
     const results = [];
     let autoPicked = 0;
     let namePicked = 0;
+    let repairedCount = 0;
+    let unrepairedBlanks = 0;
+    const unrepairedCodes = [];
     for (let i = 0; i < draft.items.length; i++) {
       const item = draft.items[i];
       const code = String(item.code || '').trim();
@@ -266,7 +269,9 @@ export async function applyOrderWeb(draft, config, logger) {
       }
       if (sel.via === 'anchor') autoPicked += 1;
       if (sel.viaName) namePicked += 1;
-      await sleep(300);
+      // Dejar que Blazor termine de ENLAZAR el artículo elegido antes de
+      // seguir (confirmar demasiado pronto deja la fila "en blanco").
+      await sleep(Number(w.selectSettleMs) || 500);
       // Tras seleccionar (sobre todo si fue por clic en una fila del
       // desplegable), el foco puede quedar en la opción, no en el editor.
       // Se devuelve el foco al editor de la fila para que el Tab siguiente
@@ -284,15 +289,31 @@ export async function applyOrderWeb(draft, config, logger) {
       await sleep(150);
       await page.keyboard.press('Enter');
       await sleep(betweenLinesMs);
-      results.push({ code, qty, ok: true });
+
+      // Autocomprobación de la línea recién confirmada: si quedó "en
+      // blanco" (C.Central sin Código Unide, un fallo de enlace de Blazor
+      // al confirmar demasiado pronto), se repara con el gesto del
+      // usuario: lápiz Editar → reescribir el código → Enter Enter.
+      let repaired = false;
+      if (w.repairBlankLines !== false) {
+        const blanks = await countBlankRows(page);
+        if (blanks > unrepairedBlanks) {
+          repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, autocompleteTimeoutMs, autocompleteMs);
+          if (repaired) repairedCount += 1;
+          else { unrepairedBlanks += 1; unrepairedCodes.push(codeLabel); }
+        }
+      }
+      results.push({ code, qty, ok: true, repaired });
     }
 
     const shot = await screenshot(page, config, 'done');
     const okCount = results.filter((r) => r.ok).length;
-    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked });
+    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked, repairedCount, unrepairedBlanks });
     const notes = [];
     if (autoPicked > 0) notes.push(`${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行`);
     if (namePicked > 0) notes.push(`${namePicked} 行代码没搜到，已改用商品名搜到并按 Código Unide 选中`);
+    if (repairedCount > 0) notes.push(`${repairedCount} 行提交后 Código Unide 显示空白，已自动重输修复`);
+    if (unrepairedCodes.length > 0) notes.push(`⚠️ ${unrepairedCodes.join('、')} 提交后显示空白且自动修复失败，请人工点铅笔重输一遍这个代码`);
     const autoNote = notes.length ? `（${notes.join('；')}）` : '';
     return {
       ok: true,
@@ -881,6 +902,101 @@ async function selectDropdownRowByCode(page, code) {
   return true;
 }
 
+// --- Reparación de líneas "en blanco" ---------------------------------
+// A veces la fila se confirma antes de que Blazor termine de enlazar el
+// artículo: la línea queda con C.Central, peso e importe correctos pero
+// con Código Unide y Artículo VACÍOS en el grid. El arreglo manual del
+// usuario (lápiz "Editar" → reescribir el código → Enter Enter) funciona
+// siempre, así que el bot lo replica solo, línea a línea, justo después
+// de confirmar cada una (así sabe QUÉ código va en la fila en blanco).
+
+// Cuenta las filas confirmadas visibles con C.Central pero sin Código
+// Unide (las "en blanco").
+async function countBlankRows(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      let count = 0;
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        const codigo = cells[idxCodigo] || '';
+        if (central && !codigo && tr.querySelector('button[title="Editar"], button[aria-label="Editar"]')) count += 1;
+      }
+      return count;
+    }
+    return 0;
+  });
+}
+
+// Botón "Editar" (lápiz) de la primera fila en blanco visible.
+async function blankRowEditButton(page) {
+  const handle = await page.evaluateHandle(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        const codigo = cells[idxCodigo] || '';
+        if (central && !codigo) {
+          const btn = tr.querySelector('button[title="Editar"], button[aria-label="Editar"]');
+          if (btn) return btn;
+        }
+      }
+    }
+    return null;
+  });
+  const el = handle.asElement();
+  if (!el) { await handle.dispose(); return null; }
+  return { el, handle };
+}
+
+// Repara la primera fila en blanco reescribiendo su artículo (el mismo
+// gesto que el usuario hace a mano). Devuelve true si tras el reintento
+// hay una fila en blanco menos.
+async function repairBlankLine(page, terms, autocompleteTimeoutMs, autocompleteMs) {
+  const before = await countBlankRows(page);
+  if (before === 0) return true;
+  const btn = await blankRowEditButton(page);
+  if (!btn) return false;
+  await btn.el.click();
+  await btn.handle.dispose();
+  const editorReady = await waitForArticleEditor(page, 4000);
+  if (!editorReady) return false;
+  await clearArticleEditor(page);
+  let sel = await searchAndSelect(page, terms.searchTerm, terms.anchorCode, autocompleteTimeoutMs, autocompleteMs, false);
+  if (sel.status !== 'ok' && terms.nombre && terms.nombre !== terms.searchTerm) {
+    await clearArticleEditor(page);
+    sel = await searchAndSelect(page, terms.nombre, terms.anchorCode, autocompleteTimeoutMs, autocompleteMs, true);
+  }
+  if (sel.status !== 'ok') return false;
+  await sleep(300);
+  await focusEditRowEditor(page);
+  // El gesto del usuario: Enter Enter para confirmar la fila reeditada
+  // (la cantidad ya estaba puesta y se conserva).
+  await page.keyboard.press('Enter');
+  await sleep(250);
+  await page.keyboard.press('Enter');
+  await sleep(400);
+  return (await countBlankRows(page)) < before;
+}
+
 // Teclea `term` en el editor de artículo, espera el desplegable y selecciona.
 //   - requireAnchor=false (búsqueda por código/EAN): un único resultado se
 //     acepta con Enter; con varios, se elige la fila cuyo Código Unide ==
@@ -946,5 +1062,6 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 // Solo para pruebas: helpers internos del rellenado por navegador.
 export const __test = {
   searchAndSelect, clearArticleEditor, selectDropdownRowByCode, focusArticleEditor,
-  waitForListRows, scrapeOrderLines, openOrderDetailByRow, spanishDateToIso
+  waitForListRows, scrapeOrderLines, openOrderDetailByRow, spanishDateToIso,
+  countBlankRows, repairBlankLine
 };
