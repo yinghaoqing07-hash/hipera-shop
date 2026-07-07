@@ -320,7 +320,10 @@ async function scrapeAllPromotionRows(page, config) {
       const key = promotionKey(row);
       if (!seen.has(key)) {
         seen.add(key);
-        all.push(row);
+        // Se anota en qué página de la lista está la fila: al abrir su
+        // detalle se salta DIRECTAMENTE a esa página (un clic) en vez de
+        // escanear página a página.
+        all.push({ ...row, listPage: pageIndex + 1 });
       }
     }
     const moved = await clickNextPromotionPage(page);
@@ -494,10 +497,26 @@ async function waitForPromotionDetailRows(page, promo, config, timeoutOverrideMs
   }
   return best;
 }
+// Qué clic abre el detalle en ESTA instalación (1 = simple, 2 = doble). Se
+// aprende con la primera promoción que abra y se prueba PRIMERO en las
+// siguientes: si el grid necesita doble clic, solo la primera paga los ~3 s
+// del clic simple fallido; el resto abre a la primera.
+let learnedDetailClickCount = null;
+
 async function openPromotionDetailByRow(page, promo, config) {
-  // Las promociones se procesan en orden de página, así que el objetivo suele
-  // estar en la página ACTUAL o en una posterior: se busca desde aquí hacia
-  // adelante (sin rebobinar → el grid ya no salta 1↔2 en cada promoción).
+  // Salto DIRECTO a la página de la lista donde se leyó esta fila (un clic
+  // al número de página del dxbl-pager), en vez de buscarla escaneando
+  // página a página. Si el grid ya está en esa página, no se toca nada.
+  if (promo.listPage) {
+    const settle = Math.min(Number(config.promotions?.detailRowsTimeoutMs) || 9000, 4000);
+    const current = await promotionGridActivePage(page).catch(() => null);
+    if (current != null && current !== promo.listPage) {
+      const before = rowsSignature(await scrapePromotionRows(page).catch(() => []));
+      if (await clickGridPageDelta(page, { toPage: promo.listPage })) {
+        await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, before, settle);
+      }
+    }
+  }
   if (await tryOpenPromotionFromCurrentPage(page, promo, config)) return true;
   // Respaldo raro (la lista retrocedió al volver del detalle, o la fila no
   // casó): rebobinar a la 1ª y recorrer todas las páginas una vez más.
@@ -508,12 +527,13 @@ async function openPromotionDetailByRow(page, promo, config) {
 async function tryOpenPromotionFromCurrentPage(page, promo, config) {
   const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
   const maxPages = Number(config.promotions?.maxPages) || 50;
-  // Espera corta para el 1er clic (simple): si abriera el detalle, lo hace en
-  // ~1 s; solo si NO abre se prueba el doble clic con más margen. Antes el 1er
-  // clic esperaba 8 s siempre, así que cada promoción cuyo grid abre con doble
-  // clic se quedaba 8 s parada antes de reintentar.
-  const firstClickWait = Math.min(timeout, Number(config.promotions?.detailOpenTimeoutMs) || 3000);
-  const secondClickWait = Math.min(timeout, 8000);
+  const settle = Math.min(Number(config.promotions?.detailRowsTimeoutMs) || 9000, 4000);
+  // Espera corta para el clic aún NO confirmado: si abriera el detalle, lo
+  // hace en ~1 s (el sondeo es cada 250 ms); solo si no abre se prueba el
+  // otro método con más margen. El método ya aprendido espera hasta 8 s
+  // porque sabemos que funciona y solo puede estar tardando en renderizar.
+  const unconfirmedWait = Math.min(timeout, Number(config.promotions?.detailOpenTimeoutMs) || 3000);
+  const confirmedWait = Math.min(timeout, 8000);
   const rowWaitMs = Number(config.promotions?.rowWaitMs) || 3000;
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
@@ -525,21 +545,30 @@ async function tryOpenPromotionFromCurrentPage(page, promo, config) {
     // la fila de verdad no está en esta página.
     const present = await waitForPromotionRowHandle(page, promo, rowWaitMs);
     if (present) {
-      for (const [clickCount, wait] of [[1, firstClickWait], [2, secondClickWait]]) {
+      const order = learnedDetailClickCount === 2 ? [2, 1] : [1, 2];
+      for (const clickCount of order) {
         const handle = await findPromotionRowHandle(page, promo);
         const el = handle.asElement();
         if (!el) { await handle.dispose(); break; }
         await el.click({ clickCount });
         await handle.dispose();
 
+        const wait = clickCount === learnedDetailClickCount ? confirmedWait : unconfirmedWait;
         const opened = await waitForPromotionDetailPage(page, wait);
-        if (opened.isPromotionDetail) return true;
+        if (opened.isPromotionDetail) { learnedDetailClickCount = clickCount; return true; }
         await sleep(300);
       }
+      // Si pulsamos y la fila "desapareció" a mitad, lo más probable es que
+      // la navegación al detalle esté en curso: última comprobación corta.
+      const opened = await waitForPromotionDetailPage(page, 2000);
+      if (opened.isPromotionDetail) return true;
     }
+    // Pasar de página esperando el CAMBIO real del contenido (vuelve en
+    // cuanto cambia), en vez de una pausa fija de 1,2 s.
+    const before = rowsSignature(await scrapePromotionRows(page).catch(() => []));
     const moved = await clickNextPromotionPage(page);
     if (!moved) break;
-    await sleep(Number(config.promotions?.pageTurnMs) || 1200);
+    await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, before, settle);
   }
 
   return false;
@@ -794,6 +823,7 @@ function enrichPromotionRow(row, index, referenceDateIso) {
     endDisplay: endDisplay || displayDate(endIso),
     startIso,
     endIso,
+    listPage: row?.listPage || null,
     fields
   };
 }
