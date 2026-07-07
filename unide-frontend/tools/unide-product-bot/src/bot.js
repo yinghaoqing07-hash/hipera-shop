@@ -3,7 +3,7 @@ import path from 'node:path';
 import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
 import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
-import { parseFruitCommandArg, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
+import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
@@ -77,6 +77,7 @@ async function handleUpdate(update) {
   if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
+  if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
   if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
@@ -122,6 +123,8 @@ async function handleCallback(callback) {
   if (data.startsWith('repeat:')) { const id = data.slice(7); const session = sessions.get(id); await telegram.answerCallbackQuery(callback.id, '重新查询'); await sendProductResult(chatId, session?.item || makeRepeatItem(id), 0, 1); return; }
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
   if (data.startsWith('np:')) { await handleNamePick(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('fpb:')) { await runFruitPriceBatch(chatId, callback.id, data.slice(4)); return; }
+  if (data.startsWith('fpstop:')) { await handleFruitBatchStop(chatId, callback.id, data.slice(7)); return; }
   if (data.startsWith('fp:')) { await handleFruitPick(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('tc:')) { await handleTallyTap(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('tcgo:')) { await handleTallyGo(chatId, callback.id, data.slice(5)); return; }
@@ -227,7 +230,7 @@ async function handleNamePick(chatId, callbackId, payload) {
 async function handleFruitPrice(chatId, text) {
   const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
   if (!arg) {
-    await telegram.sendMessage(chatId, `${formatFruitPriceFlow()}\n\n偷懒用法：/precio_fruta melocotón 2,99 → 我帮你查 código 并在桌面 Artículos 里填好价格（写入前都要你确认）。`);
+    await telegram.sendMessage(chatId, `${formatFruitPriceFlow()}\n\n偷懒用法：/precio_fruta melocotón 2,99 → 我帮你查 código 并在桌面 Artículos 里填好价格（写入前都要你确认）。\n\n一堆一起改用 /precios_fruta，一行一个「名字/código 价格」，确认一次全自动改完。`);
     return;
   }
   const { name, priceRaw } = parseFruitCommandArg(arg);
@@ -288,6 +291,154 @@ async function startFruitPriceChange(chatId, name, resolved, priceRaw) {
     labelReminder: true
   };
   await sendProductResult(chatId, item, 0, 1);
+}
+
+// /precios_fruta — cambio de precio de fruta/verdura EN LOTE. Una línea por
+// artículo ("nombre 2,99" o "código 2,99"); se resuelven todos los códigos,
+// se enseña UN plan y con UNA confirmación el bot va cambiando los precios
+// en el UnideGes de escritorio uno tras otro (buscar → leer → calcular
+// P.defecto → escribir), con las mismas validaciones por artículo que el
+// flujo individual (coste/IVA/margen razonable; si algo no cuadra, ese
+// artículo se salta y se informa, no se escribe). Las etiquetas se imprimen
+// a mano al final, como pidió el usuario.
+let fruitBatchRunning = false;
+
+async function handleFruitPriceBatch(chatId, text) {
+  const body = String(text || '').replace(/^\/\S+[ \t]*/, '');
+  const entries = parseFruitBatchLines(body);
+  if (!entries.length) {
+    await telegram.sendMessage(chatId, [
+      '批量改价用法：一行一个，名字或 código + 新价格。例如：',
+      '/precios_fruta',
+      'manzana golden 2,99',
+      'plátano canarias 1,79',
+      '73215 1,49',
+      '',
+      '确认一次后我会在桌面 UnideGes 里逐个自动改，etiquetas 最后手动打印。'
+    ].join('\n'));
+    return;
+  }
+  const { ready, issues } = partitionFruitBatch(config, storeIndex, supplierIndex, entries);
+
+  const lines = [];
+  if (ready.length) {
+    lines.push(`批量改价计划（${ready.length} 个）：`);
+    ready.forEach((it, i) => {
+      lines.push(`${i + 1}. ${it.articulo || it.name} → ${it.priceRaw} €（código ${it.codigo}）`);
+    });
+  }
+  if (issues.length) {
+    lines.push('', `⚠️ 这 ${issues.length} 行先跳过：`);
+    for (const issue of issues) {
+      if (issue.reason === 'no_price') lines.push(`- 「${issue.raw}」没写价格`);
+      else if (issue.reason === 'ambiguous') lines.push(`- 「${issue.name}」有 ${issue.count} 个候选：单独发 /precio_fruta ${issue.name} 价格 挑一次，我会记住`);
+      else lines.push(`- 「${issue.name}」没找到 código：可用 /fruta_add ${issue.name} 12345 登记`);
+    }
+  }
+  if (!ready.length) {
+    await telegram.sendMessage(chatId, lines.join('\n'));
+    return;
+  }
+  if (!config.desktop?.enabled) {
+    lines.push('', '桌面自动化没启用（desktop.enabled=false），启用后再发一次。');
+    await telegram.sendMessage(chatId, lines.join('\n'));
+    return;
+  }
+  const id = saveSession({ fruitBatch: { items: ready, stopped: false } });
+  lines.push('', '确认后开始逐个写入，中途随时可以按「停止」。写完 etiquetas 手动打印。');
+  await telegram.sendMessage(chatId, lines.join('\n'), {
+    reply_markup: { inline_keyboard: [[
+      { text: `开始改价 ${ready.length} 个`, callback_data: `fpb:${id}` },
+      { text: '取消', callback_data: `cancel:${id}` }
+    ]] }
+  });
+}
+
+async function handleFruitBatchStop(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  if (!session?.fruitBatch) { await telegram.answerCallbackQuery(callbackId, '这个批量任务已结束'); return; }
+  session.fruitBatch.stopped = true;
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, '收到，做完手头这个就停');
+}
+
+async function runFruitPriceBatch(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const batch = session?.fruitBatch;
+  if (!batch?.items?.length) { await telegram.answerCallbackQuery(callbackId, '计划已过期'); await telegram.sendMessage(chatId, '这个批量计划已过期，请重新发 /precios_fruta。'); return; }
+  if (fruitBatchRunning) { await telegram.answerCallbackQuery(callbackId, '已有批量任务在跑'); return; }
+  if (batch.started) { await telegram.answerCallbackQuery(callbackId, '这个计划已经跑过了'); return; }
+  batch.started = true;
+  sessions.set(id, session);
+  fruitBatchRunning = true;
+  await telegram.answerCallbackQuery(callbackId, '开始');
+  const total = batch.items.length;
+  await telegram.sendMessage(chatId, `开始批量改价，共 ${total} 个。每改完一个我发一条进度。`, {
+    reply_markup: { inline_keyboard: [[{ text: '⏹ 停止', callback_data: `fpstop:${id}` }]] }
+  });
+
+  const okItems = [];
+  const failItems = [];
+  let stopped = false;
+  try {
+    for (let i = 0; i < batch.items.length; i += 1) {
+      if (sessions.get(id)?.fruitBatch?.stopped) { stopped = true; break; }
+      const it = batch.items[i];
+      const label = it.articulo || it.name;
+      const progress = `${i + 1}/${total}`;
+      try {
+        const item = {
+          raw: `fruta ${it.name} ${it.priceRaw}`,
+          codigo: it.codigo,
+          ean: '',
+          nombre: label,
+          precio: parsePrice(it.priceRaw),
+          margen: { mode: 'missing', raw: '' },
+          desbloquear: false,
+          etiqueta: true,
+          nota: `precio fruta lote ${it.name}`,
+          labelReminder: false
+        };
+        const store = lookupStore(storeIndex, item);
+        const supplier = enrichSupplierLookup(supplierIndex, item, store);
+
+        const found = await searchDesktop(item, config, logger);
+        if (found.status !== 'ok') { failItems.push({ it, error: `搜索失败：${found.error || found.reason || '未知'}` }); await telegram.sendMessage(chatId, `${progress} ❌ ${label}：搜索失败`); continue; }
+
+        const read = await readPriceDesktop(config, logger);
+        if (read.status !== 'ok') { failItems.push({ it, error: `读取失败：${read.error || read.reason || '未知'}` }); await telegram.sendMessage(chatId, `${progress} ❌ ${label}：读取价格信息失败`); continue; }
+
+        const planResult = buildPricePlan({ item, supplier, store }, read);
+        if (!planResult.ok) { failItems.push({ it, error: planResult.error }); await telegram.sendMessage(chatId, `${progress} ❌ ${label}：${planResult.error}`); continue; }
+
+        const applied = await applyPriceDesktop(planResult.plan, config, logger);
+        if (applied.status !== 'ok') { failItems.push({ it, error: `写入失败：${applied.error || applied.reason || '未知'}` }); await telegram.sendMessage(chatId, `${progress} ❌ ${label}：写入失败`); continue; }
+
+        okItems.push(it);
+        await telegram.sendMessage(chatId, `${progress} ✅ ${label} → ${it.priceRaw} €（P.defecto ${planResult.plan.pDefecto}%）`);
+      } catch (error) {
+        logger.error('fruit batch item failed', { codigo: it.codigo, error: error.message });
+        failItems.push({ it, error: error.message });
+        await telegram.sendMessage(chatId, `${progress} ❌ ${label}：${error.message}`);
+      }
+    }
+  } finally {
+    fruitBatchRunning = false;
+    sessions.delete(id);
+  }
+
+  const summary = [
+    `批量改价结束${stopped ? '（手动停止）' : ''}：成功 ${okItems.length} / 失败 ${failItems.length}${stopped ? ` / 没跑 ${total - okItems.length - failItems.length}` : ''}`
+  ];
+  if (failItems.length) {
+    summary.push('', '失败的：');
+    for (const f of failItems) summary.push(`- ${f.it.articulo || f.it.name}（${f.it.codigo}）：${f.error}`);
+    summary.push('', '失败的可以单独再跑：/precio_fruta 名字 价格');
+  }
+  if (okItems.length) {
+    summary.push('', '接下来打印新价签（手动）：', '1. 关闭商品窗口 → 会弹出 Etiquetas 页面', '2. 点 Etiq. Especiales', '3. 勾选 Imprimir；Tipo Etiqueta 全改成 Tipo Display 8 A4 vertical', '4. 点 Imprimir');
+  }
+  await telegram.sendMessage(chatId, summary.join('\n'));
 }
 
 // /carne — recuento con el móvil que sustituye a la hoja de papel: la

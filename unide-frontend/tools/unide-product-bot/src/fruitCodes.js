@@ -109,3 +109,40 @@ export function parseFruitCommandArg(argText) {
   if (match) return { name: match[1].trim(), priceRaw: match[2] };
   return { name: arg, priceRaw: '' };
 }
+
+// Cambio de precio en LOTE (/precios_fruta): una línea por artículo,
+// "nombre 2,99" o "código 2,99". Devuelve una entrada por línea no vacía.
+export function parseFruitBatchLines(bodyText) {
+  return String(bodyText || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((raw) => ({ raw, ...parseFruitCommandArg(raw) }));
+}
+
+// Clasifica las líneas del lote en listas para el plan:
+//   ready  → [{ name, priceRaw, codigo, articulo }]  se pueden cambiar ya
+//   issues → [{ raw, name, reason: 'no_price'|'ambiguous'|'not_found', count? }]
+// Un "nombre" que es todo dígitos (≥3) se toma como código directo, sin
+// pasar por el diccionario: el usuario ya tiene los códigos apuntados.
+export function partitionFruitBatch(config, storeIndex, supplierIndex, entries) {
+  const ready = [];
+  const issues = [];
+  for (const entry of entries || []) {
+    if (!entry.priceRaw) { issues.push({ raw: entry.raw, name: entry.name, reason: 'no_price' }); continue; }
+    const compact = String(entry.name || '').replace(/\s+/g, '');
+    if (/^\d{3,}$/.test(compact)) {
+      ready.push({ name: entry.name, priceRaw: entry.priceRaw, codigo: compact, articulo: '' });
+      continue;
+    }
+    const resolved = resolveFruitCode(config, storeIndex, supplierIndex, entry.name);
+    if (resolved.status === 'found') {
+      ready.push({ name: entry.name, priceRaw: entry.priceRaw, codigo: resolved.codigo, articulo: resolved.articulo || '' });
+    } else if (resolved.status === 'candidates') {
+      issues.push({ raw: entry.raw, name: entry.name, reason: 'ambiguous', count: resolved.candidates.length });
+    } else {
+      issues.push({ raw: entry.raw, name: entry.name, reason: 'not_found' });
+    }
+  }
+  return { ready, issues };
+}
