@@ -405,12 +405,12 @@ async function scrapeAllPromotionDetailItems(page, promo, config) {
   const seen = new Set();
   let prevSig = '';
 
-  // Guardia de URL: pasar de página del grid NO cambia la URL; si cambia es
-  // que un clic saltó a OTRO registro (p. ej. la flecha "siguiente registro"
-  // de la barra) y estaríamos mezclando promociones. Se corta ahí mismo.
-  const detailUrl = page.url();
+  // La paginación del grid solo pulsa botones DENTRO del <dxbl-pager>
+  // (números de página), nunca la flecha "siguiente registro" de la barra,
+  // así que ya no puede encadenar otra promoción (antes hacía falta una
+  // guardia de URL que, además, cortaba la paginación legítima cuando el
+  // grid metía su estado en la URL).
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    if (pageIndex > 0 && page.url() !== detailUrl) break;
     // Primera página: esperar a que aparezcan filas. Siguientes: esperar a
     // que el contenido CAMBIE respecto a la anterior (si no, se releería la
     // página vieja y el dedupe la descartaría → se perdían filas de las
@@ -418,7 +418,6 @@ async function scrapeAllPromotionDetailItems(page, promo, config) {
     const rows = pageIndex === 0
       ? await waitForPromotionDetailRows(page, promo, config)
       : await waitForGridPageChange(page, () => scrapePromotionDetailItems(page, promo), detailSignature, prevSig, settleTimeout);
-    if (pageIndex > 0 && page.url() !== detailUrl) break;
     const sig = detailSignature(rows);
     if (pageIndex > 0 && (!rows.length || sig === prevSig)) break;
     prevSig = sig;
@@ -573,88 +572,65 @@ async function clickActionByName(page, actionName, timeoutMs = 0) {
 }
 
 async function clickNextPromotionPage(page) {
-  return clickNextGridPage(page);
+  return clickGridPageDelta(page, +1);
 }
 
 async function clickNextPromotionDetailPage(page) {
-  return clickNextGridPage(page);
+  return clickGridPageDelta(page, +1);
 }
 
-// Lee el paginador dxbl-pager VISIBLE del grid. Estructura real de este
-// UnideGes (confirmada en el volcado): botones numerados
-//   <button class="... dxbl-pager-page-btn ..." aria-label="Go to page N">
-// y el activo lleva "dxbl-pager-active-page-btn" + aria-current="page".
-// No hay flechas de "anterior/siguiente": la navegación es por número.
-async function readPager(page) {
-  return page.evaluate(() => {
+// Paginador REAL de DevExpress: <dxbl-pager> con botones numerados cuyo
+// aria-label es "Go to page N" y la pagina activa lleva la clase
+// dxbl-pager-active-page-btn / aria-current="page". Se opera SOLO sobre esos
+// botones (nunca sobre flechas de la barra de XAF, que saltarian a otro
+// registro). d = +1 (siguiente) o { toPage: N } para ir a una pagina
+// concreta. Devuelve true si pulso una pagina que existe.
+async function clickGridPageDelta(page, d) {
+  return page.evaluate((delta) => {
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const pagers = Array.from(document.querySelectorAll('.dxbl-pager, dxbl-pager, [class*="pager" i]')).filter(isVisible);
+    const pageNum = (el) => {
+      const aria = el.getAttribute('aria-label') || '';
+      const m = aria.match(/(?:page|p[aá]gina)\s+(\d+)/i);
+      if (m) return Number(m[1]);
+      if (/pager-page-btn/i.test(String(el.className || ''))) {
+        const t = (el.textContent || '').trim();
+        if (/^\d+$/.test(t)) return Number(t);
+      }
+      return null;
+    };
+    const pagers = Array.from(document.querySelectorAll('.dxbl-pager, [class*="pager" i][role="navigation"], nav[class*="pager" i]')).filter(isVisible);
     for (const pager of pagers) {
-      const btns = Array.from(pager.querySelectorAll('button, a, [role="button"]')).filter(isVisible);
-      const pages = [];
-      let current = null;
-      for (const el of btns) {
-        const cls = String(el.className || '');
-        const aria = el.getAttribute('aria-label') || '';
-        const am = aria.match(/page\s+(\d+)/i);
-        if (!/pager-page-btn/i.test(cls) && !am) continue;
-        const num = am ? Number(am[1]) : Number((el.textContent || '').trim());
-        if (!Number.isInteger(num) || num <= 0) continue;
-        pages.push(num);
-        if (el.getAttribute('aria-current') === 'page' || /active-page|pager-active/i.test(cls)) current = num;
-      }
-      if (pages.length) {
-        const visible = [...new Set(pages)].sort((a, b) => a - b);
-        return { hasPager: true, current: current ?? visible[0], visible };
-      }
-    }
-    return { hasPager: false, current: 1, visible: [] };
-  });
-}
-
-// Pulsa el botón de la página N del dxbl-pager. true si lo encontró y pulsó.
-async function clickPagerPage(page, target) {
-  return page.evaluate((n) => {
-    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-    const pagers = Array.from(document.querySelectorAll('.dxbl-pager, dxbl-pager, [class*="pager" i]')).filter(isVisible);
-    for (const pager of pagers) {
-      const btns = Array.from(pager.querySelectorAll('button, a, [role="button"]')).filter(isVisible);
-      for (const el of btns) {
-        const cls = String(el.className || '');
-        const aria = el.getAttribute('aria-label') || '';
-        const am = aria.match(/page\s+(\d+)/i);
-        if (!/pager-page-btn/i.test(cls) && !am) continue;
-        const num = am ? Number(am[1]) : Number((el.textContent || '').trim());
-        if (num === n && !el.disabled) { el.click(); return true; }
-      }
+      const btns = Array.from(pager.querySelectorAll('button, a, [role="button"]')).filter(isVisible)
+        .map((el) => ({
+          el,
+          n: pageNum(el),
+          active: el.getAttribute('aria-current') === 'page' || /active-page/i.test(String(el.className || '')),
+          disabled: el.disabled || el.getAttribute('aria-disabled') === 'true' || /disabled|dx-state-disabled/i.test(String(el.className || ''))
+        }))
+        .filter((x) => x.n != null);
+      if (!btns.length) continue;
+      const activeN = (btns.find((x) => x.active) || {}).n != null
+        ? btns.find((x) => x.active).n
+        : Math.min.apply(null, btns.map((x) => x.n));
+      const targetN = (delta && typeof delta === 'object') ? delta.toPage : activeN + delta;
+      const target = btns.find((x) => x.n === targetN && !x.disabled);
+      if (target) { target.el.click(); return true; }
+      return false;
     }
     return false;
-  }, target);
+  }, d);
 }
 
-// Avanza una página: pulsa el número (página activa + 1). Si ese botón no
-// está visible (paginador con ventana "1 2 … 8"), pulsa el menor número
-// visible mayor que el actual (desplaza la ventana). false = no hay más.
-async function clickNextGridPage(page) {
-  const st = await readPager(page);
-  if (!st.hasPager) return false;
-  if (st.visible.includes(st.current + 1)) return clickPagerPage(page, st.current + 1);
-  const nextVisible = st.visible.find((n) => n > st.current);
-  if (nextVisible != null) return clickPagerPage(page, nextVisible);
-  return false;
-}
-
-// Vuelve a la PRIMERA página de la lista (el grid recuerda la última vista;
-// tras page.goto podía quedarse en la 2ª). Salto directo al botón "1".
+// Va a la 1a pagina de la lista. El grid recuerda la ultima pagina vista;
+// sin rebobinar, al abrir detalles solo se alcanzaban las promociones de la
+// pagina en la que quedo. Se pulsa directamente el boton "pagina 1".
 async function goToFirstPromotionListPage(page, config) {
   const settle = Math.min(Number(config.promotions?.detailRowsTimeoutMs) || 9000, 4000);
-  const st = await readPager(page);
-  if (!st.hasPager || st.current === 1) return;
-  const prevSig = rowsSignature(await scrapePromotionRows(page).catch(() => []));
-  if (await clickPagerPage(page, 1)) {
-    await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, prevSig, settle);
-  }
+  const before = rowsSignature(await scrapePromotionRows(page).catch(() => []));
+  const clicked = await clickGridPageDelta(page, { toPage: 1 });
+  if (clicked) await waitForGridPageChange(page, () => scrapePromotionRows(page), rowsSignature, before, settle);
 }
+
 
 async function scrapePromotionRows(page) {
   return page.evaluate(tableRowsByScore, { mode: 'promotions' });
