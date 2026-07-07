@@ -11,6 +11,26 @@ import path from 'node:path';
 //     código viene del panel Diseño Pantalla y no está en las tablas).
 
 const MAP_FILE = 'data/frutas-codigos.json';
+// Diccionario "de fábrica": nombre→código que viaja con el bot (el usuario
+// entregó la lista de frutas/verduras). Se consulta DESPUÉS del aprendido
+// (para que una corrección manual del usuario mande) y ANTES de las tablas
+// locales. Va en la raíz del tool, así que update-bot lo refresca; el
+// aprendido vive en data/ y sobrevive a las actualizaciones.
+const SEED_FILE = 'fruta-codigos-seed.json';
+let seedCache = null;
+
+function loadFruitSeed(config) {
+  if (seedCache) return seedCache;
+  try {
+    const file = path.resolve(config.__toolRoot || '.', SEED_FILE);
+    if (!fs.existsSync(file)) { seedCache = {}; return seedCache; }
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    seedCache = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    seedCache = {};
+  }
+  return seedCache;
+}
 
 export function normalizeFruitName(value) {
   return String(value || '')
@@ -63,6 +83,11 @@ export function resolveFruitCode(config, storeIndex, supplierIndex, name) {
   const learned = loadFruitMap(config)[key];
   if (learned?.codigo) {
     return { status: 'found', codigo: learned.codigo, articulo: learned.articulo || '', source: 'aprendido' };
+  }
+
+  const seed = loadFruitSeed(config)[key];
+  if (seed?.codigo) {
+    return { status: 'found', codigo: seed.codigo, articulo: seed.articulo || '', source: 'tabla frutas' };
   }
 
   const candidates = searchByName(storeIndex, supplierIndex, key);

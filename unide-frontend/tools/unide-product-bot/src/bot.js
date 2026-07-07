@@ -296,7 +296,7 @@ function makeFruitItem(name, codigo, articulo, priceRaw, labelReminder) {
 async function processFruitPriceOnce(item) {
   const store = lookupStore(storeIndex, item);
   const supplier = enrichSupplierLookup(supplierIndex, item, store);
-  const found = await searchDesktop(item, config, logger);
+  const found = await searchDesktop(item, config, logger, { byCode: true });
   if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知' };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, stage: 'read', error: read.error || read.reason || '未知' };
@@ -333,7 +333,7 @@ async function startFruitPriceChange(chatId, name, resolved, priceRaw) {
   // Una sola confirmación: se busca para que veas la CAPTURA y confirmes que
   // es el artículo correcto; al pulsar "确认改价" se hace leer→calcular→escribir
   // de una vez (al confirmar se vuelve a buscar, por si el escritorio se movió).
-  const found = await searchDesktop(item, config, logger);
+  const found = await searchDesktop(item, config, logger, { byCode: true });
   const id = saveSession({ fruitOne: { item, priceRaw } });
   const text = `「${item.nombre}」→ código ${item.codigo}，目标 ${priceRaw} €。\n核对下截图是不是这个商品，对的话点「确认改价」，我会读价→算 P.defecto→写入一次做完（算出来不合理会中止不写）。`;
   await sendWithOptionalScreenshot(chatId, found, text, {
