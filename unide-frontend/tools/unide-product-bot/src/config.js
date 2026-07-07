@@ -84,6 +84,12 @@ const defaultConfig = {
     screenshotDir: 'screenshots',
     expectedScreen: { width: 0, height: 0 },
     steps: [],
+    // Búsqueda por CÓDIGO (fruta/verdura): en Artículos el código no se teclea
+    // en el catalejo/EAN sino en su propio campo "Código". Si se calibra aquí
+    // (focus → click en el campo Código → text {{query}} → Enter), el cambio
+    // de precio de fruta usa estos pasos; si se deja vacío, cae en `steps`
+    // (el catalejo de siempre), sin romper nada.
+    codeSearchSteps: [],
     orderApplySteps: defaultOrderApplySteps
   },
   // Automatización de Pedidos por NAVEGADOR (Edge) vía CDP.

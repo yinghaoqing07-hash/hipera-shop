@@ -2,9 +2,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export async function searchDesktop(item, config, logger) {
+export async function searchDesktop(item, config, logger, options = {}) {
   const query = item.codigo || item.ean || item.nombre;
-  return runDesktopAction('search', query, {}, config, logger);
+  // El cambio de precio de fruta busca por CÓDIGO, que en Artículos va en su
+  // propio campo, no en el catalejo/EAN. byCode usa el modo searchCode (que
+  // en el PS cae en `steps` si no se han calibrado codeSearchSteps).
+  const mode = options.byCode ? 'searchCode' : 'search';
+  return runDesktopAction(mode, query, {}, config, logger);
 }
 
 export async function clearDesktop(config, logger) {

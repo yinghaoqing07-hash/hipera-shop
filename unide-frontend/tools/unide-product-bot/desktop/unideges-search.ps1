@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "clear", "priceRead", "priceApply", "orderApply")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "orderApply")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -201,6 +201,13 @@ function Get-Steps($Config, [string]$ActionMode) {
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
   elseif ($ActionMode -eq "priceApply") { $steps = @($Config.desktop.priceApplySteps) }
   elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
+  elseif ($ActionMode -eq "searchCode") {
+    # Búsqueda por código: usa su propio campo si está calibrado; si no,
+    # cae en el catalejo/EAN de siempre (no rompe nada, aunque puede que el
+    # código no case por ahí — por eso conviene calibrar codeSearchSteps).
+    $steps = @($Config.desktop.codeSearchSteps)
+    if ($steps.Count -eq 0) { $steps = @($Config.desktop.steps) }
+  }
   else { $steps = @($Config.desktop.steps) }
   if ($steps.Count -eq 0) { throw "$ActionMode steps are not configured in config.local.json" }
   return $steps
