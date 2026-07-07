@@ -405,6 +405,24 @@ async function scrapeAllPromotionDetailItems(page, promo, config) {
   const seen = new Set();
   let prevSig = '';
 
+  // Rebobinar el grid de DETALLE a la página 1 antes de empezar. Al abrir el
+  // detalle el grid puede recordar una página posterior (se veía p. ej. la 2);
+  // entonces el bucle arrancaba ahí y NUNCA leía la 1, perdiendo justo 25
+  // artículos (una página) en promociones largas — el usuario contó 189 en
+  // OFERTA FOLLETO y el bot sacaba 164 (= páginas 2..8). Solo se pulsa si la
+  // página activa no es ya la 1, para no meter una espera inútil (~4 s) en las
+  // promociones de una sola página.
+  try {
+    const activePage = await promotionGridActivePage(page);
+    if (activePage > 1) {
+      const before = detailSignature(await scrapePromotionDetailItems(page, promo).catch(() => []));
+      const clicked = await clickGridPageDelta(page, { toPage: 1 });
+      if (clicked) {
+        await waitForGridPageChange(page, () => scrapePromotionDetailItems(page, promo), detailSignature, before, Math.min(settleTimeout, 4000));
+      }
+    }
+  } catch { /* si falla el rebobinado seguimos: mejor leer desde donde esté que nada */ }
+
   // La paginación del grid solo pulsa botones DENTRO del <dxbl-pager>
   // (números de página), nunca la flecha "siguiente registro" de la barra,
   // así que ya no puede encadenar otra promoción (antes hacía falta una
@@ -619,6 +637,37 @@ async function clickGridPageDelta(page, d) {
     }
     return false;
   }, d);
+}
+
+// Numero de pagina activa del primer <dxbl-pager> visible (1 si no hay
+// paginador). Se usa para decidir si hace falta rebobinar el grid.
+async function promotionGridActivePage(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const pageNum = (el) => {
+      const aria = el.getAttribute('aria-label') || '';
+      const m = aria.match(/(?:page|p[aá]gina)\s+(\d+)/i);
+      if (m) return Number(m[1]);
+      if (/pager-page-btn/i.test(String(el.className || ''))) {
+        const t = (el.textContent || '').trim();
+        if (/^\d+$/.test(t)) return Number(t);
+      }
+      return null;
+    };
+    const pagers = Array.from(document.querySelectorAll('.dxbl-pager, [class*="pager" i][role="navigation"], nav[class*="pager" i]')).filter(isVisible);
+    for (const pager of pagers) {
+      const btns = Array.from(pager.querySelectorAll('button, a, [role="button"]')).filter(isVisible)
+        .map((el) => ({
+          n: pageNum(el),
+          active: el.getAttribute('aria-current') === 'page' || /active-page/i.test(String(el.className || ''))
+        }))
+        .filter((x) => x.n != null);
+      if (!btns.length) continue;
+      const act = btns.find((x) => x.active);
+      return act ? act.n : Math.min.apply(null, btns.map((x) => x.n));
+    }
+    return 1;
+  });
 }
 
 // Va a la 1a pagina de la lista. El grid recuerda la ultima pagina vista;
@@ -1025,5 +1074,5 @@ function tableRowsByScore(options = {}) {
 export const __test = {
   scrapeAllPromotionDetailItems, waitForGridPageChange, detailSignature, rowsSignature,
   scrapeAllPromotionRowsForTest: (page, config) => scrapeAllPromotionRows(page, config),
-  goToFirstPromotionListPage
+  goToFirstPromotionListPage, promotionGridActivePage, clickGridPageDelta
 };
