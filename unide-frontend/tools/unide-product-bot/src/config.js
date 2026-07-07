@@ -72,6 +72,8 @@ const defaultConfig = {
     pageTurnMs: 1200,          // entre páginas de la lista
     detailPageTurnMs: 1600,    // entre páginas del detalle (evita releer la página vieja)
     detailRowsTimeoutMs: 9000, // espera MÁX a que aparezcan las filas del detalle
+    detailOpenTimeoutMs: 3000, // espera del 1er clic (simple) antes de probar doble clic
+    rowWaitMs: 3000,           // espera a que la fila aparezca en la página actual
     outputDir: 'promotions'    // carpeta del CSV (junto al bot)
   },
   desktop: {

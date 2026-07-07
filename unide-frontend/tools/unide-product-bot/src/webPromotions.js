@@ -508,18 +508,34 @@ async function openPromotionDetailByRow(page, promo, config) {
 async function tryOpenPromotionFromCurrentPage(page, promo, config) {
   const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
   const maxPages = Number(config.promotions?.maxPages) || 50;
+  // Espera corta para el 1er clic (simple): si abriera el detalle, lo hace en
+  // ~1 s; solo si NO abre se prueba el doble clic con más margen. Antes el 1er
+  // clic esperaba 8 s siempre, así que cada promoción cuyo grid abre con doble
+  // clic se quedaba 8 s parada antes de reintentar.
+  const firstClickWait = Math.min(timeout, Number(config.promotions?.detailOpenTimeoutMs) || 3000);
+  const secondClickWait = Math.min(timeout, 8000);
+  const rowWaitMs = Number(config.promotions?.rowWaitMs) || 3000;
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    for (const clickCount of [1, 2]) {
-      const handle = await findPromotionRowHandle(page, promo);
-      const el = handle.asElement();
-      if (!el) { await handle.dispose(); break; }
-      await el.click({ clickCount });
-      await handle.dispose();
+    // Esperar a que la fila aparezca en la página ACTUAL antes de decidir
+    // pasar de página. Tras volver del detalle el grid tarda un instante en
+    // re-renderizar; sin esta espera se daba por "no está" y se pulsaba
+    // "siguiente" → saltaba a la 2ª, no la encontraba y acababa barriendo
+    // toda la lista (lento y "dando tumbos"). Solo se agota rowWaitMs cuando
+    // la fila de verdad no está en esta página.
+    const present = await waitForPromotionRowHandle(page, promo, rowWaitMs);
+    if (present) {
+      for (const [clickCount, wait] of [[1, firstClickWait], [2, secondClickWait]]) {
+        const handle = await findPromotionRowHandle(page, promo);
+        const el = handle.asElement();
+        if (!el) { await handle.dispose(); break; }
+        await el.click({ clickCount });
+        await handle.dispose();
 
-      const opened = await waitForPromotionDetailPage(page, Math.min(timeout, 8000));
-      if (opened.isPromotionDetail) return true;
-      await sleep(350);
+        const opened = await waitForPromotionDetailPage(page, wait);
+        if (opened.isPromotionDetail) return true;
+        await sleep(300);
+      }
     }
     const moved = await clickNextPromotionPage(page);
     if (!moved) break;
@@ -527,6 +543,20 @@ async function tryOpenPromotionFromCurrentPage(page, promo, config) {
   }
 
   return false;
+}
+
+// Sondea findPromotionRowHandle hasta que la fila exista en la página actual
+// (o se agote el tiempo). Devuelve true si apareció.
+async function waitForPromotionRowHandle(page, promo, timeoutMs) {
+  const start = Date.now();
+  for (;;) {
+    const handle = await findPromotionRowHandle(page, promo);
+    const exists = !!handle.asElement();
+    await handle.dispose();
+    if (exists) return true;
+    if (Date.now() - start >= timeoutMs) return false;
+    await sleep(200);
+  }
 }
 
 async function findPromotionRowHandle(page, promo) {
