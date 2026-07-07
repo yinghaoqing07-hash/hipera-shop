@@ -40,9 +40,14 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
 
     const enriched = rows.map((row, index) => enrichPromotionRow(row, index, refIso));
     const active = enriched.filter((row) => row.active);
+    // Orden en que aparecen en la lista (página 1, luego 2, …). Los detalles
+    // se abren EN ESTE ORDEN para que el grid recorra las páginas de forma
+    // monótona (1→2→…) en vez de saltar 1↔2 en cada promoción. El orden por
+    // fecha (comparePromotions) se reserva para el CSV y el resumen.
+    const activeInListOrder = active.slice();
     active.sort(comparePromotions);
 
-    const details = await scrapeActivePromotionDetails(page, config, active, listUrl, logger);
+    const details = await scrapeActivePromotionDetails(page, config, activeInListOrder, listUrl, logger);
     const outputFile = writePromotionItemsCsv(config, details.items, active, refIso);
     const screenshotPath = await screenshot(page, config, 'items');
     // Si no salió ningún artículo, adjuntar un par de volcados de detalle
@@ -357,19 +362,31 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
   const items = [];
   const failures = [];
 
+  // scrapeAllPromotionRows dejó la lista en su ÚLTIMA página. Se rebobina a la
+  // 1ª UNA sola vez; a partir de aquí las promociones se abren en el mismo
+  // orden en que se leyeron (página 1, luego 2, …), buscándolas en la página
+  // ACTUAL sin volver atrás en cada una. Antes se rebobinaba a la 1ª antes de
+  // CADA promoción, así que para abrir las de la 2ª página el grid saltaba
+  // 1→2 una y otra vez (lento y "daba tumbos").
+  {
+    const st = await getPromotionPageState(page);
+    if (!st.isPromotionsList) {
+      await gotoListUrl(page, listUrl, timeout);
+      await waitForPromotionsPage(page, timeout);
+    }
+    await goToFirstPromotionListPage(page, config);
+  }
+
   for (const promo of promotions.slice(0, maxDetails)) {
     try {
       // returnToPromotionsList ya nos dejó en la lista al final de la vuelta
-      // anterior; solo se navega si NO estamos en ella (ahorra una recarga
-      // completa por promoción). El grid recuerda la última página; sin
-      // rebobinar, openPromotionDetailByRow solo alcanzaba las promociones
-      // de la página en la que se quedó (fallaban justo las 25 de la 1ª).
+      // anterior; solo se recarga (y se rebobina) si nos caímos de la lista.
       let listState = await getPromotionPageState(page);
       if (!listState.isPromotionsList) {
         await gotoListUrl(page, listUrl, timeout);
         await waitForPromotionsPage(page, timeout);
+        await goToFirstPromotionListPage(page, config);
       }
-      await goToFirstPromotionListPage(page, config);
       const opened = await openPromotionDetailByRow(page, promo, config);
       if (!opened) {
         failures.push({ promo, stage: 'open', error: '没有在 Promociones 列表里找到/打开这一行' });
@@ -478,6 +495,17 @@ async function waitForPromotionDetailRows(page, promo, config, timeoutOverrideMs
   return best;
 }
 async function openPromotionDetailByRow(page, promo, config) {
+  // Las promociones se procesan en orden de página, así que el objetivo suele
+  // estar en la página ACTUAL o en una posterior: se busca desde aquí hacia
+  // adelante (sin rebobinar → el grid ya no salta 1↔2 en cada promoción).
+  if (await tryOpenPromotionFromCurrentPage(page, promo, config)) return true;
+  // Respaldo raro (la lista retrocedió al volver del detalle, o la fila no
+  // casó): rebobinar a la 1ª y recorrer todas las páginas una vez más.
+  await goToFirstPromotionListPage(page, config);
+  return tryOpenPromotionFromCurrentPage(page, promo, config);
+}
+
+async function tryOpenPromotionFromCurrentPage(page, promo, config) {
   const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
   const maxPages = Number(config.promotions?.maxPages) || 50;
 
