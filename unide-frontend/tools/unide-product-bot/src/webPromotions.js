@@ -13,6 +13,7 @@ const DEFAULT_CANDIDATE_PATHS = [
 
 export async function fetchActivePromotions(config, referenceDateIso, logger) {
   let browser;
+  const startedAt = Date.now();
   try {
     const opened = await openPromotionsPage(config);
     browser = opened.browser;
@@ -80,6 +81,8 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
       // (Antes bastaba "todo activo", pero hay semanas en que TODAS las
       // promociones están vigentes de verdad y el aviso era ruido.)
       listMaybeTruncated: rows.length > 0 && active.length === rows.length && rows.length % 25 === 0,
+      elapsedMs: Date.now() - startedAt,
+      detailStats: details.stats || null,
       screenshot: screenshotPath,
       pageInfo
     };
@@ -104,6 +107,18 @@ export function formatPromotionsSummary(result, config) {
     `· 已开详情页：${withDetail} 个${failed ? `（${failed} 个没抓完整）` : ''}`,
     `· 商品明细：${items.length} 行（完整在 CSV）`
   ];
+  // Tiempos: total y cómo se llegó a cada detalle (flecha "registro
+  // siguiente" = rápido; vía lista = dos navegaciones). Sirve para saber
+  // dónde se va el tiempo sin tener que cronometrar a mano.
+  if (result.elapsedMs) {
+    const totalSec = Math.round(result.elapsedMs / 1000);
+    const mm = Math.floor(totalSec / 60);
+    const ss = totalSec % 60;
+    const per = withDetail ? ` · 平均每张 ${(totalSec / withDetail).toFixed(1)} 秒` : '';
+    const st = result.detailStats;
+    const via = st ? `（直达 ${st.chained} 张 / 走列表 ${st.viaList} 张）` : '';
+    lines.push(`· 用时：${mm ? `${mm} 分 ` : ''}${ss} 秒${per}${via}`);
+  }
   if (result.unknownEndDate) lines.push(`· ${result.unknownEndDate} 个没识别到结束日期，已按未过期保留`);
 
   // Una línea por promoción no caducada: código · nombre — N 商品.
@@ -364,13 +379,14 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
   const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
   const items = [];
   const failures = [];
+  // Cuántos detalles se alcanzaron encadenando (flecha "registro siguiente")
+  // y cuántos por el camino clásico vía lista: sale en el resumen para poder
+  // diagnosticar la lentitud con datos y no a ojo.
+  const stats = { chained: 0, viaList: 0 };
 
   // scrapeAllPromotionRows dejó la lista en su ÚLTIMA página. Se rebobina a la
   // 1ª UNA sola vez; a partir de aquí las promociones se abren en el mismo
-  // orden en que se leyeron (página 1, luego 2, …), buscándolas en la página
-  // ACTUAL sin volver atrás en cada una. Antes se rebobinaba a la 1ª antes de
-  // CADA promoción, así que para abrir las de la 2ª página el grid saltaba
-  // 1→2 una y otra vez (lento y "daba tumbos").
+  // orden en que se leyeron (página 1, luego 2, …).
   {
     const st = await getPromotionPageState(page);
     if (!st.isPromotionsList) {
@@ -380,18 +396,37 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
     await goToFirstPromotionListPage(page, config);
   }
 
+  // Cada promoción costaba DOS navegaciones Blazor completas: detalle →
+  // (Volver) → lista → (clic en la fila) → detalle siguiente. En el PC de la
+  // tienda cada navegación son varios segundos, así que entre promoción y
+  // promoción se "quedaba parado" aunque no hubiera ninguna espera nuestra.
+  // Ahora, estando ya en un detalle, se pulsa la flecha "registro siguiente"
+  // de la barra del detalle y se pasa DIRECTO al siguiente (una navegación,
+  // sin tocar la lista). Se verifica que el detalle alcanzado es la promoción
+  // esperada; si no lo es (o la flecha no existe), se vuelve al camino
+  // clásico por la lista para esa promoción. Es de solo lectura: la flecha
+  // solo navega, jamás guarda.
+  let onDetailOfPrevious = false;
+
   for (const promo of promotions.slice(0, maxDetails)) {
     try {
-      // returnToPromotionsList ya nos dejó en la lista al final de la vuelta
-      // anterior; solo se recarga (y se rebobina) si nos caímos de la lista.
-      let listState = await getPromotionPageState(page);
-      if (!listState.isPromotionsList) {
-        await gotoListUrl(page, listUrl, timeout);
-        await waitForPromotionsPage(page, timeout);
-        await goToFirstPromotionListPage(page, config);
+      let onDetail = false;
+      if (onDetailOfPrevious) {
+        onDetail = await advanceToNextPromotionDetail(page, promo, config);
+        if (onDetail) stats.chained += 1;
       }
-      const opened = await openPromotionDetailByRow(page, promo, config);
-      if (!opened) {
+      if (!onDetail) {
+        // Camino clásico: asegurar la lista (Volver es más ligero que
+        // recargar la URL) y abrir la fila.
+        const listState = await getPromotionPageState(page);
+        if (!listState.isPromotionsList) {
+          await returnToPromotionsList(page, config, listUrl);
+        }
+        onDetail = await openPromotionDetailByRow(page, promo, config);
+        if (onDetail) stats.viaList += 1;
+      }
+      if (!onDetail) {
+        onDetailOfPrevious = false;
         failures.push({ promo, stage: 'open', error: '没有在 Promociones 列表里找到/打开这一行' });
         continue;
       }
@@ -403,19 +438,113 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
       } else {
         items.push(...detailRows);
       }
-      await returnToPromotionsList(page, config, listUrl);
+      // Seguimos plantados en el detalle de esta promoción: la siguiente
+      // vuelta intentará encadenar desde aquí.
+      onDetailOfPrevious = true;
     } catch (error) {
       logger?.error('promotion detail failed', { code: promo.code, error: error.message });
       failures.push({ promo, stage: error.stage || 'detail', error: error.message });
+      onDetailOfPrevious = false;
       try { await returnToPromotionsList(page, config, listUrl); } catch { /* keep going */ }
     }
   }
+
+  // Dejar la app en la lista al terminar (una sola vez, no por promoción).
+  // Solo si NO estamos ya en ella: returnToPromotionsList desde la lista
+  // no encuentra "Volver" y acaba probando goBack/recarga para nada.
+  try {
+    const st = await getPromotionPageState(page);
+    if (!st.isPromotionsList) await returnToPromotionsList(page, config, listUrl);
+  } catch { /* noop */ }
 
   if (promotions.length > maxDetails) {
     failures.push({ promo: { code: '', description: 'detail limit' }, stage: 'limit', error: `超过 maxDetailPromotions=${maxDetails}，后面的 promoción 没逐个打开` });
   }
 
-  return { items, failures };
+  return { items, failures, stats };
+}
+
+// Estando en el detalle de una promoción, salta al detalle de la SIGUIENTE
+// con la flecha "registro siguiente" de la barra del detalle (una única
+// navegación Blazor, sin pasar por la lista). Devuelve true solo si el
+// detalle alcanzado corresponde a `promo`; en cualquier otro caso deja que
+// el llamador use el camino clásico. Solo lectura: nunca guarda nada.
+async function advanceToNextPromotionDetail(page, promo, config) {
+  const state = await getPromotionDetailState(page).catch(() => ({}));
+  if (!state.isPromotionDetail) return false;
+  const beforeSig = `${state.caption}·${detailSignature(await scrapePromotionDetailItems(page, promo).catch(() => []))}`;
+
+  if (!(await clickNextRecordArrow(page))) return false;
+
+  const timeoutMs = Math.min(Number(config.webOrder?.pageNavigationTimeoutMs) || 20000, 10000);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const st = await getPromotionDetailState(page);
+      if (st.isPromotionDetail) {
+        const sig = `${st.caption}·${detailSignature(await scrapePromotionDetailItems(page, promo).catch(() => []))}`;
+        if (sig !== beforeSig) {
+          // Llegó OTRO detalle: ¿es la promoción esperada?
+          return detailMatchesPromotion(page, promo);
+        }
+      } else {
+        // Nos sacó del detalle (fin de registros u otra vista): fallback.
+        return false;
+      }
+    } catch { /* render en curso */ }
+    await sleep(250);
+  }
+  return false;
+}
+
+// ¿El detalle en pantalla es la promoción esperada? Se mira el código en la
+// cabecera (los códigos son únicos) y, como refuerzo, la descripción en el
+// caption o el arranque del cuerpo. Ante la duda devuelve false y se abre
+// por la lista: preferimos lento a atribuir artículos a la promoción que no es.
+async function detailMatchesPromotion(page, promo) {
+  return page.evaluate(({ code, desc }) => {
+    const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const norm = (s) => clean(s).toLowerCase();
+    const body = clean(document.body?.innerText || '');
+    const head = body.slice(0, 2000);
+    const capEl = document.querySelector('.xaf-view-caption-sm');
+    const cap = norm(capEl ? capEl.innerText : '');
+    const okCode = code ? head.includes(code) : false;
+    const okDesc = desc ? (cap.includes(norm(desc)) || norm(head).includes(norm(desc))) : false;
+    return okCode || okDesc;
+  }, { code: promo.code || '', desc: promo.description || '' });
+}
+
+// Pulsa la flecha "registro siguiente" de la barra de herramientas del
+// DETALLE. Exigente a propósito: solo acepta NextObject o un control cuyo
+// texto/tooltip diga "siguiente" Y "registro/objeto", nunca botones del
+// paginador ni un "Siguiente" suelto. Si no lo encuentra devuelve false y
+// el llamador vuelve al camino clásico (degradación segura).
+async function clickNextRecordArrow(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const isDisabled = (el) => el.disabled || el.getAttribute('aria-disabled') === 'true'
+      || /disabled|dx-state-disabled/i.test(String(el.className || ''))
+      || !!el.closest('[aria-disabled="true"], .dxbl-disabled');
+    const label = (el) => `${el.getAttribute('data-action-name') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('aria-label') || ''}`;
+    const els = Array.from(document.querySelectorAll('[data-action-name], button[title], a[title], [role="button"][title], button[aria-label], a[aria-label]'))
+      .filter(isVisible)
+      .filter((el) => !el.closest('.dxbl-pager'));
+    let best = null;
+    let bestScore = 0;
+    for (const el of els) {
+      const t = label(el);
+      if (/p[aá]gina|page/i.test(t)) continue;
+      let s = 0;
+      if (/nextobject/i.test(t)) s += 100;
+      if (/siguiente|next/i.test(t)) s += 40;
+      if (/registro|record|objeto|object/i.test(t)) s += 40;
+      if (s > bestScore && !isDisabled(el)) { best = el; bestScore = s; }
+    }
+    if (!best || bestScore < 80) return false;
+    best.click();
+    return true;
+  });
 }
 
 async function scrapeAllPromotionDetailItems(page, promo, config) {
@@ -1162,5 +1291,6 @@ function tableRowsByScore(options = {}) {
 export const __test = {
   scrapeAllPromotionDetailItems, waitForGridPageChange, detailSignature, rowsSignature,
   scrapeAllPromotionRowsForTest: (page, config) => scrapeAllPromotionRows(page, config),
-  goToFirstPromotionListPage, promotionGridActivePage, clickGridPageDelta
+  goToFirstPromotionListPage, promotionGridActivePage, clickGridPageDelta,
+  clickNextRecordArrow, detailMatchesPromotion
 };
