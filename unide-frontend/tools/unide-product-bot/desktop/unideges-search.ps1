@@ -8,6 +8,15 @@
 
 $ErrorActionPreference = "Stop"
 
+# Salida SIEMPRE en UTF-8: sin esto, PowerShell 5.1 escribe stdout en la
+# página de códigos de consola (CP850) y la Ñ de rutas como
+# "UNION DETALLISTAS ESPAÑOLES" llega rota al bot, que entonces no
+# encuentra el fichero de la captura.
+try {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 try {
@@ -129,13 +138,21 @@ function Copy-Field([int]$X, [int]$Y) {
   $automationValue = Read-ValueAtPoint $X $Y
   if ($automationValue) { return $automationValue }
 
+  # Vaciar el portapapeles antes de copiar: si el campo está vacío (o el
+  # clic cayó fuera), ^c no copia nada y nos quedaríamos con el valor
+  # anterior; y Get-Clipboard puede devolver NULL, sobre el que .Trim()
+  # reventaba con "No se puede llamar a un método ... con valor NULL".
+  try { Set-Clipboard -Value " " } catch { }
   Click-Point $X $Y
   Start-Sleep -Milliseconds 120
   Send-StepKeys "^a"
   Start-Sleep -Milliseconds 80
   Send-StepKeys "^c"
   Start-Sleep -Milliseconds 150
-  return (Get-Clipboard -Raw).Trim()
+  $clip = $null
+  try { $clip = Get-Clipboard -Raw } catch { $clip = $null }
+  if ($null -eq $clip) { return "" }
+  return ([string]$clip).Trim()
 }
 
 function Read-ValueAtPoint([int]$X, [int]$Y) {
@@ -248,7 +265,11 @@ try {
         Start-Sleep -Milliseconds 80
         Send-Text (Resolve-Template ([string]$step.value))
       }
-      "copyField" { $values[[string]$step.name] = Copy-Field ([int]$step.x) ([int]$step.y) }
+      "copyField" {
+        $copied = Copy-Field ([int]$step.x) ([int]$step.y)
+        $values[[string]$step.name] = $copied
+        if (-not $copied) { Add-WarningText "copyField '$($step.name)' leyó vacío: revisar la coordenada ($($step.x),$($step.y))" }
+      }
       "orderLines" { Send-OrderLines $step }
       "checkboxState" {
         $size = 12
