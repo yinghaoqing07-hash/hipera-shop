@@ -58,6 +58,38 @@
     },
     "clearSteps": [],
     "steps": [],
+    "codeSearchSteps": [
+      {
+        "type": "focus"
+      },
+      {
+        "type": "click",
+        "name": "Campo Código (única coordenada; poner la real)",
+        "x": 0,
+        "y": 0
+      },
+      {
+        "type": "hotkey",
+        "keys": "^a"
+      },
+      {
+        "type": "text",
+        "value": "{{query}}"
+      },
+      {
+        "type": "hotkey",
+        "name": "F3 = Buscar (verificado en menú Archivo)",
+        "keys": "{F3}"
+      },
+      {
+        "type": "wait",
+        "ms": 1500
+      },
+      {
+        "type": "screenshot",
+        "name": "Artículo cargado por código"
+      }
+    ],
     "orderApplySteps": [
       {
         "type": "focus"
@@ -166,10 +198,9 @@
         "ms": 300
       },
       {
-        "type": "click",
-        "name": "Save",
-        "x": 0,
-        "y": 0
+        "type": "hotkey",
+        "name": "Guardar = Ctrl+S (verificado en menú Archivo; sin coordenadas)",
+        "keys": "^s"
       },
       {
         "type": "wait",
