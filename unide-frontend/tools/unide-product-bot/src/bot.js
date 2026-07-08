@@ -7,7 +7,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyOrderDesktop, applyPriceDesktop, clearDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
+import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -87,6 +87,7 @@ async function handleUpdate(update) {
   if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
   if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
+  if (/^\/uia_dump\b/i.test(text)) { await handleUiaDump(chatId); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
@@ -454,6 +455,28 @@ async function handleFruitPriceBatch(chatId, text) {
       { text: '取消', callback_data: `cancel:${id}` }
     ]] }
   });
+}
+
+// /uia_dump — vuelca el árbol de controles de la ventana de UnideGes
+// (AutomationId, nombre, tipo, valor) y lo manda como documento. Es el
+// paso de reconocimiento para cablear los pasos uiaFocus/uiaRead/uiaSet
+// por identidad de control, sin coordenadas ni contar tabulaciones.
+async function handleUiaDump(chatId) {
+  if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用（desktop.enabled=false）。'); return; }
+  await telegram.sendMessage(chatId, '正在扫描 UnideGes 窗口的控件树…');
+  const result = await dumpUiaDesktop(config, logger);
+  if (result.status !== 'ok') { await telegram.sendMessage(chatId, `扫描失败：${result.error || result.reason || '未知'}`); return; }
+  const file = result.values?.uiaDumpFile;
+  if (file && fs.existsSync(file)) {
+    try {
+      await telegram.sendDocument(chatId, file, '控件清单（转发给 Claude 就行）');
+      return;
+    } catch (error) {
+      await telegram.sendMessage(chatId, `清单生成了但发送失败：${error.message}\n文件在：${file}`);
+      return;
+    }
+  }
+  await telegram.sendMessage(chatId, `扫描完了但没找到输出文件${file ? `：${file}` : ''}。`);
 }
 
 async function handleFruitBatchStop(chatId, callbackId, id) {

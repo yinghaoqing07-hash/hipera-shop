@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "orderApply")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "orderApply", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -67,6 +67,7 @@ $values = [ordered]@{}
 $variables = $VariablesJson | ConvertFrom-Json
 $script:TargetPid = $null
 $script:KnownHandles = $null
+$script:TargetWindowHandle = $null
 
 function Add-WarningText([string]$Text) {
   if ($Text) { $warnings.Add($Text) | Out-Null }
@@ -75,6 +76,69 @@ function Add-WarningText([string]$Text) {
 function Get-ScreenInfo {
   $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
   [ordered]@{ width = $bounds.Width; height = $bounds.Height }
+}
+
+
+# ---- UI Automation por identidad de control (sin coordenadas ni Tab) ----
+function Get-UiaRoot {
+  if (-not $script:TargetWindowHandle) { throw "uia: falta el paso focus antes de usar pasos uia*" }
+  return [System.Windows.Automation.AutomationElement]::FromHandle($script:TargetWindowHandle)
+}
+
+function Find-UiaElement([string]$AutomationId, [string]$NameRegex) {
+  $root = Get-UiaRoot
+  if ($AutomationId) {
+    $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId)
+    $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+    if ($el) { return $el }
+  }
+  if ($NameRegex) {
+    $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($cand in $all) {
+      if (([string]$cand.Current.Name) -match $NameRegex) { return $cand }
+    }
+  }
+  return $null
+}
+
+function Get-UiaValue($Element) {
+  $vp = $null
+  if ($Element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+    return ([string]$vp.Current.Value).Trim()
+  }
+  $tp = $null
+  if ($Element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) {
+    return ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
+  }
+  return ([string]$Element.Current.Name).Trim()
+}
+
+function Write-UiaDump([string]$Directory) {
+  New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $path = Join-Path $Directory "uia-dump-$stamp.txt"
+  $root = Get-UiaRoot
+  $lines = New-Object System.Collections.Generic.List[string]
+  $lines.Add("ventana: '$($root.Current.Name)' clase $($root.Current.ClassName)") | Out-Null
+  $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  $lines.Add("controles: $($all.Count)") | Out-Null
+  $i = 0
+  foreach ($el in $all) {
+    $i++
+    if ($i -gt 600) { $lines.Add("... truncado en 600") | Out-Null; break }
+    try {
+      $c = $el.Current
+      $val = ""
+      $vp = $null
+      if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $val = [string]$vp.Current.Value }
+      $r = $c.BoundingRectangle
+      $lines.Add(("{0}|type={1}|id={2}|name={3}|class={4}|value={5}|rect={6},{7}" -f $i, $c.ControlType.ProgrammaticName, $c.AutomationId, $c.Name, $c.ClassName, $val, [int]$r.X, [int]$r.Y)) | Out-Null
+    } catch {
+      $lines.Add("$i|<error leyendo control>") | Out-Null
+    }
+  }
+  [System.IO.File]::WriteAllLines($path, $lines, (New-Object System.Text.UTF8Encoding($false)))
+  return $path
 }
 
 function Focus-Window($Regex, $ExcludedProcessNames, [bool]$Reactivate = $false) {
@@ -126,6 +190,7 @@ function Focus-Window($Regex, $ExcludedProcessNames, [bool]$Reactivate = $false)
   [Win32]::SetForegroundWindow($best.Handle) | Out-Null
   Start-Sleep -Milliseconds 400
   $script:TargetPid = $best.ProcId
+  $script:TargetWindowHandle = $best.Handle
   # Foto fija de las ventanas del proceso que YA existen al enfocar: solo
   # lo que aparezca DESPUÉS puede considerarse emergente y cerrarse.
   $script:KnownHandles = [WinEnum]::VisibleWindowsOfPid([uint32]$best.ProcId)
@@ -315,6 +380,9 @@ function Get-Steps($Config, [string]$ActionMode) {
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
   elseif ($ActionMode -eq "priceApply") { $steps = @($Config.desktop.priceApplySteps) }
   elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
+  elseif ($ActionMode -eq "uiaDump") {
+    $steps = @([pscustomobject]@{ type = "focus" }, [pscustomobject]@{ type = "uiaDump" })
+  }
   elseif ($ActionMode -eq "searchCode") {
     # Búsqueda por CÓDIGO: exige codeSearchSteps calibrado. Antes caía en el
     # catalejo/EAN de siempre, que con un código no encuentra nada, y el
@@ -424,6 +492,39 @@ try {
         if ($variables.PSObject.Properties.Name -contains $flagName) { $shouldSend = [System.Convert]::ToBoolean($variables.$flagName) }
         elseif ($values.Contains($flagName)) { $shouldSend = [System.Convert]::ToBoolean($values[$flagName]) }
         if ($shouldSend) { Send-StepKeys ([string]$step.keys) }
+      }
+      "uiaDump" { $values["uiaDumpFile"] = Write-UiaDump $OutDir }
+      "uiaFocus" {
+        $el = Find-UiaElement ([string]$step.automationId) ([string]$step.nameRegex)
+        if (-not $el) { throw "uiaFocus: no se encontro el control (id='$($step.automationId)' nameRegex='$($step.nameRegex)')" }
+        $el.SetFocus()
+        Start-Sleep -Milliseconds 200
+      }
+      "uiaRead" {
+        $el = Find-UiaElement ([string]$step.automationId) ([string]$step.nameRegex)
+        if (-not $el) {
+          Add-WarningText "uiaRead '$($step.name)': control no encontrado (id='$($step.automationId)')"
+          $values[[string]$step.name] = ""
+        } else {
+          $values[[string]$step.name] = Get-UiaValue $el
+        }
+      }
+      "uiaSet" {
+        $el = Find-UiaElement ([string]$step.automationId) ([string]$step.nameRegex)
+        if (-not $el) { throw "uiaSet: no se encontro el control (id='$($step.automationId)')" }
+        $vp = $null
+        if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+          $vp.SetValue((Resolve-Template ([string]$step.value)))
+        } else {
+          $el.SetFocus()
+          Start-Sleep -Milliseconds 150
+          Send-StepKeys "^a"
+          Start-Sleep -Milliseconds 80
+          $literal = Resolve-Template ([string]$step.value)
+          $escaped = $literal -replace '([+^%~(){}\[\]])', '{$1}'
+          [System.Windows.Forms.SendKeys]::SendWait($escaped)
+        }
+        Start-Sleep -Milliseconds 150
       }
       "typeText" {
         # Teclear el texto con PULSACIONES reales (SendKeys), no con pegar
