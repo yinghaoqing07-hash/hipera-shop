@@ -78,27 +78,49 @@ function Get-ScreenInfo {
 }
 
 function Focus-Window($Regex, $ExcludedProcessNames) {
+  # UnideGes tiene VARIAS ventanas top-level (menú principal, Artículo
+  # alimentación, …) y la "MainWindow" del proceso cambia según cuál
+  # estuviera activa: si se traía al frente el menú principal, tapaba la
+  # de Artículo y TODOS los clics/lecturas caían en un panel vacío (los
+  # campos "leían vacío" aunque el artículo estuviera en pantalla). Se
+  # enumeran todas las ventanas visibles de los procesos candidatos y se
+  # trae al frente LA QUE CASA por título, prefiriendo la de Artículos.
   $excluded = @($ExcludedProcessNames) | ForEach-Object { ([string]$_).ToLowerInvariant() }
-  $process = Get-Process |
-    Where-Object {
-      $_.MainWindowTitle -and $_.MainWindowTitle -match $Regex -and
-      ($excluded.Count -eq 0 -or $excluded -notcontains $_.ProcessName.ToLowerInvariant())
-    } |
-    Sort-Object ProcessName |
-    Select-Object -First 1
-  if (-not $process) {
-    $visible = (Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -First 8 -ExpandProperty MainWindowTitle) -join " · "
+  $candidates = Get-Process | Where-Object {
+    $_.MainWindowHandle -ne 0 -and
+    ($excluded.Count -eq 0 -or $excluded -notcontains $_.ProcessName.ToLowerInvariant())
+  }
+  $best = $null
+  $bestScore = -1
+  $seen = New-Object System.Collections.Generic.List[string]
+  foreach ($proc in $candidates) {
+    foreach ($h in [WinEnum]::VisibleWindowsOfPid([uint32]$proc.Id)) {
+      $titleBuf = New-Object System.Text.StringBuilder 512
+      [Win32]::GetWindowText([IntPtr]$h, $titleBuf, 512) | Out-Null
+      $title = $titleBuf.ToString()
+      if (-not $title) { continue }
+      $seen.Add($title) | Out-Null
+      if ($title -notmatch $Regex) { continue }
+      $score = 1
+      if ($title -match 'Art[ií]cul') { $score = 2 }
+      if ($score -gt $bestScore) {
+        $bestScore = $score
+        $best = @{ Handle = [IntPtr]$h; Title = $title; ProcId = $proc.Id }
+      }
+    }
+  }
+  if (-not $best) {
+    $visible = ($seen | Select-Object -First 10) -join " · "
     throw "Could not find a window matching: $Regex — ventanas visibles: $visible"
   }
-  $handle = $process.MainWindowHandle
-  if ([Win32]::IsIconic($handle)) { [Win32]::ShowWindow($handle, 9) | Out-Null }
-  [Win32]::SetForegroundWindow($handle) | Out-Null
+  if ([Win32]::IsIconic($best.Handle)) { [Win32]::ShowWindow($best.Handle, 9) | Out-Null }
+  [Win32]::SetForegroundWindow($best.Handle) | Out-Null
   Start-Sleep -Milliseconds 400
-  $script:TargetPid = $process.Id
+  $script:TargetPid = $best.ProcId
   # Foto fija de las ventanas del proceso que YA existen al enfocar: solo
   # lo que aparezca DESPUÉS puede considerarse emergente y cerrarse.
-  $script:KnownHandles = [WinEnum]::VisibleWindowsOfPid([uint32]$process.Id)
-  return $process.MainWindowTitle
+  $script:KnownHandles = [WinEnum]::VisibleWindowsOfPid([uint32]$best.ProcId)
+  return $best.Title
 }
 
 # Cierra la ventana emergente si la hay: una ventana del proceso de
