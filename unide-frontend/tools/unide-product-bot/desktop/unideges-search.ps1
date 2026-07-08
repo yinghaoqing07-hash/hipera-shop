@@ -77,7 +77,7 @@ function Get-ScreenInfo {
   [ordered]@{ width = $bounds.Width; height = $bounds.Height }
 }
 
-function Focus-Window($Regex, $ExcludedProcessNames) {
+function Focus-Window($Regex, $ExcludedProcessNames, [bool]$Reactivate = $false) {
   # UnideGes tiene VARIAS ventanas top-level (menú principal, Artículo
   # alimentación, …) y la "MainWindow" del proceso cambia según cuál
   # estuviera activa: si se traía al frente el menú principal, tapaba la
@@ -112,6 +112,15 @@ function Focus-Window($Regex, $ExcludedProcessNames) {
   if (-not $best) {
     $visible = ($seen | Select-Object -First 10) -join " · "
     throw "Could not find a window matching: $Regex — ventanas visibles: $visible"
+  }
+  if ($Reactivate) {
+    # Minimizar y restaurar fuerza una activación "fresca": el usuario
+    # confirmó que al activarse la ventana de Artículos el foco cae SIEMPRE
+    # en el campo Código — ese es el ancla del flujo de teclado puro.
+    [Win32]::ShowWindow($best.Handle, 6) | Out-Null
+    Start-Sleep -Milliseconds 300
+    [Win32]::ShowWindow($best.Handle, 9) | Out-Null
+    Start-Sleep -Milliseconds 300
   }
   if ([Win32]::IsIconic($best.Handle)) { [Win32]::ShowWindow($best.Handle, 9) | Out-Null }
   [Win32]::SetForegroundWindow($best.Handle) | Out-Null
@@ -339,7 +348,11 @@ try {
 
   foreach ($step in $stepsToRun) {
     switch ($step.type) {
-      "focus" { $windowTitle = Focus-Window $config.desktop.windowTitleRegex $config.desktop.excludedProcessNames }
+      "focus" {
+        $reactivate = $false
+        if ($step.PSObject.Properties.Name -contains "reactivate") { $reactivate = [System.Convert]::ToBoolean($step.reactivate) }
+        $windowTitle = Focus-Window $config.desktop.windowTitleRegex $config.desktop.excludedProcessNames $reactivate
+      }
       "click" { Click-Point ([int]$step.x) ([int]$step.y) }
       "conditionalClick" {
         $key = [string]$step.if
