@@ -51,9 +51,41 @@
 - 实测补充（2026-07-08 店主确认）：搜索的用法是**先把 código 输进
   Código 框，再按 `F3` 执行**；`Ctrl+N` 在 Artículos 里按了没反应，弃用。
   载入新商品会直接覆盖当前显示，所以不需要"清空"这一步。
-- bot 侧：`config.local.json` 的 `desktop.codeSearchSteps` 用"点一下
-  Código 框（唯一坐标）→ Ctrl+A → 输码 → F3"；保存用 `Ctrl+S`（已在
-  config.example.json 给了模板）。
+- 关键实测（2026-07-08）：这台机器上 UnideGes 以管理员运行，注入的
+  **鼠标点击它不处理**（光标能到位但无效），**键盘击键正常接收**。
+  所以桌面自动化全部走键盘：不点任何坐标。bot 必须以管理员启动
+  （start-bot.cmd 已自动请求 UAC）。
+- 焦点锚点：把 Artículos 窗口**最小化再还原**（或 Alt+F4 关掉搜索后偶发
+  的无用弹窗）之后，**按一次 Tab 焦点就落在 Código**。
+
+### Artículos 的 Tab 顺序地图（2026-07-08 店主逐格实测）
+
+从 Código 起按 Tab 依次经过（Código=0）：
+
+| # | 字段 | # | 字段 |
+| --- | --- | --- | --- |
+| 1 | Texto largo | 18 | **PC Medio** |
+| 2 | Texto TPV | 19 | **PC Último** |
+| 3 | Sec. | 20 | **P.defecto** |
+| 4 | Cat. | 21 | P.TPV |
+| 5 | Sub. | 22 | Tipo precio（下拉，默认 variable，↓箭头切换） |
+| 6 | Seg. | 23 | Proveedor |
+| 7 | IVA | 24 | Ref. |
+| 8 | Mar | 25 | Bloq.pedido（勾选） |
+| 9 | T.Ar | 26 | T.Campaña（下拉） |
+| 10 | Balanza TPV（勾选） | 27 | De |
+| 11 | Nº Etiqueta | 28 | A |
+| 12 | Tipo etiqueta | 29 | Per.Repos |
+| 13 | Con etiq | 30 | Modulación |
+| 14 | Und/Caja | 31 | Plataforma |
+| 15 | Und/Frac | 32 | Mínimo |
+| 16 | **Bloq.Venta（勾选，空格切换）** | 33 | Máximo |
+| 17 | PLU | 34 | Inventariable（下拉，默认 sí，↓箭头一次=no） |
+
+34 之后再按 4 次 Tab 回到 Código（中间 4 站未识别）。
+勾选框用**空格**切换；下拉用**上下箭头**选（↑=sí/第一项，↓=下一项）。
+bot 的 codeSearchSteps/priceReadSteps/priceApplySteps 全部基于这张图
+（focus reactivate → Tab×1 到 Código → Tab×N 到目标字段）。
 
 ## 叫货规律
 
