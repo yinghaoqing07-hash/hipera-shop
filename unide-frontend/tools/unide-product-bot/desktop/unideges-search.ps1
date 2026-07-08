@@ -235,6 +235,14 @@ function Resolve-UiaTarget($Step) {
   if ($Step.PSObject.Properties.Name -contains "index") { $index = [int]$Step.index }
   if ($Step.PSObject.Properties.Name -contains "self") { $self = [System.Convert]::ToBoolean($Step.self) }
   if ($label) { return Find-UiaByLabel $label $index $self }
+  if ($Step.PSObject.Properties.Name -contains "classRegex") {
+    $root = Get-UiaRoot
+    $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($cand in $all) {
+      if (([string]$cand.Current.ClassName) -match [string]$Step.classRegex) { return $cand }
+    }
+    return $null
+  }
   return Find-UiaElement ([string]$Step.automationId) ([string]$Step.nameRegex)
 }
 
@@ -678,6 +686,37 @@ try {
           if ((Read-ControlChecked $el) -eq $before) {
             Add-WarningText "uiaToggleIf '$($step.label)': el estado NO cambió"
           }
+        }
+      }
+      "listSelectLast" {
+        # Selecciona la ULTIMA fila de la lista SDC/TIENDA (SysListView32):
+        # la fila TIENDA — la editable — es la de abajo; el formulario de
+        # arriba muestra el registro seleccionado. Se manda VK_END por
+        # mensaje al propio control (procesa la tecla y notifica al padre,
+        # que recarga el formulario con TIENDA); si no cambia la seleccion,
+        # clic por mensajes en la fila estimada.
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "listSelectLast: no se encontro la lista (classRegex='$($step.classRegex)')" }
+        $hwnd = Get-UiaHwnd $el
+        if ($hwnd -eq [IntPtr]::Zero) { throw "listSelectLast: la lista no tiene HWND" }
+        $count = [int][Win32]::SendMessage($hwnd, 0x1004, [IntPtr]::Zero, [IntPtr]::Zero)  # LVM_GETITEMCOUNT
+        if ($count -le 0) { throw "listSelectLast: la lista esta vacia (¿articulo no cargado?)" }
+        [Win32]::SendMessage($hwnd, 0x0100, [IntPtr]0x23, [IntPtr]::Zero) | Out-Null  # WM_KEYDOWN VK_END
+        [Win32]::SendMessage($hwnd, 0x0101, [IntPtr]0x23, [IntPtr]::Zero) | Out-Null  # WM_KEYUP
+        Start-Sleep -Milliseconds 500
+        $sel = [int][Win32]::SendMessage($hwnd, 0x100C, [IntPtr](-1), [IntPtr]2)  # LVM_GETNEXTITEM LVNI_SELECTED
+        if ($sel -ne ($count - 1)) {
+          # Fallback: clic por mensajes sobre la fila estimada (cabecera ~20px, fila ~18px)
+          $yy = 20 + (($count - 1) * 18) + 9
+          $pt = [IntPtr](($yy -shl 16) -bor 40)
+          [Win32]::SendMessage($hwnd, 0x0201, [IntPtr]1, $pt) | Out-Null
+          Start-Sleep -Milliseconds 60
+          [Win32]::SendMessage($hwnd, 0x0202, [IntPtr]0, $pt) | Out-Null
+          Start-Sleep -Milliseconds 500
+          $sel = [int][Win32]::SendMessage($hwnd, 0x100C, [IntPtr](-1), [IntPtr]2)
+        }
+        if ($sel -ne ($count - 1)) {
+          Add-WarningText "listSelectLast: seleccion en fila $sel de $count (se esperaba la ultima)"
         }
       }
       "uiaSelectIfEmpty" {

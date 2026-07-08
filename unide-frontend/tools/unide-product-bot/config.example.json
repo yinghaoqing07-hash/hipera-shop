@@ -82,6 +82,15 @@
         "name": "Solo actúa si apareció una ventana nueva"
       },
       {
+        "type": "listSelectLast",
+        "classRegex": "SysListView32",
+        "name": "Seleccionar la fila TIENDA (la última): el formulario pasa del registro SDC al de la tienda"
+      },
+      {
+        "type": "wait",
+        "ms": 800
+      },
+      {
         "type": "screenshot",
         "name": "Artículo cargado por código"
       }
@@ -138,6 +147,20 @@
     "priceReadSteps": [
       {
         "type": "focus"
+      },
+      {
+        "type": "listSelectLast",
+        "classRegex": "SysListView32",
+        "name": "Asegurar registro TIENDA antes de leer"
+      },
+      {
+        "type": "wait",
+        "ms": 600
+      },
+      {
+        "type": "uiaRead",
+        "nameRegex": "^(SDC|TIENDA)$",
+        "name": "bancoDatos"
       },
       {
         "type": "uiaRead",

@@ -317,6 +317,15 @@ async function processFruitPriceOnce(item) {
   // formulario en blanco.
   const values = read.values || {};
   const warns = (read.warnings || []).join('；');
+  // Registro correcto: la ficha tiene DOS registros, SDC (central, NO se
+  // toca) y TIENDA (el editable). El indicador de la esquina dice cuál está
+  // cargado; si el read lo trae y no dice TIENDA, no se escribe.
+  if ('bancoDatos' in values) {
+    const banco = String(values.bancoDatos ?? '').trim();
+    if (!/tienda/i.test(banco)) {
+      return { ok: false, stage: 'read', error: `屏幕上载入的是「${banco || '未知'}」记录，不是 TIENDA——没切换成功，为安全不写。`, screenshot: read.screenshot };
+    }
+  }
   if ('codigoPantalla' in values) {
     const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
     if (!screenCode) {
