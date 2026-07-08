@@ -6,6 +6,7 @@ import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateP
 import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
+import { buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
@@ -90,6 +91,7 @@ async function handleUpdate(update) {
   if (/^\/uia_dump\b/i.test(text)) { await handleUiaDump(chatId); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
+  if (/^\/(ahorro|estrategia)\b/i.test(text)) { await handleAhorro(chatId); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
@@ -411,6 +413,43 @@ async function handleFruitPriceOne(chatId, callbackId, id) {
   await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot },
     `✅ 已改：${label} → ${one.priceRaw} €（P.defecto ${result.plan.pDefecto}%）。看截图确认 P.defecto / Bloq.Venta / 保存状态。`);
   await telegram.sendMessage(chatId, LABEL_STEPS.join('\n'));
+}
+
+// /ahorro — estrategia de ahorro a partir del ÚLTIMO CSV de /promociones:
+// cruza el PVD normal contra el PVD de promoción de cada artículo y lo que
+// la tienda compra de verdad (tabla tienda, plantilla carne, tabla frutas),
+// y saca en chino qué pedir, cuánto se ahorra y qué se acaba ya. No abre
+// el navegador: usa el CSV que ya está en disco (correr /promociones antes
+// si está viejo).
+async function handleAhorro(chatId) {
+  const latest = findLatestPromotionsCsv(config);
+  if (!latest) {
+    await telegram.sendMessage(chatId, '还没有促销数据。先跑一次 /promociones，抓完再发 /ahorro。');
+    return;
+  }
+  const ageHours = (Date.now() - latest.mtime) / 3600000;
+  let text;
+  try {
+    text = fs.readFileSync(latest.file, 'utf8');
+  } catch (error) {
+    await telegram.sendMessage(chatId, `读取促销 CSV 失败：${error.message}`);
+    return;
+  }
+  const items = parsePromotionsCsv(text);
+  if (!items.length) { await telegram.sendMessage(chatId, `促销 CSV 是空的（${path.basename(latest.file)}）。重跑一次 /promociones 吧。`); return; }
+  const relevance = buildRelevanceSets({ storeIndex, carneTemplate: loadTemplate(config, 'carne'), config });
+  const advice = buildSavingsAdvice(items, relevance, new Date());
+  const csvDate = path.basename(latest.file).replace(/^promociones-productos-activos-|\.csv$/g, '');
+  let summary = formatAdvice(advice, { csvDate });
+  if (ageHours > 48) summary += `\n\n⚠️ 这份数据是 ${Math.round(ageHours / 24)} 天前抓的，建议先 /promociones 刷新再看。`;
+  await telegram.sendMessage(chatId, summary);
+  try {
+    const detailFile = path.join(path.dirname(latest.file), `ahorro-${csvDate}.txt`);
+    fs.writeFileSync(detailFile, formatAdviceDetail(advice, { csvDate }));
+    await telegram.sendDocument(chatId, detailFile, '完整省钱明细（按力度排序）');
+  } catch (error) {
+    logger.warn('ahorro detail send failed', { error: error.message });
+  }
 }
 
 // /precios_fruta — cambio de precio de fruta/verdura EN LOTE. Una línea por
