@@ -27,6 +27,13 @@ export async function applyOrderDesktop(draft, config, logger) {
   return runDesktopAction('orderApply', draft.orderName, draft, config, logger, { timeoutMs: 120000 });
 }
 
+// Vuelca el árbol de controles (UI Automation) de la ventana de UnideGes a
+// un fichero: tipo, AutomationId, nombre, clase y valor de cada control.
+// Sirve para cablear los pasos uiaFocus/uiaRead/uiaSet por identidad.
+export async function dumpUiaDesktop(config, logger) {
+  return runDesktopAction('uiaDump', 'uia', {}, config, logger, { timeoutMs: 90000 });
+}
+
 async function runDesktopAction(mode, query, variables, config, logger, options = {}) {
   if (!config.desktop?.enabled) {
     return { status: 'disabled', reason: 'desktop.enabled=false' };
