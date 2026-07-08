@@ -86,6 +86,10 @@
         "ms": 1500
       },
       {
+        "type": "closeDialog",
+        "name": "Cierra el aviso emergente si aparece (ESC); si no hay, no hace nada"
+      },
+      {
         "type": "screenshot",
         "name": "Artículo cargado por código"
       }

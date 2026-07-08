@@ -2,6 +2,16 @@
 setlocal
 cd /d "%~dp0"
 
+rem UnideGes corre como administrador; Windows (UIPI) descarta EN SILENCIO
+rem los clics/teclas que le mande un proceso sin elevar. El bot debe correr
+rem elevado tambien: si no lo esta, se relanza pidiendo UAC.
+net session >nul 2>&1
+if errorlevel 1 (
+  echo Pidiendo permisos de administrador para poder controlar UnideGes...
+  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  exit /b 0
+)
+
 where node >nul 2>nul
 if errorlevel 1 (
   echo Node.js was not found.
