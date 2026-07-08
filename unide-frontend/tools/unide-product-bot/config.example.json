@@ -63,15 +63,29 @@
         "type": "focus"
       },
       {
+        "type": "uiaClickMsg",
+        "classRegex": "ToolbarWindow32",
+        "offsetX": 376,
+        "offsetY": 15,
+        "name": "Vaciar pantalla (clic por mensajes al botón de la barra; offset relativo a la barra)"
+      },
+      {
+        "type": "wait",
+        "ms": 600
+      },
+      {
+        "type": "closeDialog",
+        "keys": "n",
+        "name": "Si vaciar pregunta '¿guardar?', responder NO (no arrastrar basura de pruebas)"
+      },
+      {
         "type": "uiaSet",
         "label": "Código",
-        "value": "{{query}}",
-        "name": "Escribe el código directo en el control (WM_SETTEXT, sin foco)"
+        "value": "{{query}}"
       },
       {
         "type": "hotkey",
-        "keys": "{F3}",
-        "name": "F3 = Buscar (atajo de la ventana)"
+        "keys": "{F3}"
       },
       {
         "type": "wait",
@@ -79,12 +93,12 @@
       },
       {
         "type": "closeDialog",
-        "name": "Solo actúa si apareció una ventana nueva"
+        "name": "Aviso inútil post-búsqueda (Alt+F4); sin aviso no hace nada"
       },
       {
         "type": "listSelectLast",
         "classRegex": "SysListView32",
-        "name": "Seleccionar la fila TIENDA (la última): el formulario pasa del registro SDC al de la tienda"
+        "name": "Seleccionar la fila TIENDA (la última)"
       },
       {
         "type": "wait",
@@ -92,7 +106,7 @@
       },
       {
         "type": "screenshot",
-        "name": "Artículo cargado por código"
+        "name": "Artículo cargado, registro TIENDA"
       }
     ],
     "orderApplySteps": [
@@ -150,8 +164,7 @@
       },
       {
         "type": "listSelectLast",
-        "classRegex": "SysListView32",
-        "name": "Asegurar registro TIENDA antes de leer"
+        "classRegex": "SysListView32"
       },
       {
         "type": "wait",
@@ -198,25 +211,23 @@
         "label": "Proveedor",
         "index": 0,
         "value": "4214",
-        "name": "PRIMERO y con el objeto aún limpio: el alta de proveedor dispara una búsqueda ('continuar') y si ya hubiera cambios sin guardar saltaría el aviso de guardar"
+        "name": "PRIMERO con el objeto limpio: proveedor por defecto 4214 (don fruta), solo si vacío"
       },
       {
         "type": "closeDialog",
-        "keys": "{ENTER}",
-        "name": "Por si la búsqueda de proveedor pregunta algo"
+        "keys": "{ENTER}"
       },
       {
         "type": "uiaSelectIfEmpty",
         "label": "Proveedor",
         "index": 1,
-        "value": "don fruta",
-        "name": "Refuerzo por nombre en el combo"
+        "value": "don fruta"
       },
       {
         "type": "uiaSelectIfEmpty",
         "label": "Inventariable",
         "value": "s",
-        "name": "Prefijo \"s\" casa con \"Sí\" aunque lleve tilde; solo si está vacío"
+        "name": "Prefijo s casa con Sí"
       },
       {
         "type": "uiaSet",
@@ -236,37 +247,30 @@
         "name": "Columna %"
       },
       {
+        "type": "uiaKey",
+        "label": "P. defecto",
+        "index": 1,
+        "vk": "F2",
+        "name": "F2 en el campo: recalcula el P.TPV (escribir el % no lo dispara solo)"
+      },
+      {
+        "type": "wait",
+        "ms": 500
+      },
+      {
         "type": "uiaToggleIf",
         "label": "Bloq.Venta",
         "self": true,
         "if": "bloqVentaChecked",
-        "name": "AL FINAL: desmarcar solo si estaba marcado; después ya no hay más acciones que 'continúen'"
+        "name": "AL FINAL: desmarcar solo si estaba marcado (estado por MSAA, fiable)"
       },
       {
         "type": "wait",
-        "ms": 300
-      },
-      {
-        "type": "hotkey",
-        "keys": "^s",
-        "name": "Guardar = Ctrl+S"
-      },
-      {
-        "type": "wait",
-        "ms": 1200
-      },
-      {
-        "type": "closeDialog",
-        "keys": "{ENTER}",
-        "name": "Aceptar el '¿Guardar?' si aparece tras Ctrl+S"
-      },
-      {
-        "type": "wait",
-        "ms": 800
+        "ms": 400
       },
       {
         "type": "screenshot",
-        "name": "Price changed screenshot"
+        "name": "MODO PRUEBAS: SIN Ctrl+S — revisar la captura y guardar A MANO. Para reactivar el guardado, añadir aquí hotkey ^s + closeDialog {ENTER}"
       }
     ]
   },
