@@ -87,6 +87,13 @@
 bot 的 codeSearchSteps/priceReadSteps/priceApplySteps 全部基于这张图
 （focus reactivate → Tab×1 到 Código → Tab×N 到目标字段）。
 
+### 保存必填与默认供应商（2026-07-08）
+
+- Artículos 保存时 Proveedor 与 Inventariable 为空会被拒绝。
+- 规则：来源不明的水果填小众 proveedor；店里自建 **4214 = don fruta**
+  当"无主水果默认供应商"。bot 仅在字段为空时自动补，已有值绝不覆盖；
+  Inventariable 为空补 si。
+
 ## 叫货规律
 
 当前最稳规律：

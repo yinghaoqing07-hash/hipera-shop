@@ -180,8 +180,16 @@
       {
         "type": "uiaSelectIfEmpty",
         "label": "Proveedor",
-        "value": "CAMBIAME_PROVEEDOR",
-        "name": "Solo si está vacío: proveedor minoritario elegido por el usuario"
+        "index": 0,
+        "value": "4214",
+        "name": "Código de proveedor por defecto (4214 = don fruta) solo si está vacío"
+      },
+      {
+        "type": "uiaSelectIfEmpty",
+        "label": "Proveedor",
+        "index": 1,
+        "value": "don fruta",
+        "name": "Refuerzo: seleccionar también por nombre en el combo"
       },
       {
         "type": "uiaSelectIfEmpty",
