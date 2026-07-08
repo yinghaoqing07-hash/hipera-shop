@@ -63,22 +63,15 @@
         "type": "focus"
       },
       {
-        "type": "uiaFocus",
+        "type": "uiaSet",
         "label": "Código",
-        "name": "Foco directo al campo Código (por etiqueta, sin coordenadas)"
-      },
-      {
-        "type": "hotkey",
-        "keys": "^a"
-      },
-      {
-        "type": "typeText",
-        "value": "{{query}}"
+        "value": "{{query}}",
+        "name": "Escribe el código directo en el control (WM_SETTEXT, sin foco)"
       },
       {
         "type": "hotkey",
         "keys": "{F3}",
-        "name": "F3 = Buscar"
+        "name": "F3 = Buscar (atajo de la ventana)"
       },
       {
         "type": "wait",
@@ -178,58 +171,28 @@
         "type": "focus"
       },
       {
-        "type": "uiaFocus",
+        "type": "uiaToggleIf",
         "label": "Bloq.Venta",
-        "self": true
-      },
-      {
-        "type": "conditionalKey",
+        "self": true,
         "if": "bloqVentaChecked",
-        "keys": " ",
-        "name": "Desmarcar solo si estaba marcado"
+        "name": "Desmarcar solo si estaba marcado (BM_CLICK)"
       },
       {
-        "type": "uiaFocus",
-        "label": "PC Medio"
-      },
-      {
-        "type": "hotkey",
-        "keys": "^a"
-      },
-      {
-        "type": "typeText",
+        "type": "uiaSet",
+        "label": "PC Medio",
         "value": "{{pcMedio}}"
       },
       {
-        "type": "uiaFocus",
-        "label": "PC Ultimo"
-      },
-      {
-        "type": "hotkey",
-        "keys": "^a"
-      },
-      {
-        "type": "typeText",
+        "type": "uiaSet",
+        "label": "PC Ultimo",
         "value": "{{pcUltimo}}"
       },
       {
-        "type": "uiaFocus",
+        "type": "uiaSet",
         "label": "P. defecto",
         "index": 1,
-        "name": "Columna % (la 2ª a la derecha de la etiqueta)"
-      },
-      {
-        "type": "hotkey",
-        "keys": "^a"
-      },
-      {
-        "type": "typeText",
-        "value": "{{pDefecto}}"
-      },
-      {
-        "type": "hotkey",
-        "keys": "{TAB}",
-        "name": "Salir del campo para confirmar el valor"
+        "value": "{{pDefecto}}",
+        "name": "Columna % (2ª a la derecha de la etiqueta)"
       },
       {
         "type": "wait",
