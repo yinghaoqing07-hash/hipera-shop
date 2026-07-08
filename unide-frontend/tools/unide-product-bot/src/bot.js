@@ -47,20 +47,27 @@ let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length });
 
-while (true) {
-  try {
-    const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
-    for (const update of updates) {
-      offset = update.update_id + 1;
-      // Aislar cada update: si uno falla (botón caducado, error puntual de
-      // una acción), se registra y se sigue con el resto, sin abortar el
-      // lote ni castigar el bucle con la espera de "polling error".
-      try { await handleUpdate(update); }
-      catch (error) { logger.error('update error', { updateId: update.update_id, error: error.message }); }
-    }
-    await maybeSendOrderReminder();
-    await maybePrintArrivalChecklist();
-  } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
+// OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).
+// Antes era un `while (true)` aquí en medio: como no termina nunca, los
+// const/let declarados más abajo (LABEL_STEPS, fruitBatchRunning, …)
+// quedaban sin inicializar para siempre y los handlers reventaban con
+// "Cannot access ... before initialization".
+async function mainLoop() {
+  while (true) {
+    try {
+      const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
+      for (const update of updates) {
+        offset = update.update_id + 1;
+        // Aislar cada update: si uno falla (botón caducado, error puntual de
+        // una acción), se registra y se sigue con el resto, sin abortar el
+        // lote ni castigar el bucle con la espera de "polling error".
+        try { await handleUpdate(update); }
+        catch (error) { logger.error('update error', { updateId: update.update_id, error: error.message }); }
+      }
+      await maybeSendOrderReminder();
+      await maybePrintArrivalChecklist();
+    } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
+  }
 }
 
 async function handleUpdate(update) {
@@ -300,6 +307,15 @@ async function processFruitPriceOnce(item) {
   if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知' };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, stage: 'read', error: read.error || read.reason || '未知' };
+  // Si TODOS los campos leídos vienen vacíos, el artículo casi seguro NO se
+  // cargó (búsqueda por código sin calibrar / F3 sin efecto): abortar antes
+  // de escribir sobre un formulario vacío. Antes esto acababa en un "✅ 已改"
+  // falso con la pantalla en blanco.
+  const readValues = Object.entries(read.values || {}).filter(([k]) => !/^bloq/i.test(k));
+  if (readValues.length && readValues.every(([, v]) => !String(v ?? '').trim())) {
+    const warns = (read.warnings || []).join('；');
+    return { ok: false, stage: 'read', error: `所有字段都读到空——商品可能没载入（código+F3 没生效，检查 codeSearchSteps 坐标）${warns ? `。警告：${warns}` : ''}`, screenshot: read.screenshot };
+  }
   const planResult = buildPricePlan({ item, supplier, store }, read);
   if (!planResult.ok) return { ok: false, stage: 'plan', error: planResult.error };
   const applied = await applyPriceDesktop(planResult.plan, config, logger);
@@ -1027,3 +1043,6 @@ function formatNumber(value) { const n = Number(value); if (!Number.isFinite(n))
 function formatMoney(value) { return `${Number(value).toFixed(2).replace('.', ',')}`; }
 function isAllowed(chatId, userId) { const allowed = config.telegram.allowedChatIds || []; if (!allowed.length) return true; const allowedStrings = new Set(allowed.map(String)); return allowedStrings.has(String(chatId)) || allowedStrings.has(String(userId)); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// Arranque: TODAS las declaraciones de arriba ya están inicializadas.
+await mainLoop();
