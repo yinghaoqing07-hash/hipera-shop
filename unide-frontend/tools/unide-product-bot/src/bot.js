@@ -1012,7 +1012,9 @@ function buildPricePlan(session, read) {
     iva: formatNumber(iva),
     ivaSource: ivaInfo.source,
     targetWithoutIva: formatNumber(targetWithoutIva),
-    pDefecto: formatNumber(pDefecto),
+    // El campo P.defecto NO admite 3 decimales: redondear a 2 antes de
+    // escribirlo (formatNumber solo recorta ceros, dejaba p. ej. 29,974).
+    pDefecto: formatNumber(Math.round(pDefecto * 100) / 100),
     price: formatNumber(item.precio?.value || supplierPvp || 0),
     marginPct: formatNumber(item.margen?.value || 0),
     bloqVentaChecked,
