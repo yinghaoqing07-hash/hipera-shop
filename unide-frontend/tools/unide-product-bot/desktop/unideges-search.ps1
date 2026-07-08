@@ -40,13 +40,33 @@ public class Win32 {
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 }
+public class WinEnum {
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  // Ventanas top-level VISIBLES de un proceso. Se usa para la foto fija de
+  // "ventanas que ya existían" al enfocar: closeDialog solo puede cerrar
+  // ventanas que NO estén en esa foto (las que aparecieron después).
+  public static System.Collections.Generic.List<long> VisibleWindowsOfPid(uint pid) {
+    var list = new System.Collections.Generic.List<long>();
+    EnumWindows(delegate(IntPtr h, IntPtr l) {
+      if (!IsWindowVisible(h)) return true;
+      uint p;
+      GetWindowThreadProcessId(h, out p);
+      if (p == pid) list.Add(h.ToInt64());
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+}
 "@
 
 $warnings = New-Object System.Collections.Generic.List[string]
 $values = [ordered]@{}
 $variables = $VariablesJson | ConvertFrom-Json
 $script:TargetPid = $null
-$script:TargetMainHandle = $null
+$script:KnownHandles = $null
 
 function Add-WarningText([string]$Text) {
   if ($Text) { $warnings.Add($Text) | Out-Null }
@@ -75,17 +95,20 @@ function Focus-Window($Regex, $ExcludedProcessNames) {
   [Win32]::SetForegroundWindow($handle) | Out-Null
   Start-Sleep -Milliseconds 400
   $script:TargetPid = $process.Id
-  $script:TargetMainHandle = $handle
+  # Foto fija de las ventanas del proceso que YA existen al enfocar: solo
+  # lo que aparezca DESPUÉS puede considerarse emergente y cerrarse.
+  $script:KnownHandles = [WinEnum]::VisibleWindowsOfPid([uint32]$process.Id)
   return $process.MainWindowTitle
 }
 
-# Cierra la ventana emergente si la hay: cualquier ventana en primer plano
-# que pertenezca al proceso de UnideGes pero NO sea la ventana principal
-# que enfocamos (los avisos de este programa no siempre son diálogos
-# estándar, por eso no se filtra por clase). Por defecto manda Alt+F4
-# (verificado por el usuario); como jamás se aplica sobre la ventana
-# principal, no puede cerrar el UnideGes entero. Sin emergente no hace
-# nada. Deja el título en warnings para saber qué era.
+# Cierra la ventana emergente si la hay: una ventana del proceso de
+# UnideGes en primer plano que NO estaba en la foto de Focus-Window (es
+# decir, que apareció después: el aviso post-búsqueda). Las ventanas que
+# ya existían —la principal Y la de Artículo alimentación— no se tocan
+# jamás (antes se comparaba solo con la "principal" y se llevó por delante
+# la de Artículo). Por defecto manda Alt+F4, que es lo que cierra estos
+# avisos; keys/attempts configurables. Sin emergente no hace nada y deja
+# el título de lo cerrado en warnings.
 function Close-DialogIfAny([string]$Keys = "%{F4}", [int]$Attempts = 3) {
   for ($i = 0; $i -lt $Attempts; $i++) {
     $handle = [Win32]::GetForegroundWindow()
@@ -93,7 +116,8 @@ function Close-DialogIfAny([string]$Keys = "%{F4}", [int]$Attempts = 3) {
     $ownerPid = [uint32]0
     [Win32]::GetWindowThreadProcessId($handle, [ref]$ownerPid) | Out-Null
     if (-not $script:TargetPid -or $ownerPid -ne [uint32]$script:TargetPid) { return }
-    if ($script:TargetMainHandle -and $handle -eq $script:TargetMainHandle) { return }
+    if ($null -eq $script:KnownHandles) { return }
+    if ($script:KnownHandles.Contains($handle.ToInt64())) { return }
     $titleBuf = New-Object System.Text.StringBuilder 512
     [Win32]::GetWindowText($handle, $titleBuf, 512) | Out-Null
     Add-WarningText "Cerrada ventana emergente: '$($titleBuf.ToString())' (keys $Keys)"
