@@ -141,6 +141,12 @@
     ],
     "priceReadSteps": [
       {
+        "type": "copyField",
+        "name": "codigoPantalla",
+        "x": 0,
+        "y": 0
+      },
+      {
         "type": "checkboxState",
         "name": "bloqVentaChecked",
         "x": 0,

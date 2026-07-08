@@ -307,14 +307,28 @@ async function processFruitPriceOnce(item) {
   if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知' };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, stage: 'read', error: read.error || read.reason || '未知' };
-  // Si TODOS los campos leídos vienen vacíos, el artículo casi seguro NO se
-  // cargó (búsqueda por código sin calibrar / F3 sin efecto): abortar antes
-  // de escribir sobre un formulario vacío. Antes esto acababa en un "✅ 已改"
-  // falso con la pantalla en blanco.
-  const readValues = Object.entries(read.values || {}).filter(([k]) => !/^bloq/i.test(k));
-  if (readValues.length && readValues.every(([, v]) => !String(v ?? '').trim())) {
-    const warns = (read.warnings || []).join('；');
-    return { ok: false, stage: 'read', error: `所有字段都读到空——商品可能没载入（código+F3 没生效，检查 codeSearchSteps 坐标）${warns ? `。警告：${warns}` : ''}`, screenshot: read.screenshot };
+  // Verificación de que el artículo CORRECTO está en pantalla. La mejor
+  // señal es leer el propio campo Código (copyField "codigoPantalla" en
+  // priceReadSteps): si coincide, seguimos aunque PC Medio/PC Último estén
+  // vacíos (en fruta suelen estarlo y el coste sale del PVD del proveedor);
+  // si no coincide o lee vacío, NO se escribe. Sin codigoPantalla calibrado
+  // se mantiene la guarda antigua de "todo vacío" para no escribir sobre un
+  // formulario en blanco.
+  const values = read.values || {};
+  const warns = (read.warnings || []).join('；');
+  if ('codigoPantalla' in values) {
+    const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
+    if (!screenCode) {
+      return { ok: false, stage: 'read', error: `Código 框读到空——商品没载入（código+F3 没生效？）${warns ? `。警告：${warns}` : ''}`, screenshot: read.screenshot };
+    }
+    if (screenCode !== String(item.codigo)) {
+      return { ok: false, stage: 'read', error: `屏幕上载入的是 código ${screenCode}，不是 ${item.codigo}——为安全没有写入。`, screenshot: read.screenshot };
+    }
+  } else {
+    const readValues = Object.entries(values).filter(([k]) => !/^bloq/i.test(k));
+    if (readValues.length && readValues.every(([, v]) => !String(v ?? '').trim())) {
+      return { ok: false, stage: 'read', error: `所有字段都读到空——商品可能没载入。建议在 priceReadSteps 加一行读 Código 框的 copyField（name: "codigoPantalla"），我就能精确判断${warns ? `。警告：${warns}` : ''}`, screenshot: read.screenshot };
+    }
   }
   const planResult = buildPricePlan({ item, supplier, store }, read);
   if (!planResult.ok) return { ok: false, stage: 'plan', error: planResult.error };
