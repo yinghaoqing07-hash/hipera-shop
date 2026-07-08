@@ -192,8 +192,8 @@
       {
         "type": "uiaSelectIfEmpty",
         "label": "Inventariable",
-        "value": "si",
-        "name": "Solo si está vacío"
+        "value": "s",
+        "name": "Prefijo \"s\" casa con \"Sí\" aunque lleve tilde; solo si está vacío"
       },
       {
         "type": "uiaSet",
