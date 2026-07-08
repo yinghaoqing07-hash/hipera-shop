@@ -171,30 +171,23 @@
         "type": "focus"
       },
       {
-        "type": "uiaToggleIf",
-        "label": "Bloq.Venta",
-        "self": true,
-        "if": "bloqVentaChecked",
-        "name": "Desmarcar solo si estaba marcado (BM_CLICK)"
-      },
-      {
-        "type": "closeDialog",
-        "keys": "{ENTER}",
-        "name": "Si salió el aviso de guardar/continuar, aceptarlo (Enter); sin aviso no hace nada"
-      },
-      {
         "type": "uiaSelectIfEmpty",
         "label": "Proveedor",
         "index": 0,
         "value": "4214",
-        "name": "Código de proveedor por defecto (4214 = don fruta) solo si está vacío"
+        "name": "PRIMERO y con el objeto aún limpio: el alta de proveedor dispara una búsqueda ('continuar') y si ya hubiera cambios sin guardar saltaría el aviso de guardar"
+      },
+      {
+        "type": "closeDialog",
+        "keys": "{ENTER}",
+        "name": "Por si la búsqueda de proveedor pregunta algo"
       },
       {
         "type": "uiaSelectIfEmpty",
         "label": "Proveedor",
         "index": 1,
         "value": "don fruta",
-        "name": "Refuerzo: seleccionar también por nombre en el combo"
+        "name": "Refuerzo por nombre en el combo"
       },
       {
         "type": "uiaSelectIfEmpty",
@@ -217,7 +210,14 @@
         "label": "P. defecto",
         "index": 1,
         "value": "{{pDefecto}}",
-        "name": "Columna % (2ª a la derecha de la etiqueta)"
+        "name": "Columna %"
+      },
+      {
+        "type": "uiaToggleIf",
+        "label": "Bloq.Venta",
+        "self": true,
+        "if": "bloqVentaChecked",
+        "name": "AL FINAL: desmarcar solo si estaba marcado; después ya no hay más acciones que 'continúen'"
       },
       {
         "type": "wait",
@@ -230,7 +230,7 @@
       },
       {
         "type": "wait",
-        "ms": 1500
+        "ms": 1200
       },
       {
         "type": "closeDialog",
