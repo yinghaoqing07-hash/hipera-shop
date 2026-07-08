@@ -35,12 +35,17 @@ public class Win32 {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern void mouse_event(UInt32 dwFlags, UInt32 dx, UInt32 dy, UInt32 dwData, UIntPtr dwExtraInfo);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 }
 "@
 
 $warnings = New-Object System.Collections.Generic.List[string]
 $values = [ordered]@{}
 $variables = $VariablesJson | ConvertFrom-Json
+$script:TargetPid = $null
 
 function Add-WarningText([string]$Text) {
   if ($Text) { $warnings.Add($Text) | Out-Null }
@@ -68,7 +73,30 @@ function Focus-Window($Regex, $ExcludedProcessNames) {
   if ([Win32]::IsIconic($handle)) { [Win32]::ShowWindow($handle, 9) | Out-Null }
   [Win32]::SetForegroundWindow($handle) | Out-Null
   Start-Sleep -Milliseconds 400
+  $script:TargetPid = $process.Id
   return $process.MainWindowTitle
+}
+
+# Cierra el diálogo emergente (clase estándar #32770) si hay uno en primer
+# plano y pertenece al proceso de UnideGes. Algunas búsquedas sacan un
+# aviso que hay que quitar antes de seguir; si no hay diálogo, no hace
+# nada. Deja constancia del título en warnings para saber qué era.
+function Close-DialogIfAny([string]$Keys = "{ESC}", [int]$Attempts = 3) {
+  for ($i = 0; $i -lt $Attempts; $i++) {
+    $handle = [Win32]::GetForegroundWindow()
+    if ($handle -eq [IntPtr]::Zero) { return }
+    $classBuf = New-Object System.Text.StringBuilder 256
+    [Win32]::GetClassName($handle, $classBuf, 256) | Out-Null
+    if ($classBuf.ToString() -ne "#32770") { return }
+    $ownerPid = [uint32]0
+    [Win32]::GetWindowThreadProcessId($handle, [ref]$ownerPid) | Out-Null
+    if ($script:TargetPid -and $ownerPid -ne [uint32]$script:TargetPid) { return }
+    $titleBuf = New-Object System.Text.StringBuilder 512
+    [Win32]::GetWindowText($handle, $titleBuf, 512) | Out-Null
+    Add-WarningText "Cerrado dialogo emergente: '$($titleBuf.ToString())'"
+    [System.Windows.Forms.SendKeys]::SendWait($Keys)
+    Start-Sleep -Milliseconds 400
+  }
 }
 
 function Click-Point([int]$X, [int]$Y) {
@@ -272,6 +300,13 @@ try {
         if ($shouldClick) { Click-Point ([int]$step.x) ([int]$step.y) }
       }
       "wait" { Start-Sleep -Milliseconds ([int]$step.ms) }
+      "closeDialog" {
+        $dlgKeys = "{ESC}"
+        $dlgTries = 3
+        if ($step.PSObject.Properties.Name -contains "keys") { $dlgKeys = [string]$step.keys }
+        if ($step.PSObject.Properties.Name -contains "attempts") { $dlgTries = [int]$step.attempts }
+        Close-DialogIfAny $dlgKeys $dlgTries
+      }
       "hotkey" { Send-StepKeys ([string]$step.keys) }
       "key" { Send-StepKeys ([string]$step.keys) }
       "text" { Send-Text (Resolve-Template ([string]$step.value)) }
