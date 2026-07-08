@@ -267,6 +267,15 @@ try {
       "hotkey" { Send-StepKeys ([string]$step.keys) }
       "key" { Send-StepKeys ([string]$step.keys) }
       "text" { Send-Text (Resolve-Template ([string]$step.value)) }
+      "typeText" {
+        # Teclear el texto con PULSACIONES reales (SendKeys), no con pegar
+        # del portapapeles: algunos campos de WinForms antiguos ignoran ^v
+        # o no disparan sus validaciones con él. Se escapan los caracteres
+        # especiales de SendKeys; para códigos numéricos es transparente.
+        $literal = Resolve-Template ([string]$step.value)
+        $escaped = $literal -replace '([+^%~(){}\[\]])', '{$1}'
+        [System.Windows.Forms.SendKeys]::SendWait($escaped)
+      }
       "setField" {
         Click-Point ([int]$step.x) ([int]$step.y)
         Start-Sleep -Milliseconds 100
