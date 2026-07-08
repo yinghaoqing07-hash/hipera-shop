@@ -210,7 +210,11 @@ nota: FEL 92695469
 
 原因：
 
-- `SDC` 和 `TIENDA` 两行关系还没有完全理清。
+- `SDC` 和 `TIENDA` 两行关系已理清（2026-07-08 店主确认）：Artículos 底部
+  列表有两条记录，**SDC = 总部数据，不允许改；TIENDA = 店内数据，要改的
+  是它**（列表最后一行）。窗口右上角的 SDC/TIENDA 字样显示当前载入的是
+  哪条。bot 载入商品后自动选中 TIENDA 行，写入前还会读右上角指示牌验证，
+  不是 TIENDA 就中止。
 - `sin precio en la lista`、前台刷新、桌面显示之间有同步问题。
 - `Bloq.Venta`、PC Medio、PC Último、P.defecto 的读写坐标和字段行为还不够稳。
 
