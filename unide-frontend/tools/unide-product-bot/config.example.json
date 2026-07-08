@@ -60,34 +60,35 @@
     "steps": [],
     "codeSearchSteps": [
       {
-        "type": "focus"
+        "type": "focus",
+        "reactivate": true,
+        "name": "Reactivar: minimiza+restaura; tras esto Tab x1 cae en Código"
       },
       {
-        "type": "click",
-        "name": "Campo Código (única coordenada; poner la real)",
-        "x": 0,
-        "y": 0
+        "type": "tab",
+        "count": 1,
+        "name": "Al campo Código"
       },
       {
         "type": "hotkey",
         "keys": "^a"
       },
       {
-        "type": "text",
+        "type": "typeText",
         "value": "{{query}}"
       },
       {
         "type": "hotkey",
-        "name": "F3 = Buscar (verificado en menú Archivo)",
-        "keys": "{F3}"
+        "keys": "{F3}",
+        "name": "F3 = Buscar"
       },
       {
         "type": "wait",
-        "ms": 1500
+        "ms": 2000
       },
       {
         "type": "closeDialog",
-        "name": "Cierra el aviso emergente si aparece (ESC); si no hay, no hace nada"
+        "name": "Cierra el aviso emergente si aparece; sin aviso no hace nada"
       },
       {
         "type": "screenshot",
@@ -145,17 +146,44 @@
     ],
     "priceReadSteps": [
       {
-        "type": "copyField",
-        "name": "codigoPantalla",
-        "x": 0,
-        "y": 0
+        "type": "focus",
+        "reactivate": true
       },
       {
-        "type": "checkboxState",
-        "name": "bloqVentaChecked",
-        "x": 0,
-        "y": 0,
-        "size": 12
+        "type": "tab",
+        "count": 1,
+        "name": "Código"
+      },
+      {
+        "type": "readFocused",
+        "name": "codigoPantalla"
+      },
+      {
+        "type": "tab",
+        "count": 16,
+        "name": "Bloq.Venta"
+      },
+      {
+        "type": "readFocused",
+        "name": "bloqVentaChecked"
+      },
+      {
+        "type": "tab",
+        "count": 2,
+        "name": "PC Medio"
+      },
+      {
+        "type": "readFocused",
+        "name": "pcMedio"
+      },
+      {
+        "type": "tab",
+        "count": 1,
+        "name": "PC Último"
+      },
+      {
+        "type": "readFocused",
+        "name": "pcUltimo"
       },
       {
         "type": "screenshot",
@@ -164,44 +192,68 @@
     ],
     "priceApplySteps": [
       {
-        "type": "conditionalClick",
+        "type": "focus",
+        "reactivate": true
+      },
+      {
+        "type": "tab",
+        "count": 1,
+        "name": "Código"
+      },
+      {
+        "type": "tab",
+        "count": 16,
+        "name": "Bloq.Venta"
+      },
+      {
+        "type": "conditionalKey",
         "if": "bloqVentaChecked",
-        "name": "Uncheck Bloq.Venta",
-        "x": 0,
-        "y": 0
+        "keys": " ",
+        "name": "Desmarcar solo si estaba marcado"
       },
       {
-        "type": "wait",
-        "ms": 300
+        "type": "tab",
+        "count": 2,
+        "name": "PC Medio"
       },
       {
-        "type": "setField",
-        "name": "PC Medio",
-        "x": 0,
-        "y": 0,
+        "type": "hotkey",
+        "keys": "^a"
+      },
+      {
+        "type": "typeText",
         "value": "{{pcMedio}}"
       },
       {
-        "type": "wait",
-        "ms": 300
+        "type": "tab",
+        "count": 1,
+        "name": "PC Último"
       },
       {
-        "type": "setField",
-        "name": "PC Último",
-        "x": 0,
-        "y": 0,
+        "type": "hotkey",
+        "keys": "^a"
+      },
+      {
+        "type": "typeText",
         "value": "{{pcUltimo}}"
       },
       {
-        "type": "wait",
-        "ms": 300
+        "type": "tab",
+        "count": 1,
+        "name": "P.defecto"
       },
       {
-        "type": "setField",
-        "name": "P.defecto %",
-        "x": 0,
-        "y": 0,
+        "type": "hotkey",
+        "keys": "^a"
+      },
+      {
+        "type": "typeText",
         "value": "{{pDefecto}}"
+      },
+      {
+        "type": "tab",
+        "count": 1,
+        "name": "Salir del campo para que el valor se confirme"
       },
       {
         "type": "wait",
@@ -209,8 +261,8 @@
       },
       {
         "type": "hotkey",
-        "name": "Guardar = Ctrl+S (verificado en menú Archivo; sin coordenadas)",
-        "keys": "^s"
+        "keys": "^s",
+        "name": "Guardar = Ctrl+S"
       },
       {
         "type": "wait",
