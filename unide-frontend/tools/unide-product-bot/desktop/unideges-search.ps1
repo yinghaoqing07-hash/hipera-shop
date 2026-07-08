@@ -46,6 +46,7 @@ $warnings = New-Object System.Collections.Generic.List[string]
 $values = [ordered]@{}
 $variables = $VariablesJson | ConvertFrom-Json
 $script:TargetPid = $null
+$script:TargetMainHandle = $null
 
 function Add-WarningText([string]$Text) {
   if ($Text) { $warnings.Add($Text) | Out-Null }
@@ -74,26 +75,28 @@ function Focus-Window($Regex, $ExcludedProcessNames) {
   [Win32]::SetForegroundWindow($handle) | Out-Null
   Start-Sleep -Milliseconds 400
   $script:TargetPid = $process.Id
+  $script:TargetMainHandle = $handle
   return $process.MainWindowTitle
 }
 
-# Cierra el diálogo emergente (clase estándar #32770) si hay uno en primer
-# plano y pertenece al proceso de UnideGes. Algunas búsquedas sacan un
-# aviso que hay que quitar antes de seguir; si no hay diálogo, no hace
-# nada. Deja constancia del título en warnings para saber qué era.
-function Close-DialogIfAny([string]$Keys = "{ESC}", [int]$Attempts = 3) {
+# Cierra la ventana emergente si la hay: cualquier ventana en primer plano
+# que pertenezca al proceso de UnideGes pero NO sea la ventana principal
+# que enfocamos (los avisos de este programa no siempre son diálogos
+# estándar, por eso no se filtra por clase). Por defecto manda Alt+F4
+# (verificado por el usuario); como jamás se aplica sobre la ventana
+# principal, no puede cerrar el UnideGes entero. Sin emergente no hace
+# nada. Deja el título en warnings para saber qué era.
+function Close-DialogIfAny([string]$Keys = "%{F4}", [int]$Attempts = 3) {
   for ($i = 0; $i -lt $Attempts; $i++) {
     $handle = [Win32]::GetForegroundWindow()
     if ($handle -eq [IntPtr]::Zero) { return }
-    $classBuf = New-Object System.Text.StringBuilder 256
-    [Win32]::GetClassName($handle, $classBuf, 256) | Out-Null
-    if ($classBuf.ToString() -ne "#32770") { return }
     $ownerPid = [uint32]0
     [Win32]::GetWindowThreadProcessId($handle, [ref]$ownerPid) | Out-Null
-    if ($script:TargetPid -and $ownerPid -ne [uint32]$script:TargetPid) { return }
+    if (-not $script:TargetPid -or $ownerPid -ne [uint32]$script:TargetPid) { return }
+    if ($script:TargetMainHandle -and $handle -eq $script:TargetMainHandle) { return }
     $titleBuf = New-Object System.Text.StringBuilder 512
     [Win32]::GetWindowText($handle, $titleBuf, 512) | Out-Null
-    Add-WarningText "Cerrado dialogo emergente: '$($titleBuf.ToString())'"
+    Add-WarningText "Cerrada ventana emergente: '$($titleBuf.ToString())' (keys $Keys)"
     [System.Windows.Forms.SendKeys]::SendWait($Keys)
     Start-Sleep -Milliseconds 400
   }
@@ -301,7 +304,7 @@ try {
       }
       "wait" { Start-Sleep -Milliseconds ([int]$step.ms) }
       "closeDialog" {
-        $dlgKeys = "{ESC}"
+        $dlgKeys = "%{F4}"
         $dlgTries = 3
         if ($step.PSObject.Properties.Name -contains "keys") { $dlgKeys = [string]$step.keys }
         if ($step.PSObject.Properties.Name -contains "attempts") { $dlgTries = [int]$step.attempts }
