@@ -60,9 +60,12 @@
     "steps": [],
     "codeSearchSteps": [
       {
-        "type": "focus",
-        "reactivate": true,
-        "name": "Reactivar (minimiza+restaura): el foco queda DIRECTO en Código"
+        "type": "focus"
+      },
+      {
+        "type": "uiaFocus",
+        "label": "Código",
+        "name": "Foco directo al campo Código (por etiqueta, sin coordenadas)"
       },
       {
         "type": "hotkey",
@@ -83,7 +86,7 @@
       },
       {
         "type": "closeDialog",
-        "name": "Cierra el aviso emergente si aparece; sin aviso no hace nada"
+        "name": "Solo actúa si apareció una ventana nueva"
       },
       {
         "type": "screenshot",
@@ -141,39 +144,29 @@
     ],
     "priceReadSteps": [
       {
-        "type": "focus",
-        "reactivate": true
+        "type": "focus"
       },
       {
-        "type": "readFocused",
+        "type": "uiaRead",
+        "label": "Código",
         "name": "codigoPantalla"
       },
       {
-        "type": "tab",
-        "count": 16,
-        "name": "Bloq.Venta"
-      },
-      {
-        "type": "readFocused",
-        "name": "bloqVentaChecked"
-      },
-      {
-        "type": "tab",
-        "count": 2,
-        "name": "PC Medio"
-      },
-      {
-        "type": "readFocused",
+        "type": "uiaRead",
+        "label": "PC Medio",
         "name": "pcMedio"
       },
       {
-        "type": "tab",
-        "count": 1,
-        "name": "PC Último"
+        "type": "uiaRead",
+        "label": "PC Ultimo",
+        "name": "pcUltimo"
       },
       {
-        "type": "readFocused",
-        "name": "pcUltimo"
+        "type": "uiaRead",
+        "label": "Bloq.Venta",
+        "self": true,
+        "checkbox": true,
+        "name": "bloqVentaChecked"
       },
       {
         "type": "screenshot",
@@ -182,13 +175,12 @@
     ],
     "priceApplySteps": [
       {
-        "type": "focus",
-        "reactivate": true
+        "type": "focus"
       },
       {
-        "type": "tab",
-        "count": 16,
-        "name": "Bloq.Venta"
+        "type": "uiaFocus",
+        "label": "Bloq.Venta",
+        "self": true
       },
       {
         "type": "conditionalKey",
@@ -197,9 +189,8 @@
         "name": "Desmarcar solo si estaba marcado"
       },
       {
-        "type": "tab",
-        "count": 2,
-        "name": "PC Medio"
+        "type": "uiaFocus",
+        "label": "PC Medio"
       },
       {
         "type": "hotkey",
@@ -210,9 +201,8 @@
         "value": "{{pcMedio}}"
       },
       {
-        "type": "tab",
-        "count": 1,
-        "name": "PC Último"
+        "type": "uiaFocus",
+        "label": "PC Ultimo"
       },
       {
         "type": "hotkey",
@@ -223,9 +213,10 @@
         "value": "{{pcUltimo}}"
       },
       {
-        "type": "tab",
-        "count": 1,
-        "name": "P.defecto"
+        "type": "uiaFocus",
+        "label": "P. defecto",
+        "index": 1,
+        "name": "Columna % (la 2ª a la derecha de la etiqueta)"
       },
       {
         "type": "hotkey",
@@ -236,9 +227,9 @@
         "value": "{{pDefecto}}"
       },
       {
-        "type": "tab",
-        "count": 1,
-        "name": "Salir del campo para que el valor se confirme"
+        "type": "hotkey",
+        "keys": "{TAB}",
+        "name": "Salir del campo para confirmar el valor"
       },
       {
         "type": "wait",

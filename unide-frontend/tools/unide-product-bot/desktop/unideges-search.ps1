@@ -101,6 +101,40 @@ function Find-UiaElement([string]$AutomationId, [string]$NameRegex) {
   return $null
 }
 
+
+# Localiza un control por su ETIQUETA: los AutomationId de este UnideGes
+# son HWND numericos que cambian en cada arranque, pero los textos de las
+# etiquetas (Código, PC Medio, ...) son fijos. Se busca el elemento cuyo
+# Name coincide EXACTO con la etiqueta y se devuelve el control de entrada
+# (EDIT/COMBOBOX/RichEdit/fecha) situado a su derecha en la misma fila,
+# ordenado por X; Index elige la columna (0 = primera, 1 = segunda, p. ej.
+# la columna % de P. defecto). Con -Self se devuelve el propio elemento
+# nombrado (p. ej. el checkbox Bloq.Venta, cuyo Name ES su etiqueta).
+function Find-UiaByLabel([string]$Label, [int]$Index = 0, [bool]$Self = $false) {
+  $root = Get-UiaRoot
+  $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  $labelEl = $null
+  foreach ($cand in $all) {
+    if (([string]$cand.Current.Name).Trim() -eq $Label) { $labelEl = $cand; break }
+  }
+  if (-not $labelEl) { return $null }
+  if ($Self) { return $labelEl }
+  $lr = $labelEl.Current.BoundingRectangle
+  $row = @()
+  foreach ($cand in $all) {
+    $cls = [string]$cand.Current.ClassName
+    if ($cls -notmatch 'EDIT|RichEdit|COMBOBOX|SysDateTimePick') { continue }
+    $r = $cand.Current.BoundingRectangle
+    if ([Math]::Abs($r.Y - $lr.Y) -gt 10) { continue }
+    if ($r.X -le $lr.X) { continue }
+    $row += ,@($r.X, $cand)
+  }
+  if (-not $row.Count) { return $null }
+  $sorted = $row | Sort-Object { $_[0] }
+  if ($Index -ge $sorted.Count) { return $null }
+  return ($sorted[$Index])[1]
+}
+
 function Get-UiaValue($Element) {
   $vp = $null
   if ($Element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
@@ -111,6 +145,18 @@ function Get-UiaValue($Element) {
     return ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
   }
   return ([string]$Element.Current.Name).Trim()
+}
+
+
+function Resolve-UiaTarget($Step) {
+  $label = ""
+  $index = 0
+  $self = $false
+  if ($Step.PSObject.Properties.Name -contains "label") { $label = [string]$Step.label }
+  if ($Step.PSObject.Properties.Name -contains "index") { $index = [int]$Step.index }
+  if ($Step.PSObject.Properties.Name -contains "self") { $self = [System.Convert]::ToBoolean($Step.self) }
+  if ($label) { return Find-UiaByLabel $label $index $self }
+  return Find-UiaElement ([string]$Step.automationId) ([string]$Step.nameRegex)
 }
 
 function Write-UiaDump([string]$Directory) {
@@ -495,23 +541,33 @@ try {
       }
       "uiaDump" { $values["uiaDumpFile"] = Write-UiaDump $OutDir }
       "uiaFocus" {
-        $el = Find-UiaElement ([string]$step.automationId) ([string]$step.nameRegex)
-        if (-not $el) { throw "uiaFocus: no se encontro el control (id='$($step.automationId)' nameRegex='$($step.nameRegex)')" }
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "uiaFocus: no se encontro el control (label='$($step.label)' id='$($step.automationId)')" }
         $el.SetFocus()
         Start-Sleep -Milliseconds 200
       }
       "uiaRead" {
-        $el = Find-UiaElement ([string]$step.automationId) ([string]$step.nameRegex)
+        $el = Resolve-UiaTarget $step
         if (-not $el) {
-          Add-WarningText "uiaRead '$($step.name)': control no encontrado (id='$($step.automationId)')"
+          Add-WarningText "uiaRead '$($step.name)': control no encontrado (label='$($step.label)' id='$($step.automationId)')"
           $values[[string]$step.name] = ""
+        } elseif (($step.PSObject.Properties.Name -contains "checkbox") -and [System.Convert]::ToBoolean($step.checkbox)) {
+          # Checkbox: TogglePattern si existe; si no, heuristica de pixeles
+          # sobre el cuadradito (borde izquierdo del control).
+          $tp = $null
+          if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) {
+            $values[[string]$step.name] = ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
+          } else {
+            $r = $el.Current.BoundingRectangle
+            $values[[string]$step.name] = Test-CheckboxChecked ([int]($r.X + 8)) ([int]($r.Y + $r.Height / 2)) 18
+          }
         } else {
           $values[[string]$step.name] = Get-UiaValue $el
         }
       }
       "uiaSet" {
-        $el = Find-UiaElement ([string]$step.automationId) ([string]$step.nameRegex)
-        if (-not $el) { throw "uiaSet: no se encontro el control (id='$($step.automationId)')" }
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "uiaSet: no se encontro el control (label='$($step.label)' id='$($step.automationId)')" }
         $vp = $null
         if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
           $vp.SetValue((Resolve-Template ([string]$step.value)))
