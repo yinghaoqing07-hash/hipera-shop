@@ -36,6 +36,22 @@
 - `Albarán electrónico`：处理 `.FEL`。
 - `Etiquetas`：打印标签。
 
+### Artículos 键盘快捷键（2026-07-08 从 Archivo 菜单实测抄录）
+
+| 功能 | 快捷键 |
+| --- | --- |
+| Buscar（搜索） | `F3` |
+| Guardar（保存） | `Ctrl+S` |
+| Nuevo（新建/清空界面，≈工具栏 Vaciar pantalla） | `Ctrl+N` |
+| Imprimir（打印） | `Ctrl+P` |
+| Cerrar（关闭窗口） | `Alt+F4` |
+
+- 表单字段之间用 `Tab` 跳、勾选框用空格、确认用 `Enter`，基本全键盘可走。
+- `P. defecto` 字段旁标着 `F2`（用途待确认，改价自动化接键盘流程前先弄清）。
+- 意义：bot 的桌面改价流程可以做成纯键盘（清空 → 输 código → 载入 →
+  Tab 到字段 → `Ctrl+S`），不再依赖屏幕坐标。待确认两点：F3 按下后焦点
+  落在哪、Ctrl+N 清空后光标是否停在 Código。
+
 ## 叫货规律
 
 当前最稳规律：
