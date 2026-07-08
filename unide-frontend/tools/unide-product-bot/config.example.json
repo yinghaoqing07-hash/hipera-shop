@@ -62,12 +62,7 @@
       {
         "type": "focus",
         "reactivate": true,
-        "name": "Reactivar: minimiza+restaura; tras esto Tab x1 cae en Código"
-      },
-      {
-        "type": "tab",
-        "count": 1,
-        "name": "Al campo Código"
+        "name": "Reactivar (minimiza+restaura): el foco queda DIRECTO en Código"
       },
       {
         "type": "hotkey",
@@ -150,11 +145,6 @@
         "reactivate": true
       },
       {
-        "type": "tab",
-        "count": 1,
-        "name": "Código"
-      },
-      {
         "type": "readFocused",
         "name": "codigoPantalla"
       },
@@ -194,11 +184,6 @@
       {
         "type": "focus",
         "reactivate": true
-      },
-      {
-        "type": "tab",
-        "count": 1,
-        "name": "Código"
       },
       {
         "type": "tab",
