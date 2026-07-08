@@ -26,9 +26,29 @@ try {
   # Some locked-down Windows setups may not expose UI Automation assemblies.
 }
 
-Add-Type @"
+Add-Type -ReferencedAssemblies Accessibility @"
 using System;
 using System.Runtime.InteropServices;
+using Accessibility;
+public class Msaa {
+  [DllImport("oleacc.dll")]
+  static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint dwId, ref Guid riid, [In, Out, MarshalAs(UnmanagedType.IUnknown)] ref object ppvObject);
+  // Estado REAL de un checkbox de WinForms via MSAA (el propio control lo
+  // declara por accesibilidad): bit 0x10 = CHECKED. Devuelve 1/0, o -1 si
+  // no se pudo leer.
+  public static int CheckState(IntPtr hwnd) {
+    try {
+      Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");
+      object obj = null;
+      int hr = AccessibleObjectFromWindow(hwnd, 0xFFFFFFFC, ref iid, ref obj);
+      if (hr != 0 || obj == null) return -1;
+      IAccessible acc = (IAccessible)obj;
+      object state = acc.get_accState(0);
+      if (state is int) return (((int)state & 0x10) != 0) ? 1 : 0;
+      return -1;
+    } catch { return -1; }
+  }
+}
 public class Win32 {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
@@ -218,13 +238,20 @@ function Read-ControlChecked($Element) {
     $state = [int][Win32]::SendMessage($hwnd, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) # BM_GETCHECK
     return ($state -eq 1)
   }
+  # MSAA: el propio checkbox declara su estado por accesibilidad. Es la
+  # fuente fiable — los píxeles fallaban porque en este control el TEXTO va
+  # a la izquierda y el cuadradito a la DERECHA, y muestreábamos las letras.
+  if ($hwnd -ne [IntPtr]::Zero) {
+    $msaaState = [Msaa]::CheckState($hwnd)
+    if ($msaaState -ge 0) { return ($msaaState -eq 1) }
+  }
   $tp = $null
   if ($Element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) {
     return ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
   }
   $r = $Element.Current.BoundingRectangle
-  # centro del cuadradito: ~7 px desde el borde izquierdo del control
-  return (Read-CheckBoxPixels ([int]($r.X + 7)) ([int]($r.Y + $r.Height / 2)))
+  # último recurso: píxeles en el lado DERECHO (ahí está el cuadradito)
+  return (Read-CheckBoxPixels ([int]($r.X + $r.Width - 8)) ([int]($r.Y + $r.Height / 2)))
 }
 
 function Resolve-UiaTarget($Step) {
@@ -718,6 +745,41 @@ try {
         if ($sel -ne ($count - 1)) {
           Add-WarningText "listSelectLast: seleccion en fila $sel de $count (se esperaba la ultima)"
         }
+      }
+      "uiaKey" {
+        # Manda una tecla POR MENSAJE directamente al control (p. ej. F2 en
+        # P. defecto para que recalcule el P.TPV). No necesita foco.
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "uiaKey: no se encontro el control (label='$($step.label)')" }
+        $hwnd = Get-UiaHwnd $el
+        if ($hwnd -eq [IntPtr]::Zero) { throw "uiaKey: el control no tiene HWND" }
+        $vkMap = @{ "F2" = 0x71; "F3" = 0x72; "ENTER" = 0x0D; "END" = 0x23; "TAB" = 0x09; "ESC" = 0x1B }
+        $vk = 0
+        $vkName = [string]$step.vk
+        if ($vkMap.ContainsKey($vkName.ToUpperInvariant())) { $vk = [int]$vkMap[$vkName.ToUpperInvariant()] }
+        elseif ($vkName -match '^\d+$') { $vk = [int]$vkName }
+        if ($vk -le 0) { throw "uiaKey: vk desconocida '$vkName'" }
+        [Win32]::SendMessage($hwnd, 0x0100, [IntPtr]$vk, [IntPtr]::Zero) | Out-Null
+        Start-Sleep -Milliseconds 60
+        [Win32]::SendMessage($hwnd, 0x0101, [IntPtr]$vk, [IntPtr]::Zero) | Out-Null
+        Start-Sleep -Milliseconds 200
+      }
+      "uiaClickMsg" {
+        # Clic POR MENSAJES dentro de un control, en un offset relativo a su
+        # esquina (no es un clic inyectado: el control lo procesa el mismo).
+        # Se usa para el boton "Vaciar pantalla" de la barra de herramientas,
+        # que no tiene atajo de teclado.
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "uiaClickMsg: no se encontro el control (classRegex='$($step.classRegex)')" }
+        $hwnd = Get-UiaHwnd $el
+        if ($hwnd -eq [IntPtr]::Zero) { throw "uiaClickMsg: el control no tiene HWND" }
+        $ox = [int]$step.offsetX
+        $oy = [int]$step.offsetY
+        $pt = [IntPtr](($oy -shl 16) -bor ($ox -band 0xFFFF))
+        [Win32]::SendMessage($hwnd, 0x0201, [IntPtr]1, $pt) | Out-Null
+        Start-Sleep -Milliseconds 80
+        [Win32]::SendMessage($hwnd, 0x0202, [IntPtr]0, $pt) | Out-Null
+        Start-Sleep -Milliseconds 300
       }
       "uiaSelectIfEmpty" {
         # Rellena un combo SOLO si está vacío (regla del usuario: fruta sin
