@@ -301,11 +301,17 @@ function makeFruitItem(name, codigo, articulo, priceRaw, labelReminder) {
 // Mismas validaciones que el flujo por pasos (buildPricePlan); si algo no
 // cuadra, NO escribe. No imprime etiquetas. Lo comparten el individual y el
 // lote, para que se comporten igual.
-async function processFruitPriceOnce(item) {
+async function processFruitPriceOnce(item, options = {}) {
   const store = lookupStore(storeIndex, item);
   const supplier = enrichSupplierLookup(supplierIndex, item, store);
-  const found = await searchDesktop(item, config, logger, { byCode: true });
-  if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知' };
+  // skipSearch: el flujo individual YA buscó el artículo para la captura de
+  // confirmación (con su vaciar pantalla incluido); repetir la búsqueda al
+  // confirmar era lento y redundante — la lectura verifica igualmente que el
+  // código en pantalla es el esperado y aborta si alguien tocó la ventana.
+  if (!options.skipSearch) {
+    const found = await searchDesktop(item, config, logger, { byCode: true });
+    if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知' };
+  }
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, stage: 'read', error: read.error || read.reason || '未知' };
   // Verificación de que el artículo CORRECTO está en pantalla. La mejor
@@ -393,7 +399,9 @@ async function handleFruitPriceOne(chatId, callbackId, id) {
   sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, '正在改价');
   const label = one.item.nombre;
-  const result = await processFruitPriceOnce(one.item);
+  // El artículo ya está en pantalla desde la búsqueda de la tarjeta: se
+  // salta la re-búsqueda (la lectura verifica el código igualmente).
+  const result = await processFruitPriceOnce(one.item, { skipSearch: true });
   sessions.delete(id);
   if (!result.ok) {
     const text = `❌ ${label} 没改（${fruitStageLabel(result.stage)}）：${result.error}\n没有写入。`;
