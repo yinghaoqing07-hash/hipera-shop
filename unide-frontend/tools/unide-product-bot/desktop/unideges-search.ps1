@@ -133,7 +133,10 @@ function Find-UiaByLabel([string]$Label, [int]$Index = 0, [bool]$Self = $false) 
     $row += ,@($r.X, $cand)
   }
   if (-not $row.Count) { return $null }
-  $sorted = $row | Sort-Object { $_[0] }
+  # @() imprescindible: con UN solo candidato el pipeline desenvuelve la
+  # tupla y el indexado devolvía $null ("no se encontró el control" en
+  # filas de un solo campo, como Inventariable).
+  $sorted = @($row | Sort-Object { $_[0] })
   if ($Index -ge $sorted.Count) { return $null }
   return ($sorted[$Index])[1]
 }
@@ -180,6 +183,30 @@ function Write-ControlText($Element, [string]$Text) {
   return $false
 }
 
+
+# Estado de un checkbox de WinForms por píxeles: se muestrea un cuadrito
+# 10x10 CENTRADO EN EL INTERIOR de la casilla (el borde queda fuera). El
+# muestreo anterior pisaba el borde, que es oscuro, y devolvía "marcado"
+# SIEMPRE — por eso Bloq.Venta se intentaba alternar aunque no hiciera
+# falta y acababa en "el estado NO cambió".
+function Read-CheckBoxPixels([int]$CenterX, [int]$CenterY) {
+  $size = 10
+  $bitmap = New-Object System.Drawing.Bitmap $size, $size
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.CopyFromScreen($CenterX - 5, $CenterY - 5, 0, 0, $bitmap.Size)
+  $ink = 0
+  for ($ix = 0; $ix -lt $size; $ix++) {
+    for ($iy = 0; $iy -lt $size; $iy++) {
+      $p = $bitmap.GetPixel($ix, $iy)
+      $brightness = (($p.R * 0.299) + ($p.G * 0.587) + ($p.B * 0.114))
+      if ($brightness -lt 140) { $ink++ }
+    }
+  }
+  $graphics.Dispose()
+  $bitmap.Dispose()
+  return ($ink -ge 5)
+}
+
 function Read-ControlChecked($Element) {
   # OJO: los checkbox de WinForms NO implementan BM_GETCHECK (devuelve 0
   # siempre, por eso Bloq.Venta "leyó desmarcado" y no se desmarcó). Orden:
@@ -196,7 +223,8 @@ function Read-ControlChecked($Element) {
     return ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
   }
   $r = $Element.Current.BoundingRectangle
-  return (Test-CheckboxChecked ([int]($r.X + 8)) ([int]($r.Y + $r.Height / 2)) 18)
+  # centro del cuadradito: ~7 px desde el borde izquierdo del control
+  return (Read-CheckBoxPixels ([int]($r.X + 7)) ([int]($r.Y + $r.Height / 2)))
 }
 
 function Resolve-UiaTarget($Step) {
