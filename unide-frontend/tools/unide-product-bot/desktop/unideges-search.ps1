@@ -663,10 +663,18 @@ try {
           $hwnd = Get-UiaHwnd $el
           if ($hwnd -eq [IntPtr]::Zero) { throw "uiaSelectIfEmpty: el control no tiene HWND" }
           $target = Resolve-Template ([string]$step.value)
-          $res = [int][Win32]::SendMessage($hwnd, 0x014D, [IntPtr](-1), $target)  # CB_SELECTSTRING
-          if ($res -lt 0) {
-            Add-WarningText "uiaSelectIfEmpty '$($step.label)': ninguna opción empieza por '$target'"
+          $cls = [string]$el.Current.ClassName
+          if ($cls -match 'COMBOBOX') {
+            # Combo: seleccionar la opción que empieza por el texto.
+            $res = [int][Win32]::SendMessage($hwnd, 0x014D, [IntPtr](-1), $target)  # CB_SELECTSTRING
+            if ($res -lt 0) {
+              Add-WarningText "uiaSelectIfEmpty '$($step.label)': ninguna opción empieza por '$target'"
+            } else {
+              Add-WarningText "Autorrellenado '$($step.label)' = '$target' (estaba vacío)"
+            }
           } else {
+            # Cuadro de texto (p. ej. el CÓDIGO de proveedor): escribirlo.
+            Write-ControlText $el $target | Out-Null
             Add-WarningText "Autorrellenado '$($step.label)' = '$target' (estaba vacío)"
           }
           Start-Sleep -Milliseconds 250
