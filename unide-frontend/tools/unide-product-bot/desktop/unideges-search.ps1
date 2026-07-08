@@ -39,6 +39,9 @@ public class Win32 {
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, System.Text.StringBuilder lParam);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 }
 public class WinEnum {
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
@@ -147,6 +150,49 @@ function Get-UiaValue($Element) {
   return ([string]$Element.Current.Name).Trim()
 }
 
+
+
+# HWND del control (estos controles son ventanas Win32 de verdad): permite
+# hablarles por MENSAJES directos, el canal mas fiable con esta app —
+# WM_SETTEXT/WM_GETTEXT para texto, BM_GETCHECK/BM_CLICK para checkboxes.
+# Ni foco, ni teclado, ni raton.
+function Get-UiaHwnd($Element) {
+  try { return [IntPtr]([int]$Element.Current.NativeWindowHandle) } catch { return [IntPtr]::Zero }
+}
+
+function Read-ControlText($Element) {
+  $hwnd = Get-UiaHwnd $Element
+  if ($hwnd -ne [IntPtr]::Zero) {
+    $len = [int][Win32]::SendMessage($hwnd, 0x000E, [IntPtr]::Zero, [IntPtr]::Zero)  # WM_GETTEXTLENGTH
+    $buf = New-Object System.Text.StringBuilder ($len + 2)
+    [Win32]::SendMessage($hwnd, 0x000D, [IntPtr]($len + 1), $buf) | Out-Null       # WM_GETTEXT
+    return $buf.ToString().Trim()
+  }
+  return [string](Get-UiaValue $Element)
+}
+
+function Write-ControlText($Element, [string]$Text) {
+  $hwnd = Get-UiaHwnd $Element
+  if ($hwnd -ne [IntPtr]::Zero) {
+    [Win32]::SendMessage($hwnd, 0x000C, [IntPtr]::Zero, $Text) | Out-Null           # WM_SETTEXT
+    return $true
+  }
+  return $false
+}
+
+function Read-ControlChecked($Element) {
+  $hwnd = Get-UiaHwnd $Element
+  if ($hwnd -ne [IntPtr]::Zero) {
+    $state = [int][Win32]::SendMessage($hwnd, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) # BM_GETCHECK
+    return ($state -eq 1)
+  }
+  $tp = $null
+  if ($Element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) {
+    return ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
+  }
+  $r = $Element.Current.BoundingRectangle
+  return (Test-CheckboxChecked ([int]($r.X + 8)) ([int]($r.Y + $r.Height / 2)) 18)
+}
 
 function Resolve-UiaTarget($Step) {
   $label = ""
@@ -552,35 +598,40 @@ try {
           Add-WarningText "uiaRead '$($step.name)': control no encontrado (label='$($step.label)' id='$($step.automationId)')"
           $values[[string]$step.name] = ""
         } elseif (($step.PSObject.Properties.Name -contains "checkbox") -and [System.Convert]::ToBoolean($step.checkbox)) {
-          # Checkbox: TogglePattern si existe; si no, heuristica de pixeles
-          # sobre el cuadradito (borde izquierdo del control).
-          $tp = $null
-          if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) {
-            $values[[string]$step.name] = ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
-          } else {
-            $r = $el.Current.BoundingRectangle
-            $values[[string]$step.name] = Test-CheckboxChecked ([int]($r.X + 8)) ([int]($r.Y + $r.Height / 2)) 18
-          }
+          $values[[string]$step.name] = Read-ControlChecked $el
         } else {
-          $values[[string]$step.name] = Get-UiaValue $el
+          $values[[string]$step.name] = Read-ControlText $el
         }
       }
       "uiaSet" {
         $el = Resolve-UiaTarget $step
         if (-not $el) { throw "uiaSet: no se encontro el control (label='$($step.label)' id='$($step.automationId)')" }
-        $vp = $null
-        if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
-          $vp.SetValue((Resolve-Template ([string]$step.value)))
-        } else {
-          $el.SetFocus()
-          Start-Sleep -Milliseconds 150
-          Send-StepKeys "^a"
-          Start-Sleep -Milliseconds 80
-          $literal = Resolve-Template ([string]$step.value)
-          $escaped = $literal -replace '([+^%~(){}\[\]])', '{$1}'
-          [System.Windows.Forms.SendKeys]::SendWait($escaped)
+        $textValue = Resolve-Template ([string]$step.value)
+        if (-not (Write-ControlText $el $textValue)) {
+          $vp = $null
+          if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+            $vp.SetValue($textValue)
+          } else {
+            throw "uiaSet: el control (label='$($step.label)') no tiene HWND ni ValuePattern"
+          }
         }
         Start-Sleep -Milliseconds 150
+      }
+      "uiaToggleIf" {
+        # Alterna un checkbox (BM_CLICK, el clic se procesa DENTRO del
+        # propio control) solo si la variable/valor indicado es verdadero.
+        $flagName = [string]$step.if
+        $shouldToggle = $false
+        if ($variables.PSObject.Properties.Name -contains $flagName) { $shouldToggle = [System.Convert]::ToBoolean($variables.$flagName) }
+        elseif ($values.Contains($flagName)) { $shouldToggle = [System.Convert]::ToBoolean($values[$flagName]) }
+        if ($shouldToggle) {
+          $el = Resolve-UiaTarget $step
+          if (-not $el) { throw "uiaToggleIf: no se encontro el control (label='$($step.label)')" }
+          $hwnd = Get-UiaHwnd $el
+          if ($hwnd -eq [IntPtr]::Zero) { throw "uiaToggleIf: el control no tiene HWND" }
+          [Win32]::SendMessage($hwnd, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # BM_CLICK
+          Start-Sleep -Milliseconds 200
+        }
       }
       "typeText" {
         # Teclear el texto con PULSACIONES reales (SendKeys), no con pegar
