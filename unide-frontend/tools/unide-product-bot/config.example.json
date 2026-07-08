@@ -178,6 +178,18 @@
         "name": "Desmarcar solo si estaba marcado (BM_CLICK)"
       },
       {
+        "type": "uiaSelectIfEmpty",
+        "label": "Proveedor",
+        "value": "CAMBIAME_PROVEEDOR",
+        "name": "Solo si está vacío: proveedor minoritario elegido por el usuario"
+      },
+      {
+        "type": "uiaSelectIfEmpty",
+        "label": "Inventariable",
+        "value": "si",
+        "name": "Solo si está vacío"
+      },
+      {
         "type": "uiaSet",
         "label": "PC Medio",
         "value": "{{pcMedio}}"

@@ -181,8 +181,13 @@ function Write-ControlText($Element, [string]$Text) {
 }
 
 function Read-ControlChecked($Element) {
+  # OJO: los checkbox de WinForms NO implementan BM_GETCHECK (devuelve 0
+  # siempre, por eso Bloq.Venta "leyó desmarcado" y no se desmarcó). Orden:
+  # BM_GETCHECK solo para BUTTON nativos; TogglePattern; y como verdad
+  # visual, los píxeles del cuadradito en el rect del propio control.
+  $cls = [string]$Element.Current.ClassName
   $hwnd = Get-UiaHwnd $Element
-  if ($hwnd -ne [IntPtr]::Zero) {
+  if ($hwnd -ne [IntPtr]::Zero -and $cls -notmatch 'WindowsForms') {
     $state = [int][Win32]::SendMessage($hwnd, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) # BM_GETCHECK
     return ($state -eq 1)
   }
@@ -629,8 +634,42 @@ try {
           if (-not $el) { throw "uiaToggleIf: no se encontro el control (label='$($step.label)')" }
           $hwnd = Get-UiaHwnd $el
           if ($hwnd -eq [IntPtr]::Zero) { throw "uiaToggleIf: el control no tiene HWND" }
+          $before = Read-ControlChecked $el
           [Win32]::SendMessage($hwnd, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # BM_CLICK
-          Start-Sleep -Milliseconds 200
+          Start-Sleep -Milliseconds 250
+          if ((Read-ControlChecked $el) -eq $before) {
+            # BM_CLICK no surtió efecto: clic por mensajes DENTRO del control
+            # (no es un clic inyectado de los que esta app ignora).
+            $r = $el.Current.BoundingRectangle
+            $pt = [IntPtr]((([int]($r.Height / 2)) -shl 16) -bor 8)
+            [Win32]::SendMessage($hwnd, 0x0201, [IntPtr]1, $pt) | Out-Null  # WM_LBUTTONDOWN
+            Start-Sleep -Milliseconds 60
+            [Win32]::SendMessage($hwnd, 0x0202, [IntPtr]0, $pt) | Out-Null  # WM_LBUTTONUP
+            Start-Sleep -Milliseconds 250
+          }
+          if ((Read-ControlChecked $el) -eq $before) {
+            Add-WarningText "uiaToggleIf '$($step.label)': el estado NO cambió"
+          }
+        }
+      }
+      "uiaSelectIfEmpty" {
+        # Rellena un combo SOLO si está vacío (regla del usuario: fruta sin
+        # proveedor conocido → elegir uno minoritario; Inventariable → si).
+        # Lo que ya tiene valor no se toca jamás.
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "uiaSelectIfEmpty: no se encontro el control (label='$($step.label)')" }
+        $current = Read-ControlText $el
+        if (-not $current) {
+          $hwnd = Get-UiaHwnd $el
+          if ($hwnd -eq [IntPtr]::Zero) { throw "uiaSelectIfEmpty: el control no tiene HWND" }
+          $target = Resolve-Template ([string]$step.value)
+          $res = [int][Win32]::SendMessage($hwnd, 0x014D, [IntPtr](-1), $target)  # CB_SELECTSTRING
+          if ($res -lt 0) {
+            Add-WarningText "uiaSelectIfEmpty '$($step.label)': ninguna opción empieza por '$target'"
+          } else {
+            Add-WarningText "Autorrellenado '$($step.label)' = '$target' (estaba vacío)"
+          }
+          Start-Sleep -Milliseconds 250
         }
       }
       "typeText" {
