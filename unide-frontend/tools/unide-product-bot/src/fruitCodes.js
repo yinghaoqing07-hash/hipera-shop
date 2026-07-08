@@ -73,9 +73,14 @@ export function saveFruitEntry(config, name, codigo, articulo, logger) {
 }
 
 // Resuelve un nombre a código:
-//   { status: 'found', codigo, articulo, source: 'aprendido'|'tabla' }
+//   { status: 'found', codigo, articulo, source: 'aprendido'|'tabla frutas' }
 //   { status: 'candidates', candidates: [{codigo, articulo}] }  → elegir
 //   { status: 'not_found' }
+// SOLO mira el diccionario aprendido y la tabla de frutas del usuario.
+// Antes caía en las tablas generales de tienda/proveedor y "coco" devolvía
+// yogures y turrones de coco; el usuario fue claro: para fruta/verdura se
+// usa exclusivamente su lista de códigos. Los parámetros storeIndex y
+// supplierIndex se conservan por compatibilidad pero ya no se usan.
 export function resolveFruitCode(config, storeIndex, supplierIndex, name) {
   const key = normalizeFruitName(name);
   if (!key) return { status: 'not_found' };
@@ -85,41 +90,38 @@ export function resolveFruitCode(config, storeIndex, supplierIndex, name) {
     return { status: 'found', codigo: learned.codigo, articulo: learned.articulo || '', source: 'aprendido' };
   }
 
-  const seed = loadFruitSeed(config)[key];
+  const seedMap = loadFruitSeed(config);
+  const seed = seedMap[key];
   if (seed?.codigo) {
     return { status: 'found', codigo: seed.codigo, articulo: seed.articulo || '', source: 'tabla frutas' };
   }
 
-  const candidates = searchByName(storeIndex, supplierIndex, key);
+  // Búsqueda parcial DENTRO de la tabla de frutas: "coco" → "COCO 1 UNIDAD",
+  // "manzana golden" → las 3 golden para elegir (y lo elegido se aprende).
+  const candidates = searchSeed(seedMap, key);
   if (candidates.length === 1) {
-    return { status: 'found', codigo: candidates[0].codigo, articulo: candidates[0].articulo, source: 'tabla' };
+    return { status: 'found', codigo: candidates[0].codigo, articulo: candidates[0].articulo, source: 'tabla frutas' };
   }
   if (candidates.length > 1) return { status: 'candidates', candidates };
   return { status: 'not_found' };
 }
 
-// Busca por nombre en la tabla de la tienda y en el catálogo del proveedor:
-// filas cuyo nombre contiene TODOS los tokens de la consulta. Dedupe por
-// código, tienda primero. Tope 8 (se elige con botones).
-function searchByName(storeIndex, supplierIndex, normalizedQuery, max = 8) {
+// Entradas de la tabla de frutas cuyo nombre contiene TODOS los tokens de
+// la consulta. Tope 8 (se elige con botones).
+function searchSeed(seedMap, normalizedQuery, max = 8) {
   const tokens = normalizedQuery.split(' ').filter(Boolean);
   if (!tokens.length) return [];
   const out = [];
   const seen = new Set();
-  const scan = (rows, nameField) => {
-    for (const row of rows || []) {
-      const nombre = normalizeFruitName(row?.[nameField] || row?.articulo || '');
-      if (!nombre) continue;
-      if (!tokens.every((t) => nombre.includes(t))) continue;
-      const codigo = String(row.codigo_unide || '').replace(/[^\d]/g, '');
-      if (!codigo || seen.has(codigo)) continue;
-      seen.add(codigo);
-      out.push({ codigo, articulo: String(row[nameField] || row.articulo || '').trim() });
-      if (out.length >= max) return;
-    }
-  };
-  scan(storeIndex?.rows, 'articulo_tienda');
-  if (out.length < max) scan(supplierIndex?.rows, 'articulo');
+  for (const [key, entry] of Object.entries(seedMap || {})) {
+    const codigo = String(entry?.codigo || '').replace(/[^\d]/g, '');
+    if (!codigo || seen.has(codigo)) continue;
+    const nombre = `${key} ${normalizeFruitName(entry?.articulo || '')}`;
+    if (!tokens.every((t) => nombre.includes(t))) continue;
+    seen.add(codigo);
+    out.push({ codigo, articulo: String(entry?.articulo || '').trim() || key });
+    if (out.length >= max) break;
+  }
   return out;
 }
 
