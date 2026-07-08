@@ -242,7 +242,7 @@ async function handleFruitPrice(chatId, text) {
   }
   if (resolved.status === 'candidates') {
     const id = saveSession({ fruitPick: { name, priceRaw, candidates: resolved.candidates } });
-    const list = resolved.candidates.map((c, i) => `[${i + 1}] ${c.articulo}（${c.codigo}）`).join('\n\n');
+    const list = resolved.candidates.map((c, i) => `[${i + 1}] ${c.articulo}（${c.codigo}）`).join('\n');
     const rows = [];
     let row = [];
     for (let i = 0; i < resolved.candidates.length; i += 1) {
@@ -251,10 +251,10 @@ async function handleFruitPrice(chatId, text) {
     }
     if (row.length) rows.push(row);
     rows.push([{ text: '取消', callback_data: `cancel:${id}` }]);
-    await telegram.sendMessage(chatId, `「${name}」在本地表里有 ${resolved.candidates.length} 个可能，点对的那个（我会记住，下次不再问）：\n\n${list}`, { reply_markup: { inline_keyboard: rows } });
+    await telegram.sendMessage(chatId, `「${name}」在你的水果表里有 ${resolved.candidates.length} 个，点对的那个（我会记住，下次不再问）：\n\n${list}`, { reply_markup: { inline_keyboard: rows } });
     return;
   }
-  await telegram.sendMessage(chatId, `本地表里没搜到「${name}」。如果你在 Diseño Pantalla 的 Acción 页看到了它的 código，可以登记一次：\n/fruta_add ${name} 12345\n以后就能直接 /precio_fruta ${name} 2,99 了。`);
+  await telegram.sendMessage(chatId, `你的水果表里没有「${name}」。如果你在 Diseño Pantalla 的 Acción 页看到了它的 código，可以登记一次：\n/fruta_add ${name} 12345\n以后就能直接 /precio_fruta ${name} 2,99 了。也可以直接用 código：/precio_fruta 616403 1,95`);
 }
 
 async function handleFruitPick(chatId, callbackId, payload) {
