@@ -178,6 +178,11 @@
         "name": "Desmarcar solo si estaba marcado (BM_CLICK)"
       },
       {
+        "type": "closeDialog",
+        "keys": "{ENTER}",
+        "name": "Si salió el aviso de guardar/continuar, aceptarlo (Enter); sin aviso no hace nada"
+      },
+      {
         "type": "uiaSelectIfEmpty",
         "label": "Proveedor",
         "index": 0,
@@ -226,6 +231,15 @@
       {
         "type": "wait",
         "ms": 1500
+      },
+      {
+        "type": "closeDialog",
+        "keys": "{ENTER}",
+        "name": "Aceptar el '¿Guardar?' si aparece tras Ctrl+S"
+      },
+      {
+        "type": "wait",
+        "ms": 800
       },
       {
         "type": "screenshot",
