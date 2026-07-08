@@ -359,6 +359,59 @@ try {
       "hotkey" { Send-StepKeys ([string]$step.keys) }
       "key" { Send-StepKeys ([string]$step.keys) }
       "text" { Send-Text (Resolve-Template ([string]$step.value)) }
+      "tab" {
+        # N tabulaciones con pausa: navegación por teclado entre campos.
+        $tabCount = 1
+        if ($step.PSObject.Properties.Name -contains "count") { $tabCount = [int]$step.count }
+        for ($t = 0; $t -lt $tabCount; $t++) {
+          [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+          Start-Sleep -Milliseconds 90
+        }
+      }
+      "readFocused" {
+        # Lee el valor del control CON FOCO vía UI Automation (sin
+        # portapapeles ni coordenadas). Para checkboxes devuelve
+        # true/false por TogglePattern. Fallback: ^a^c al portapapeles.
+        $focusedValue = $null
+        try {
+          $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+          if ($el) {
+            $vp = $null
+            if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+              $focusedValue = ([string]$vp.Current.Value).Trim()
+            }
+            if (-not $focusedValue) {
+              $tp = $null
+              if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) {
+                $focusedValue = ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On)
+              }
+            }
+          }
+        } catch { $focusedValue = $null }
+        if ($null -eq $focusedValue -or $focusedValue -eq '') {
+          try { Set-Clipboard -Value " " } catch { }
+          Send-StepKeys "^a"
+          Start-Sleep -Milliseconds 80
+          Send-StepKeys "^c"
+          Start-Sleep -Milliseconds 150
+          $clip = $null
+          try { $clip = Get-Clipboard -Raw } catch { $clip = $null }
+          if ($null -ne $clip) { $focusedValue = ([string]$clip).Trim() }
+        }
+        $values[[string]$step.name] = $focusedValue
+        if ($null -eq $focusedValue -or $focusedValue -eq '') {
+          Add-WarningText "readFocused '$($step.name)' leyó vacío"
+        }
+      }
+      "conditionalKey" {
+        # Manda teclas SOLO si la variable/valor indicado es verdadero
+        # (p. ej. espacio para desmarcar Bloq.Venta si estaba marcado).
+        $flagName = [string]$step.if
+        $shouldSend = $false
+        if ($variables.PSObject.Properties.Name -contains $flagName) { $shouldSend = [System.Convert]::ToBoolean($variables.$flagName) }
+        elseif ($values.Contains($flagName)) { $shouldSend = [System.Convert]::ToBoolean($values[$flagName]) }
+        if ($shouldSend) { Send-StepKeys ([string]$step.keys) }
+      }
       "typeText" {
         # Teclear el texto con PULSACIONES reales (SendKeys), no con pegar
         # del portapapeles: algunos campos de WinForms antiguos ignoran ^v
