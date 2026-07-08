@@ -75,6 +75,14 @@ function Click-Point([int]$X, [int]$Y) {
   if ($X -le 0 -or $Y -le 0) { throw "Click step has invalid coordinate: x=$X y=$Y" }
   [Win32]::SetCursorPos($X, $Y) | Out-Null
   Start-Sleep -Milliseconds 120
+  # Verificar que el ratón se movió DE VERDAD. Si la app objetivo corre
+  # elevada (como administrador) y el bot no, Windows (UIPI) descarta el
+  # movimiento y los clics EN SILENCIO: sin esto el flujo "corría" entero
+  # sin tocar nada y parecía que las coordenadas estaban mal.
+  $pos = [System.Windows.Forms.Cursor]::Position
+  if ([Math]::Abs($pos.X - $X) -gt 3 -or [Math]::Abs($pos.Y - $Y) -gt 3) {
+    throw "El raton NO se movio a ($X,$Y): esta en ($($pos.X),$($pos.Y)). Causa tipica: UnideGes corre como administrador y el bot no -> cierra el bot y arranca start-bot.cmd con 'Ejecutar como administrador'."
+  }
   [Win32]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 80
   [Win32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
