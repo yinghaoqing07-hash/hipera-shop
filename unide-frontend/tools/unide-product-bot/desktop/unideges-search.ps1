@@ -219,11 +219,13 @@ function Get-Steps($Config, [string]$ActionMode) {
   elseif ($ActionMode -eq "priceApply") { $steps = @($Config.desktop.priceApplySteps) }
   elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
   elseif ($ActionMode -eq "searchCode") {
-    # Búsqueda por código: usa su propio campo si está calibrado; si no,
-    # cae en el catalejo/EAN de siempre (no rompe nada, aunque puede que el
-    # código no case por ahí — por eso conviene calibrar codeSearchSteps).
+    # Búsqueda por CÓDIGO: exige codeSearchSteps calibrado. Antes caía en el
+    # catalejo/EAN de siempre, que con un código no encuentra nada, y el
+    # flujo seguía sobre un formulario vacío fingiendo éxito ("啥也没做").
     $steps = @($Config.desktop.codeSearchSteps)
-    if ($steps.Count -eq 0) { $steps = @($Config.desktop.steps) }
+    if ($steps.Count -eq 0) {
+      throw "codeSearchSteps sin configurar en config.local.json: copia la plantilla de config.example.json y pon la coordenada del campo Código (la búsqueda por código NO funciona por el catalejo/EAN)."
+    }
   }
   else { $steps = @($Config.desktop.steps) }
   if ($steps.Count -eq 0) { throw "$ActionMode steps are not configured in config.local.json" }
