@@ -60,7 +60,10 @@ function Focus-Window($Regex, $ExcludedProcessNames) {
     } |
     Sort-Object ProcessName |
     Select-Object -First 1
-  if (-not $process) { throw "Could not find a window matching: $Regex" }
+  if (-not $process) {
+    $visible = (Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -First 8 -ExpandProperty MainWindowTitle) -join " · "
+    throw "Could not find a window matching: $Regex — ventanas visibles: $visible"
+  }
   $handle = $process.MainWindowHandle
   if ([Win32]::IsIconic($handle)) { [Win32]::ShowWindow($handle, 9) | Out-Null }
   [Win32]::SetForegroundWindow($handle) | Out-Null
@@ -233,7 +236,11 @@ function Get-Steps($Config, [string]$ActionMode) {
 }
 
 try {
-  $config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
+  # Leer el config SIEMPRE como UTF-8: Get-Content en PowerShell 5.1 adivina
+  # la codificación y un config.local.json guardado por el Bloc de notas
+  # (UTF-8 sin BOM) llegaba con "Artículos" convertido en "ArtÃ­culos", con
+  # lo que el windowTitleRegex no casaba con ninguna ventana.
+  $config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
   $screen = Get-ScreenInfo
   $windowTitle = $null
   $screenshotPath = $null
