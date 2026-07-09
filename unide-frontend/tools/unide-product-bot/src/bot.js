@@ -486,9 +486,6 @@ async function handleAhorroPedido(chatId, text) {
   const extraDeals = general.topSavings.filter((s) => s.relevant && s.pct >= 20 && !inOrder.has(s.code));
 
   let summary = formatOrderAdvice(fetched, orderAdvice, extraDeals, { csvDate });
-  if (!arg && fetched.otherPda?.length) {
-    summary += `\n\n📋 列表里还有别的 PDA 单：\n${fetched.otherPda.map((o) => `· ${o.nombre}${o.fecha ? `（${o.fecha}）` : ''}`).join('\n')}\n想看哪单就发 /ahorro_pedido 单号（比如 /ahorro_pedido 152）。`;
-  }
   const ageHours = (Date.now() - latest.mtime) / 3600000;
   if (ageHours > 48) summary += `\n\n⚠️ 促销数据是 ${Math.round(ageHours / 24)} 天前的，建议先 /promociones 刷新。`;
   await telegram.sendMessage(chatId, summary);
