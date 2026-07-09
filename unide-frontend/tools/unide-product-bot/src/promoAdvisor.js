@@ -197,6 +197,96 @@ export function formatAdvice(advice, meta = {}) {
   return lines.join('\n');
 }
 
+// ---------- análisis de UN pedido contra las promociones ----------
+
+// orderItems: [{ code, nombre, quantity }] del pedido (Cajas).
+// promoItems: filas de parsePromotionsCsv. Devuelve las líneas del pedido
+// que YA van con promoción (con su % y días restantes), las que no, y las
+// que van con promoción a punto de caducar (para plantearse subir cajas).
+export function buildOrderAdvice(orderItems, promoItems, referenceDate = new Date()) {
+  const today = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+  const promoByCode = new Map();
+  for (const p of promoItems || []) {
+    const code = String(p.code || '').replace(/[^\d]/g, '');
+    if (!code || !Number.isFinite(p.oferta) || p.oferta <= 0) continue;
+    const hasPvd = Number.isFinite(p.pvd) && p.pvd > 0;
+    const pct = hasPvd ? ((p.pvd - p.oferta) / p.pvd) * 100 : NaN;
+    const daysLeft = p.hasta ? Math.round((p.hasta - today) / 86400000) : null;
+    if (daysLeft != null && daysLeft < 0) continue; // ya caducada
+    const cand = { ...p, pct, daysLeft };
+    const prev = promoByCode.get(code);
+    if (!prev || (Number.isFinite(cand.pct) && (!Number.isFinite(prev.pct) || cand.pct > prev.pct))) {
+      promoByCode.set(code, cand);
+    }
+  }
+  const onPromo = [];
+  const noPromo = [];
+  for (const line of orderItems || []) {
+    const code = String(line.code || '').replace(/[^\d]/g, '');
+    const promo = code ? promoByCode.get(code) : null;
+    if (promo) onPromo.push({ ...line, code, promo });
+    else noPromo.push({ ...line, code });
+  }
+  onPromo.sort((a, b) => (b.promo.pct || 0) - (a.promo.pct || 0));
+  const endingSoonInOrder = onPromo.filter((l) => l.promo.daysLeft != null && l.promo.daysLeft <= 2);
+  return { onPromo, noPromo, endingSoonInOrder, promoByCode };
+}
+
+export function formatOrderAdvice(orderMeta, orderAdvice, extraDeals = [], meta = {}) {
+  const lines = [];
+  const total = orderAdvice.onPromo.length + orderAdvice.noPromo.length;
+  lines.push(`📦 单子「${orderMeta.orderName}」${orderMeta.orderDate ? `（${orderMeta.orderDate}${orderMeta.estado ? ` · ${orderMeta.estado}` : ''}）` : ''}`);
+  lines.push(`共 ${total} 行，对照促销数据${meta.csvDate ? `（${meta.csvDate}）` : ''}：`);
+  lines.push(`✅ 已享促销价 ${orderAdvice.onPromo.length} 行 · 💤 正常价 ${orderAdvice.noPromo.length} 行`);
+
+  if (orderAdvice.endingSoonInOrder.length) {
+    lines.push('', '⏰ 单里这些的促销马上结束，想多囤就趁这单加量：');
+    for (const l of orderAdvice.endingSoonInOrder.slice(0, 8)) {
+      lines.push(`· ${l.nombre || l.promo.name}（${l.code}）×${l.quantity || '?'} 箱 — 省 ${Number.isFinite(l.promo.pct) ? l.promo.pct.toFixed(0) + '%' : '?'}${fmtDaysCn(l.promo.daysLeft)}`);
+    }
+  }
+
+  const best = orderAdvice.onPromo.filter((l) => Number.isFinite(l.promo.pct) && l.promo.pct >= 5).slice(0, 6);
+  if (best.length) {
+    lines.push('', '✅ 单里力度最大的（放心，已是促销价）：');
+    for (const l of best) {
+      lines.push(`· ${l.nombre || l.promo.name}（${l.code}）×${l.quantity || '?'} 箱 — ${fmtEur(l.promo.pvd)}→${fmtEur(l.promo.oferta)}，省 ${l.promo.pct.toFixed(0)}%${fmtDaysCn(l.promo.daysLeft)}`);
+    }
+  }
+
+  if (extraDeals.length) {
+    lines.push('', '➕ 单里没有、但正在大促可考虑加的：');
+    for (const s of extraDeals.slice(0, 5)) {
+      lines.push(`· ${s.name}（${s.code}）${s.tags?.length ? ' ' + s.tags.join('/') : ''} — 省 ${s.pct.toFixed(0)}%${fmtDaysCn(s.daysLeft)}`);
+    }
+  }
+
+  if (!orderAdvice.onPromo.length && !extraDeals.length) {
+    lines.push('', '这单没有踩中任何促销，正常发就行。');
+  }
+  return lines.join('\n');
+}
+
+function fmtDaysCn(d) {
+  if (d == null) return '';
+  if (d <= 0) return '（今天最后一天！）';
+  if (d === 1) return '（明天结束）';
+  return `（还剩 ${d} 天）`;
+}
+
+export function formatOrderAdviceDetail(orderMeta, orderAdvice, meta = {}) {
+  const lines = [];
+  lines.push(`单子「${orderMeta.orderName}」逐行对照促销${meta.csvDate ? `（数据：${meta.csvDate}）` : ''}`);
+  lines.push('');
+  for (const l of orderAdvice.onPromo) {
+    lines.push(`PROMO ${Number.isFinite(l.promo.pct) ? l.promo.pct.toFixed(0).padStart(3) + '%' : '  ?'}  ${l.code}  ${l.nombre || l.promo.name}  x${l.quantity || '?'}  ${fmtEur(l.promo.pvd)}→${fmtEur(l.promo.oferta)}${l.promo.daysLeft != null ? `  quedan ${l.promo.daysLeft}d` : ''}  [${l.promo.promoCode} ${l.promo.promoName}]`);
+  }
+  for (const l of orderAdvice.noPromo) {
+    lines.push(`  --      ${l.code}  ${l.nombre}  x${l.quantity || '?'}`);
+  }
+  return lines.join('\n');
+}
+
 export function formatAdviceDetail(advice, meta = {}) {
   const lines = [];
   lines.push(`促销省钱明细${meta.csvDate ? `（数据：${meta.csvDate}）` : ''}`);

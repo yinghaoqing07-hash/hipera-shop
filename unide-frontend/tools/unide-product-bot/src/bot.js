@@ -6,10 +6,10 @@ import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateP
 import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolveFruitCode, saveFruitEntry } from './fruitCodes.js';
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
-import { buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
+import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName } from './webOrder.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
@@ -91,6 +91,7 @@ async function handleUpdate(update) {
   if (/^\/uia_dump\b/i.test(text)) { await handleUiaDump(chatId); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
+  if (/^\/ahorro_pedido\b/i.test(text)) { await handleAhorroPedido(chatId, text); return; }
   if (/^\/(ahorro|estrategia)\b/i.test(text)) { await handleAhorro(chatId); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
@@ -449,6 +450,51 @@ async function handleAhorro(chatId) {
     await telegram.sendDocument(chatId, detailFile, '完整省钱明细（按力度排序）');
   } catch (error) {
     logger.warn('ahorro detail send failed', { error: error.message });
+  }
+}
+
+// /ahorro_pedido [nombre] — la variante que de verdad ahorra: abre en la
+// web de Pedidos el pedido indicado (o el PDA más reciente si no se da
+// nombre — los pedidos grandes), lee TODAS sus líneas y las cruza con las
+// promociones vigentes: qué líneas ya van a precio de promoción, cuáles de
+// ellas caducan ya (plantearse subir cajas en ESTE pedido) y qué chollos
+// relevantes no están en el pedido. Solo lectura.
+async function handleAhorroPedido(chatId, text) {
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
+  if (!config.webOrder?.enabled) { await telegram.sendMessage(chatId, '网页自动化没启用（webOrder.enabled=false），开着 Edge 调试模式才能读单子。'); return; }
+  const latest = findLatestPromotionsCsv(config);
+  if (!latest) { await telegram.sendMessage(chatId, '还没有促销数据。先跑一次 /promociones，再来对单子。'); return; }
+
+  await telegram.sendMessage(chatId, `正在打开 Pedidos 读取${arg ? `「${arg}」` : '最新的 PDA'}单子…`);
+  const fetched = await fetchOrderLinesByName(config, arg, logger);
+  if (!fetched.ok) {
+    let msg = `读取单子失败：${fetched.error}`;
+    if (fetched.names?.length) msg += `\n列表里最近的单子：\n${fetched.names.map((n) => `· ${n}`).join('\n')}\n可以用 /ahorro_pedido 名字片段 指定。`;
+    await telegram.sendMessage(chatId, msg);
+    return;
+  }
+  if (!fetched.items?.length) { await telegram.sendMessage(chatId, `单子「${fetched.orderName}」里没读到商品行。`); return; }
+
+  const promoItems = parsePromotionsCsv(fs.readFileSync(latest.file, 'utf8'));
+  const csvDate = path.basename(latest.file).replace(/^promociones-productos-activos-|\.csv$/g, '');
+  const orderAdvice = buildOrderAdvice(fetched.items, promoItems, new Date());
+
+  // Chollos relevantes que NO están en el pedido (≥20%, etiquetados).
+  const relevance = buildRelevanceSets({ storeIndex, carneTemplate: loadTemplate(config, 'carne'), config });
+  const general = buildSavingsAdvice(promoItems, relevance, new Date());
+  const inOrder = new Set([...orderAdvice.onPromo, ...orderAdvice.noPromo].map((l) => l.code));
+  const extraDeals = general.topSavings.filter((s) => s.relevant && s.pct >= 20 && !inOrder.has(s.code));
+
+  let summary = formatOrderAdvice(fetched, orderAdvice, extraDeals, { csvDate });
+  const ageHours = (Date.now() - latest.mtime) / 3600000;
+  if (ageHours > 48) summary += `\n\n⚠️ 促销数据是 ${Math.round(ageHours / 24)} 天前的，建议先 /promociones 刷新。`;
+  await telegram.sendMessage(chatId, summary);
+  try {
+    const detailFile = path.join(path.dirname(latest.file), `ahorro-pedido-${csvDate}.txt`);
+    fs.writeFileSync(detailFile, formatOrderAdviceDetail(fetched, orderAdvice, { csvDate }));
+    await telegram.sendDocument(chatId, detailFile, '单子逐行对照促销的完整明细');
+  } catch (error) {
+    logger.warn('ahorro_pedido detail send failed', { error: error.message });
   }
 }
 

@@ -545,6 +545,44 @@ async function scrapeOrderLines(page) {
   });
 }
 
+// Abre UN pedido por nombre (o el PDA más reciente si no se da nombre) y
+// devuelve sus líneas. Solo lectura: mismo camino que /llegada. Lo usa
+// /ahorro_pedido para cruzar el contenido del pedido con las promociones.
+export async function fetchOrderLinesByName(config, nameQuery, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const timeout = Number(w.pageNavigationTimeoutMs) || 20000;
+    const rows = await waitForListRows(page, timeout);
+    if (!rows.length) return { ok: false, error: 'Pedidos 列表是空的' };
+    const q = String(nameQuery || '').trim().toLowerCase();
+    const candidates = rows.filter((r) => (q ? r.nombre.toLowerCase().includes(q) : /pda/i.test(r.nombre)));
+    if (!candidates.length) {
+      return {
+        ok: false,
+        error: q ? `没找到名字包含「${nameQuery}」的单子` : '没找到 PDA 单（名字里带 PDA 的）',
+        names: rows.slice(0, 10).map((r) => r.nombre)
+      };
+    }
+    candidates.sort((a, b) => String(b.fechaIso).localeCompare(String(a.fechaIso)));
+    const target = candidates[0];
+    const openedDetail = await openOrderDetailByRow(page, target, timeout);
+    if (!openedDetail) return { ok: false, error: `打不开单子「${target.nombre}」` };
+    await sleep(Number(w.formRenderMs) || 2800);
+    const items = await scrapeOrderLines(page);
+    logger?.info('order lines fetched', { nombre: target.nombre, lines: items.length });
+    return { ok: true, orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items };
+  } catch (error) {
+    logger?.error('fetch order lines failed', { error: error.message });
+    return { ok: false, error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
 // Lee las opciones VISIBLES del desplegable abierto y las DESGLOSA para que
 // la lista que ve el usuario sea legible:
 //   name → el nombre del producto (lo que va antes del primer número largo).
