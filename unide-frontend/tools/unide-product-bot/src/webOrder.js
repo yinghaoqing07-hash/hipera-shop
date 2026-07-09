@@ -422,6 +422,80 @@ export async function fetchArrivingOrders(config, creationDate, logger) {
   }
 }
 
+// Elige filas de la lista de Pedidos según lo que escribió el usuario
+// ("/llegada 152 153", "/llegada carne 0807"). Reglas:
+//   1. Primero se prueba TODO el texto como UNA consulta (todas las palabras
+//      en el mismo nombre) → el pedido más reciente que las tenga todas.
+//      Cubre "carne 0807" cuando es un único pedido.
+//   2. Si no, cada palabra es un selector: un número suelto casa como número
+//      entero del nombre ("152" → "Nro. 152" pero no "1520"), el texto como
+//      substring; de cada selector se coge el pedido MÁS RECIENTE.
+// Exportada aparte para poder probarla sin navegador.
+export function selectOrderRows(rows, argText) {
+  const tokens = String(argText || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { selected: [], notFound: [] };
+  const matchesToken = (nombre, t) => (/^\d+$/.test(t)
+    ? new RegExp(`(^|\\D)${t}(\\D|$)`).test(nombre)
+    : String(nombre).toLowerCase().includes(t));
+  const newest = (list) => [...list].sort((a, b) => String(b.fechaIso).localeCompare(String(a.fechaIso)))[0];
+
+  if (tokens.length > 1) {
+    const all = rows.filter((r) => tokens.every((t) => matchesToken(r.nombre, t)));
+    if (all.length) return { selected: [newest(all)], notFound: [] };
+  }
+
+  const selected = [];
+  const notFound = [];
+  const seen = new Set();
+  for (const t of tokens) {
+    const hits = rows.filter((r) => matchesToken(r.nombre, t));
+    if (!hits.length) { notFound.push(t); continue; }
+    const pick = newest(hits);
+    const key = `${pick.nombre}|${pick.fechaIso}`;
+    if (!seen.has(key)) { seen.add(key); selected.push(pick); }
+  }
+  return { selected, notFound };
+}
+
+// Abre los pedidos elegidos por selectOrderRows y devuelve sus líneas
+// completas — mismo bucle de lectura que fetchArrivingOrders, pero la
+// selección es por nombre/número en vez de por fecha de creación.
+export async function fetchOrdersBySelectors(config, argText, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const timeout = Number(w.pageNavigationTimeoutMs) || 20000;
+
+    const rows = await waitForListRows(page, timeout);
+    if (!rows.length) return { ok: true, orders: [], notFound: [], names: [] };
+
+    const { selected, notFound } = selectOrderRows(rows, argText);
+    const orders = [];
+    for (const target of selected) {
+      const openedDetail = await openOrderDetailByRow(page, target, timeout);
+      if (!openedDetail) {
+        logger?.warn('could not open order detail', { id: target.id, nombre: target.nombre });
+        await ensurePedidoPage(page, config);
+        continue;
+      }
+      await sleep(Number(w.formRenderMs) || 2800);
+      const items = await scrapeAllOrderLines(page, config);
+      orders.push({ orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items });
+      await ensurePedidoPage(page, config);
+    }
+    logger?.info('orders by selectors fetched', { arg: argText, selected: selected.length, scraped: orders.length, notFound });
+    return { ok: true, orders, notFound, names: rows.slice(0, 10).map((r) => r.nombre) };
+  } catch (error) {
+    logger?.error('fetch orders by selectors failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'fetchLlegada', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
 // Espera (sondeando) a que la lista de Pedidos tenga filas y las devuelve
 // como { index, id, nombre, fecha, fechaIso, estado }. Se localiza la
 // tabla por sus CABECERAS (no por posición), así aguanta cambios de orden

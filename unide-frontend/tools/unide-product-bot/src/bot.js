@@ -10,7 +10,7 @@ import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPro
 import { llmConfigured, llmPickSimilarPromos } from './llm.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors } from './webOrder.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
@@ -940,15 +940,17 @@ async function maybePrintArrivalChecklist() {
   if (delivered) arrivalScheduler.markSent(due.key);
 }
 
-// /llegada [fecha] — saca la lista a demanda (imprime + Telegram). Sin
-// fecha usa hoy; con fecha ("/llegada 1/7") esa fecha se toma como día de
-// LLEGADA (útil para probar con pedidos pasados).
+// /llegada — saca la lista a demanda (imprime + Telegram).
+//   /llegada             → pedidos que llegan HOY (por fecha, como siempre)
+//   /llegada 1/7         → pedidos que llegan esa fecha
+//   /llegada 152 153     → esos pedidos por NOMBRE/número, lleguen cuando
+//   /llegada carne 0807    lleguen (el usuario elige exactamente cuáles)
 async function handleArrivalChecklist(chatId, text = '') {
   const today = todayString(config);
   const arg = String(text || '').replace(/^\/llegada(?:_hoy)?\s*/i, '').trim();
   const requested = parseDateArg(arg, today);
   if (arg && !requested) {
-    await telegram.sendMessage(chatId, `没看懂日期「${arg}」。可以写 /llegada（今天）、/llegada 1/7 或 /llegada 2026-07-01。`);
+    await handleArrivalByNames(chatId, arg);
     return;
   }
   const dateStr = requested || today;
@@ -960,6 +962,34 @@ async function handleArrivalChecklist(chatId, text = '') {
     return;
   }
   await sendAndPrintChecklist([chatId], collected, dateStr);
+}
+
+// /llegada con nombres/números: abre en la web exactamente los pedidos que
+// pidió el usuario y los imprime, sin filtrar por fecha (el filtro por fecha
+// de creación se dejaba pedidos fuera cuando dos entregas del mismo día se
+// habían pedido en días distintos).
+async function handleArrivalByNames(chatId, arg) {
+  if (!config.webOrder?.enabled) {
+    await telegram.sendMessage(chatId, '按单名打印需要网页自动化（webOrder.enabled）和开着调试模式的 Edge。');
+    return;
+  }
+  await telegram.sendMessage(chatId, `正在打开 Pedidos 找「${arg}」…`);
+  const res = await fetchOrdersBySelectors(config, arg, logger);
+  if (!res.ok) {
+    await telegram.sendMessage(chatId, `读取失败：${res.error}`);
+    return;
+  }
+  let note = '';
+  if (res.notFound?.length) {
+    note = `\n⚠️ 没找到「${res.notFound.join('」「')}」对应的单子。`;
+    if (res.names?.length) note += `\n列表里最近的单子：\n${res.names.map((n) => `· ${n}`).join('\n')}`;
+  }
+  if (!res.orders.length) {
+    await telegram.sendMessage(chatId, `一张单也没匹配上。${note}`);
+    return;
+  }
+  const delivered = await sendAndPrintChecklist([chatId], { source: 'web', orders: res.orders }, todayString(config));
+  if (note && delivered) await telegram.sendMessage(chatId, note.trim());
 }
 
 // Imprime la lista y manda por Telegram solo una CONFIRMACIÓN corta (la
