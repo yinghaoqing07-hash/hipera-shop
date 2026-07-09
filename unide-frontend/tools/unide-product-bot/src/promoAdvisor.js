@@ -276,13 +276,34 @@ function fmtDaysCn(d) {
 
 export function formatOrderAdviceDetail(orderMeta, orderAdvice, meta = {}) {
   const lines = [];
-  lines.push(`单子「${orderMeta.orderName}」逐行对照促销${meta.csvDate ? `（数据：${meta.csvDate}）` : ''}`);
-  lines.push('');
-  for (const l of orderAdvice.onPromo) {
-    lines.push(`PROMO ${Number.isFinite(l.promo.pct) ? l.promo.pct.toFixed(0).padStart(3) + '%' : '  ?'}  ${l.code}  ${l.nombre || l.promo.name}  x${l.quantity || '?'}  ${fmtEur(l.promo.pvd)}→${fmtEur(l.promo.oferta)}${l.promo.daysLeft != null ? `  quedan ${l.promo.daysLeft}d` : ''}  [${l.promo.promoCode} ${l.promo.promoName}]`);
+  const total = orderAdvice.onPromo.length + orderAdvice.noPromo.length;
+  lines.push('══════════════════════════════════');
+  lines.push(`单子「${orderMeta.orderName}」`);
+  if (orderMeta.orderDate) lines.push(`日期 ${orderMeta.orderDate}${orderMeta.estado ? ` · 状态 ${orderMeta.estado}` : ''}`);
+  lines.push(`共 ${total} 行 · 有促销 ${orderAdvice.onPromo.length} 行 · 正常价 ${orderAdvice.noPromo.length} 行`);
+  if (meta.csvDate) lines.push(`促销数据：${meta.csvDate}`);
+  lines.push('══════════════════════════════════');
+
+  if (orderAdvice.onPromo.length) {
+    lines.push('', '🏷️ 有促销的行（按力度从大到小）', '──────────────────────');
+    let i = 0;
+    for (const l of orderAdvice.onPromo) {
+      i += 1;
+      const pct = Number.isFinite(l.promo.pct) ? `省 ${l.promo.pct.toFixed(0)}%` : '省 ?%';
+      const days = l.promo.daysLeft == null ? '' : (l.promo.daysLeft <= 0 ? ' ⚠️今天最后一天' : `，还剩 ${l.promo.daysLeft} 天`);
+      lines.push(`${i}. ${l.nombre || l.promo.name}`);
+      lines.push(`   编号 ${l.code} · ${l.quantity || '?'} 箱`);
+      lines.push(`   进价 ${fmtEur(l.promo.pvd)} → ${fmtEur(l.promo.oferta)}（${pct}${days}）`);
+      lines.push(`   活动：${l.promo.promoName}`);
+      lines.push('');
+    }
   }
-  for (const l of orderAdvice.noPromo) {
-    lines.push(`  --      ${l.code}  ${l.nombre}  x${l.quantity || '?'}`);
+
+  if (orderAdvice.noPromo.length) {
+    lines.push('💤 正常价的行（没有促销，仅列出核对）', '──────────────────────');
+    for (const l of orderAdvice.noPromo) {
+      lines.push(`· ${l.nombre || '?'}（${l.code || '无编号'}）× ${l.quantity || '?'}`);
+    }
   }
   return lines.join('\n');
 }

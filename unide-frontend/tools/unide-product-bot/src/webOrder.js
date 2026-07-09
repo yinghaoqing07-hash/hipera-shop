@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
+import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
 
 // Sube (o localiza) la pestaña de UnideGes, la trae al frente y se asegura
 // de que estamos en Pedidos. Esto evita pulsar por error un "Nuevo" de otra
@@ -406,7 +407,7 @@ export async function fetchArrivingOrders(config, creationDate, logger) {
         continue;
       }
       await sleep(Number(w.formRenderMs) || 2800);
-      const items = await scrapeOrderLines(page);
+      const items = await scrapeAllOrderLines(page, config);
       orders.push({ orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items });
       // Volver a la lista (recarga dura; no hay nada que guardar).
       await ensurePedidoPage(page, config);
@@ -512,6 +513,46 @@ async function openOrderDetailByRow(page, target, timeoutMs) {
   return false;
 }
 
+// Lee TODAS las páginas de las líneas del pedido: el grid pagina de 25 en
+// 25 (mismo dxbl-pager que Promociones) y antes solo se leía la primera —
+// un PDA de dos páginas salía con la mitad de las líneas. Reutiliza los
+// helpers de paginación ya probados en webPromotions: rebobinar a la 1ª,
+// leer, pasar página esperando el CAMBIO real del contenido, dedupe.
+async function scrapeAllOrderLines(page, config) {
+  const maxPages = 30;
+  const settle = Number(config?.webOrder?.pageNavigationTimeoutMs) ? Math.min(Number(config.webOrder.pageNavigationTimeoutMs), 8000) : 8000;
+  const sig = (items) => (items || []).map((i) => `${i.code}|${i.nombre}|${i.quantity}`).join('||');
+
+  // Rebobinar si el grid quedó en una página posterior.
+  try {
+    const active = await gridActivePage(page);
+    if (active > 1) {
+      const before = sig(await scrapeOrderLines(page).catch(() => []));
+      if (await gridClickPageDelta(page, { toPage: 1 })) {
+        await gridWaitForPageChange(page, () => scrapeOrderLines(page), sig, before, Math.min(settle, 4000));
+      }
+    }
+  } catch { /* sin paginador o render en curso: leer desde donde esté */ }
+
+  const all = [];
+  const seen = new Set();
+  let prevSig = '';
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const rows = pageIndex === 0
+      ? await scrapeOrderLines(page)
+      : await gridWaitForPageChange(page, () => scrapeOrderLines(page), sig, prevSig, settle);
+    const s = sig(rows);
+    if (pageIndex > 0 && (!rows.length || s === prevSig)) break;
+    prevSig = s;
+    for (const row of rows) {
+      const key = `${row.code}|${row.nombre}|${row.quantity}`;
+      if (!seen.has(key)) { seen.add(key); all.push(row); }
+    }
+    if (!(await gridClickPageDelta(page, +1))) break;
+  }
+  return all;
+}
+
 // Copia las líneas del pedido abierto (grid con cabecera "Código Unide").
 // Devuelve [{ code, nombre, quantity }] con quantity = Cajas.
 async function scrapeOrderLines(page) {
@@ -572,7 +613,7 @@ export async function fetchOrderLinesByName(config, nameQuery, logger) {
     const openedDetail = await openOrderDetailByRow(page, target, timeout);
     if (!openedDetail) return { ok: false, error: `打不开单子「${target.nombre}」` };
     await sleep(Number(w.formRenderMs) || 2800);
-    const items = await scrapeOrderLines(page);
+    const items = await scrapeAllOrderLines(page, config);
     logger?.info('order lines fetched', { nombre: target.nombre, lines: items.length });
     return { ok: true, orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items };
   } catch (error) {

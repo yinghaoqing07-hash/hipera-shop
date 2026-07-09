@@ -1294,3 +1294,9 @@ export const __test = {
   goToFirstPromotionListPage, promotionGridActivePage, clickGridPageDelta,
   clickNextRecordArrow, detailMatchesPromotion
 };
+
+// Utilidades de paginación GENÉRICAS del grid DevExpress (dxbl-pager),
+// reutilizadas por webOrder para leer TODAS las páginas de las líneas de
+// un pedido (el mismo problema de "solo lee una página" que ya se resolvió
+// aquí para las promociones).
+export { clickGridPageDelta as gridClickPageDelta, waitForGridPageChange as gridWaitForPageChange, promotionGridActivePage as gridActivePage };
