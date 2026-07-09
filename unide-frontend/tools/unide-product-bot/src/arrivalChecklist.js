@@ -82,26 +82,79 @@ export function formatChecklist(orders, dateStr) {
   const lines = [];
   lines.push('LISTA DE COMPROBACION DE LLEGADA');
   lines.push(`Fecha llegada: ${prettyDate(dateStr)}`);
-  lines.push('='.repeat(46));
+  lines.push('='.repeat(75));
   for (const order of orders) {
     lines.push('');
     const estado = order.estado ? `, ${order.estado}` : '';
     lines.push(`PEDIDO: ${order.orderName}   (pedido el ${prettyDate(order.orderDate)}${estado})`);
-    lines.push('-'.repeat(46));
-    for (const item of order.items || []) {
-      const qty = item.quantity || '?';
-      const name = item.nombre || '';
-      const code = item.code || '';
-      lines.push(`[ ] ${padRight(qty, 4)} x ${padRight(code, 14)} ${name}`);
+    // Con precios (pedidos leídos de la web, que traen C.Central/PVD/Oferta/
+    // Total del grid) se imprime en tabla; los del historial local viejo no
+    // tienen esas columnas y salen en el formato simple de siempre.
+    const items = order.items || [];
+    const hasExtras = items.some((it) => it.central || it.pvd || it.total);
+    if (hasExtras) {
+      lines.push('-'.repeat(75));
+      lines.push(`    ${padRight('C.CENTRAL', 10)}${padRight('ARTICULO', 29)}${padLeft('CAJAS', 5)}${padLeft('PVD', 9)}${padLeft('OFERTA', 9)}${padLeft('TOTAL', 10)}`);
+      lines.push('-'.repeat(75));
+      let sum = 0;
+      let sumOk = items.length > 0;
+      for (const item of items) {
+        lines.push('[ ] '
+          + padRight(item.central || item.code || '', 10)
+          + padRight(cut(item.nombre || '', 28), 29)
+          + padLeft(item.quantity || '?', 5)
+          + padLeft(cleanMoney(item.pvd), 9)
+          + padLeft(cleanMoney(item.oferta), 9)
+          + padLeft(cleanMoney(item.total), 10));
+        const t = parseSpanishNumber(item.total);
+        if (Number.isFinite(t)) sum += t; else sumOk = false;
+      }
+      lines.push('-'.repeat(75));
+      lines.push(`    ${padRight(`${items.length} lineas`, 39)}${padLeft('SUMA TOTAL:', 24)}${padLeft(sumOk ? formatEuro(sum) : '', 12)}`);
+    } else {
+      lines.push('-'.repeat(46));
+      for (const item of items) {
+        const qty = item.quantity || '?';
+        const name = item.nombre || '';
+        const code = item.code || '';
+        lines.push(`[ ] ${padRight(qty, 4)} x ${padRight(code, 14)} ${name}`);
+      }
     }
     lines.push('');
     lines.push('    Bultos recibidos: ____   Incidencias: ______________');
   }
   lines.push('');
-  lines.push('='.repeat(46));
+  lines.push('='.repeat(75));
   lines.push('Marcar cada linea al contar. Si falta o sobra algo,');
   lines.push('apuntarlo y registrar la incidencia en UnideGes.');
   return lines.join('\n');
+}
+
+function cut(s, n) {
+  const str = String(s || '');
+  return str.length > n ? `${str.slice(0, n - 1)}…` : str;
+}
+
+function padLeft(value, width) {
+  const str = String(value ?? '');
+  return str.length >= width ? str : ' '.repeat(width - str.length) + str;
+}
+
+// Los importes del grid vienen como "1,89 €" o "12,345"; para la tabla se
+// quita el símbolo y los espacios (la cabecera ya dice que son euros).
+function cleanMoney(value) {
+  return String(value ?? '').replace(/[€\s ]/g, '');
+}
+
+function parseSpanishNumber(value) {
+  const s = cleanMoney(value).replace(/\./g, '').replace(',', '.');
+  if (!s) return NaN;
+  const n = Number.parseFloat(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function formatEuro(n) {
+  return `${n.toFixed(2).replace('.', ',')} EUR`;
 }
 
 // --- impresión --------------------------------------------------------
