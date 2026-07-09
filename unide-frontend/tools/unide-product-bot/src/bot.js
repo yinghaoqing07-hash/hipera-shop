@@ -7,7 +7,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmConfigured, llmPickSimilarPromos } from './llm.js';
+import { llmConfigured, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors } from './webOrder.js';
@@ -98,11 +98,86 @@ async function handleUpdate(update) {
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
   const parsed = parseProductMessage(text);
-  if (!parsed.ok) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
+  if (!parsed.ok) {
+    // Texto libre ("帮我打一下152的清单"): si hay LLM configurado, que él
+    // decida a qué comando corresponde; si no, la ayuda de siempre.
+    if (!text.startsWith('/') && llmConfigured(config)) { await handleFreeText(chatId, text); return; }
+    await telegram.sendMessage(chatId, formatTemplateHelp());
+    return;
+  }
   const maxItems = config.telegram.maxItemsPerMessage ?? 5;
   const items = parsed.items.slice(0, maxItems);
   if (parsed.items.length > items.length) await telegram.sendMessage(chatId, `这次先处理前 ${items.length} 个商品，剩下的请分批发。`);
   for (let index = 0; index < items.length; index += 1) await sendProductResult(chatId, items[index], index, items.length);
+}
+
+// Mensajes en lenguaje natural: el LLM los traduce a un comando del bot y
+// se despachan a los MISMOS handlers que el comando escrito a mano. Antes
+// de ejecutar se enseña la traducción ("我理解为 /llegada 152") para que la
+// usuaria aprenda el comando y pueda corregir si el modelo entendió mal.
+// Las acciones que escriben (precio_fruta) conservan su confirmación propia.
+async function handleFreeText(chatId, text) {
+  let intent;
+  try {
+    intent = await llmRouteIntent(text, config, logger);
+  } catch (error) {
+    logger.warn('llm intent failed', { error: error.message });
+    await telegram.sendMessage(chatId, formatTemplateHelp());
+    return;
+  }
+  const arg = intent.argumento;
+  const say = async (cmd) => telegram.sendMessage(chatId, `我理解为 ${cmd}，这就去办。`);
+  switch (intent.accion) {
+    case 'llegada':
+      await say(`/llegada${arg ? ` ${arg}` : ''}`);
+      await handleArrivalChecklist(chatId, `/llegada${arg ? ` ${arg}` : ''}`);
+      return;
+    case 'ahorro_pedido':
+      await say(`/ahorro_pedido${arg ? ` ${arg}` : ''}`);
+      await handleAhorroPedido(chatId, `/ahorro_pedido${arg ? ` ${arg}` : ''}`);
+      return;
+    case 'ahorro':
+      await say('/ahorro');
+      await handleAhorro(chatId);
+      return;
+    case 'promociones':
+      await say('/promociones');
+      await handlePromotions(chatId, '/promociones');
+      return;
+    case 'precio_fruta':
+      if (!arg) { await telegram.sendMessage(chatId, '要改哪个水果、改成多少？比如：platano 2,99'); return; }
+      await say(`/precio_fruta ${arg}`);
+      await handleFruitPrice(chatId, `/precio_fruta ${arg}`);
+      return;
+    case 'precios_fruta':
+      if (!arg) { await telegram.sendMessage(chatId, '要改哪些？一行一个，比如：\nplatano 2,99\ntomate 1,85'); return; }
+      await say('/precios_fruta（批量）');
+      await handleFruitPriceBatch(chatId, `/precios_fruta\n${arg}`);
+      return;
+    case 'pedido': {
+      const cmd = `/pedido${arg ? ` ${arg}` : ''}`;
+      await say(cmd);
+      await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(cmd), new Date(), config), makeOrderButtons());
+      return;
+    }
+    case 'carne':
+      await say('/carne');
+      await startTally(chatId, 'carne');
+      return;
+    case 'articulo': {
+      if (!arg) { await telegram.sendMessage(chatId, '要查哪个商品？发我编号或 EAN。'); return; }
+      const reparsed = parseProductMessage(`/articulo ${arg}`);
+      if (!reparsed.ok || !reparsed.items.length) { await telegram.sendMessage(chatId, `没看懂编号「${arg}」。`); return; }
+      await say(`/articulo ${arg}`);
+      await sendProductResult(chatId, reparsed.items[0], 0, 1);
+      return;
+    }
+    case 'ayuda':
+      await telegram.sendMessage(chatId, formatTemplateHelp());
+      return;
+    default:
+      await telegram.sendMessage(chatId, intent.respuesta || '没太明白你想做什么，可以发 /help 看看我会什么。');
+  }
 }
 
 async function handleDocument(message) {

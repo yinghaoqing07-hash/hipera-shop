@@ -57,6 +57,88 @@ Reglas:
 - La misma promoción puede sugerirse para varias líneas si de verdad sustituye a cada una.
 - Si no hay ningún par claro, devuelve la lista vacía. Mejor ningún par que un par dudoso.`;
 
+// ---------- router de intenciones ----------
+// El usuario escribe en chino/español coloquial ("帮我打一下152的清单") y el
+// modelo lo traduce a uno de los comandos del bot. Solo se llama cuando el
+// mensaje no casó con ningún comando ni plantilla — los comandos exactos
+// siguen siendo gratis e instantáneos.
+
+const INTENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    accion: {
+      type: 'string',
+      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'pedido', 'carne', 'articulo', 'ayuda', 'responder'],
+      description: 'Comando del bot al que corresponde el mensaje, o "responder" si no corresponde a ninguno'
+    },
+    argumento: { type: 'string', description: 'Argumento del comando (números de pedido, "nombre precio", código…); vacío si no aplica' },
+    respuesta: { type: 'string', description: 'Solo para accion=responder: la respuesta al usuario, EN CHINO, corta' }
+  },
+  required: ['accion', 'argumento', 'respuesta'],
+  additionalProperties: false
+};
+
+const INTENT_SYSTEM = `Eres el intérprete de intenciones de un bot de Telegram que ayuda a la dueña de un pequeño supermercado español. La usuaria escribe en chino coloquial (a veces español). Tu trabajo: decidir a qué comando corresponde su mensaje y con qué argumento.
+
+Comandos disponibles:
+- llegada — imprimir la lista de comprobación de llegada en la impresora de la tienda. argumento: números o palabras del nombre del pedido ("152 153", "carne 0807"), una fecha ("1/7"), o vacío = pedidos que llegan hoy. Palabras clave: 打印, 清单, 对货, 到货, imprimir, lista.
+- ahorro_pedido — abrir un pedido de la web y cruzarlo con las promociones (qué va ya a precio promo, qué sustituir). argumento: número del pedido o vacío = el PDA más reciente. Palabras clave: 省钱, 促销对比, 划算.
+- ahorro — resumen general de promociones vigentes y estrategia de compra.
+- promociones — descargar de la web las promociones vigentes (CSV). Palabras clave: 促销, 刷新促销.
+- precio_fruta — cambiar el precio de UNA fruta/verdura en el UnideGes de escritorio (con confirmación). argumento: "nombre precio", p. ej. "platano 2,99". Palabras clave: 改价, 换价格.
+- precios_fruta — cambio de precios de fruta EN LOTE. argumento: una línea por artículo "nombre precio".
+- pedido — plantillas/recordatorio de pedido. argumento: "carne", "fruta", "pda" o vacío.
+- carne — empezar el recuento de carne para el pedido.
+- articulo — consultar un producto por código o EAN. argumento: el código.
+- ayuda — mostrar la ayuda del bot.
+- responder — el mensaje NO corresponde a ningún comando (una pregunta sobre el bot, una duda, un saludo, algo ambiguo). Contesta tú en el campo "respuesta", EN CHINO, corto y útil. Si es ambiguo entre dos comandos, pregunta cuál quiere.
+
+Reglas: en la duda entre ejecutar algo y preguntar, pregunta (responder). Nunca inventes argumentos que la usuaria no dijo. Los números de pedido van tal cual en el argumento.`;
+
+// Devuelve { accion, argumento, respuesta }.
+export async function llmRouteIntent(text, config, logger) {
+  const apiKey = llmApiKey(config);
+  if (!apiKey) throw new Error('LLM sin apiKey');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
+  let response;
+  try {
+    response = await fetch(API_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION
+      },
+      body: JSON.stringify({
+        model: config?.llm?.model || DEFAULT_MODEL,
+        max_tokens: 1000,
+        system: INTENT_SYSTEM,
+        output_config: { format: { type: 'json_schema', schema: INTENT_SCHEMA } },
+        messages: [{ role: 'user', content: String(text || '').slice(0, 2000) }]
+      })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  if (data.stop_reason === 'refusal') throw new Error('refusal');
+  const textOut = (data.content || []).find((b) => b.type === 'text')?.text;
+  if (!textOut) throw new Error('respuesta sin texto');
+  const parsed = JSON.parse(textOut);
+  logger?.info('llm intent', { accion: parsed.accion, argumento: parsed.argumento, inputTokens: data.usage?.input_tokens });
+  return {
+    accion: String(parsed.accion || 'responder'),
+    argumento: String(parsed.argumento || '').trim(),
+    respuesta: String(parsed.respuesta || '').trim()
+  };
+}
+
 // orderLines: [{code, nombre}] — líneas a precio normal.
 // promoItems: [{code, name, pct}] — promociones candidatas (ya filtradas por ahorro mínimo).
 // Devuelve [{lineCode, promoCode, motivo}], validado contra las listas de entrada.
