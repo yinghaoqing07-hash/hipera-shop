@@ -82,7 +82,7 @@ export function formatChecklist(orders, dateStr) {
   const lines = [];
   lines.push('LISTA DE COMPROBACION DE LLEGADA');
   lines.push(`Fecha llegada: ${prettyDate(dateStr)}`);
-  lines.push('='.repeat(75));
+  lines.push('='.repeat(93));
   for (const order of orders) {
     lines.push('');
     const estado = order.estado ? `, ${order.estado}` : '';
@@ -90,27 +90,30 @@ export function formatChecklist(orders, dateStr) {
     // Con precios (pedidos leídos de la web, que traen C.Central/PVD/Oferta/
     // Total del grid) se imprime en tabla; los del historial local viejo no
     // tienen esas columnas y salen en el formato simple de siempre.
+    // Ancho total 93 columnas: medido en una impresión real en A4, la fuente
+    // de Out-Printer da para ~130, así que 93 entra sobrado y el nombre del
+    // artículo (45) casi nunca se corta.
     const items = order.items || [];
     const hasExtras = items.some((it) => it.central || it.pvd || it.total);
     if (hasExtras) {
-      lines.push('-'.repeat(75));
-      lines.push(`    ${padRight('C.CENTRAL', 10)}${padRight('ARTICULO', 29)}${padLeft('CAJAS', 5)}${padLeft('PVD', 9)}${padLeft('OFERTA', 9)}${padLeft('TOTAL', 10)}`);
-      lines.push('-'.repeat(75));
+      lines.push('-'.repeat(93));
+      lines.push(`    ${padRight('C.CENTRAL', 10)}${padRight('ARTICULO', 46)}${padLeft('CAJAS', 6)}${padLeft('PVD', 9)}${padLeft('OFERTA', 8)}${padLeft('TOTAL', 10)}`);
+      lines.push('-'.repeat(93));
       let sum = 0;
       let sumOk = items.length > 0;
       for (const item of items) {
         lines.push('[ ] '
           + padRight(item.central || item.code || '', 10)
-          + padRight(cut(item.nombre || '', 28), 29)
-          + padLeft(item.quantity || '?', 5)
+          + padRight(cut(item.nombre || '', 45), 46)
+          + padLeft(item.quantity || '?', 6)
           + padLeft(cleanMoney(item.pvd), 9)
-          + padLeft(cleanMoney(item.oferta), 9)
+          + padLeft(cleanMoney(item.oferta), 8)
           + padLeft(cleanMoney(item.total), 10));
         const t = parseSpanishNumber(item.total);
         if (Number.isFinite(t)) sum += t; else sumOk = false;
       }
-      lines.push('-'.repeat(75));
-      lines.push(`    ${padRight(`${items.length} lineas`, 39)}${padLeft('SUMA TOTAL:', 24)}${padLeft(sumOk ? formatEuro(sum) : '', 12)}`);
+      lines.push('-'.repeat(93));
+      lines.push(`    ${padRight(`${items.length} lineas`, 55)}${padLeft('SUMA TOTAL:', 22)}${padLeft(sumOk ? formatEuro(sum) : '', 12)}`);
     } else {
       lines.push('-'.repeat(46));
       for (const item of items) {
@@ -124,7 +127,7 @@ export function formatChecklist(orders, dateStr) {
     lines.push('    Bultos recibidos: ____   Incidencias: ______________');
   }
   lines.push('');
-  lines.push('='.repeat(75));
+  lines.push('='.repeat(93));
   lines.push('Marcar cada linea al contar. Si falta o sobra algo,');
   lines.push('apuntarlo y registrar la incidencia en UnideGes.');
   return lines.join('\n');
