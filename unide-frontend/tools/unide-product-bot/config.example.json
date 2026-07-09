@@ -1,4 +1,4 @@
-﻿{
+{
   "telegram": {
     "allowedChatIds": [],
     "pollTimeoutSeconds": 25,
@@ -291,5 +291,11 @@
     "selectSettleMs": 500,
     "repairBlankLines": true,
     "nextFieldMs": 140
+  },
+  "llm": {
+    "enabled": true,
+    "apiKey": "",
+    "model": "claude-opus-4-8",
+    "timeoutMs": 180000
   }
 }

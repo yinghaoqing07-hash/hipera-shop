@@ -87,13 +87,6 @@
 bot 的 codeSearchSteps/priceReadSteps/priceApplySteps 全部基于这张图
 （focus reactivate → Tab×1 到 Código → Tab×N 到目标字段）。
 
-### 保存必填与默认供应商（2026-07-08）
-
-- Artículos 保存时 Proveedor 与 Inventariable 为空会被拒绝。
-- 规则：来源不明的水果填小众 proveedor；店里自建 **4214 = don fruta**
-  当"无主水果默认供应商"。bot 仅在字段为空时自动补，已有值绝不覆盖；
-  Inventariable 为空补 si。
-
 ## 叫货规律
 
 当前最稳规律：
@@ -127,6 +120,19 @@ PDA：
 - 常见一次出现两张，一张大、一张小，不要漏。
 - 检查状态、重量、金额是否明显异常。
 - 如果没有生成，不要急着手工补整单，先确认 PDA/导入流程。
+
+PDA 扫货后的完整操作流程（2026-07 店主口述确认）：
+
+1. 在 PDA 上扫完所有要叫的商品。
+2. 在 PDA 上点 `Generar fichero`（生成文件）。
+3. 把 PDA 和电脑连接（放回底座/接线）。
+4. 在电脑上打开 `COMPC` 程序（负责把 PDA 里的文件传到电脑）。
+5. 打开网页 `Gestión Tiendas > Pedidos`，点工具栏的 `Cargar Pedido`（加载订单）。
+6. 订单加载进来后照常核对：状态、重量、金额、行数。
+7. 确认无误后人工点 `Enviar Pedido` 发出。
+
+注意：顺序不能乱——没点 `Generar fichero` 就连电脑，或者没开 `COMPC`
+就去点 `Cargar Pedido`，都会加载不到东西。
 
 EXTRA / HUEVOS：
 
@@ -204,7 +210,11 @@ nota: FEL 92695469
 
 原因：
 
-- `SDC` 和 `TIENDA` 两行关系还没有完全理清。
+- `SDC` 和 `TIENDA` 两行关系已理清（2026-07-08 店主确认）：Artículos 底部
+  列表有两条记录，**SDC = 总部数据，不允许改；TIENDA = 店内数据，要改的
+  是它**（列表最后一行）。窗口右上角的 SDC/TIENDA 字样显示当前载入的是
+  哪条。bot 载入商品后自动选中 TIENDA 行，写入前还会读右上角指示牌验证，
+  不是 TIENDA 就中止。
 - `sin precio en la lista`、前台刷新、桌面显示之间有同步问题。
 - `Bloq.Venta`、PC Medio、PC Último、P.defecto 的读写坐标和字段行为还不够稳。
 
@@ -219,6 +229,32 @@ nota: FEL 92695469
 
 - 改价格相关自动化暂停。
 - 真要改价，先让 bot 查询和截图，再人工操作。
+
+### 2b. 促销省钱策略（/ahorro）
+
+- 命令：`/ahorro`（别名 `/estrategia`）。
+- 数据源：最近一次 `/promociones` 生成的 CSV（不重新抓网页；数据超过
+  2 天会提示先刷新）。
+- 逻辑：每个促销商品都带"平时进价 PVD"和"促销进价"，直接算出省几个
+  点；再和店里真正买的东西对上（在售商品表 🏪、carne 模板 🥩、水果
+  código 表 🍎）打标。
+- 输出：中文摘要（快结束的末班车 / 常购促销 / 全场力度榜 / 行动建议）
+  + 完整明细 txt 附件。
+
+### 2c. 单子对照促销（/ahorro_pedido）
+
+- 命令：`/ahorro_pedido`（默认找最新的 PDA 大单）、`/ahorro_pedido 153`（按单号，
+  精确匹配 Nro.）或 `/ahorro_pedido 名字片段`。
+- 做什么：打开网页 Pedidos，读出这张单的**全部商品行和箱数**（多页会翻页读全），
+  逐行对照促销 CSV：哪些行已享促销价、哪些行的促销马上结束（考虑在这单加量）、
+  哪些正常价的行有**类似商品在促销**（可换着叫）、哪些相关大促不在单里。
+  逐行明细 txt 附件。
+- 类似商品匹配：配置了 `ANTHROPIC_API_KEY`（写在 .env 里，和 TELEGRAM_BOT_TOKEN
+  一样）就用 Claude AI 判断"顾客真的可以换着买"的替代品，明细里带理由；
+  没配就退回关键词匹配（第一个词=商品类型，两边都要一致）。config 里
+  `llm.model` 可换模型，`llm.enabled: false` 可关。
+- 定位：PDA 大单才值得优化；fruta/carne 小单量少，不必看。
+- 只读：不改单子、不点 Guardar/Enviar。
 
 ### 3. 叫货提醒
 
@@ -318,6 +354,36 @@ nombre: CARNE 0307
 - 价格没变或货架已正确，可以不打。
 - 真的要换价签时再打印。
 
+### 水果/蔬菜换价格完整流程（2026-07 店主口述确认）
+
+1. 在桌面打开 `Diseño Pantalla Unide`。
+2. 进 `Frutas` 或 `Verduras` 面板。
+3. 右键要换价格的水果/蔬菜，点 `Editar`。
+4. 进 `Acción` 页，抄下它的 `código`。
+5. 拿着 código 去 UnideGes 的 `Artículos` 搜这个 código，改价格。
+6. 改完点关闭，会自动弹出跳转 `Etiquetas` 页面打印新价签。
+7. 在标签页面点 `Etiq. Especiales`。
+8. 勾选 `Imprimir`；`Tipo Etiqueta` 全部改成 `Tipo Display 8 A4 vertical`。
+9. 最后点 `Imprimir` 打印。
+
+注意：水果/蔬菜的价格入口在 Diseño Pantalla（触摸屏面板），不能只在
+Artículos 里搜名字——先从面板拿准确的 código 再去改，避免改错品种。
+
+半自动化（2026-07 起，bot 命令 /precio_fruta）：
+
+- `/precio_fruta melocotón 2,99`：bot 查 código（本地表搜索 + 你点选确认，
+  选过一次就记住存进 data/frutas-codigos.json），然后走桌面 Artículos 的
+  坐标流水线把价格填好，截图给你，「确认写入」才真正写。
+- 第 6-9 步（Etiquetas 打印）保持手动，写入成功后 bot 会把打印步骤发给你。
+- `/fruta_add 名字 código`：手动登记一个面板 código（本地表搜不到时用）。
+- 水果/蔬菜可以走这个自动化；当初"改价自动化暂停"针对的是资料不一致的
+  普通商品，不适用于果蔬。
+- 保存的必填校验（2026-07-08 实测）：Proveedor 和 Inventariable 为空时
+  UnideGes 拒绝保存。规则（前任顾问教的）：不知道进货来源的水果就填一个
+  小众 proveedor。店里自建了 **4214 = don fruta** 专门当"无主水果默认
+  供应商"；bot 只在字段为空时自动补（代码框填 4214），已有值绝不覆盖。
+  Inventariable 为空时补 si。
+
 ## 商品资料判断
 
 数据源优先级：
@@ -387,7 +453,13 @@ bot 不反应：
 优先继续完善自动叫货：
 
 1. 让 `/pedido_nuevo` 在某个商品卡住时自动停止并截图。
-2. 支持一键生成肉类/果蔬模板。
+2. 支持一键生成肉类/果蔬模板。→ 已做（2026-07）：/carne 点货单。
+   肉类纸质点货表（打印的 CODIGO+NOMBRE 那张）替换为 Telegram 点选：
+   发 /carne，28 个肉类商品变成按钮，点名字数量 +1（点到 5 归零），
+   「清零」重来，「✔ 生成订单」直接变成 /pedido_nuevo 的确认草稿
+   （订单名自动 CARNE ddmm），后面就是老流程：确认填入 → 人工 Guardar。
+   商品清单可在店里电脑 data/plantilla-carne.json 修改（不改就用内置
+   的 28 个）。果蔬模板同机制，以后加 data/plantilla-fruta.json 即可。
 3. 从上一张同星期订单提取商品清单，用户只改数量。
 4. 最终形成“准备草稿 -> 截图确认 -> 人工保存 -> 人工发送”的稳定流程。
 

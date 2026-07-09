@@ -306,7 +306,7 @@ export function formatOrderAdvice(orderMeta, orderAdvice, extraDeals = [], meta 
   }
 
   if (orderAdvice.similar?.length) {
-    lines.push('', '🔁 单里这些是正常价，但有类似商品在促销，可考虑换着叫：');
+    lines.push('', `🔁 单里这些是正常价，但有类似商品在促销，可考虑换着叫${meta.similarViaLlm ? '（AI 挑的）' : ''}：`);
     for (const s of orderAdvice.similar.slice(0, 4)) {
       lines.push(`· 单里 ${s.line.nombre}（${s.line.code}）`);
       lines.push(`  ↳ 促销 ${s.promo.name}（${s.promo.code}）${fmtEur(s.promo.pvd)}→${fmtEur(s.promo.oferta)}，省 ${Number.isFinite(s.promo.pct) ? s.promo.pct.toFixed(0) : '?'}%${fmtDaysCn(s.promo.daysLeft)}`);
@@ -321,7 +321,7 @@ export function formatOrderAdvice(orderMeta, orderAdvice, extraDeals = [], meta 
     }
   }
 
-  if (!orderAdvice.onPromo.length && !extraDeals.length) {
+  if (!orderAdvice.onPromo.length && !orderAdvice.similar?.length && !extraDeals.length) {
     lines.push('', '这单没有踩中任何促销，正常发就行。');
   }
   return lines.join('\n');
@@ -368,7 +368,7 @@ export function formatOrderAdviceDetail(orderMeta, orderAdvice, meta = {}) {
     const plain = orderAdvice.noPromo.filter((l) => !similarByCode.has(l.code));
 
     if (withSimilar.length) {
-      lines.push('🔁 正常价、但有类似商品在促销的行', '──────────────────────', '');
+      lines.push(`🔁 正常价、但有类似商品在促销的行${meta.similarViaLlm ? '（AI 挑的）' : ''}`, '──────────────────────', '');
       let i = 0;
       for (const l of withSimilar) {
         i += 1;
@@ -378,6 +378,7 @@ export function formatOrderAdviceDetail(orderMeta, orderAdvice, meta = {}) {
         lines.push(`${i}. ${l.nombre || '?'}（${l.code || '无编号'}）× ${l.quantity || '?'}`);
         lines.push(`   ↳ 类似促销：${s.promo.name}（${s.promo.code}）`);
         lines.push(`     ${fmtEur(s.promo.pvd)} → ${fmtEur(s.promo.oferta)}（${pct}${days}）`);
+        if (s.motivo) lines.push(`     理由：${s.motivo}`);
         lines.push('');
       }
     }

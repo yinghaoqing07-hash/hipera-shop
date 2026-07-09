@@ -7,6 +7,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
+import { llmConfigured, llmPickSimilarPromos } from './llm.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName } from './webOrder.js';
@@ -479,19 +480,50 @@ async function handleAhorroPedido(chatId, text) {
   const csvDate = path.basename(latest.file).replace(/^promociones-productos-activos-|\.csv$/g, '');
   const orderAdvice = buildOrderAdvice(fetched.items, promoItems, new Date());
 
+  // Sustitutos con IA: las reglas por palabras confunden "pizza" con "patatas
+  // sabor pizza"; si hay apiKey se le pide a Claude que empareje solo
+  // productos de verdad intercambiables. Si falla, se queda el emparejado
+  // por palabras que ya trae buildOrderAdvice.
+  let similarViaLlm = false;
+  if (llmConfigured(config) && orderAdvice.noPromo.length) {
+    await telegram.sendMessage(chatId, '🤖 正在让 AI 对比正常价的行和整张促销清单，挑真正能换着叫的…');
+    try {
+      const inOrder0 = new Set([...orderAdvice.onPromo, ...orderAdvice.noPromo].map((l) => l.code));
+      const candidates = [...orderAdvice.promoByCode.entries()]
+        .filter(([code, p]) => Number.isFinite(p.pct) && p.pct >= 10 && !inOrder0.has(code))
+        .map(([code, p]) => ({ code, name: p.name, pct: p.pct, promo: p }));
+      const pairs = await llmPickSimilarPromos(
+        orderAdvice.noPromo.filter((l) => l.code),
+        candidates,
+        config,
+        logger
+      );
+      const candByCode = new Map(candidates.map((c) => [c.code, c]));
+      const lineByCode = new Map(orderAdvice.noPromo.map((l) => [l.code, l]));
+      orderAdvice.similar = pairs
+        .map((p) => ({ line: lineByCode.get(p.lineCode), promo: candByCode.get(p.promoCode)?.promo, motivo: p.motivo }))
+        .filter((s) => s.line && s.promo)
+        .sort((a, b) => (b.promo.pct || 0) - (a.promo.pct || 0));
+      similarViaLlm = true;
+    } catch (error) {
+      logger.warn('llm similar failed, using keyword fallback', { error: error.message });
+      await telegram.sendMessage(chatId, `AI 匹配没成功（${error.message.slice(0, 120)}），这次先用关键词匹配。`);
+    }
+  }
+
   // Chollos relevantes que NO están en el pedido (≥20%, etiquetados).
   const relevance = buildRelevanceSets({ storeIndex, carneTemplate: loadTemplate(config, 'carne'), config });
   const general = buildSavingsAdvice(promoItems, relevance, new Date());
   const inOrder = new Set([...orderAdvice.onPromo, ...orderAdvice.noPromo].map((l) => l.code));
   const extraDeals = general.topSavings.filter((s) => s.relevant && s.pct >= 20 && !inOrder.has(s.code));
 
-  let summary = formatOrderAdvice(fetched, orderAdvice, extraDeals, { csvDate });
+  let summary = formatOrderAdvice(fetched, orderAdvice, extraDeals, { csvDate, similarViaLlm });
   const ageHours = (Date.now() - latest.mtime) / 3600000;
   if (ageHours > 48) summary += `\n\n⚠️ 促销数据是 ${Math.round(ageHours / 24)} 天前的，建议先 /promociones 刷新。`;
   await telegram.sendMessage(chatId, summary);
   try {
     const detailFile = path.join(path.dirname(latest.file), `ahorro-pedido-${csvDate}.txt`);
-    fs.writeFileSync(detailFile, formatOrderAdviceDetail(fetched, orderAdvice, { csvDate }));
+    fs.writeFileSync(detailFile, formatOrderAdviceDetail(fetched, orderAdvice, { csvDate, similarViaLlm }));
     await telegram.sendDocument(chatId, detailFile, '单子逐行对照促销的完整明细');
   } catch (error) {
     logger.warn('ahorro_pedido detail send failed', { error: error.message });

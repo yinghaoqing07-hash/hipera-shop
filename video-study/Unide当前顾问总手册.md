@@ -243,10 +243,16 @@ nota: FEL 92695469
 
 ### 2c. 单子对照促销（/ahorro_pedido）
 
-- 命令：`/ahorro_pedido`（默认找最新的 PDA 大单）或 `/ahorro_pedido 名字片段`。
-- 做什么：打开网页 Pedidos，读出这张单的**全部商品行和箱数**，逐行对照
-  促销 CSV：哪些行已享促销价、哪些行的促销马上结束（考虑在这单加量）、
-  哪些相关大促不在单里。逐行明细 txt 附件。
+- 命令：`/ahorro_pedido`（默认找最新的 PDA 大单）、`/ahorro_pedido 153`（按单号，
+  精确匹配 Nro.）或 `/ahorro_pedido 名字片段`。
+- 做什么：打开网页 Pedidos，读出这张单的**全部商品行和箱数**（多页会翻页读全），
+  逐行对照促销 CSV：哪些行已享促销价、哪些行的促销马上结束（考虑在这单加量）、
+  哪些正常价的行有**类似商品在促销**（可换着叫）、哪些相关大促不在单里。
+  逐行明细 txt 附件。
+- 类似商品匹配：配置了 `ANTHROPIC_API_KEY`（写在 .env 里，和 TELEGRAM_BOT_TOKEN
+  一样）就用 Claude AI 判断"顾客真的可以换着买"的替代品，明细里带理由；
+  没配就退回关键词匹配（第一个词=商品类型，两边都要一致）。config 里
+  `llm.model` 可换模型，`llm.enabled: false` 可关。
 - 定位：PDA 大单才值得优化；fruta/carne 小单量少，不必看。
 - 只读：不改单子、不点 Guardar/Enviar。
 
