@@ -304,11 +304,11 @@ export function formatOrderAdvice(orderMeta, orderAdvice, extraDeals = [], meta 
 
   if (orderAdvice.similar?.length) {
     lines.push('', '🔁 单里这些是正常价，但有类似商品在促销，可考虑换着叫：');
-    for (const s of orderAdvice.similar.slice(0, 6)) {
+    for (const s of orderAdvice.similar.slice(0, 4)) {
       lines.push(`· 单里 ${s.line.nombre}（${s.line.code}）`);
       lines.push(`  ↳ 促销 ${s.promo.name}（${s.promo.code}）${fmtEur(s.promo.pvd)}→${fmtEur(s.promo.oferta)}，省 ${Number.isFinite(s.promo.pct) ? s.promo.pct.toFixed(0) : '?'}%${fmtDaysCn(s.promo.daysLeft)}`);
     }
-    if (orderAdvice.similar.length > 6) lines.push(`  …还有 ${orderAdvice.similar.length - 6} 个，见附件`);
+    if (orderAdvice.similar.length > 4) lines.push(`  …还有 ${orderAdvice.similar.length - 4} 个，见附件`);
   }
 
   if (extraDeals.length) {
@@ -357,15 +357,32 @@ export function formatOrderAdviceDetail(orderMeta, orderAdvice, meta = {}) {
   }
 
   if (orderAdvice.noPromo.length) {
+    // Las líneas con sugerencia van en su propio bloque, numeradas y con
+    // línea en blanco entre ellas (el usuario no las distinguía en la
+    // versión compacta); las que no tienen nada parecido, en lista corta.
     const similarByCode = new Map((orderAdvice.similar || []).map((s) => [s.line.code, s]));
-    lines.push('💤 正常价的行（没有促销，仅列出核对）', '──────────────────────');
-    for (const l of orderAdvice.noPromo) {
-      lines.push(`· ${l.nombre || '?'}（${l.code || '无编号'}）× ${l.quantity || '?'}`);
-      const s = similarByCode.get(l.code);
-      if (s) {
+    const withSimilar = orderAdvice.noPromo.filter((l) => similarByCode.has(l.code));
+    const plain = orderAdvice.noPromo.filter((l) => !similarByCode.has(l.code));
+
+    if (withSimilar.length) {
+      lines.push('🔁 正常价、但有类似商品在促销的行', '──────────────────────', '');
+      let i = 0;
+      for (const l of withSimilar) {
+        i += 1;
+        const s = similarByCode.get(l.code);
         const pct = Number.isFinite(s.promo.pct) ? `省 ${s.promo.pct.toFixed(0)}%` : '省 ?%';
         const days = s.promo.daysLeft == null ? '' : (s.promo.daysLeft <= 0 ? '，今天最后一天' : `，还剩 ${s.promo.daysLeft} 天`);
-        lines.push(`  ↳ 类似促销：${s.promo.name}（${s.promo.code}）${fmtEur(s.promo.pvd)}→${fmtEur(s.promo.oferta)}（${pct}${days}）`);
+        lines.push(`${i}. ${l.nombre || '?'}（${l.code || '无编号'}）× ${l.quantity || '?'}`);
+        lines.push(`   ↳ 类似促销：${s.promo.name}（${s.promo.code}）`);
+        lines.push(`     ${fmtEur(s.promo.pvd)} → ${fmtEur(s.promo.oferta)}（${pct}${days}）`);
+        lines.push('');
+      }
+    }
+
+    if (plain.length) {
+      lines.push('💤 正常价、也没找到类似促销的行（仅列出核对）', '──────────────────────');
+      for (const l of plain) {
+        lines.push(`· ${l.nombre || '?'}（${l.code || '无编号'}）× ${l.quantity || '?'}`);
       }
     }
   }
