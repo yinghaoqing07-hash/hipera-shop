@@ -237,9 +237,12 @@ export function buildOrderAdvice(orderItems, promoItems, referenceDate = new Dat
 // ---------- productos PARECIDOS en oferta ----------
 // La línea del pedido no tiene promoción con SU código, pero puede haber un
 // producto similar (otra marca/formato) en oferta. Comparación por palabras
-// del nombre: se normalizan acentos, se tiran preposiciones/unidades, y se
-// exige que coincida la PRIMERA palabra (el tipo de producto: "GALLETAS",
-// "ACEITE"…) o al menos dos palabras. Solo ofertas con ahorro ≥10%.
+// del nombre: se normalizan acentos y se tiran preposiciones/unidades. La
+// PRIMERA palabra de ambos nombres tiene que ser LA MISMA — en los nombres
+// de Unide la primera palabra es el tipo de producto ("QUESO", "PAN",
+// "CERVEZA"…), y exigirla en los dos lados evita falsos amigos como
+// PIZZA REFRIGERADA ↔ SNACK PATATA PRINGLES PIZZA (patatas con sabor a
+// pizza, no pizza). Solo ofertas con ahorro ≥10%.
 const STOP_TOKENS = new Set([
   'DE', 'LA', 'EL', 'DEL', 'CON', 'SIN', 'PARA', 'LOS', 'LAS', 'EN', 'AL', 'POR',
   'GR', 'GRS', 'KG', 'KGS', 'ML', 'CL', 'LT', 'L', 'UD', 'UDS', 'UN', 'PACK',
@@ -266,12 +269,12 @@ export function findSimilarPromos(noPromoLines, promoByCode, excludeCodes = new 
     const first = tokens[0];
     let best = null;
     for (const cand of promos) {
+      // El tipo de producto (primera palabra) tiene que coincidir en los
+      // DOS nombres; que la primera palabra de uno aparezca por el medio
+      // del otro no vale (PIZZA ↔ patatas sabor pizza).
+      if (cand.tokens[0] !== first) continue;
       const shared = tokens.filter((t) => cand.tokens.includes(t));
-      if (!shared.length) continue;
-      // Coincidir solo en palabras sueltas de marca da falsos positivos:
-      // pedimos el tipo de producto (primera palabra) o dos palabras.
-      if (!shared.includes(first) && shared.length < 2) continue;
-      const score = shared.length * 100 + (shared.includes(first) ? 50 : 0) + (cand.promo.pct || 0);
+      const score = shared.length * 100 + (cand.promo.pct || 0);
       if (!best || score > best.score) best = { promo: cand.promo, shared, score };
     }
     if (best) out.push({ line, promo: best.promo, shared: best.shared });
