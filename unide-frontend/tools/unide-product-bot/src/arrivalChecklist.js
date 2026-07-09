@@ -162,13 +162,78 @@ function formatEuro(n) {
 
 // --- impresión --------------------------------------------------------
 
-// Imprime texto en la impresora del PC (Windows): se escribe a un archivo
-// temporal UTF-8 con BOM y se manda con Out-Printer (impresora
-// predeterminada, o la de config.arrival.printerName). Antes se comprueba
-// si la impresora está APAGADA/desconectada (WorkOffline): el trabajo se
-// encola igual —Windows lo imprime solo al encenderla—, pero se devuelve
-// queuedOffline=true para avisar por Telegram de que hay que encenderla.
-// En otros sistemas se omite con aviso.
+// Script de PowerShell que imprime el texto con System.Drawing.Printing
+// (PrintDocument) en vez de Out-Printer. Motivo: Out-Printer no deja tocar
+// ni la fuente ni los márgenes — en A4 dejaba media página en blanco y
+// partía las líneas de más de ~85 caracteres. Aquí los márgenes se fijan a
+// 0,3" y el tamaño de la fuente (Courier New) se calcula para que la línea
+// MÁS LARGA ocupe justo el ancho útil del papel: la tabla llena la hoja.
+// Si PrintDocument falla por lo que sea, cae a Out-Printer como antes.
+const PRINT_PS1 = String.raw`param(
+  [Parameter(Mandatory=$true)][string]$TextPath,
+  [string]$PrinterName = '',
+  [double]$MaxFontSize = 13
+)
+$ErrorActionPreference = 'Stop'
+
+# Estado de la impresora (apagada => el trabajo se encola igual)
+$filter = if ($PrinterName) { "Name='" + $PrinterName.Replace("'", "''") + "'" } else { 'Default=TRUE' }
+try {
+  $p = Get-CimInstance Win32_Printer -Filter $filter | Select-Object -First 1
+  if ($p -and $p.WorkOffline) { Write-Output 'PRINTER_OFFLINE' } else { Write-Output 'PRINTER_ONLINE' }
+} catch { Write-Output 'PRINTER_ONLINE' }
+
+try {
+  Add-Type -AssemblyName System.Drawing
+  $script:lines = [System.IO.File]::ReadAllLines($TextPath)
+  $doc = New-Object System.Drawing.Printing.PrintDocument
+  if ($PrinterName) { $doc.PrinterSettings.PrinterName = $PrinterName }
+  if (-not $doc.PrinterSettings.IsValid) { throw "Impresora no valida: '$PrinterName'" }
+  $doc.DocumentName = 'Lista de llegada'
+  # Margenes en centesimas de pulgada: 0,3" lados / 0,35" arriba y abajo
+  $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(30, 30, 35, 35)
+
+  $script:format = [System.Drawing.StringFormat]::GenericTypographic
+  $script:font = $null
+  $script:idx = 0
+  $doc.add_PrintPage({
+    param($sender, $e)
+    if (-not $script:font) {
+      # La fuente mas grande con la que la linea mas larga cabe en el ancho util
+      $longest = ' '
+      foreach ($l in $script:lines) { if ($l.Length -gt $longest.Length) { $longest = $l } }
+      $trial = New-Object System.Drawing.Font('Courier New', 10)
+      $w = $e.Graphics.MeasureString($longest, $trial, [int]::MaxValue, $script:format).Width
+      $trial.Dispose()
+      $size = [Math]::Floor(10 * $e.MarginBounds.Width / $w * 4) / 4
+      if ($size -gt $MaxFontSize) { $size = $MaxFontSize }
+      if ($size -lt 6) { $size = 6 }
+      $script:font = New-Object System.Drawing.Font('Courier New', $size)
+    }
+    $lh = $script:font.GetHeight($e.Graphics)
+    $y = [double]$e.MarginBounds.Top
+    while ($script:idx -lt $script:lines.Count -and ($y + $lh) -le $e.MarginBounds.Bottom) {
+      $e.Graphics.DrawString($script:lines[$script:idx], $script:font, [System.Drawing.Brushes]::Black, $e.MarginBounds.Left, $y, $script:format)
+      $y += $lh
+      $script:idx++
+    }
+    $e.HasMorePages = ($script:idx -lt $script:lines.Count)
+  })
+  $doc.Print()
+  Write-Output 'PRINT_SENT'
+} catch {
+  # Respaldo: el camino viejo. Peor presentacion, pero sale papel.
+  Write-Output ("PRINT_FALLBACK " + $_.Exception.Message)
+  if ($PrinterName) { Get-Content -LiteralPath $TextPath -Encoding UTF8 | Out-Printer -Name $PrinterName }
+  else { Get-Content -LiteralPath $TextPath -Encoding UTF8 | Out-Printer }
+}
+`;
+
+// Imprime texto en la impresora del PC (Windows) con el script de arriba
+// (impresora predeterminada, o la de config.arrival.printerName). Se
+// comprueba si la impresora está APAGADA (WorkOffline): el trabajo se
+// encola igual —Windows lo imprime al encenderla—, pero se devuelve
+// queuedOffline=true para avisar por Telegram. En otros sistemas se omite.
 export function printText(config, text, logger) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
@@ -181,19 +246,13 @@ export function printText(config, text, logger) {
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `llegada-${Date.now()}.txt`);
       fs.writeFileSync(file, '\uFEFF' + text, 'utf8'); // BOM explícito: PowerShell lee bien UTF-8
+      const scriptFile = path.join(dir, 'print-page.ps1');
+      fs.writeFileSync(scriptFile, '\uFEFF' + PRINT_PS1, 'utf8'); // BOM: PS 5.1 exige BOM para tratar el .ps1 como UTF-8
       const printerName = String(config.arrival?.printerName || '').trim();
-      const psName = printerName.replace(/'/g, "''").replace(/"/g, '');
-      const nameArg = printerName ? ` -Name '${psName}'` : '';
-      const getPrinter = printerName
-        ? `Get-CimInstance Win32_Printer -Filter "Name='${psName}'"`
-        : 'Get-CimInstance Win32_Printer -Filter "Default=TRUE"';
-      // Primero el estado (marcador en stdout), después la impresión.
-      const command = [
-        `$p = ${getPrinter} | Select-Object -First 1`,
-        "if ($p -and $p.WorkOffline) { Write-Output 'PRINTER_OFFLINE' } else { Write-Output 'PRINTER_ONLINE' }",
-        `Get-Content -LiteralPath '${file.replace(/'/g, "''")}' -Encoding UTF8 | Out-Printer${nameArg}`
-      ].join('; ');
-      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true });
+      const maxFont = Number(config.arrival?.printMaxFontSize) || 13;
+      const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, '-TextPath', file, '-MaxFontSize', String(maxFont)];
+      if (printerName) args.push('-PrinterName', printerName);
+      const child = spawn('powershell.exe', args, { windowsHide: true });
       let stderr = '';
       let stdout = '';
       child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -201,6 +260,7 @@ export function printText(config, text, logger) {
       child.on('error', (error) => resolve({ ok: false, error: error.message }));
       child.on('close', (code) => {
         const queuedOffline = /PRINTER_OFFLINE/.test(stdout);
+        if (/PRINT_FALLBACK/.test(stdout)) logger?.warn('printdocument fallo, se uso Out-Printer', { detail: stdout.trim().slice(0, 300) });
         if (code === 0) resolve({ ok: true, queuedOffline });
         else resolve({ ok: false, queuedOffline, error: stderr.trim() || `powershell salió con código ${code}` });
       });
