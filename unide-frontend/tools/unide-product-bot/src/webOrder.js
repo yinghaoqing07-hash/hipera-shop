@@ -600,22 +600,35 @@ export async function fetchOrderLinesByName(config, nameQuery, logger) {
     const rows = await waitForListRows(page, timeout);
     if (!rows.length) return { ok: false, error: 'Pedidos 列表是空的' };
     const q = String(nameQuery || '').trim().toLowerCase();
-    const candidates = rows.filter((r) => (q ? r.nombre.toLowerCase().includes(q) : /pda/i.test(r.nombre)));
+    // Un número a secas se interpreta como el "Nro." del pedido PDA
+    // (p. ej. /ahorro_pedido 153 → "Pedido importado desde PDA Nro. 153"),
+    // para poder elegir el pedido cuando hay varios PDA seguidos.
+    const asNumber = /^\d+$/.test(q) ? new RegExp(`(^|\\D)${q}(\\D|$)`) : null;
+    const candidates = rows.filter((r) => {
+      if (asNumber) return asNumber.test(r.nombre);
+      return q ? r.nombre.toLowerCase().includes(q) : /pda/i.test(r.nombre);
+    });
     if (!candidates.length) {
       return {
         ok: false,
-        error: q ? `没找到名字包含「${nameQuery}」的单子` : '没找到 PDA 单（名字里带 PDA 的）',
+        error: q ? `没找到${asNumber ? `编号 ${q}` : `名字包含「${nameQuery}」`}的单子` : '没找到 PDA 单（名字里带 PDA 的）',
         names: rows.slice(0, 10).map((r) => r.nombre)
       };
     }
     candidates.sort((a, b) => String(b.fechaIso).localeCompare(String(a.fechaIso)));
     const target = candidates[0];
+    // Otros pedidos PDA de la lista (sin el elegido), para que el bot pueda
+    // decir "también están estos" y el usuario elija por número.
+    const otherPda = rows
+      .filter((r) => /pda/i.test(r.nombre) && r !== target)
+      .map((r) => ({ nombre: r.nombre, fecha: r.fechaIso, estado: r.estado }))
+      .slice(0, 6);
     const openedDetail = await openOrderDetailByRow(page, target, timeout);
     if (!openedDetail) return { ok: false, error: `打不开单子「${target.nombre}」` };
     await sleep(Number(w.formRenderMs) || 2800);
     const items = await scrapeAllOrderLines(page, config);
     logger?.info('order lines fetched', { nombre: target.nombre, lines: items.length });
-    return { ok: true, orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items };
+    return { ok: true, orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items, otherPda };
   } catch (error) {
     logger?.error('fetch order lines failed', { error: error.message });
     return { ok: false, error: error.message };

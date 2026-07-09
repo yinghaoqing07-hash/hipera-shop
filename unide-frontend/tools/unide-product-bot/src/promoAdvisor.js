@@ -229,7 +229,55 @@ export function buildOrderAdvice(orderItems, promoItems, referenceDate = new Dat
   }
   onPromo.sort((a, b) => (b.promo.pct || 0) - (a.promo.pct || 0));
   const endingSoonInOrder = onPromo.filter((l) => l.promo.daysLeft != null && l.promo.daysLeft <= 2);
-  return { onPromo, noPromo, endingSoonInOrder, promoByCode };
+  const inOrderCodes = new Set([...onPromo, ...noPromo].map((l) => l.code).filter(Boolean));
+  const similar = findSimilarPromos(noPromo, promoByCode, inOrderCodes);
+  return { onPromo, noPromo, similar, endingSoonInOrder, promoByCode };
+}
+
+// ---------- productos PARECIDOS en oferta ----------
+// La línea del pedido no tiene promoción con SU código, pero puede haber un
+// producto similar (otra marca/formato) en oferta. Comparación por palabras
+// del nombre: se normalizan acentos, se tiran preposiciones/unidades, y se
+// exige que coincida la PRIMERA palabra (el tipo de producto: "GALLETAS",
+// "ACEITE"…) o al menos dos palabras. Solo ofertas con ahorro ≥10%.
+const STOP_TOKENS = new Set([
+  'DE', 'LA', 'EL', 'DEL', 'CON', 'SIN', 'PARA', 'LOS', 'LAS', 'EN', 'AL', 'POR',
+  'GR', 'GRS', 'KG', 'KGS', 'ML', 'CL', 'LT', 'L', 'UD', 'UDS', 'UN', 'PACK',
+  'CAJA', 'BOLSA', 'BOTE', 'LATA', 'BRIK', 'GRANEL', 'UNIDE', 'GENERICA', 'GENERICO'
+]);
+
+function nameTokens(name) {
+  return String(name || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .split(/[^A-Z0-9]+/)
+    .filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !STOP_TOKENS.has(t));
+}
+
+export function findSimilarPromos(noPromoLines, promoByCode, excludeCodes = new Set(), minPct = 10) {
+  const promos = [...promoByCode.values()]
+    .filter((p) => Number.isFinite(p.pct) && p.pct >= minPct && !excludeCodes.has(String(p.code || '').replace(/[^\d]/g, '')))
+    .map((p) => ({ promo: p, tokens: nameTokens(p.name) }))
+    .filter((p) => p.tokens.length);
+  const out = [];
+  for (const line of noPromoLines || []) {
+    const tokens = nameTokens(line.nombre);
+    if (!tokens.length) continue;
+    const first = tokens[0];
+    let best = null;
+    for (const cand of promos) {
+      const shared = tokens.filter((t) => cand.tokens.includes(t));
+      if (!shared.length) continue;
+      // Coincidir solo en palabras sueltas de marca da falsos positivos:
+      // pedimos el tipo de producto (primera palabra) o dos palabras.
+      if (!shared.includes(first) && shared.length < 2) continue;
+      const score = shared.length * 100 + (shared.includes(first) ? 50 : 0) + (cand.promo.pct || 0);
+      if (!best || score > best.score) best = { promo: cand.promo, shared, score };
+    }
+    if (best) out.push({ line, promo: best.promo, shared: best.shared });
+  }
+  out.sort((a, b) => (b.promo.pct || 0) - (a.promo.pct || 0));
+  return out;
 }
 
 export function formatOrderAdvice(orderMeta, orderAdvice, extraDeals = [], meta = {}) {
@@ -252,6 +300,15 @@ export function formatOrderAdvice(orderMeta, orderAdvice, extraDeals = [], meta 
     for (const l of best) {
       lines.push(`· ${l.nombre || l.promo.name}（${l.code}）×${l.quantity || '?'} 箱 — ${fmtEur(l.promo.pvd)}→${fmtEur(l.promo.oferta)}，省 ${l.promo.pct.toFixed(0)}%${fmtDaysCn(l.promo.daysLeft)}`);
     }
+  }
+
+  if (orderAdvice.similar?.length) {
+    lines.push('', '🔁 单里这些是正常价，但有类似商品在促销，可考虑换着叫：');
+    for (const s of orderAdvice.similar.slice(0, 6)) {
+      lines.push(`· 单里 ${s.line.nombre}（${s.line.code}）`);
+      lines.push(`  ↳ 促销 ${s.promo.name}（${s.promo.code}）${fmtEur(s.promo.pvd)}→${fmtEur(s.promo.oferta)}，省 ${Number.isFinite(s.promo.pct) ? s.promo.pct.toFixed(0) : '?'}%${fmtDaysCn(s.promo.daysLeft)}`);
+    }
+    if (orderAdvice.similar.length > 6) lines.push(`  …还有 ${orderAdvice.similar.length - 6} 个，见附件`);
   }
 
   if (extraDeals.length) {
@@ -300,9 +357,16 @@ export function formatOrderAdviceDetail(orderMeta, orderAdvice, meta = {}) {
   }
 
   if (orderAdvice.noPromo.length) {
+    const similarByCode = new Map((orderAdvice.similar || []).map((s) => [s.line.code, s]));
     lines.push('💤 正常价的行（没有促销，仅列出核对）', '──────────────────────');
     for (const l of orderAdvice.noPromo) {
       lines.push(`· ${l.nombre || '?'}（${l.code || '无编号'}）× ${l.quantity || '?'}`);
+      const s = similarByCode.get(l.code);
+      if (s) {
+        const pct = Number.isFinite(s.promo.pct) ? `省 ${s.promo.pct.toFixed(0)}%` : '省 ?%';
+        const days = s.promo.daysLeft == null ? '' : (s.promo.daysLeft <= 0 ? '，今天最后一天' : `，还剩 ${s.promo.daysLeft} 天`);
+        lines.push(`  ↳ 类似促销：${s.promo.name}（${s.promo.code}）${fmtEur(s.promo.pvd)}→${fmtEur(s.promo.oferta)}（${pct}${days}）`);
+      }
     }
   }
   return lines.join('\n');
