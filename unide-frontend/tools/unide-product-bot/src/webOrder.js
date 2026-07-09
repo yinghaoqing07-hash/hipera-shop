@@ -566,6 +566,12 @@ async function scrapeOrderLines(page) {
       if (idxCodigo === -1) continue;
       const idxArticulo = headers.findIndex((h) => /^art[ií]culo$/i.test(h));
       const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+      // Columnas extra para la lista de comprobación imprimible; si el grid
+      // no las tiene quedan '' y todo lo demás sigue igual.
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      const idxPvd = headers.findIndex((h) => /^pvd\b/i.test(h));
+      const idxOferta = headers.findIndex((h) => /^oferta\b/i.test(h));
+      const idxTotal = headers.findIndex((h) => /^total\b/i.test(h));
       const out = [];
       for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
         const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
@@ -577,7 +583,11 @@ async function scrapeOrderLines(page) {
         out.push({
           code,
           nombre,
-          quantity: idxCajas >= 0 ? (cells[idxCajas] || '') : ''
+          quantity: idxCajas >= 0 ? (cells[idxCajas] || '') : '',
+          central: idxCentral >= 0 ? (cells[idxCentral] || '') : '',
+          pvd: idxPvd >= 0 ? (cells[idxPvd] || '') : '',
+          oferta: idxOferta >= 0 ? (cells[idxOferta] || '') : '',
+          total: idxTotal >= 0 ? (cells[idxTotal] || '') : ''
         });
       }
       return out;
