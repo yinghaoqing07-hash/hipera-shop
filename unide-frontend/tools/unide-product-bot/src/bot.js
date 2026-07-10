@@ -45,6 +45,49 @@ if (process.argv.includes('--help')) { console.log('Usage: node src/bot.js --con
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegram = new TelegramClient(token);
+
+// --- transcripción de la conversación (para el chat del panel) -----------
+// El bot es el punto de paso de TODOS los mensajes: lo que llega de
+// Telegram, lo que se teclea en el panel y lo que él responde. Se guarda
+// una transcripción (últimos 300) en logs/panel-chat.json para que el chat
+// del panel y el de Telegram cuenten la misma historia, reinicios incluidos.
+const CHAT_LOG_FILE = () => path.resolve(config.logsDir || '.', 'panel-chat.json');
+let chatLog = [];
+let chatSeq = 0;
+try {
+  const saved = JSON.parse(fs.readFileSync(CHAT_LOG_FILE(), 'utf8'));
+  if (Array.isArray(saved.messages)) { chatLog = saved.messages; chatSeq = Number(saved.seq) || chatLog.length; }
+} catch { /* primera vez */ }
+let chatSaveTimer = null;
+function recordChat(from, text) {
+  const clean = String(text ?? '').trim();
+  if (!clean) return;
+  chatSeq += 1;
+  chatLog.push({ seq: chatSeq, at: new Date().toISOString(), from, text: clean.slice(0, 4000) });
+  if (chatLog.length > 300) chatLog = chatLog.slice(-300);
+  clearTimeout(chatSaveTimer);
+  chatSaveTimer = setTimeout(() => {
+    try { fs.writeFileSync(CHAT_LOG_FILE(), JSON.stringify({ seq: chatSeq, messages: chatLog })); }
+    catch (error) { logger.warn('chat log save failed', { error: error.message }); }
+  }, 1500);
+}
+// Envolver los envíos para transcribir TODO lo que el bot dice. Un envío
+// con __noLog en options no se transcribe (p. ej. el eco "🖥" del panel).
+for (const method of ['sendMessage', 'sendPhoto', 'sendDocument']) {
+  const original = telegram[method].bind(telegram);
+  telegram[method] = async (chatId, arg1, arg2, options) => {
+    if (method === 'sendMessage') {
+      const opts = arg2 || {};
+      const { __noLog, ...rest } = opts;
+      if (!__noLog) recordChat('bot', arg1);
+      return original(chatId, arg1, rest);
+    }
+    // sendPhoto / sendDocument: (chatId, filePath, caption, options)
+    const caption = arg2 || '';
+    recordChat('bot', `${method === 'sendPhoto' ? '🖼' : '📎'} ${path.basename(String(arg1))}${caption ? ` — ${caption}` : ''}`);
+    return original(chatId, arg1, caption, options);
+  };
+}
 const orderReminderScheduler = new OrderReminderScheduler(config, logger);
 const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
 const autoAdvisor = new AutoAdvisorScheduler(config, logger);
@@ -88,6 +131,7 @@ async function handleUpdate(update) {
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   notePanelActivity(text);
+  recordChat(update.__panel ? 'panel' : 'user', text);
   if (text === '/start' || text === '/help' || /^\/(comandos|commands|menu)\b/i.test(text)) { await telegram.sendMessage(chatId, formatCommandList()); return; }
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
@@ -1552,7 +1596,14 @@ if (config.panel?.enabled !== false) {
     dispatch: async (cmd) => {
       const ids = arrivalChatIds();
       if (!ids.length) throw new Error('sin chatIds configurados para el panel');
-      await handleUpdate({ message: { chat: { id: ids[0] }, from: { id: ids[0] }, text: String(cmd) } });
+      // Eco al chat de Telegram para que el móvil también vea lo que se
+      // pidió desde el panel (sin transcribirlo dos veces).
+      try { await telegram.sendMessage(ids[0], `🖥 ${String(cmd)}`, { __noLog: true }); } catch { /* sin red */ }
+      await handleUpdate({ __panel: true, message: { chat: { id: ids[0] }, from: { id: ids[0] }, text: String(cmd) } });
+    },
+    chat: (sinceSeq) => {
+      const since = Number(sinceSeq) || 0;
+      return { seq: chatSeq, messages: chatLog.filter((m) => m.seq > since).slice(-100) };
     },
     status: async () => {
       const latest = findLatestPromotionsCsv(config);

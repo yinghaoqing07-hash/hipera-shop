@@ -24,6 +24,12 @@ export function startPanel(config, logger, hooks) {
         res.end(JSON.stringify(status));
         return;
       }
+      if (req.method === 'GET' && req.url.startsWith('/chat')) {
+        const since = new URL(req.url, 'http://x').searchParams.get('since') || '0';
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(hooks.chat ? hooks.chat(since) : { seq: 0, messages: [] }));
+        return;
+      }
       if (req.method === 'GET' && req.url === '/comandos') {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         res.end(hooks.commandList());
@@ -124,6 +130,23 @@ function renderPage() {
   .tarjeta .dato { font-size: 14px; color: #93a3b1; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #3d4a56; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  #charla {
+    width: min(680px, 92vw); max-height: 34vh; overflow-y: auto;
+    margin-bottom: 26px; display: none; scrollbar-width: thin;
+    scrollbar-color: rgba(125,211,252,.2) transparent;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
+  }
+  #charla.con { display: block; }
+  .msg { display: flex; margin: 7px 0; }
+  .msg.mia { justify-content: flex-end; }
+  .burbuja {
+    max-width: 80%; padding: 8px 14px; border-radius: 14px;
+    font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    border: 1px solid rgba(200,211,220,.12); color: #a7b4c1;
+  }
+  .mia .burbuja { border-color: rgba(56,189,248,.4); color: #d5ecf8; border-bottom-right-radius: 4px; }
+  .msg:not(.mia) .burbuja { border-bottom-left-radius: 4px; }
+  .burbuja .meta { display: block; font-size: 10.5px; color: #3d4a56; letter-spacing: .1em; margin-top: 5px; }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
@@ -141,6 +164,7 @@ function renderPage() {
   <div id="reloj">--:--</div>
   <div id="fecha">&nbsp;</div>
   <div id="saludo">需要我做什么</div>
+  <div id="charla"></div>
   <div id="linea">
     <input id="libre" placeholder="打印今天的清单 · 看看153划不划算 · 香蕉改成2,99 …" autofocus>
   </div>
@@ -173,10 +197,45 @@ const libre = document.getElementById('libre');
 libre.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && libre.value.trim()) { run(libre.value.trim()); libre.value = ''; }
 });
+
+// --- chat sincronizado con Telegram: el bot guarda la transcripción y el
+// panel la va pidiendo (solo lo nuevo, por seq). Lo tecleado aquí llega a
+// Telegram como eco "🖥 …", y lo del móvil aparece aquí solo.
+let chatSeq = 0;
+async function pollChat() {
+  try {
+    const r = await (await fetch('/chat?since=' + chatSeq)).json();
+    if (r.messages && r.messages.length) {
+      const caja = document.getElementById('charla');
+      const pegado = caja.scrollHeight - caja.scrollTop - caja.clientHeight < 60;
+      for (const m of r.messages) {
+        chatSeq = Math.max(chatSeq, m.seq);
+        const fila = document.createElement('div');
+        fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia');
+        const b = document.createElement('div');
+        b.className = 'burbuja';
+        b.textContent = (m.from === 'panel' ? '🖥 ' : '') + m.text;
+        const meta = document.createElement('span');
+        meta.className = 'meta';
+        const t = new Date(m.at);
+        meta.textContent = (m.from === 'bot' ? 'JARVIS' : m.from === 'panel' ? '面板' : '你') + ' · ' + String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+        b.appendChild(meta);
+        fila.appendChild(b);
+        caja.appendChild(fila);
+      }
+      while (caja.children.length > 120) caja.removeChild(caja.firstChild);
+      caja.classList.add('con');
+      if (pegado) caja.scrollTop = caja.scrollHeight;
+    }
+  } catch { /* bot apagado: el punto rojo ya lo dice */ }
+}
+pollChat();
+setInterval(pollChat, 2500);
 async function run(cmd) {
   try {
     const r = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd }) });
-    aviso(r.ok ? '已收到 · 结果在 TELEGRAM' : '发送失败');
+    aviso(r.ok ? '已收到' : '发送失败');
+    setTimeout(pollChat, 350);
   } catch { aviso('连不上 BOT'); }
 }
 function aviso(txt) {
