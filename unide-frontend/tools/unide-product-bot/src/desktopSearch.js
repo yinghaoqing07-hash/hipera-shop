@@ -23,6 +23,13 @@ export async function applyPriceDesktop(plan, config, logger) {
   return runDesktopAction('priceApply', 'price', plan, config, logger);
 }
 
+// Marca/desmarca el checkbox Bloq.Venta del artículo YA cargado en pantalla
+// y guarda (Ctrl+S). El bot solo llama cuando el estado actual difiere del
+// pedido, así que el paso uiaToggleIf siempre debe alternar.
+export async function applyBloqDesktop(codigo, config, logger) {
+  return runDesktopAction('bloqApply', codigo, { toggleBloqVenta: true }, config, logger);
+}
+
 export async function applyOrderDesktop(draft, config, logger) {
   return runDesktopAction('orderApply', draft.orderName, draft, config, logger, { timeoutMs: 120000 });
 }

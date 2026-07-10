@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "orderApply", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "bloqApply", "orderApply", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -539,6 +539,12 @@ function Get-Steps($Config, [string]$ActionMode) {
   if ($ActionMode -eq "clear") { $steps = @($Config.desktop.clearSteps) }
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
   elseif ($ActionMode -eq "priceApply") { $steps = @($Config.desktop.priceApplySteps) }
+  elseif ($ActionMode -eq "bloqApply") {
+    $steps = @($Config.desktop.bloqApplySteps)
+    if ($steps.Count -eq 0) {
+      throw "bloqApplySteps sin configurar en config.local.json: copia la plantilla de config.example.json (marcar/desmarcar Bloq.Venta + Ctrl+S)."
+    }
+  }
   elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
   elseif ($ActionMode -eq "uiaDump") {
     $steps = @([pscustomobject]@{ type = "focus" }, [pscustomobject]@{ type = "uiaDump" })

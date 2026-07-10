@@ -9,7 +9,7 @@ import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { llmConfigured, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
+import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors } from './webOrder.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -90,6 +90,7 @@ async function handleUpdate(update) {
   if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
   if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
+  if (/^\/bloq(?:_venta)?\b/i.test(text)) { await handleBloqVenta(chatId, text); return; }
   if (/^\/uia_dump\b/i.test(text)) { await handleUiaDump(chatId); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
@@ -134,6 +135,7 @@ function formatCommandList() {
     '/precio_fruta platano 2,99 — 改一个价（会先让你确认）',
     '/precios_fruta 加多行「名字 价格」— 批量改',
     '/fruta_add — 教我一个新的水果编号',
+    '/bloq platano off — 取消/勾选 Bloq.Venta（off=恢复可卖，on=停卖；其他商品用编号）',
     '',
     '【叫货】',
     '/pedido — 今天的叫货提醒（也可 /pedido carne、/pedido fruta、/pedido pda）',
@@ -204,6 +206,11 @@ async function handleFreeText(chatId, text) {
       await say('/carne');
       await startTally(chatId, 'carne');
       return;
+    case 'bloq_venta':
+      if (!arg) { await telegram.sendMessage(chatId, '要动哪个商品的 Bloq.Venta？发我：/bloq 名字或编号 off（恢复可卖）/ on（停卖）'); return; }
+      await say(`/bloq ${arg}`);
+      await handleBloqVenta(chatId, `/bloq ${arg}`);
+      return;
     case 'articulo': {
       if (!arg) { await telegram.sendMessage(chatId, '要查哪个商品？发我编号或 EAN。'); return; }
       const reparsed = parseProductMessage(`/articulo ${arg}`);
@@ -251,6 +258,7 @@ async function handleCallback(callback) {
   if (data.startsWith('order:')) { await telegram.answerCallbackQuery(callback.id, '叫货助手'); await telegram.sendMessage(chatId, formatOrderResponse(data.slice(6), new Date(), config), makeOrderButtons()); return; }
   if (data.startsWith('np:')) { await handleNamePick(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('fpone:')) { await handleFruitPriceOne(chatId, callback.id, data.slice(6)); return; }
+  if (data.startsWith('bvone:')) { await handleBloqVentaOne(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('fpb:')) { await runFruitPriceBatch(chatId, callback.id, data.slice(4)); return; }
   if (data.startsWith('fpstop:')) { await handleFruitBatchStop(chatId, callback.id, data.slice(7)); return; }
   if (data.startsWith('fp:')) { await handleFruitPick(chatId, callback.id, data.slice(3)); return; }
@@ -530,6 +538,91 @@ async function handleFruitPriceOne(chatId, callbackId, id) {
   await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot },
     `✅ 已改：${label} → ${one.priceRaw} €（P.defecto ${result.plan.pDefecto}%）。看截图确认 P.defecto / Bloq.Venta / 保存状态。`);
   await telegram.sendMessage(chatId, LABEL_STEPS.join('\n'));
+}
+
+// /bloq <nombre|codigo> on|off — marcar/desmarcar el checkbox Bloq.Venta de
+// UN artículo en el UnideGes de escritorio. off = desmarcar (el artículo se
+// puede vender); on = marcar (bloquear la venta). Mismo esqueleto que el
+// cambio de precio de fruta: buscar → captura → confirmación → leer con
+// guardas (código en pantalla + registro TIENDA) → alternar SOLO si el
+// estado difiere → Ctrl+S → releer para verificar. El nombre se resuelve por
+// el diccionario de frutas; para cualquier otro artículo, dar el código.
+async function handleBloqVenta(chatId, text) {
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
+  const m = arg.match(/^(.*?)[\s]+(on|off|si|no)$/i);
+  if (!m) {
+    await telegram.sendMessage(chatId, '用法：/bloq 名字或编号 off（取消勾选，恢复可卖）或 on（勾选，停卖）。\n比如：/bloq platano off 或 /bloq 620475 on');
+    return;
+  }
+  const nameOrCode = m[1].trim();
+  const marcar = /^(on|si)$/i.test(m[2]);
+  if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用（desktop.enabled=false）。'); return; }
+  let codigo = '';
+  let label = nameOrCode;
+  if (/^\d{3,}$/.test(nameOrCode)) {
+    codigo = nameOrCode;
+  } else {
+    const resolved = resolveFruitCode(config, storeIndex, supplierIndex, nameOrCode);
+    if (resolved?.codigo) { codigo = String(resolved.codigo); label = resolved.articulo || nameOrCode; }
+  }
+  if (!codigo) {
+    await telegram.sendMessage(chatId, `没认出「${nameOrCode}」。水果可以用名字；其他商品请直接给我 código，比如：/bloq 620475 ${marcar ? 'on' : 'off'}`);
+    return;
+  }
+  await telegram.sendMessage(chatId, `「${label}」→ código ${codigo}，目标：${marcar ? '勾选 Bloq.Venta（停卖）' : '取消 Bloq.Venta（恢复可卖）'}。正在桌面 Artículos 里搜索…`);
+  const item = { codigo, nombre: label };
+  const found = await searchDesktop(item, config, logger, { byCode: true });
+  const id = saveSession({ bloqOne: { codigo, label, marcar } });
+  await sendWithOptionalScreenshot(chatId, found,
+    `核对下截图是不是「${label}」（código ${codigo}）。确认后我会：读状态 → ${marcar ? '勾选' : '取消勾选'} Bloq.Venta → Ctrl+S 保存 → 再读一遍验证。已经是目标状态就什么都不动。`,
+    { reply_markup: { inline_keyboard: [[
+      { text: marcar ? '确认停卖' : '确认恢复可卖', callback_data: `bvone:${id}` },
+      { text: '取消', callback_data: `cancel:${id}` }
+    ]] } });
+}
+
+async function handleBloqVentaOne(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const one = session?.bloqOne;
+  if (!one?.codigo) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); await telegram.sendMessage(chatId, '这条记录已过期，请再发一次 /bloq。'); return; }
+  if (one.running) { await telegram.answerCallbackQuery(callbackId, '正在处理，别重复点'); return; }
+  one.running = true;
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, '正在处理');
+
+  const finish = async (ok, msg, screenshot) => {
+    sessions.delete(id);
+    await sendWithOptionalScreenshot(chatId, { status: screenshot ? 'ok' : 'error', screenshot }, `${ok ? '✅' : '❌'} ${msg}`);
+  };
+  // El artículo ya está en pantalla desde la tarjeta de confirmación.
+  const read = await readPriceDesktop(config, logger);
+  if (read.status !== 'ok') { await finish(false, `读取失败：${read.error || read.reason || '未知'}`, read.screenshot); return; }
+  const values = read.values || {};
+  if ('bancoDatos' in values && !/tienda/i.test(String(values.bancoDatos ?? ''))) {
+    await finish(false, `屏幕上载入的是「${String(values.bancoDatos ?? '').trim() || '未知'}」记录，不是 TIENDA——为安全不动。`, read.screenshot); return;
+  }
+  if ('codigoPantalla' in values) {
+    const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
+    if (!screenCode) { await finish(false, 'Código 框读到空——商品没载入，为安全不动。', read.screenshot); return; }
+    if (screenCode !== String(one.codigo)) { await finish(false, `屏幕上是 código ${screenCode}，不是 ${one.codigo}——为安全不动。`, read.screenshot); return; }
+  }
+  if (!('bloqVentaChecked' in values)) { await finish(false, '读不到 Bloq.Venta 的勾选状态（priceReadSteps 里缺这一步？），为安全不动。', read.screenshot); return; }
+  const current = Boolean(values.bloqVentaChecked);
+  if (current === one.marcar) {
+    await finish(true, `「${one.label}」的 Bloq.Venta 本来就是${one.marcar ? '勾选（停卖）' : '未勾选（可卖）'}状态，什么都不用改。`, read.screenshot); return;
+  }
+  const applied = await applyBloqDesktop(one.codigo, config, logger);
+  if (applied.status !== 'ok') { await finish(false, `写入失败：${applied.error || applied.reason || '未知'}`, applied.screenshot); return; }
+  // Verificación: releer y comprobar que el estado quedó como se pidió.
+  const recheck = await readPriceDesktop(config, logger);
+  const after = recheck.status === 'ok' ? Boolean(recheck.values?.bloqVentaChecked) : null;
+  if (after === one.marcar) {
+    await finish(true, `「${one.label}」Bloq.Venta 已${one.marcar ? '勾选（停卖）' : '取消（恢复可卖）'}并保存。`, recheck.screenshot || applied.screenshot);
+  } else if (after === null) {
+    await finish(true, `已执行${one.marcar ? '勾选' : '取消勾选'}+保存，但复查读取失败（${recheck.error || '未知'}）——看截图确认一下。`, applied.screenshot);
+  } else {
+    await finish(false, `点了勾选框但状态没变（可能保存时弹了必填项报错——Proveedor/Inventariable 为空会存不了）。看截图，必要时手动处理。`, recheck.screenshot || applied.screenshot);
+  }
 }
 
 // /ahorro — estrategia de ahorro a partir del ÚLTIMO CSV de /promociones:
