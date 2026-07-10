@@ -87,6 +87,7 @@ async function handleUpdate(update) {
   const text = message.text.trim();
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
+  notePanelActivity(text);
   if (text === '/start' || text === '/help' || /^\/(comandos|commands|menu)\b/i.test(text)) { await telegram.sendMessage(chatId, formatCommandList()); return; }
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
@@ -1169,6 +1170,7 @@ async function maybeRunAutoAdvisor() {
 
   // 1. Promociones frescas para que /ahorro_pedido no trabaje con datos viejos.
   try {
+    notePanelActivity('⏰ 每日自动任务');
     await telegram.sendMessage(chatId, '⏰ 每日自动任务：先刷新促销数据…');
     const result = await fetchActivePromotions(config, due.dateStr, logger);
     if (result.ok) await telegram.sendMessage(chatId, `促销数据已刷新 ✅\n${formatPromotionsSummary(result, config).split('\n').slice(0, 3).join('\n')}`);
@@ -1511,6 +1513,40 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 // Panel de escritorio (127.0.0.1): botones grandes para las acciones de
 // cada día. Despacha los mismos comandos que Telegram (mismo handleUpdate,
 // mismas confirmaciones); el resultado llega por Telegram.
+// Últimas acciones para la tarjeta "最近动态" del panel: comandos que
+// llegan (Telegram o panel) y tareas automáticas. Solo en memoria.
+const panelActivity = [];
+function notePanelActivity(text) {
+  panelActivity.unshift({ at: new Date().toISOString(), text: String(text).slice(0, 60) });
+  if (panelActivity.length > 8) panelActivity.pop();
+}
+
+// Estadística rápida del CSV de promociones para el panel, cacheada por
+// mtime (el status se pide cada 15 s; parsear 500 filas cada vez sobra).
+let promoStatsCache = { mtime: 0, stats: null };
+function promoStatsForPanel() {
+  const latest = findLatestPromotionsCsv(config);
+  if (!latest) return null;
+  if (promoStatsCache.mtime === latest.mtime) return promoStatsCache.stats;
+  try {
+    const items = parsePromotionsCsv(fs.readFileSync(latest.file, 'utf8'));
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const promos = new Set(items.map((i) => i.promoCode).filter(Boolean));
+    let endingSoon = 0;
+    for (const it of items) {
+      if (!it.hasta) continue;
+      const days = Math.round((it.hasta - today) / 86400000);
+      if (days === 0 || days === 1) endingSoon += 1;
+    }
+    const stats = { promos: promos.size, items: items.length, endingSoon };
+    promoStatsCache = { mtime: latest.mtime, stats };
+    return stats;
+  } catch {
+    return null;
+  }
+}
+
 if (config.panel?.enabled !== false) {
   startPanel(config, logger, {
     dispatch: async (cmd) => {
@@ -1525,13 +1561,18 @@ if (config.panel?.enabled !== false) {
         const days = Math.floor((Date.now() - latest.mtime) / 86400000);
         promoCsv = days <= 0 ? '今天的' : `${days} 天前的`;
       }
+      let arrivingToday = 0;
+      try { arrivingToday = ordersArrivingOn(config, todayString(config)).length; } catch { /* sin historial */ }
       return {
         uptime: humanUptime(process.uptime()),
         promoCsv,
+        promoStats: promoStatsForPanel(),
+        arrivingToday,
         autoRanToday: Boolean(autoAdvisor.state.sent[`auto|${todayString(config)}`]),
         webOrder: Boolean(config.webOrder?.enabled),
         desktop: Boolean(config.desktop?.enabled),
-        llm: llmConfigured(config)
+        llm: llmConfigured(config),
+        activity: panelActivity
       };
     },
     commandList: () => formatCommandList()
