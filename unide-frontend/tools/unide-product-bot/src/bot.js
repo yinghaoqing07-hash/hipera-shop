@@ -83,7 +83,8 @@ async function handleUpdate(update) {
   const text = message.text.trim();
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
-  if (text === '/start' || text === '/help') { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
+  if (text === '/start' || text === '/help' || /^\/(comandos|commands|menu)\b/i.test(text)) { await telegram.sendMessage(chatId, formatCommandList()); return; }
+  if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
   if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
@@ -102,13 +103,52 @@ async function handleUpdate(update) {
     // Texto libre ("帮我打一下152的清单"): si hay LLM configurado, que él
     // decida a qué comando corresponde; si no, la ayuda de siempre.
     if (!text.startsWith('/') && llmConfigured(config)) { await handleFreeText(chatId, text); return; }
-    await telegram.sendMessage(chatId, formatTemplateHelp());
+    await telegram.sendMessage(chatId, formatCommandList());
     return;
   }
   const maxItems = config.telegram.maxItemsPerMessage ?? 5;
   const items = parsed.items.slice(0, maxItems);
   if (parsed.items.length > items.length) await telegram.sendMessage(chatId, `这次先处理前 ${items.length} 个商品，剩下的请分批发。`);
   for (let index = 0; index < items.length; index += 1) await sendProductResult(chatId, items[index], index, items.length);
+}
+
+// Menú completo de comandos (/help, /comandos). Se mantiene A MANO: cuando
+// se añada o cambie un comando, tocar también esta lista.
+function formatCommandList() {
+  return [
+    '📋 我会的所有命令',
+    '',
+    '【对货 / 打印】',
+    '/llegada — 打印今天到货的核对清单',
+    '/llegada 152 153 — 按单号打印指定的单（可多张）',
+    '/llegada carne 0807 — 按名字找单打印',
+    '/llegada 1/7 — 按到货日期打印',
+    '',
+    '【促销 / 省钱】',
+    '/promociones — 去网页抓最新促销（CSV）',
+    '/ahorro — 所有促销的省钱策略',
+    '/ahorro_pedido — 最新 PDA 单逐行对照促销，AI 挑可替换的促销品',
+    '/ahorro_pedido 153 — 指定看哪张单',
+    '',
+    '【果蔬改价（桌面 UnideGes）】',
+    '/precio_fruta platano 2,99 — 改一个价（会先让你确认）',
+    '/precios_fruta 加多行「名字 价格」— 批量改',
+    '/fruta_add — 教我一个新的水果编号',
+    '',
+    '【叫货】',
+    '/pedido — 今天的叫货提醒（也可 /pedido carne、/pedido fruta、/pedido pda）',
+    '/carne — 开始肉类盘点',
+    '/pedido_nuevo — 手动建一张单的草稿',
+    '',
+    '【查商品】',
+    '/articulo 模板 — 查/改一个商品（发 /plantilla 看模板怎么写）',
+    '直接发编号或 EAN 也可以',
+    '',
+    '【其他】',
+    '直接用中文说事也行，比如「帮我打一下152的清单」（需要配好 AI key）',
+    '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
+    '/whoami — 看这个对话的 chat id'
+  ].join('\n');
 }
 
 // Mensajes en lenguaje natural: el LLM los traduce a un comando del bot y
@@ -173,7 +213,7 @@ async function handleFreeText(chatId, text) {
       return;
     }
     case 'ayuda':
-      await telegram.sendMessage(chatId, formatTemplateHelp());
+      await telegram.sendMessage(chatId, formatCommandList());
       return;
     default:
       await telegram.sendMessage(chatId, intent.respuesta || '没太明白你想做什么，可以发 /help 看看我会什么。');
