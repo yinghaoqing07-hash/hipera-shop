@@ -111,6 +111,19 @@ function renderPage() {
   }
   .pill:hover { border-color: rgba(125,211,252,.6); color: #cfe9f7; }
   .pill:active { transform: scale(.97); }
+  #reloj { font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #dbe7ef; line-height: 1; font-variant-numeric: tabular-nums; }
+  #reloj span.seg { font-size: 26px; color: #38bdf8; font-weight: 300; margin-left: 6px; }
+  #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .28em; color: #4a5865; text-transform: uppercase; }
+  #tarjetas {
+    margin-top: 52px; display: grid; gap: 12px; width: min(820px, 94vw);
+    grid-template-columns: 1fr 1fr 1.6fr;
+  }
+  @media (max-width: 700px) { #tarjetas { grid-template-columns: 1fr; } }
+  .tarjeta { border: 1px solid rgba(200,211,220,.09); border-radius: 12px; padding: 14px 16px; min-height: 88px; }
+  .tarjeta .titulo { font-size: 11px; letter-spacing: .25em; color: #3d4a56; margin-bottom: 9px; }
+  .tarjeta .dato { font-size: 14px; color: #93a3b1; line-height: 1.65; }
+  .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
+  .tarjeta .dato .hora { color: #3d4a56; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
@@ -125,6 +138,8 @@ function renderPage() {
   <span id="estado"><span><span id="punto"></span><span id="txtEstado">连接中</span></span></span>
 </header>
 <main>
+  <div id="reloj">--:--</div>
+  <div id="fecha">&nbsp;</div>
   <div id="saludo">需要我做什么</div>
   <div id="linea">
     <input id="libre" placeholder="打印今天的清单 · 看看153划不划算 · 香蕉改成2,99 …" autofocus>
@@ -135,6 +150,21 @@ function renderPage() {
     <button class="pill" onclick="run('/ahorro_pedido')">PDA 省钱分析</button>
     <button class="pill" onclick="run('/pedido')">叫货提醒</button>
     <button class="pill" onclick="run('/carne')">肉类盘点</button>
+    <button class="pill" onclick="run('/ahorro')">总体省钱策略</button>
+  </div>
+  <div id="tarjetas">
+    <div class="tarjeta">
+      <div class="titulo">今日</div>
+      <div class="dato" id="tHoy">—</div>
+    </div>
+    <div class="tarjeta">
+      <div class="titulo">促销</div>
+      <div class="dato" id="tPromo">—</div>
+    </div>
+    <div class="tarjeta ancha">
+      <div class="titulo">最近动态</div>
+      <div class="dato" id="tActividad">—</div>
+    </div>
   </div>
 </main>
 <div id="aviso"></div>
@@ -171,11 +201,42 @@ async function refrescar() {
     if (!s.llm) off.push('AI');
     if (off.length) partes.push('⚠ ' + off.join('/') + '关');
     txt.textContent = partes.join('　·　');
+    pintarTarjetas(s);
   } catch {
     punto.classList.add('rojo');
     txt.textContent = '离线 — 黑窗口开着吗？';
   }
 }
+function tic() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  document.getElementById('reloj').innerHTML = hh + ':' + mm + '<span class="seg">' + ss + '</span>';
+  const dias = ['周日','周一','周二','周三','周四','周五','周六'];
+  document.getElementById('fecha').textContent = d.getFullYear() + ' / ' + String(d.getMonth() + 1).padStart(2, '0') + ' / ' + String(d.getDate()).padStart(2, '0') + '　' + dias[d.getDay()];
+  const h = d.getHours();
+  document.getElementById('saludo').textContent = (h < 6 ? '夜深了' : h < 12 ? '早上好' : h < 20 ? '下午好' : '晚上好') + '，需要我做什么';
+}
+tic();
+setInterval(tic, 1000);
+function pintarTarjetas(s) {
+  document.getElementById('tHoy').innerHTML =
+    '预计到货 <b>' + (s.arrivingToday ?? 0) + '</b> 单<br>晨务 ' + (s.autoRanToday ? '<b>已完成</b>' : '还没跑');
+  if (s.promoStats) {
+    document.getElementById('tPromo').innerHTML =
+      '<b>' + s.promoStats.promos + '</b> 个活动 · <b>' + s.promoStats.items + '</b> 个商品<br>今明到期 <b>' + s.promoStats.endingSoon + '</b> 个' + (s.promoCsv ? '<br>数据：' + s.promoCsv : '');
+  } else {
+    document.getElementById('tPromo').textContent = '还没有促销数据，点「刷新促销」';
+  }
+  const act = (s.activity || []).slice(0, 4).map((a) => {
+    const t = new Date(a.at);
+    const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+    return '<span class="hora">' + hh + '</span>' + escapar(a.text);
+  });
+  document.getElementById('tActividad').innerHTML = act.length ? act.join('<br>') : '还没有动静';
+}
+function escapar(x) { const d = document.createElement('div'); d.textContent = x; return d.innerHTML; }
 refrescar();
 setInterval(refrescar, 15000);
 </script>
