@@ -70,107 +70,110 @@ function renderPage() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>贾维斯 · 店铺面板</title>
+<title>JARVIS</title>
 <style>
-  :root { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
-  body { margin: 0; background: #f4f5f7; color: #1a1d21; }
-  header { background: #1f6f43; color: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-  header h1 { margin: 0; font-size: 20px; }
-  #estado { font-size: 14px; display: flex; gap: 14px; flex-wrap: wrap; }
-  #estado span { background: rgba(255,255,255,.15); border-radius: 999px; padding: 3px 10px; }
-  main { max-width: 860px; margin: 18px auto; padding: 0 16px 40px; }
-  h2 { font-size: 15px; color: #555; margin: 22px 4px 8px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-  button { font-size: 16px; padding: 14px 12px; border: 1px solid #d5d9de; border-radius: 10px; background: #fff; cursor: pointer; text-align: left; }
-  button:hover { border-color: #1f6f43; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
-  button:active { transform: scale(.99); }
-  .fila { display: flex; gap: 8px; }
-  .fila input { flex: 1; font-size: 16px; padding: 12px; border: 1px solid #d5d9de; border-radius: 10px; }
-  .fila button { flex: 0 0 auto; }
-  #aviso { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1a1d21; color: #fff; padding: 10px 18px; border-radius: 10px; opacity: 0; transition: opacity .3s; pointer-events: none; font-size: 15px; }
-  #aviso.visible { opacity: .95; }
-  small.pista { color: #777; display: block; margin: 4px 4px 0; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: #07090c; color: #c8d3dc;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column;
+    background-image: radial-gradient(ellipse 70% 45% at 50% 38%, rgba(56,189,248,.07), transparent 70%);
+  }
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 26px; font-size: 12px; letter-spacing: .18em; color: #4a5865;
+  }
+  #logo { color: #7dd3fc; font-weight: 600; }
+  #estado { display: flex; gap: 18px; align-items: center; }
+  #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
+  #punto.rojo { background: #ef4444; animation: none; }
+  @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  main { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 24px 8vh; }
+  #saludo { font-size: 13px; letter-spacing: .3em; color: #3d4a56; margin-bottom: 26px; text-transform: uppercase; }
+  #linea {
+    width: min(680px, 92vw); display: flex; align-items: center; gap: 14px;
+    border-bottom: 1px solid rgba(125,211,252,.25); padding: 6px 4px 12px;
+    transition: border-color .25s;
+  }
+  #linea:focus-within { border-color: rgba(125,211,252,.75); }
+  #linea::before { content: "›"; color: #38bdf8; font-size: 26px; line-height: 1; }
+  #libre {
+    flex: 1; background: none; border: none; outline: none; color: #e6eef4;
+    font-size: 20px; font-weight: 300; letter-spacing: .02em; caret-color: #38bdf8;
+  }
+  #libre::placeholder { color: #38424d; }
+  #pills { margin-top: 44px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 680px; }
+  .pill {
+    background: none; border: 1px solid rgba(200,211,220,.14); color: #8b98a5;
+    border-radius: 999px; padding: 9px 18px; font-size: 14px; cursor: pointer;
+    transition: all .2s;
+  }
+  .pill:hover { border-color: rgba(125,211,252,.6); color: #cfe9f7; }
+  .pill:active { transform: scale(.97); }
+  #aviso {
+    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
+    color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
+    opacity: 0; transition: opacity .35s; pointer-events: none;
+  }
+  #aviso.visible { opacity: .9; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🤖 贾维斯 · 店铺面板</h1>
-  <div id="estado">加载中…</div>
+  <span id="logo">J A R V I S</span>
+  <span id="estado"><span><span id="punto"></span><span id="txtEstado">连接中</span></span></span>
 </header>
 <main>
-  <h2>🖨 对货清单</h2>
-  <div class="grid">
-    <button onclick="run('/llegada')">打印今天到货的清单</button>
+  <div id="saludo">需要我做什么</div>
+  <div id="linea">
+    <input id="libre" placeholder="打印今天的清单 · 看看153划不划算 · 香蕉改成2,99 …" autofocus>
   </div>
-  <div class="fila" style="margin-top:8px">
-    <input id="llegadaArg" placeholder="单号或名字，比如：152 153 或 carne 0807">
-    <button onclick="runConArg('/llegada','llegadaArg')">按单号打印</button>
+  <div id="pills">
+    <button class="pill" onclick="run('/llegada')">打印今天清单</button>
+    <button class="pill" onclick="run('/promociones')">刷新促销</button>
+    <button class="pill" onclick="run('/ahorro_pedido')">PDA 省钱分析</button>
+    <button class="pill" onclick="run('/pedido')">叫货提醒</button>
+    <button class="pill" onclick="run('/carne')">肉类盘点</button>
   </div>
-
-  <h2>💶 促销 / 省钱</h2>
-  <div class="grid">
-    <button onclick="run('/promociones')">刷新促销数据</button>
-    <button onclick="run('/ahorro_pedido')">最新 PDA 单省钱分析</button>
-    <button onclick="run('/ahorro')">总体省钱策略</button>
-  </div>
-  <div class="fila" style="margin-top:8px">
-    <input id="ahorroArg" placeholder="单号，比如：153">
-    <button onclick="runConArg('/ahorro_pedido','ahorroArg')">指定单号分析</button>
-  </div>
-
-  <h2>📦 叫货</h2>
-  <div class="grid">
-    <button onclick="run('/pedido')">今天的叫货提醒</button>
-    <button onclick="run('/carne')">开始肉类盘点</button>
-  </div>
-
-  <h2>💬 跟它说句话（AI）</h2>
-  <div class="fila">
-    <input id="libre" placeholder="比如：帮我把香蕉的 bloc venta 关了">
-    <button onclick="runLibre()">发送</button>
-  </div>
-  <small class="pista">所有操作的结果都发到 Telegram，去手机上看。改价、停卖这类会动数据的操作照样要在 Telegram 里点确认。</small>
 </main>
 <div id="aviso"></div>
 <script>
+const libre = document.getElementById('libre');
+libre.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && libre.value.trim()) { run(libre.value.trim()); libre.value = ''; }
+});
 async function run(cmd) {
   try {
     const r = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd }) });
-    aviso(r.ok ? '已发送 ✅ 结果去 Telegram 看' : '发送失败');
-  } catch { aviso('发送失败：bot 可能没在运行'); }
-}
-function runConArg(cmd, inputId) {
-  const v = document.getElementById(inputId).value.trim();
-  if (!v) { aviso('先在框里填内容'); return; }
-  run(cmd + ' ' + v);
-  document.getElementById(inputId).value = '';
-}
-function runLibre() {
-  const v = document.getElementById('libre').value.trim();
-  if (!v) { aviso('先写点什么'); return; }
-  run(v);
-  document.getElementById('libre').value = '';
+    aviso(r.ok ? '已收到 · 结果在 TELEGRAM' : '发送失败');
+  } catch { aviso('连不上 BOT'); }
 }
 function aviso(txt) {
   const el = document.getElementById('aviso');
   el.textContent = txt;
   el.classList.add('visible');
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('visible'), 2600);
+  el._t = setTimeout(() => el.classList.remove('visible'), 2400);
 }
 async function refrescar() {
+  const punto = document.getElementById('punto');
+  const txt = document.getElementById('txtEstado');
   try {
     const s = await (await fetch('/status')).json();
-    const partes = [];
-    partes.push('🟢 bot 在线 ' + s.uptime);
-    partes.push('促销数据：' + (s.promoCsv || '还没有'));
-    partes.push('今日自动任务：' + (s.autoRanToday ? '已跑 ✅' : '还没跑'));
-    if (!s.webOrder) partes.push('⚠️ 网页自动化关着');
-    if (!s.desktop) partes.push('⚠️ 桌面自动化关着');
-    if (!s.llm) partes.push('⚠️ AI 没配');
-    document.getElementById('estado').innerHTML = partes.map((p) => '<span>' + p + '</span>').join('');
+    punto.classList.remove('rojo');
+    const partes = ['在线 ' + s.uptime];
+    partes.push('促销 ' + (s.promoCsv || '无'));
+    partes.push(s.autoRanToday ? '晨务 ✓' : '晨务 —');
+    const off = [];
+    if (!s.webOrder) off.push('网页');
+    if (!s.desktop) off.push('桌面');
+    if (!s.llm) off.push('AI');
+    if (off.length) partes.push('⚠ ' + off.join('/') + '关');
+    txt.textContent = partes.join('　·　');
   } catch {
-    document.getElementById('estado').innerHTML = '<span>🔴 连不上 bot（黑窗口开着吗？）</span>';
+    punto.classList.add('rojo');
+    txt.textContent = '离线 — 黑窗口开着吗？';
   }
 }
 refrescar();
