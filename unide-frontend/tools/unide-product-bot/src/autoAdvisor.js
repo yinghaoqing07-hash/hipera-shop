@@ -26,9 +26,14 @@ export class AutoAdvisorScheduler {
     const timezone = this.config.ordering?.timezone || 'Europe/Madrid';
     const parts = zonedParts(now, timezone);
     const runMinutes = parseTimeToMinutes(auto.time || '07:15');
-    const windowMinutes = Number.isFinite(Number(auto.windowMinutes)) ? Number(auto.windowMinutes) : 240;
+    // "time" es la hora MÁS TEMPRANA, no una cita: el PC de la tienda se
+    // enciende cuando se enciende, así que por defecto NO hay límite
+    // superior — la primera vez que el bot esté vivo pasada esa hora, corre
+    // (una vez al día). windowMinutes > 0 lo acota si algún día hiciera falta.
+    const windowMinutes = Number(auto.windowMinutes);
     const nowMinutes = parts.hour * 60 + parts.minute;
-    if (nowMinutes < runMinutes || nowMinutes > runMinutes + windowMinutes) return null;
+    if (nowMinutes < runMinutes) return null;
+    if (Number.isFinite(windowMinutes) && windowMinutes > 0 && nowMinutes > runMinutes + windowMinutes) return null;
     const key = `auto|${parts.date}`;
     if (this.state.sent[key]) return null;
     return { key, dateStr: parts.date };
