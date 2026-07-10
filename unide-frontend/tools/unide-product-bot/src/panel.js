@@ -45,7 +45,12 @@ export function startPanel(config, logger, hooks) {
       if (req.method === 'GET' && req.url.startsWith('/file/')) {
         const filePath = hooks.file ? hooks.file(req.url.slice(6)) : null;
         if (!filePath) { res.writeHead(404); res.end(); return; }
-        res.writeHead(200, { 'content-type': filePath.toLowerCase().endsWith('.jpg') || filePath.toLowerCase().endsWith('.jpeg') ? 'image/jpeg' : 'image/png' });
+        const low = filePath.toLowerCase();
+        const tipo = low.endsWith('.jpg') || low.endsWith('.jpeg') ? 'image/jpeg'
+          : low.endsWith('.png') ? 'image/png'
+          : low.endsWith('.csv') ? 'text/csv; charset=utf-8'
+          : 'text/plain; charset=utf-8';
+        res.writeHead(200, { 'content-type': tipo });
         fs.createReadStream(filePath).pipe(res);
         return;
       }
@@ -201,6 +206,34 @@ function renderPage() {
   }
   #cajon .filaB button:hover { background: rgba(56,189,248,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
+  .chipLeer {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+    background: none; border: 1px solid rgba(200,211,220,.2); color: #8b98a5;
+    border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer; letter-spacing: .08em;
+  }
+  .chipLeer:hover { border-color: rgba(125,211,252,.5); color: #cfe9f7; }
+  #lector {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 94vw);
+    background: rgba(10,14,19,.97); border-left: 1px solid rgba(125,211,252,.18);
+    box-shadow: -18px 0 50px rgba(0,0,0,.45);
+    transform: translateX(102%); transition: transform .28s ease;
+    display: flex; flex-direction: column; z-index: 30;
+  }
+  #lector.abierto { transform: translateX(0); }
+  #lector .cab {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 18px 20px 12px; font-size: 11px; letter-spacing: .2em; color: #4a5865;
+  }
+  #lector .cab b { color: #7dd3fc; font-weight: 600; white-space: nowrap; }
+  #lector .cab span.titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: right; }
+  #lector .cab button { background: none; border: none; color: #4a5865; font-size: 18px; cursor: pointer; padding: 2px 6px; }
+  #lector .cab button:hover { color: #cfe9f7; }
+  #lector pre {
+    flex: 1; overflow: auto; margin: 0; padding: 6px 20px 24px;
+    font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.6;
+    color: #a7b4c1; white-space: pre-wrap; word-break: break-word;
+    scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
+  }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
@@ -245,6 +278,10 @@ function renderPage() {
     </div>
   </div>
 </main>
+<div id="lector">
+  <div class="cab"><b>📄 阅读台</b><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
+  <pre id="lectorTexto"></pre>
+</div>
 <div id="cajon">
   <div class="cab"><span><b>⌨ 操作台</b></span><button onclick="cerrarCajon()" title="关闭">✕</button></div>
   <div class="cuerpo">
@@ -269,8 +306,38 @@ function pintarBurbuja(m) {
   const b = document.createElement('div');
   b.className = 'burbuja';
   const cuerpo = document.createElement('div');
-  cuerpo.textContent = (m.from === 'panel' ? '🖥 ' : '') + m.text;
+  const completo = (m.from === 'panel' ? '🖥 ' : '') + m.text;
+  const esLargo = completo.length > 380 || completo.split('\\n').length > 8;
+  if (esLargo) {
+    // Los informes largos no llenan el chat: recorte + "展开" en el lector.
+    const lineas = completo.split('\\n').slice(0, 4).join('\\n');
+    cuerpo.textContent = (lineas.length > 380 ? lineas.slice(0, 380) : lineas) + ' …';
+  } else {
+    cuerpo.textContent = completo;
+  }
   b.appendChild(cuerpo);
+  if (esLargo) {
+    const chip = document.createElement('span');
+    chip.className = 'chipLeer';
+    chip.textContent = '📄 展开阅读';
+    chip.onclick = () => abrirLector(m.text.split('\\n')[0].slice(0, 40), m.text);
+    b.appendChild(document.createElement('br'));
+    b.appendChild(chip);
+  }
+  if (m.doc) {
+    const chip = document.createElement('span');
+    chip.className = 'chipLeer';
+    chip.textContent = '📄 打开文件';
+    chip.onclick = async () => {
+      try {
+        const r = await fetch('/file/' + m.id);
+        if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
+        abrirLector(m.text.slice(0, 40), await r.text());
+      } catch { aviso('连不上 BOT'); }
+    };
+    b.appendChild(document.createElement('br'));
+    b.appendChild(chip);
+  }
   if (m.photo) {
     const img = document.createElement('img');
     img.src = '/file/' + m.id + '?s=' + m.seq;
@@ -294,6 +361,14 @@ function pintarBurbuja(m) {
   b.appendChild(meta);
   return b;
 }
+// --- lector (cajón derecho para contenido largo) ---------------------------
+function abrirLector(titulo, texto) {
+  document.getElementById('lectorTitulo').textContent = titulo || '';
+  document.getElementById('lectorTexto').textContent = texto || '';
+  document.getElementById('lector').classList.add('abierto');
+}
+function cerrarLector() { document.getElementById('lector').classList.remove('abierto'); }
+
 // --- cajón lateral -------------------------------------------------------
 const datos = new Map();      // id → último estado del mensaje (para re-render)
 const cajonCerrados = new Set(); // teclados que el usuario cerró a mano
