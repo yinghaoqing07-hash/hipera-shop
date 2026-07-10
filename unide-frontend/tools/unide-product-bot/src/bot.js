@@ -48,45 +48,91 @@ const telegram = new TelegramClient(token);
 
 // --- transcripción de la conversación (para el chat del panel) -----------
 // El bot es el punto de paso de TODOS los mensajes: lo que llega de
-// Telegram, lo que se teclea en el panel y lo que él responde. Se guarda
-// una transcripción (últimos 300) en logs/panel-chat.json para que el chat
-// del panel y el de Telegram cuenten la misma historia, reinicios incluidos.
+// Telegram, lo tecleado en el panel y lo que él responde — botones de
+// confirmación y capturas incluidos, para que TODO lo que se puede hacer
+// desde el móvil se pueda hacer también desde el panel. Se guarda una
+// transcripción (últimos 300) en logs/panel-chat.json.
 const CHAT_LOG_FILE = () => path.resolve(config.logsDir || '.', 'panel-chat.json');
 let chatLog = [];
 let chatSeq = 0;
+let chatEntryId = 0;
 try {
   const saved = JSON.parse(fs.readFileSync(CHAT_LOG_FILE(), 'utf8'));
-  if (Array.isArray(saved.messages)) { chatLog = saved.messages; chatSeq = Number(saved.seq) || chatLog.length; }
+  if (Array.isArray(saved.messages)) {
+    chatLog = saved.messages;
+    chatSeq = Number(saved.seq) || chatLog.length;
+    chatEntryId = Number(saved.entryId) || chatLog.length;
+  }
 } catch { /* primera vez */ }
 let chatSaveTimer = null;
-function recordChat(from, text) {
-  const clean = String(text ?? '').trim();
-  if (!clean) return;
-  chatSeq += 1;
-  chatLog.push({ seq: chatSeq, at: new Date().toISOString(), from, text: clean.slice(0, 4000) });
-  if (chatLog.length > 300) chatLog = chatLog.slice(-300);
+function scheduleChatSave() {
   clearTimeout(chatSaveTimer);
   chatSaveTimer = setTimeout(() => {
-    try { fs.writeFileSync(CHAT_LOG_FILE(), JSON.stringify({ seq: chatSeq, messages: chatLog })); }
+    try { fs.writeFileSync(CHAT_LOG_FILE(), JSON.stringify({ seq: chatSeq, entryId: chatEntryId, messages: chatLog })); }
     catch (error) { logger.warn('chat log save failed', { error: error.message }); }
   }, 1500);
 }
-// Envolver los envíos para transcribir TODO lo que el bot dice. Un envío
-// con __noLog en options no se transcribe (p. ej. el eco "🖥" del panel).
-for (const method of ['sendMessage', 'sendPhoto', 'sendDocument']) {
-  const original = telegram[method].bind(telegram);
-  telegram[method] = async (chatId, arg1, arg2, options) => {
-    if (method === 'sendMessage') {
-      const opts = arg2 || {};
-      const { __noLog, ...rest } = opts;
-      if (!__noLog) recordChat('bot', arg1);
-      return original(chatId, arg1, rest);
-    }
-    // sendPhoto / sendDocument: (chatId, filePath, caption, options)
-    const caption = arg2 || '';
-    recordChat('bot', `${method === 'sendPhoto' ? '🖼' : '📎'} ${path.basename(String(arg1))}${caption ? ` — ${caption}` : ''}`);
-    return original(chatId, arg1, caption, options);
+function recordChat(from, text, extra = {}) {
+  const clean = String(text ?? '').trim();
+  if (!clean && !extra.photo) return null;
+  chatSeq += 1;
+  chatEntryId += 1;
+  const entry = { id: chatEntryId, seq: chatSeq, at: new Date().toISOString(), from, text: clean.slice(0, 4000) };
+  if (extra.buttons) entry.buttons = extra.buttons;
+  if (extra.photo) entry.photo = extra.photo;
+  chatLog.push(entry);
+  if (chatLog.length > 300) chatLog = chatLog.slice(-300);
+  scheduleChatSave();
+  return entry;
+}
+// Un botón pulsado o un teclado editado cambian una entrada EXISTENTE: se
+// le sube el seq para que el polling incremental del panel la vuelva a traer
+// (el cliente la actualiza en sitio por id).
+function bumpChatEntry(entry) {
+  chatSeq += 1;
+  entry.seq = chatSeq;
+  scheduleChatSave();
+}
+function buttonsFromMarkup(options) {
+  const kb = options?.reply_markup?.inline_keyboard;
+  if (!Array.isArray(kb)) return undefined;
+  return kb.map((row) => row.map((b) => ({ t: String(b.text || ''), d: String(b.callback_data || '') })));
+}
+// Respuestas de answerCallbackQuery para clics hechos DESDE el panel (el id
+// sintético no existe en Telegram): se capturan aquí y el endpoint /callback
+// las devuelve como toast.
+const panelToasts = new Map();
+{
+  const origAnswer = telegram.answerCallbackQuery.bind(telegram);
+  telegram.answerCallbackQuery = async (id, text = '') => {
+    if (String(id).startsWith('panelcb:')) { panelToasts.set(String(id), String(text || '')); return { ok: true }; }
+    return origAnswer(id, text);
   };
+  const origEditMarkup = telegram.editMessageReplyMarkup.bind(telegram);
+  telegram.editMessageReplyMarkup = async (chatId, messageId, replyMarkup) => {
+    const entry = chatLog.find((e) => e.tgMessageId === messageId);
+    if (entry) { entry.buttons = buttonsFromMarkup({ reply_markup: replyMarkup }); bumpChatEntry(entry); }
+    return origEditMarkup(chatId, messageId, replyMarkup);
+  };
+  const origSendMessage = telegram.sendMessage.bind(telegram);
+  telegram.sendMessage = async (chatId, text, options = {}) => {
+    const { __noLog, ...rest } = options || {};
+    const entry = __noLog ? null : recordChat('bot', text, { buttons: buttonsFromMarkup(rest) });
+    const result = await origSendMessage(chatId, text, rest);
+    if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
+    return result;
+  };
+  for (const method of ['sendPhoto', 'sendDocument']) {
+    const original = telegram[method].bind(telegram);
+    telegram[method] = async (chatId, filePath, caption = '', options) => {
+      const entry = method === 'sendPhoto'
+        ? recordChat('bot', caption, { photo: String(filePath), buttons: buttonsFromMarkup(options) })
+        : recordChat('bot', `📎 ${path.basename(String(filePath))}${caption ? ` — ${caption}` : ''}`, { buttons: buttonsFromMarkup(options) });
+      const result = await original(chatId, filePath, caption, options);
+      if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
+      return result;
+    };
+  }
 }
 const orderReminderScheduler = new OrderReminderScheduler(config, logger);
 const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
@@ -1603,7 +1649,24 @@ if (config.panel?.enabled !== false) {
     },
     chat: (sinceSeq) => {
       const since = Number(sinceSeq) || 0;
-      return { seq: chatSeq, messages: chatLog.filter((m) => m.seq > since).slice(-100) };
+      // Al cliente no se le manda la ruta del fichero de la captura, solo un
+      // booleano; la imagen se sirve por /file/<id> (hook file de abajo).
+      const messages = chatLog.filter((m) => m.seq > since).slice(-100)
+        .map(({ photo, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo) }));
+      return { seq: chatSeq, messages };
+    },
+    callback: async (data) => {
+      const ids = arrivalChatIds();
+      if (!ids.length) throw new Error('sin chatIds configurados para el panel');
+      const cbId = `panelcb:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+      await handleCallback({ id: cbId, data: String(data), message: { chat: { id: ids[0] } }, from: { id: ids[0] } });
+      const toast = panelToasts.get(cbId) || '';
+      panelToasts.delete(cbId);
+      return toast;
+    },
+    file: (entryId) => {
+      const entry = chatLog.find((e) => e.id === Number(entryId));
+      return entry?.photo && fs.existsSync(entry.photo) ? entry.photo : null;
     },
     status: async () => {
       const latest = findLatestPromotionsCsv(config);

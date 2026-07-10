@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import http from 'node:http';
 
 // Panel de escritorio del bot: un mini servidor HTTP SOLO en 127.0.0.1 con
@@ -28,6 +29,24 @@ export function startPanel(config, logger, hooks) {
         const since = new URL(req.url, 'http://x').searchParams.get('since') || '0';
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(hooks.chat ? hooks.chat(since) : { seq: 0, messages: [] }));
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/callback') {
+        const body = await readBody(req);
+        let data = '';
+        try { data = String(JSON.parse(body || '{}').data || '').trim(); } catch { /* json roto */ }
+        if (!data) { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        logger?.info('panel callback', { data });
+        const toast = hooks.callback ? await hooks.callback(data) : '';
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, toast }));
+        return;
+      }
+      if (req.method === 'GET' && req.url.startsWith('/file/')) {
+        const filePath = hooks.file ? hooks.file(req.url.slice(6)) : null;
+        if (!filePath) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': filePath.toLowerCase().endsWith('.jpg') || filePath.toLowerCase().endsWith('.jpeg') ? 'image/jpeg' : 'image/png' });
+        fs.createReadStream(filePath).pipe(res);
         return;
       }
       if (req.method === 'GET' && req.url === '/comandos') {
@@ -147,6 +166,15 @@ function renderPage() {
   .mia .burbuja { border-color: rgba(56,189,248,.4); color: #d5ecf8; border-bottom-right-radius: 4px; }
   .msg:not(.mia) .burbuja { border-bottom-left-radius: 4px; }
   .burbuja .meta { display: block; font-size: 10.5px; color: #3d4a56; letter-spacing: .1em; margin-top: 5px; }
+  .burbuja img { display: block; max-width: 100%; border-radius: 8px; margin: 6px 0 2px; border: 1px solid rgba(200,211,220,.1); }
+  .botones { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .botones .filaB { display: flex; flex-wrap: wrap; gap: 6px; }
+  .botones button {
+    background: rgba(56,189,248,.06); border: 1px solid rgba(56,189,248,.35); color: #a9dcf5;
+    border-radius: 8px; padding: 7px 13px; font-size: 13.5px; cursor: pointer; transition: all .15s;
+  }
+  .botones button:hover { background: rgba(56,189,248,.14); color: #d5ecf8; }
+  .botones button:active { transform: scale(.97); }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
@@ -202,30 +230,79 @@ libre.addEventListener('keydown', (e) => {
 // panel la va pidiendo (solo lo nuevo, por seq). Lo tecleado aquí llega a
 // Telegram como eco "🖥 …", y lo del móvil aparece aquí solo.
 let chatSeq = 0;
+const filas = new Map(); // id → elemento .msg (para actualizar botones editados en sitio)
+function pintarBurbuja(m) {
+  const b = document.createElement('div');
+  b.className = 'burbuja';
+  const cuerpo = document.createElement('div');
+  cuerpo.textContent = (m.from === 'panel' ? '🖥 ' : '') + m.text;
+  b.appendChild(cuerpo);
+  if (m.photo) {
+    const img = document.createElement('img');
+    img.src = '/file/' + m.id + '?s=' + m.seq;
+    img.loading = 'lazy';
+    b.appendChild(img);
+  }
+  if (m.buttons && m.buttons.length) {
+    const zona = document.createElement('div');
+    zona.className = 'botones';
+    for (const fila of m.buttons) {
+      const f = document.createElement('div');
+      f.className = 'filaB';
+      for (const bot of fila) {
+        const btn = document.createElement('button');
+        btn.textContent = bot.t;
+        btn.onclick = () => pulsar(bot.d);
+        f.appendChild(btn);
+      }
+      zona.appendChild(f);
+    }
+    b.appendChild(zona);
+  }
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  const t = new Date(m.at);
+  meta.textContent = (m.from === 'bot' ? 'JARVIS' : m.from === 'panel' ? '面板' : '你') + ' · ' + String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+  b.appendChild(meta);
+  return b;
+}
+async function pulsar(data) {
+  try {
+    const r = await (await fetch('/callback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }) })).json();
+    if (r.toast) aviso(r.toast);
+    setTimeout(pollChat, 300);
+  } catch { aviso('连不上 BOT'); }
+}
 async function pollChat() {
   try {
     const r = await (await fetch('/chat?since=' + chatSeq)).json();
     if (r.messages && r.messages.length) {
       const caja = document.getElementById('charla');
       const pegado = caja.scrollHeight - caja.scrollTop - caja.clientHeight < 60;
+      let nuevos = false;
       for (const m of r.messages) {
         chatSeq = Math.max(chatSeq, m.seq);
+        const previa = filas.get(m.id);
+        if (previa) {
+          // Entrada editada (teclado del recuento, etc.): refrescar en sitio.
+          const vieja = previa.querySelector('.burbuja');
+          previa.replaceChild(pintarBurbuja(m), vieja);
+          continue;
+        }
         const fila = document.createElement('div');
         fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia');
-        const b = document.createElement('div');
-        b.className = 'burbuja';
-        b.textContent = (m.from === 'panel' ? '🖥 ' : '') + m.text;
-        const meta = document.createElement('span');
-        meta.className = 'meta';
-        const t = new Date(m.at);
-        meta.textContent = (m.from === 'bot' ? 'JARVIS' : m.from === 'panel' ? '面板' : '你') + ' · ' + String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
-        b.appendChild(meta);
-        fila.appendChild(b);
+        fila.appendChild(pintarBurbuja(m));
         caja.appendChild(fila);
+        filas.set(m.id, fila);
+        nuevos = true;
       }
-      while (caja.children.length > 120) caja.removeChild(caja.firstChild);
+      while (caja.children.length > 120) {
+        const primero = caja.firstChild;
+        for (const [id, el] of filas) if (el === primero) filas.delete(id);
+        caja.removeChild(primero);
+      }
       caja.classList.add('con');
-      if (pegado) caja.scrollTop = caja.scrollHeight;
+      if (pegado && nuevos) caja.scrollTop = caja.scrollHeight;
     }
   } catch { /* bot apagado: el punto rojo ya lo dice */ }
 }
