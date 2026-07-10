@@ -8,9 +8,10 @@ import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } fro
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { llmConfigured, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, listOrders } from './webOrder.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
@@ -45,6 +46,7 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegram = new TelegramClient(token);
 const orderReminderScheduler = new OrderReminderScheduler(config, logger);
 const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
+const autoAdvisor = new AutoAdvisorScheduler(config, logger);
 let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length });
@@ -68,6 +70,7 @@ async function mainLoop() {
       }
       await maybeSendOrderReminder();
       await maybePrintArrivalChecklist();
+      await maybeRunAutoAdvisor();
     } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
   }
 }
@@ -148,6 +151,7 @@ function formatCommandList() {
     '',
     '【其他】',
     '直接用中文说事也行，比如「帮我打一下152的清单」（需要配好 AI key）',
+    '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（config 里 autoAdvisor 可调）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
     '/whoami — 看这个对话的 chat id'
   ].join('\n');
@@ -1146,6 +1150,52 @@ async function maybePrintArrivalChecklist() {
   }
   const delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
   if (delivered) arrivalScheduler.markSent(due.key);
+}
+
+// Tarea diaria automática (config.autoAdvisor): refrescar promociones y
+// analizar pedidos PDA nuevos sin que nadie lo pida. Corre una vez al día a
+// la hora configurada (por defecto 07:15, antes de abrir la tienda, para no
+// pelearse con nadie por el Edge). Los fallos se avisan y NO se reintenta
+// hasta el día siguiente, para no machacar el navegador en bucle.
+async function maybeRunAutoAdvisor() {
+  const due = autoAdvisor.due(new Date());
+  if (!due) return;
+  const chatIds = arrivalChatIds();
+  if (!chatIds.length || !config.webOrder?.enabled) { autoAdvisor.markSent(due.key); return; }
+  autoAdvisor.markSent(due.key); // primero: si algo casca a mitad, no reintentar en bucle
+  const chatId = chatIds[0];
+
+  // 1. Promociones frescas para que /ahorro_pedido no trabaje con datos viejos.
+  try {
+    await telegram.sendMessage(chatId, '⏰ 每日自动任务：先刷新促销数据…');
+    const result = await fetchActivePromotions(config, due.dateStr, logger);
+    if (result.ok) await telegram.sendMessage(chatId, `促销数据已刷新 ✅\n${formatPromotionsSummary(result, config).split('\n').slice(0, 3).join('\n')}`);
+    else await telegram.sendMessage(chatId, `自动刷新促销失败（${result.stage || '?'}）：${result.error || '未知'}。今天先用旧数据。`);
+  } catch (error) {
+    logger.error('auto promotions failed', { error: error.message });
+    try { await telegram.sendMessage(chatId, `自动刷新促销出错：${error.message}`); } catch { /* noop */ }
+  }
+
+  // 2. Pedidos PDA nuevos → análisis de ahorro automático.
+  try {
+    const listed = await listOrders(config, logger);
+    if (!listed.ok) { await telegram.sendMessage(chatId, `自动任务读不了 Pedidos 列表：${listed.error}`); return; }
+    const lookback = Number.isFinite(Number(config.autoAdvisor?.lookbackDays)) ? Number(config.autoAdvisor.lookbackDays) : 2;
+    const cutoff = addDays(due.dateStr, -lookback);
+    const fresh = listed.rows.filter((r) => /pda/i.test(r.nombre)
+      && String(r.fechaIso || '') >= cutoff
+      && !autoAdvisor.isOrderAnalyzed(r.nombre));
+    if (!fresh.length) { logger.info('auto advisor: no new pda orders'); return; }
+    for (const row of fresh.slice(0, 3)) {
+      const nro = (row.nombre.match(/(\d+)\s*$/) || [])[1] || '';
+      await telegram.sendMessage(chatId, `发现新 PDA 单「${row.nombre}」，自动对照促销：`);
+      await handleAhorroPedido(chatId, `/ahorro_pedido ${nro}`.trim());
+      autoAdvisor.markOrderAnalyzed(row.nombre);
+    }
+  } catch (error) {
+    logger.error('auto advisor failed', { error: error.message });
+    try { await telegram.sendMessage(chatId, `自动分析新单出错：${error.message}`); } catch { /* noop */ }
+  }
 }
 
 // /llegada — saca la lista a demanda (imprime + Telegram).

@@ -42,6 +42,12 @@
     "detailRowsTimeoutMs": 9000,
     "outputDir": "promotions"
   },
+  "autoAdvisor": {
+    "enabled": true,
+    "time": "07:15",
+    "windowMinutes": 240,
+    "lookbackDays": 2
+  },
   "desktop": {
     "enabled": false,
     "script": "desktop/unideges-search.ps1",
@@ -269,8 +275,25 @@
         "ms": 400
       },
       {
-        "type": "screenshot",
-        "name": "MODO PRUEBAS: SIN Ctrl+S — revisar la captura y guardar A MANO. Para reactivar el guardado, añadir aquí hotkey ^s + closeDialog {ENTER}"
+        "type": "hotkey",
+        "keys": "^s",
+        "name": "Guardar (modo pruebas terminado)"
+      },
+      {
+        "type": "wait",
+        "ms": 900
+      },
+      {
+        "type": "closeDialog",
+        "keys": "{ENTER}",
+        "name": "Aceptar el aviso de guardado si aparece"
+      },
+      {
+        "type": "wait",
+        "ms": 500
+      },
+      {
+        "type": "screenshot"
       }
     ],
     "bloqApplySteps": [

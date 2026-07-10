@@ -422,6 +422,26 @@ export async function fetchArrivingOrders(config, creationDate, logger) {
   }
 }
 
+// Lista los pedidos visibles en la página de Pedidos (nombre, fecha, estado),
+// sin abrir ninguno. Lo usa la tarea diaria automática para detectar pedidos
+// PDA nuevos que aún no se han analizado.
+export async function listOrders(config, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+    const rows = await waitForListRows(page, timeout);
+    return { ok: true, rows: rows.map((r) => ({ nombre: r.nombre, fechaIso: r.fechaIso, estado: r.estado })) };
+  } catch (error) {
+    logger?.error('list orders failed', { error: error.message });
+    return { ok: false, error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
 // Elige filas de la lista de Pedidos según lo que escribió el usuario
 // ("/llegada 152 153", "/llegada carne 0807"). Reglas:
 //   1. Primero se prueba TODO el texto como UNA consulta (todas las palabras

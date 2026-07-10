@@ -92,6 +92,16 @@ const defaultConfig = {
     codeSearchSteps: [],
     orderApplySteps: defaultOrderApplySteps
   },
+  // Tarea diaria automática: a esta hora el bot refresca las promociones y
+  // busca pedidos PDA nuevos; si hay, corre /ahorro_pedido solo y manda el
+  // resultado a los chats de arrival/ordering. Necesita webOrder.enabled y
+  // el Edge en modo depuración abierto.
+  autoAdvisor: {
+    enabled: true,
+    time: '07:15',             // hora local (Europe/Madrid)
+    windowMinutes: 240,        // margen si el PC estaba apagado a esa hora
+    lookbackDays: 2            // qué tan atrás mirar pedidos PDA nuevos
+  },
   // Automatización de Pedidos por NAVEGADOR (Edge) vía CDP.
   // Pedidos es una página web (DevExpress XAF: unideges30.unide.es),
   // no la app de escritorio; por eso se conduce el DOM directamente,
