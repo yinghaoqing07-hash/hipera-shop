@@ -92,6 +92,12 @@ const defaultConfig = {
     codeSearchSteps: [],
     orderApplySteps: defaultOrderApplySteps
   },
+  // Panel de escritorio: mini web SOLO en 127.0.0.1 con botones para las
+  // acciones diarias. panel.cmd la abre en el navegador del PC de la tienda.
+  panel: {
+    enabled: true,
+    port: 8765
+  },
   // Tarea diaria automática: a esta hora el bot refresca las promociones y
   // busca pedidos PDA nuevos; si hay, corre /ahorro_pedido solo y manda el
   // resultado a los chats de arrival/ordering. Necesita webOrder.enabled y

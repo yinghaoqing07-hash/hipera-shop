@@ -48,6 +48,10 @@
     "windowMinutes": 0,
     "lookbackDays": 2
   },
+  "panel": {
+    "enabled": true,
+    "port": 8765
+  },
   "desktop": {
     "enabled": false,
     "script": "desktop/unideges-search.ps1",

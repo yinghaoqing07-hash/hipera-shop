@@ -9,6 +9,7 @@ import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { llmConfigured, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
+import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, listOrders } from './webOrder.js';
@@ -153,6 +154,7 @@ function formatCommandList() {
     '直接用中文说事也行，比如「帮我打一下152的清单」（需要配好 AI key）',
     '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（config 里 autoAdvisor 可调）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
+    '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
     '/whoami — 看这个对话的 chat id'
   ].join('\n');
 }
@@ -1506,4 +1508,40 @@ function isAllowed(chatId, userId) { const allowed = config.telegram.allowedChat
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 // Arranque: TODAS las declaraciones de arriba ya están inicializadas.
+// Panel de escritorio (127.0.0.1): botones grandes para las acciones de
+// cada día. Despacha los mismos comandos que Telegram (mismo handleUpdate,
+// mismas confirmaciones); el resultado llega por Telegram.
+if (config.panel?.enabled !== false) {
+  startPanel(config, logger, {
+    dispatch: async (cmd) => {
+      const ids = arrivalChatIds();
+      if (!ids.length) throw new Error('sin chatIds configurados para el panel');
+      await handleUpdate({ message: { chat: { id: ids[0] }, from: { id: ids[0] }, text: String(cmd) } });
+    },
+    status: async () => {
+      const latest = findLatestPromotionsCsv(config);
+      let promoCsv = null;
+      if (latest) {
+        const days = Math.floor((Date.now() - latest.mtime) / 86400000);
+        promoCsv = days <= 0 ? '今天的' : `${days} 天前的`;
+      }
+      return {
+        uptime: humanUptime(process.uptime()),
+        promoCsv,
+        autoRanToday: Boolean(autoAdvisor.state.sent[`auto|${todayString(config)}`]),
+        webOrder: Boolean(config.webOrder?.enabled),
+        desktop: Boolean(config.desktop?.enabled),
+        llm: llmConfigured(config)
+      };
+    },
+    commandList: () => formatCommandList()
+  });
+}
+
+function humanUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h ? `${h}h${m}m` : `${m}m`;
+}
+
 await mainLoop();
