@@ -80,6 +80,7 @@ function recordChat(from, text, extra = {}) {
   const entry = { id: chatEntryId, seq: chatSeq, at: new Date().toISOString(), from, text: clean.slice(0, 4000) };
   if (extra.buttons) entry.buttons = extra.buttons;
   if (extra.photo) entry.photo = extra.photo;
+  if (extra.doc) entry.doc = extra.doc;
   chatLog.push(entry);
   if (chatLog.length > 300) chatLog = chatLog.slice(-300);
   scheduleChatSave();
@@ -127,7 +128,7 @@ const panelToasts = new Map();
     telegram[method] = async (chatId, filePath, caption = '', options) => {
       const entry = method === 'sendPhoto'
         ? recordChat('bot', caption, { photo: String(filePath), buttons: buttonsFromMarkup(options) })
-        : recordChat('bot', `📎 ${path.basename(String(filePath))}${caption ? ` — ${caption}` : ''}`, { buttons: buttonsFromMarkup(options) });
+        : recordChat('bot', `📎 ${path.basename(String(filePath))}${caption ? ` — ${caption}` : ''}`, { doc: String(filePath), buttons: buttonsFromMarkup(options) });
       const result = await original(chatId, filePath, caption, options);
       if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
       return result;
@@ -1652,7 +1653,7 @@ if (config.panel?.enabled !== false) {
       // Al cliente no se le manda la ruta del fichero de la captura, solo un
       // booleano; la imagen se sirve por /file/<id> (hook file de abajo).
       const messages = chatLog.filter((m) => m.seq > since).slice(-100)
-        .map(({ photo, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo) }));
+        .map(({ photo, doc, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo), doc: Boolean(doc) }));
       return { seq: chatSeq, messages };
     },
     callback: async (data) => {
@@ -1666,7 +1667,8 @@ if (config.panel?.enabled !== false) {
     },
     file: (entryId) => {
       const entry = chatLog.find((e) => e.id === Number(entryId));
-      return entry?.photo && fs.existsSync(entry.photo) ? entry.photo : null;
+      const filePath = entry?.photo || entry?.doc;
+      return filePath && fs.existsSync(filePath) ? filePath : null;
     },
     status: async () => {
       const latest = findLatestPromotionsCsv(config);
