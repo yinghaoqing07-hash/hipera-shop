@@ -45,7 +45,7 @@
   "autoAdvisor": {
     "enabled": true,
     "time": "07:15",
-    "windowMinutes": 240,
+    "windowMinutes": 0,
     "lookbackDays": 2
   },
   "desktop": {

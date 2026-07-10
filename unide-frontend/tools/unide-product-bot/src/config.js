@@ -98,8 +98,8 @@ const defaultConfig = {
   // el Edge en modo depuración abierto.
   autoAdvisor: {
     enabled: true,
-    time: '07:15',             // hora local (Europe/Madrid)
-    windowMinutes: 240,        // margen si el PC estaba apagado a esa hora
+    time: '07:15',             // hora local MÁS TEMPRANA; corre al primer arranque del día pasada esta hora
+    windowMinutes: 0,          // 0 = sin límite superior (el PC se enciende cuando se enciende)
     lookbackDays: 2            // qué tan atrás mirar pedidos PDA nuevos
   },
   // Automatización de Pedidos por NAVEGADOR (Edge) vía CDP.
