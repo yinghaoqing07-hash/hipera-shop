@@ -68,7 +68,7 @@ const INTENT_SCHEMA = {
   properties: {
     accion: {
       type: 'string',
-      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'pedido', 'carne', 'articulo', 'ayuda', 'responder'],
+      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'bloq_venta', 'pedido', 'carne', 'articulo', 'ayuda', 'responder'],
       description: 'Comando del bot al que corresponde el mensaje, o "responder" si no corresponde a ninguno'
     },
     argumento: { type: 'string', description: 'Argumento del comando (números de pedido, "nombre precio", código…); vacío si no aplica' },
@@ -87,6 +87,7 @@ Comandos disponibles:
 - promociones — descargar de la web las promociones vigentes (CSV). Palabras clave: 促销, 刷新促销.
 - precio_fruta — cambiar el precio de UNA fruta/verdura en el UnideGes de escritorio (con confirmación). argumento: "nombre precio", p. ej. "platano 2,99". Palabras clave: 改价, 换价格.
 - precios_fruta — cambio de precios de fruta EN LOTE. argumento: una línea por artículo "nombre precio".
+- bloq_venta — marcar o desmarcar el checkbox Bloq.Venta de un artículo en el UnideGes de escritorio. argumento: "nombre_o_codigo off" (desmarcar = 恢复可卖/解锁, p.ej. "把X的bloc venta关了") o "nombre_o_codigo on" (marcar = 停卖/锁上). Palabras clave: bloq venta, bloc venta, 停卖, 开卖, 解锁, 锁.
 - pedido — plantillas/recordatorio de pedido. argumento: "carne", "fruta", "pda" o vacío.
 - carne — empezar el recuento de carne para el pedido.
 - articulo — consultar un producto por código o EAN. argumento: el código.

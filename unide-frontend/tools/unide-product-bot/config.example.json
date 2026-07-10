@@ -272,6 +272,43 @@
         "type": "screenshot",
         "name": "MODO PRUEBAS: SIN Ctrl+S — revisar la captura y guardar A MANO. Para reactivar el guardado, añadir aquí hotkey ^s + closeDialog {ENTER}"
       }
+    ],
+    "bloqApplySteps": [
+      {
+        "type": "focus"
+      },
+      {
+        "type": "uiaToggleIf",
+        "label": "Bloq.Venta",
+        "self": true,
+        "if": "toggleBloqVenta",
+        "name": "Alternar el checkbox (el bot solo llama si el estado actual difiere del pedido)"
+      },
+      {
+        "type": "wait",
+        "ms": 400
+      },
+      {
+        "type": "hotkey",
+        "keys": "^s",
+        "name": "Guardar: sin esto el cambio se pierde al cerrar"
+      },
+      {
+        "type": "wait",
+        "ms": 900
+      },
+      {
+        "type": "closeDialog",
+        "keys": "{ENTER}",
+        "name": "Aceptar el aviso de guardado si aparece"
+      },
+      {
+        "type": "wait",
+        "ms": 500
+      },
+      {
+        "type": "screenshot"
+      }
     ]
   },
   "webOrder": {
