@@ -1,5 +1,6 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
 import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
@@ -1691,8 +1692,40 @@ if (config.panel?.enabled !== false) {
         activity: panelActivity
       };
     },
-    commandList: () => formatCommandList()
+    commandList: () => formatCommandList(),
+    // Mantenimiento desde el propio panel: como el bot ya corre elevado,
+    // puede lanzar el updater o pararse a si mismo sin UAC ni ventanas.
+    admin: async (accion) => {
+      if (accion === 'stop') {
+        logger.info('panel admin: stop');
+        setTimeout(() => process.exit(0), 400);
+        return '好，正在关闭。想再开就双击 panel.cmd 或 abrir-panel.vbs';
+      }
+      if (accion === 'update') {
+        if (process.platform !== 'win32') return '更新只在店里的 Windows 电脑上有用';
+        const updater = path.join(config.__toolRoot, 'update-bot.ps1');
+        if (!fs.existsSync(updater)) return '找不到 update-bot.ps1，先手动跑一次 update-bot.cmd';
+        logger.info('panel admin: update', { updater });
+        // Desacoplado del bot: el updater para este proceso a mitad de
+        // faena, asi que debe sobrevivirle (detached + unref).
+        const child = spawnDetached('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', updater], config.__toolRoot);
+        if (!child) return '启动更新器失败，看看 logs 里的报错';
+        return '正在后台更新。面板会断开一两分钟，更新完 bot 自己回来，刷新即可';
+      }
+      return '';
+    }
   });
+}
+
+function spawnDetached(command, args, cwd) {
+  try {
+    const child = spawn(command, args, { cwd, detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+    return child;
+  } catch (error) {
+    logger.error('spawn detached failed', { command, error: error.message });
+    return null;
+  }
 }
 
 function humanUptime(seconds) {

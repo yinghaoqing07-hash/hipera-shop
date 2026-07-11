@@ -42,16 +42,6 @@ if ($DryRun) {
 }
 
 Write-Host ""
-# El bot corre oculto (ya no hay ventana negra que cerrar): se para aqui
-# solo, con el mismo script que usa stop-bot.cmd. Necesita ir elevado
-# (update-bot.cmd eleva antes de llamar aqui).
-$stopScript = Join-Path $root "stop-bot.ps1"
-if (Test-Path $stopScript) {
-  powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript
-  Start-Sleep -Seconds 1
-} else {
-  Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow
-}
 Write-Host "Downloading latest package..."
 
 try {
@@ -72,6 +62,18 @@ Write-Host "Downloaded: $zipPath ($sizeMb MB)" -ForegroundColor Green
 $applyScript = Join-Path $root "apply-update.ps1"
 if (-not (Test-Path $applyScript)) {
   throw "Missing apply-update.ps1"
+}
+
+# El bot corre oculto (ya no hay ventana negra que cerrar): se para aqui
+# solo, con el mismo script que usa stop-bot.cmd, y SOLO despues de que la
+# descarga haya ido bien — si fallara, el bot sigue corriendo como estaba.
+# Necesita ir elevado (update-bot.cmd eleva antes de llamar aqui).
+$stopScript = Join-Path $root "stop-bot.ps1"
+if (Test-Path $stopScript) {
+  powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript
+  Start-Sleep -Seconds 1
+} else {
+  Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow
 }
 
 Write-Host "Applying update..."

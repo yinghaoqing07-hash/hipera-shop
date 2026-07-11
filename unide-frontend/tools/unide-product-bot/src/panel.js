@@ -73,6 +73,17 @@ export function startPanel(config, logger, hooks) {
         res.end(hooks.commandList());
         return;
       }
+      if (req.method === 'POST' && req.url === '/admin') {
+        const body = await readBody(req);
+        let accion = '';
+        try { accion = String(JSON.parse(body || '{}').accion || '').trim(); } catch { /* json roto */ }
+        if (accion !== 'stop' && accion !== 'update') { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        logger?.info('panel admin', { accion });
+        const toast = hooks.admin ? await hooks.admin(accion) : '';
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, toast }));
+        return;
+      }
       if (req.method === 'POST' && req.url === '/run') {
         const body = await readBody(req);
         let cmd = '';
@@ -165,6 +176,7 @@ function renderPage() {
   #reloj span.seg { font-size: 26px; color: #38bdf8; font-weight: 300; margin-left: 6px; }
   #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .28em; color: #76879a; text-transform: uppercase; }
   #tarjetas { margin-top: 22px; display: grid; gap: 10px; grid-template-columns: 1fr; }
+  #mantenimiento { margin-top: 26px; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
   #cajonTeclado { display: none; }
   .tarjeta { border: 1px solid rgba(200,211,220,.16); background: rgba(148,180,205,.05); border-radius: 12px; padding: 14px 16px; min-height: 88px; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .25em; color: #5f7184; margin-bottom: 9px; }
@@ -298,6 +310,10 @@ function renderPage() {
           <div class="titulo">最近动态</div>
           <div class="dato" id="tActividad">—</div>
         </div>
+      </div>
+      <div id="mantenimiento">
+        <button class="pill" onclick="admin('update')">更新 BOT</button>
+        <button class="pill" onclick="admin('stop')">关闭 BOT</button>
       </div>
     </div>
     <div id="cajonTeclado">
@@ -505,6 +521,18 @@ function abrirCajonInicio() {
   document.getElementById('cajon').classList.add('abierto');
 }
 
+// Mantenimiento desde el panel: actualizar o apagar el bot, sin tocar
+// ningun script a mano. El bot confirma con un aviso y hace el resto solo.
+async function admin(accion) {
+  const pregunta = accion === 'update'
+    ? '现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。'
+    : '要关闭 BOT 吗？关掉后面板离线，想再开就双击 panel.cmd 或 abrir-panel.vbs。';
+  if (!confirm(pregunta)) return;
+  try {
+    const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
+    if (r.toast) aviso(r.toast);
+  } catch { aviso('连不上 BOT'); }
+}
 async function pulsar(data) {
   try {
     const r = await (await fetch('/callback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }) })).json();
