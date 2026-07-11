@@ -92,14 +92,22 @@ Comandos disponibles:
 - carne — empezar el recuento de carne para el pedido.
 - articulo — consultar un producto por código o EAN. argumento: el código.
 - ayuda — mostrar la ayuda del bot.
-- responder — el mensaje NO corresponde a ningún comando (una pregunta sobre el bot, una duda, un saludo, algo ambiguo). Contesta tú en el campo "respuesta", EN CHINO, corto y útil. Si es ambiguo entre dos comandos, pregunta cuál quiere.
+- responder — el mensaje NO corresponde a ningún comando: una PREGUNTA (sobre promociones, precios, pedidos, fechas…), una duda, un saludo o algo ambiguo. Contesta tú en el campo "respuesta", EN CHINO (los nombres de productos y promociones quedan en español tal cual). Si la pregunta se puede contestar con los DATOS DE HOY del final, respóndela con cifras, fechas y nombres CONCRETOS de esos datos. Si los datos no llegan para contestar, dilo claramente y sugiere el comando útil. Usa el historial de la conversación para resolver referencias ("那152呢", "第二个", "那个促销").
 
-Reglas: en la duda entre ejecutar algo y preguntar, pregunta (responder). Nunca inventes argumentos que la usuaria no dijo. Los números de pedido van tal cual en el argumento.`;
+Reglas: en la duda entre ejecutar algo y preguntar, pregunta (responder). Nunca inventes argumentos que la usuaria no dijo. Los números de pedido van tal cual en el argumento. Los DATOS DE HOY (si los hay al final) cuentan como la verdad: no inventes promociones, precios ni pedidos que no estén ahí.`;
 
-// Devuelve { accion, argumento, respuesta }.
-export async function llmRouteIntent(text, config, logger) {
+// Devuelve { accion, argumento, respuesta }. extras (opcional):
+//   history — últimos turnos del chat [{role:'user'|'assistant', content}] para
+//             que el modelo resuelva referencias ("那152呢");
+//   datos   — texto con los datos del día (promociones, pedidos) para que
+//             accion=responder conteste con cifras reales, no de memoria.
+export async function llmRouteIntent(text, config, logger, extras = {}) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
+  const history = Array.isArray(extras.history) ? extras.history : [];
+  const system = extras.datos
+    ? `${INTENT_SYSTEM}\n\n=== DATOS DE HOY ===\n${String(extras.datos).slice(0, 150000)}`
+    : INTENT_SYSTEM;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
   let response;
@@ -114,10 +122,10 @@ export async function llmRouteIntent(text, config, logger) {
       },
       body: JSON.stringify({
         model: config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 1000,
-        system: INTENT_SYSTEM,
+        max_tokens: 1500,
+        system,
         output_config: { format: { type: 'json_schema', schema: INTENT_SCHEMA } },
-        messages: [{ role: 'user', content: String(text || '').slice(0, 2000) }]
+        messages: [...history, { role: 'user', content: String(text || '').slice(0, 2000) }]
       })
     });
   } finally {

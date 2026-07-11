@@ -257,10 +257,74 @@ function formatCommandList() {
 // de ejecutar se enseña la traducción ("我理解为 /llegada 152") para que la
 // usuaria aprenda el comando y pueda corregir si el modelo entendió mal.
 // Las acciones que escriben (precio_fruta) conservan su confirmación propia.
+// Datos del día para el asistente: promociones vigentes (código, precios,
+// caducidad) y últimos pedidos rellenados. Van en texto plano dentro del
+// system prompt para que accion=responder conteste con cifras REALES.
+function buildAssistDatos() {
+  const partes = [`Fecha de hoy: ${todayString(config)}`];
+  try {
+    const latest = findLatestPromotionsCsv(config);
+    if (latest) {
+      const items = parsePromotionsCsv(fs.readFileSync(latest.file, 'utf8'));
+      const fecha = (d) => (d instanceof Date && !Number.isNaN(d.getTime()) ? `${d.getDate()}/${d.getMonth() + 1}` : '?');
+      const euro = (n) => (Number.isFinite(n) ? n.toFixed(2).replace('.', ',') : '?');
+      let bloque = items
+        .map((i) => `${i.code} ${i.name} | promo ${euro(i.oferta)} (normal ${euro(i.pvd)}) hasta ${fecha(i.hasta)} | ${i.promoName}`)
+        .join('\n');
+      if (bloque.length > 70000) bloque = `${bloque.slice(0, 70000)}\n(lista truncada)`;
+      const diasCsv = Math.max(0, Math.floor((Date.now() - latest.mtime) / 86400000));
+      partes.push(`PROMOCIONES VIGENTES (${items.length} artículos; CSV de hace ${diasCsv} días):\n${bloque}`);
+    } else {
+      partes.push('PROMOCIONES: aún no hay CSV descargado (se descarga con /promociones).');
+    }
+  } catch (error) { logger.warn('assist datos promos failed', { error: error.message }); }
+  try {
+    const file = path.resolve(config.logsDir || '.', 'orders-history.json');
+    if (fs.existsSync(file)) {
+      const historial = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const ultimos = historial.slice(-6);
+      const lineas = ultimos.map((o) => `${o.orderDate} ${o.orderName} (${(o.items || []).length} líneas)`);
+      for (const o of ultimos.slice(-2)) {
+        lineas.push(`Detalle de ${o.orderName}:`);
+        for (const it of (o.items || []).slice(0, 80)) lineas.push(`  ${it.code} ${it.nombre} x${it.quantity}`);
+      }
+      if (ultimos.length) partes.push(`ÚLTIMOS PEDIDOS RELLENADOS (historial de 60 días):\n${lineas.join('\n')}`);
+    }
+  } catch (error) { logger.warn('assist datos pedidos failed', { error: error.message }); }
+  partes.push('NO tienes acceso a: stock de la tienda, ventas, facturas ni histórico de precios de fruta.');
+  return partes.join('\n\n');
+}
+
+// Últimos turnos del chat (Telegram + panel comparten transcripción) para que
+// el asistente entienda referencias. Se excluye el mensaje entrante (va como
+// último user), se fusionan turnos seguidos del mismo rol (la API exige
+// alternancia) y se recorta cada turno para no inflar el prompt.
+function assistHistory(currentText) {
+  const turnos = [];
+  for (const e of chatLog.slice(-14)) {
+    if (!e.text) continue;
+    turnos.push({ role: e.from === 'bot' ? 'assistant' : 'user', content: String(e.text).slice(0, 400) });
+  }
+  const actual = String(currentText || '').slice(0, 400);
+  if (turnos.length && turnos[turnos.length - 1].role === 'user' && turnos[turnos.length - 1].content === actual) turnos.pop();
+  const fusionados = [];
+  for (const t of turnos) {
+    const prev = fusionados[fusionados.length - 1];
+    if (prev && prev.role === t.role) prev.content += `\n${t.content}`;
+    else fusionados.push({ ...t });
+  }
+  // Debe empezar por user y acabar en assistant (el mensaje actual se añade
+  // como user justo después).
+  while (fusionados.length && fusionados[fusionados.length - 1].role === 'user') fusionados.pop();
+  const corte = fusionados.slice(-10);
+  while (corte.length && corte[0].role !== 'user') corte.shift();
+  return corte;
+}
+
 async function handleFreeText(chatId, text) {
   let intent;
   try {
-    intent = await llmRouteIntent(text, config, logger);
+    intent = await llmRouteIntent(text, config, logger, { history: assistHistory(text), datos: buildAssistDatos() });
   } catch (error) {
     logger.warn('llm intent failed', { error: error.message });
     await telegram.sendMessage(chatId, formatTemplateHelp());
