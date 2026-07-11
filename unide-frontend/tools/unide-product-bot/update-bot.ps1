@@ -42,7 +42,16 @@ if ($DryRun) {
 }
 
 Write-Host ""
-Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow
+# El bot corre oculto (ya no hay ventana negra que cerrar): se para aqui
+# solo, con el mismo script que usa stop-bot.cmd. Necesita ir elevado
+# (update-bot.cmd eleva antes de llamar aqui).
+$stopScript = Join-Path $root "stop-bot.ps1"
+if (Test-Path $stopScript) {
+  powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript
+  Start-Sleep -Seconds 1
+} else {
+  Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow
+}
 Write-Host "Downloading latest package..."
 
 try {
@@ -79,4 +88,13 @@ if (Test-Path $panelFile) {
   $v = (Get-Item -LiteralPath $panelFile).LastWriteTime.ToString("dd/MM HH:mm")
   Write-Host "Version instalada: v $v (debe salir igual en la esquina del panel)" -ForegroundColor Cyan
 }
-Write-Host "Double-click start-bot.cmd to start the new version."
+
+# Reinicio automatico en segundo plano (sin ventana): este proceso ya va
+# elevado, asi que el vbs oculto arranca el bot sin ningun aviso UAC.
+$vbs = Join-Path $root "run-bot-hidden.vbs"
+if (Test-Path $vbs) {
+  Start-Process -FilePath "wscript.exe" -ArgumentList "`"$vbs`""
+  Write-Host "Bot reiniciado en segundo plano. Abre panel.cmd cuando quieras." -ForegroundColor Green
+} else {
+  Write-Host "Double-click start-bot.cmd to start the new version."
+}
