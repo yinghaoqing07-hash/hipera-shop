@@ -43,7 +43,8 @@ export function startPanel(config, logger, hooks) {
         return;
       }
       if (req.method === 'GET' && req.url.startsWith('/file/')) {
-        const filePath = hooks.file ? hooks.file(req.url.slice(6)) : null;
+        // El id llega con ?s=<seq> para saltar la caché del navegador.
+        const filePath = hooks.file ? hooks.file(req.url.slice(6).split('?')[0]) : null;
         if (!filePath) { res.writeHead(404); res.end(); return; }
         const low = filePath.toLowerCase();
         const tipo = low.endsWith('.jpg') || low.endsWith('.jpeg') ? 'image/jpeg'
@@ -161,23 +162,21 @@ function renderPage() {
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
   }
   #charla.con { display: block; }
-  .msg { display: flex; margin: 7px 0; }
+  .msg { display: flex; margin: 13px 0; }
   .msg.mia { justify-content: flex-end; }
   .burbuja {
-    max-width: 80%; padding: 8px 14px; border-radius: 14px;
-    font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
-    border: 1px solid rgba(200,211,220,.12); color: #a7b4c1;
+    max-width: 84%;
+    font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    color: #97a5b2;
   }
-  .mia .burbuja { border-color: rgba(56,189,248,.4); color: #d5ecf8; border-bottom-right-radius: 4px; }
-  .msg:not(.mia) .burbuja { border-bottom-left-radius: 4px; }
-  .burbuja .meta { display: block; font-size: 10.5px; color: #3d4a56; letter-spacing: .1em; margin-top: 5px; }
-  .burbuja img { display: block; max-width: 100%; border-radius: 8px; margin: 6px 0 2px; border: 1px solid rgba(200,211,220,.1); }
-  .chipTeclado {
-    display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
-    background: rgba(56,189,248,.07); border: 1px solid rgba(56,189,248,.35); color: #a9dcf5;
-    border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer; letter-spacing: .08em;
+  .mia .burbuja { color: #cfe9f7; text-align: right; }
+  .burbuja .meta { display: block; font-size: 10.5px; color: #38424d; letter-spacing: .14em; margin-top: 4px; }
+  .chipTeclado, .chipLeer {
+    display: inline-flex; align-items: center; margin: 8px 8px 0 0;
+    background: none; border: 1px solid rgba(56,189,248,.3); color: #7fb8d4;
+    border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer; letter-spacing: .12em;
   }
-  .chipTeclado:hover { background: rgba(56,189,248,.16); color: #d5ecf8; }
+  .chipTeclado:hover, .chipLeer:hover { border-color: rgba(125,211,252,.6); color: #d5ecf8; }
   /* --- cajón lateral: donde viven los teclados interactivos --- */
   #cajon {
     position: fixed; top: 0; left: 0; bottom: 0; width: min(400px, 88vw);
@@ -206,12 +205,6 @@ function renderPage() {
   }
   #cajon .filaB button:hover { background: rgba(56,189,248,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
-  .chipLeer {
-    display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
-    background: none; border: 1px solid rgba(200,211,220,.2); color: #8b98a5;
-    border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer; letter-spacing: .08em;
-  }
-  .chipLeer:hover { border-color: rgba(125,211,252,.5); color: #cfe9f7; }
   #lector {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 94vw);
     background: rgba(10,14,19,.97); border-left: 1px solid rgba(125,211,252,.18);
@@ -225,6 +218,8 @@ function renderPage() {
     padding: 18px 20px 12px; font-size: 11px; letter-spacing: .2em; color: #4a5865;
   }
   #lector .cab b { color: #7dd3fc; font-weight: 600; white-space: nowrap; }
+  #lectorFoto { padding: 0 20px; }
+  #lectorFoto img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); }
   #lector .cab span.titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: right; }
   #lector .cab button { background: none; border: none; color: #4a5865; font-size: 18px; cursor: pointer; padding: 2px 6px; }
   #lector .cab button:hover { color: #cfe9f7; }
@@ -279,11 +274,12 @@ function renderPage() {
   </div>
 </main>
 <div id="lector">
-  <div class="cab"><b>📄 阅读台</b><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
+  <div class="cab"><b>阅 读</b><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
+  <div id="lectorFoto"></div>
   <pre id="lectorTexto"></pre>
 </div>
 <div id="cajon">
-  <div class="cab"><span><b>⌨ 操作台</b></span><button onclick="cerrarCajon()" title="关闭">✕</button></div>
+  <div class="cab"><span><b>操 作 台</b></span><button onclick="cerrarCajon()" title="关闭">✕</button></div>
   <div class="cuerpo">
     <div class="texto" id="cajonTexto"></div>
     <div id="cajonFoto"></div>
@@ -302,11 +298,16 @@ libre.addEventListener('keydown', (e) => {
 // Telegram como eco "🖥 …", y lo del móvil aparece aquí solo.
 let chatSeq = 0;
 const filas = new Map(); // id → elemento .msg (para actualizar botones editados en sitio)
+// El panel es sobrio: los emojis de los mensajes (pensados para Telegram)
+// se filtran solo en la VISUALIZACION; en Telegram y en el registro siguen.
+function sinEmoji(s) {
+  return String(s || '').replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{2300}-\\u{23FF}\\u{FE0F}\\u{200D}]/gu, '').replace(/  +/g, ' ').replace(/^ +/gm, '').trim();
+}
 function pintarBurbuja(m) {
   const b = document.createElement('div');
   b.className = 'burbuja';
   const cuerpo = document.createElement('div');
-  const completo = (m.from === 'panel' ? '🖥 ' : '') + m.text;
+  const completo = sinEmoji(m.text);
   const esLargo = completo.length > 380 || completo.split('\\n').length > 8;
   if (esLargo) {
     // Los informes largos no llenan el chat: recorte + "展开" en el lector.
@@ -316,44 +317,45 @@ function pintarBurbuja(m) {
     cuerpo.textContent = completo;
   }
   b.appendChild(cuerpo);
+  const chips = document.createElement('div');
   if (esLargo) {
     const chip = document.createElement('span');
     chip.className = 'chipLeer';
-    chip.textContent = '📄 展开阅读';
-    chip.onclick = () => abrirLector(m.text.split('\\n')[0].slice(0, 40), m.text);
-    b.appendChild(document.createElement('br'));
-    b.appendChild(chip);
+    chip.textContent = '展开阅读';
+    chip.onclick = () => abrirLector(sinEmoji(m.text).split('\\n')[0].slice(0, 40), sinEmoji(m.text));
+    chips.appendChild(chip);
   }
   if (m.doc) {
     const chip = document.createElement('span');
     chip.className = 'chipLeer';
-    chip.textContent = '📄 打开文件';
+    chip.textContent = '打开文件';
     chip.onclick = async () => {
       try {
         const r = await fetch('/file/' + m.id);
         if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
-        abrirLector(m.text.slice(0, 40), await r.text());
+        abrirLector(sinEmoji(m.text).slice(0, 40), await r.text());
       } catch { aviso('连不上 BOT'); }
     };
-    b.appendChild(document.createElement('br'));
-    b.appendChild(chip);
+    chips.appendChild(chip);
   }
-  if (m.photo) {
-    const img = document.createElement('img');
-    img.src = '/file/' + m.id + '?s=' + m.seq;
-    img.loading = 'lazy';
-    b.appendChild(img);
+  if (m.photo && !(m.buttons && m.buttons.length)) {
+    // Las capturas no se incrustan en el chat: se abren en el lector. Las de
+    // tarjetas con botones ya se ven en el cajón de operaciones.
+    const chip = document.createElement('span');
+    chip.className = 'chipLeer';
+    chip.textContent = '查看截图';
+    chip.onclick = () => abrirLector(sinEmoji(m.text).slice(0, 40), '', '/file/' + m.id + '?s=' + m.seq);
+    chips.appendChild(chip);
   }
   if (m.buttons && m.buttons.length) {
     // Los teclados NO se pintan en la burbuja: viven en el cajón lateral.
-    // El chip permite reabrir el de un mensaje antiguo.
     const chip = document.createElement('span');
     chip.className = 'chipTeclado';
-    chip.textContent = '⌨ 操作台';
+    chip.textContent = '操作台';
     chip.onclick = () => abrirCajon(m.id);
-    b.appendChild(document.createElement('br'));
-    b.appendChild(chip);
+    chips.appendChild(chip);
   }
+  if (chips.children.length) b.appendChild(chips);
   const meta = document.createElement('span');
   meta.className = 'meta';
   const t = new Date(m.at);
@@ -362,9 +364,16 @@ function pintarBurbuja(m) {
   return b;
 }
 // --- lector (cajón derecho para contenido largo) ---------------------------
-function abrirLector(titulo, texto) {
+function abrirLector(titulo, texto, fotoUrl) {
   document.getElementById('lectorTitulo').textContent = titulo || '';
   document.getElementById('lectorTexto').textContent = texto || '';
+  const foto = document.getElementById('lectorFoto');
+  foto.innerHTML = '';
+  if (fotoUrl) {
+    const img = document.createElement('img');
+    img.src = fotoUrl;
+    foto.appendChild(img);
+  }
   document.getElementById('lector').classList.add('abierto');
 }
 function cerrarLector() { document.getElementById('lector').classList.remove('abierto'); }
@@ -374,7 +383,7 @@ const datos = new Map();      // id → último estado del mensaje (para re-rend
 const cajonCerrados = new Set(); // teclados que el usuario cerró a mano
 let cajonId = null;
 function renderCajon(m) {
-  document.getElementById('cajonTexto').textContent = m.text || '';
+  document.getElementById('cajonTexto').textContent = sinEmoji(m.text);
   const foto = document.getElementById('cajonFoto');
   foto.innerHTML = '';
   if (m.photo) {
@@ -389,7 +398,7 @@ function renderCajon(m) {
     f.className = 'filaB';
     for (const bot of fila) {
       const btn = document.createElement('button');
-      btn.textContent = bot.t;
+      btn.textContent = sinEmoji(bot.t) || bot.t;
       btn.onclick = () => pulsar(bot.d);
       f.appendChild(btn);
     }
@@ -482,12 +491,12 @@ async function refrescar() {
     punto.classList.remove('rojo');
     const partes = ['在线 ' + s.uptime];
     partes.push('促销 ' + (s.promoCsv || '无'));
-    partes.push(s.autoRanToday ? '晨务 ✓' : '晨务 —');
+    partes.push(s.autoRanToday ? '晨务 已办' : '晨务 —');
     const off = [];
     if (!s.webOrder) off.push('网页');
     if (!s.desktop) off.push('桌面');
     if (!s.llm) off.push('AI');
-    if (off.length) partes.push('⚠ ' + off.join('/') + '关');
+    if (off.length) partes.push(off.join('/') + ' 关');
     txt.textContent = partes.join('　·　');
     pintarTarjetas(s);
   } catch {
