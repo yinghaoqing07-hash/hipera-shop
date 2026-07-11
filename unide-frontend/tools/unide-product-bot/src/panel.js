@@ -23,8 +23,21 @@ try {
 
 export function startPanel(config, logger, hooks) {
   const port = Number(config.panel?.port) || 8765;
+  // Cerrar la ventana del panel (la X) apaga también el bot: la página manda
+  // un beacon 'adios' al cerrarse y aquí se programa el apagado con un margen
+  // de gracia — si solo era una recarga, la página vuelve a pedir / o /chat
+  // enseguida y el cierre se cancela.
+  let cierrePendiente = null;
+  const cancelarCierre = () => {
+    if (cierrePendiente) {
+      clearTimeout(cierrePendiente);
+      cierrePendiente = null;
+      logger?.info('panel window is back, shutdown cancelled');
+    }
+  };
   const server = http.createServer(async (req, res) => {
     try {
+      if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html' || req.url.startsWith('/chat'))) cancelarCierre();
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
         // no-store: que el navegador NUNCA sirva una página vieja de caché
         // después de actualizar el bot.
@@ -77,7 +90,16 @@ export function startPanel(config, logger, hooks) {
         const body = await readBody(req);
         let accion = '';
         try { accion = String(JSON.parse(body || '{}').accion || '').trim(); } catch { /* json roto */ }
-        if (accion !== 'stop' && accion !== 'update') { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        if (accion !== 'stop' && accion !== 'update' && accion !== 'adios') { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        if (accion === 'adios') {
+          if (!cierrePendiente && hooks.admin) {
+            logger?.info('panel window closed, bot stops in 3s unless the page returns');
+            cierrePendiente = setTimeout(() => { try { hooks.admin('stop'); } catch { /* ya saliendo */ } }, 3000);
+          }
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end('{"ok":true}');
+          return;
+        }
         logger?.info('panel admin', { accion });
         const toast = hooks.admin ? await hooks.admin(accion) : '';
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -536,6 +558,12 @@ async function admin(accion) {
     if (accion === 'stop') setTimeout(() => window.close(), 900);
   } catch { aviso('连不上 BOT'); }
 }
+// La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
+// Una recarga también lo manda, pero la página vuelve al instante y el bot
+// cancela el apagado (margen de 3 s en el servidor).
+addEventListener('pagehide', () => {
+  try { navigator.sendBeacon('/admin', new Blob([JSON.stringify({ accion: 'adios' })], { type: 'application/json' })); } catch { }
+});
 async function pulsar(data) {
   try {
     const r = await (await fetch('/callback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }) })).json();
