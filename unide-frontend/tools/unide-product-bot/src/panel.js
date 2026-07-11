@@ -325,6 +325,55 @@ const filas = new Map(); // id → elemento .msg (para actualizar botones editad
 function sinEmoji(s) {
   return String(s || '').replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{2300}-\\u{23FF}\\u{FE0F}\\u{200D}]/gu, '').replace(/  +/g, ' ').replace(/^ +/gm, '').trim();
 }
+// El CSV de promociones (pensado para Excel) es ilegible en crudo: el lector
+// lo convierte en una lista agrupada por promoción, con precio de oferta,
+// precio anterior y condiciones. Cualquier otro archivo se muestra tal cual.
+function trocearCsv(texto) {
+  const tabla = []; let fila = []; let campo = ''; let dentro = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (dentro) {
+      if (c === '"') { if (texto[i + 1] === '"') { campo += '"'; i++; } else { dentro = false; } }
+      else { campo += c; }
+    } else if (c === '"') { dentro = true; }
+    else if (c === ';') { fila.push(campo); campo = ''; }
+    else if (c === '\\n') { fila.push(campo); tabla.push(fila); fila = []; campo = ''; }
+    else if (c !== '\\r') { campo += c; }
+  }
+  if (campo !== '' || fila.length) { fila.push(campo); tabla.push(fila); }
+  return tabla;
+}
+function csvLegible(texto) {
+  const tabla = trocearCsv(texto);
+  if (tabla.length < 2) return null;
+  const cab = tabla[0].map((s) => s.trim().toLowerCase());
+  const col = (n) => cab.indexOf(n);
+  const iCod = col('codigo_promocion');
+  const iNom = col('promocion'), iD = col('desde_promocion'), iH = col('hasta_promocion');
+  const iArt = col('descripcion_articulo'), iPvp = col('pvp'), iOf = col('oferta'), iTx = col('texto_oferta');
+  if (iCod < 0 || iArt < 0) return null;
+  const grupos = new Map();
+  for (const f of tabla.slice(1)) {
+    if (f.length < 6) continue;
+    const k = f[iCod] + '|' + (f[iNom] || '');
+    if (!grupos.has(k)) grupos.set(k, { nombre: (f[iNom] || f[iCod] || '').trim(), desde: (f[iD] || '').trim(), hasta: (f[iH] || '').trim(), arts: [] });
+    grupos.get(k).arts.push(f);
+  }
+  const L = ['共 ' + grupos.size + ' 个促销活动', ''];
+  for (const g of grupos.values()) {
+    L.push('◆ ' + g.nombre + (g.desde ? '　（' + g.desde + ' → ' + g.hasta + '）' : ''));
+    for (const f of g.arts) {
+      let precio = (f[iOf] || '').trim();
+      if (precio && precio.indexOf('€') < 0) precio = precio.replace(/(,\\d\\d)0$/, '$1') + ' €';
+      const antes = (f[iPvp] || '').trim().replace(/(,\\d\\d)0(\\s*€)/, '$1$2');
+      L.push('　· ' + (f[iArt] || '').trim() + '　→ ' + precio + (antes ? '（原价 ' + antes + '）' : ''));
+      const tx = (f[iTx] || '').trim();
+      if (tx) L.push('　　' + tx.toLowerCase());
+    }
+    L.push('');
+  }
+  return L.join('\\n');
+}
 function pintarBurbuja(m) {
   const b = document.createElement('div');
   b.className = 'burbuja';
@@ -355,7 +404,8 @@ function pintarBurbuja(m) {
       try {
         const r = await fetch('/file/' + m.id);
         if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
-        abrirLector(sinEmoji(m.text).slice(0, 40), await r.text());
+        const crudo = await r.text();
+        abrirLector(sinEmoji(m.text).slice(0, 40), csvLegible(crudo) || crudo);
       } catch { aviso('连不上 BOT'); }
     };
     chips.appendChild(chip);
