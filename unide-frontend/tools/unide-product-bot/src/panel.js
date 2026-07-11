@@ -1,5 +1,16 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
+
+// Fecha de compilación de ESTE archivo (git archive fija el mtime al commit;
+// el zip y Expand-Archive lo conservan). Se pinta en una esquina del panel
+// para poder ver de un vistazo qué versión está corriendo la tienda.
+let VERSION = '';
+try {
+  const st = fs.statSync(fileURLToPath(import.meta.url));
+  const d = st.mtime;
+  VERSION = `v ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+} catch { /* sin versión */ }
 
 // Panel de escritorio del bot: un mini servidor HTTP SOLO en 127.0.0.1 con
 // una página de botones grandes para las acciones de cada día (imprimir la
@@ -15,7 +26,9 @@ export function startPanel(config, logger, hooks) {
   const server = http.createServer(async (req, res) => {
     try {
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        // no-store: que el navegador NUNCA sirva una página vieja de caché
+        // después de actualizar el bot.
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         res.end(renderPage());
         return;
       }
@@ -82,7 +95,7 @@ export function startPanel(config, logger, hooks) {
   });
   server.on('error', (error) => logger?.warn('panel server error', { error: error.message }));
   // SOLO loopback: el panel no lleva autenticación, no debe salir del PC.
-  server.listen(port, '127.0.0.1', () => logger?.info('panel listening', { url: `http://127.0.0.1:${port}` }));
+  server.listen(port, '127.0.0.1', () => logger?.info('panel listening', { url: `http://127.0.0.1:${port}`, version: VERSION }));
   return server;
 }
 
@@ -235,6 +248,7 @@ function renderPage() {
     opacity: 0; transition: opacity .35s; pointer-events: none;
   }
   #aviso.visible { opacity: .9; }
+  #ver { position: fixed; right: 16px; bottom: 10px; font-size: 10px; letter-spacing: .12em; color: rgba(125,211,252,.3); pointer-events: none; }
 </style>
 </head>
 <body>
@@ -287,6 +301,7 @@ function renderPage() {
   </div>
 </div>
 <div id="aviso"></div>
+<div id="ver">${VERSION}</div>
 <script>
 const libre = document.getElementById('libre');
 libre.addEventListener('keydown', (e) => {
