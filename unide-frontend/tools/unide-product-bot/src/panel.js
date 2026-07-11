@@ -335,7 +335,6 @@ function renderPage() {
       </div>
       <div id="mantenimiento">
         <button class="pill" onclick="admin('update')">更新 BOT</button>
-        <button class="pill" onclick="admin('stop')">关闭 BOT</button>
       </div>
     </div>
     <div id="cajonTeclado">
@@ -543,19 +542,13 @@ function abrirCajonInicio() {
   document.getElementById('cajon').classList.add('abierto');
 }
 
-// Mantenimiento desde el panel: actualizar o apagar el bot, sin tocar
-// ningun script a mano. El bot confirma con un aviso y hace el resto solo.
+// Mantenimiento desde el panel: actualizar el bot sin tocar ningun script.
+// Para apagarlo basta cerrar la ventana (la X): el bot se apaga solo.
 async function admin(accion) {
-  const pregunta = accion === 'update'
-    ? '现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。'
-    : '要关闭 BOT 吗？关掉后面板离线，想再开就双击 panel.cmd 或 abrir-panel.vbs。';
-  if (!confirm(pregunta)) return;
+  if (!confirm('现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。')) return;
   try {
     const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
     if (r.toast) aviso(r.toast);
-    // Al apagar el bot, la ventana del panel se cierra sola tras el aviso.
-    // (Si el navegador bloquease window.close, la página queda en 离线.)
-    if (accion === 'stop') setTimeout(() => window.close(), 900);
   } catch { aviso('连不上 BOT'); }
 }
 // La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
