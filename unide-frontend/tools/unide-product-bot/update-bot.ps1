@@ -46,7 +46,9 @@ Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow
 Write-Host "Downloading latest package..."
 
 try {
-  Invoke-WebRequest -Uri $Url -OutFile $zipPath -UseBasicParsing
+  # ?t=... esquiva la cache CDN de GitHub (hasta 5 min sirviendo el zip viejo).
+  $sep = if ($Url.Contains('?')) { '&' } else { '?' }
+  Invoke-WebRequest -Uri ($Url + $sep + "t=$stamp") -OutFile $zipPath -UseBasicParsing -Headers @{ 'Cache-Control' = 'no-cache' }
 } catch {
   throw "Download failed. Check internet/GitHub URL. Details: $($_.Exception.Message)"
 }
@@ -69,4 +71,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $applyScript -ZipPath $zipPa
 Write-Host ""
 Write-Host "Update finished." -ForegroundColor Green
 Write-Host "Saved .env and config.local.json were preserved."
+
+# La fecha de src/panel.js es la "version" que el panel pinta en la esquina:
+# imprimirla aqui permite comprobar al momento que la actualizacion entro.
+$panelFile = Join-Path $root "src\panel.js"
+if (Test-Path $panelFile) {
+  $v = (Get-Item -LiteralPath $panelFile).LastWriteTime.ToString("dd/MM HH:mm")
+  Write-Host "Version instalada: v $v (debe salir igual en la esquina del panel)" -ForegroundColor Cyan
+}
 Write-Host "Double-click start-bot.cmd to start the new version."
