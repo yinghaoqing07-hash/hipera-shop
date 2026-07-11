@@ -12,8 +12,16 @@ set PORT=8765
 powershell -NoProfile -Command "try { (New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%)).Close(); exit 0 } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 goto abrir
 
-echo El bot no esta corriendo. Arrancandolo...
-start "" "%~dp0start-bot.cmd"
+echo El bot no esta corriendo. Arrancandolo en segundo plano...
+rem Sin ventanas: si existe la tarea programada (install-autostart.cmd),
+rem se usa (corre elevada y oculta, sin UAC). Si no, se eleva wscript con
+rem un aviso UAC y el bot corre oculto igualmente.
+schtasks /Query /TN "UnideProductBot" >nul 2>&1
+if not errorlevel 1 (
+  schtasks /Run /TN "UnideProductBot" >nul 2>&1
+) else (
+  powershell -NoProfile -Command "Start-Process -FilePath 'wscript.exe' -ArgumentList '\"%~dp0run-bot-hidden.vbs\"' -Verb RunAs"
+)
 echo Esperando a que el bot este listo (hasta 60 s)...
 powershell -NoProfile -Command "for($i=0;$i -lt 60;$i++){ try{(New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%)).Close(); exit 0}catch{Start-Sleep -Seconds 1} }; exit 1" >nul 2>&1
 if errorlevel 1 goto sin_bot
@@ -26,8 +34,8 @@ exit /b 0
 
 :sin_bot
 echo.
-echo El bot no llego a arrancar. Mira la ventana negra de start-bot.cmd
-echo (puede estar pidiendo permisos de administrador o instalando npm).
+echo El bot no llego a arrancar. Para ver que pasa, abre start-bot.cmd
+echo directamente (ahi se ven los mensajes y errores) o mira la carpeta logs.
 echo Cuando este corriendo, vuelve a abrir panel.cmd.
 pause
 exit /b 1
