@@ -531,6 +531,9 @@ async function admin(accion) {
   try {
     const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
     if (r.toast) aviso(r.toast);
+    // Al apagar el bot, la ventana del panel se cierra sola tras el aviso.
+    // (Si el navegador bloquease window.close, la página queda en 离线.)
+    if (accion === 'stop') setTimeout(() => window.close(), 900);
   } catch { aviso('连不上 BOT'); }
 }
 async function pulsar(data) {
