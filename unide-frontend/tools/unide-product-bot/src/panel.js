@@ -359,6 +359,10 @@ function csvLegible(texto) {
     if (!grupos.has(k)) grupos.set(k, { nombre: (f[iNom] || f[iCod] || '').trim(), desde: (f[iD] || '').trim(), hasta: (f[iH] || '').trim(), arts: [] });
     grupos.get(k).arts.push(f);
   }
+  // Muchas campañas (NOVEDAD/STOCK semanal, sobre todo fruta) llevan el
+  // MISMO precio en PVD y PVD Promoción: no hay rebaja, es el precio de la
+  // semana. Señalarlo evita leerlo como si fuera un descuento.
+  const aNum = (s) => parseFloat(String(s || '').replace(/[^0-9,.]/g, '').replace(',', '.'));
   const L = ['共 ' + grupos.size + ' 个促销活动', ''];
   for (const g of grupos.values()) {
     L.push('◆ ' + g.nombre + (g.desde ? '　（' + g.desde + ' → ' + g.hasta + '）' : ''));
@@ -366,9 +370,10 @@ function csvLegible(texto) {
       let precio = (f[iOf] || '').trim();
       if (precio && precio.indexOf('€') < 0) precio = precio.replace(/(,\\d\\d)0$/, '$1') + ' €';
       const antes = (f[iPvp] || '').trim().replace(/(,\\d\\d)0(\\s*€)/, '$1$2');
-      L.push('　· ' + (f[iArt] || '').trim() + '　→ ' + precio + (antes ? '（原价 ' + antes + '）' : ''));
+      const sinRebaja = antes && Number.isFinite(aNum(precio)) && Math.abs(aNum(precio) - aNum(antes)) < 0.0005;
+      L.push('　· ' + (f[iArt] || '').trim() + '　→ ' + precio + (sinRebaja ? '（本周价，无折扣）' : antes ? '（原价 ' + antes + '）' : ''));
       const tx = (f[iTx] || '').trim();
-      if (tx) L.push('　　' + tx.toLowerCase());
+      if (tx && !sinRebaja) L.push('　　' + tx.toLowerCase());
     }
     L.push('');
   }
