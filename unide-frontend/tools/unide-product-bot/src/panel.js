@@ -139,7 +139,7 @@ function renderPage() {
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
   @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-  main { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 24px 8vh; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 24px 24px; min-height: 0; }
   #saludo { font-size: 13px; letter-spacing: .3em; color: #5f7184; margin-bottom: 26px; text-transform: uppercase; }
   #linea {
     width: min(800px, 94vw); display: flex; align-items: center; gap: 14px;
@@ -161,7 +161,7 @@ function renderPage() {
   }
   .pill:hover { border-color: rgba(125,211,252,.6); color: #cfe9f7; }
   .pill:active { transform: scale(.97); }
-  #reloj { font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
+  #reloj { margin-top: 2vh; font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
   #reloj span.seg { font-size: 26px; color: #38bdf8; font-weight: 300; margin-left: 6px; }
   #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .28em; color: #76879a; text-transform: uppercase; }
   #tarjetas { margin-top: 22px; display: grid; gap: 10px; grid-template-columns: 1fr; }
@@ -172,12 +172,12 @@ function renderPage() {
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
   #charla {
-    width: min(800px, 94vw); max-height: 56vh; overflow-y: auto;
-    margin-bottom: 26px; display: none; scrollbar-width: thin;
+    /* flex 1: el chat se estira hasta la línea de comando, pegada abajo */
+    flex: 1 1 0; min-height: 0; width: min(800px, 94vw); overflow-y: auto;
+    margin: 8px 0 20px; scrollbar-width: thin;
     scrollbar-color: rgba(125,211,252,.2) transparent;
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
   }
-  #charla.con { display: block; }
   .msg { display: flex; margin: 13px 0; }
   .msg.mia { justify-content: flex-end; }
   .burbuja {
@@ -265,7 +265,7 @@ function renderPage() {
   <div id="saludo">需要我做什么</div>
   <div id="charla"></div>
   <div id="linea">
-    <input id="libre" placeholder="打印今天的清单 · 看看153划不划算 · 香蕉改成2,99 …" autofocus>
+    <input id="libre" autofocus>
   </div>
 </main>
 <div id="lector">
