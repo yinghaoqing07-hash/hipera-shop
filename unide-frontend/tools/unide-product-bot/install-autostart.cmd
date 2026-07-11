@@ -14,7 +14,8 @@ if errorlevel 1 (
   exit /b 0
 )
 
-schtasks /Create /F /TN "UnideProductBot" /SC ONLOGON /RL HIGHEST /TR "\"%~dp0start-bot.cmd\""
+rem wscript + run-bot-hidden.vbs: el bot arranca sin ninguna ventana.
+schtasks /Create /F /TN "UnideProductBot" /SC ONLOGON /RL HIGHEST /TR "wscript.exe \"%~dp0run-bot-hidden.vbs\""
 if errorlevel 1 goto fallo
 
 echo.
