@@ -130,13 +130,19 @@ function renderPage() {
   }
   #logo { color: #7dd3fc; font-weight: 600; }
   #estado { display: flex; gap: 18px; align-items: center; }
+  #btnCajon {
+    background: none; border: 1px solid rgba(125,211,252,.3); color: #97c9e3;
+    border-radius: 999px; padding: 5px 16px; font-size: 11px; letter-spacing: .25em;
+    cursor: pointer; font-family: inherit;
+  }
+  #btnCajon:hover { border-color: rgba(125,211,252,.65); color: #d5ecf8; }
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
   @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   main { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 24px 8vh; }
   #saludo { font-size: 13px; letter-spacing: .3em; color: #5f7184; margin-bottom: 26px; text-transform: uppercase; }
   #linea {
-    width: min(680px, 92vw); display: flex; align-items: center; gap: 14px;
+    width: min(800px, 94vw); display: flex; align-items: center; gap: 14px;
     border-bottom: 1px solid rgba(125,211,252,.25); padding: 6px 4px 12px;
     transition: border-color .25s;
   }
@@ -147,7 +153,7 @@ function renderPage() {
     font-size: 20px; font-weight: 300; letter-spacing: .02em; caret-color: #38bdf8;
   }
   #libre::placeholder { color: #53657a; }
-  #pills { margin-top: 44px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 680px; }
+  #pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
   .pill {
     background: none; border: 1px solid rgba(200,211,220,.22); color: #b6c4d1;
     border-radius: 999px; padding: 9px 18px; font-size: 14px; cursor: pointer;
@@ -158,18 +164,15 @@ function renderPage() {
   #reloj { font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
   #reloj span.seg { font-size: 26px; color: #38bdf8; font-weight: 300; margin-left: 6px; }
   #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .28em; color: #76879a; text-transform: uppercase; }
-  #tarjetas {
-    margin-top: 52px; display: grid; gap: 12px; width: min(820px, 94vw);
-    grid-template-columns: 1fr 1fr 1.6fr;
-  }
-  @media (max-width: 700px) { #tarjetas { grid-template-columns: 1fr; } }
+  #tarjetas { margin-top: 22px; display: grid; gap: 10px; grid-template-columns: 1fr; }
+  #cajonTeclado { display: none; }
   .tarjeta { border: 1px solid rgba(200,211,220,.16); background: rgba(148,180,205,.05); border-radius: 12px; padding: 14px 16px; min-height: 88px; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .25em; color: #5f7184; margin-bottom: 9px; }
   .tarjeta .dato { font-size: 14px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
   #charla {
-    width: min(680px, 92vw); max-height: 34vh; overflow-y: auto;
+    width: min(800px, 94vw); max-height: 56vh; overflow-y: auto;
     margin-bottom: 26px; display: none; scrollbar-width: thin;
     scrollbar-color: rgba(125,211,252,.2) transparent;
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
@@ -179,7 +182,7 @@ function renderPage() {
   .msg.mia { justify-content: flex-end; }
   .burbuja {
     max-width: 84%;
-    font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    font-size: 15.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
     color: #b4c2cf;
   }
   .mia .burbuja { color: #cfe9f7; text-align: right; }
@@ -254,7 +257,7 @@ function renderPage() {
 <body>
 <header>
   <span id="logo">J A R V I S</span>
-  <span id="estado"><span><span id="punto"></span><span id="txtEstado">连接中</span></span></span>
+  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><span><span id="punto"></span><span id="txtEstado">连接中</span></span></span>
 </header>
 <main>
   <div id="reloj">--:--</div>
@@ -263,28 +266,6 @@ function renderPage() {
   <div id="charla"></div>
   <div id="linea">
     <input id="libre" placeholder="打印今天的清单 · 看看153划不划算 · 香蕉改成2,99 …" autofocus>
-  </div>
-  <div id="pills">
-    <button class="pill" onclick="run('/llegada')">打印今天清单</button>
-    <button class="pill" onclick="run('/promociones')">刷新促销</button>
-    <button class="pill" onclick="run('/ahorro_pedido')">PDA 省钱分析</button>
-    <button class="pill" onclick="run('/pedido')">叫货提醒</button>
-    <button class="pill" onclick="run('/carne')">肉类盘点</button>
-    <button class="pill" onclick="run('/ahorro')">总体省钱策略</button>
-  </div>
-  <div id="tarjetas">
-    <div class="tarjeta">
-      <div class="titulo">今日</div>
-      <div class="dato" id="tHoy">—</div>
-    </div>
-    <div class="tarjeta">
-      <div class="titulo">促销</div>
-      <div class="dato" id="tPromo">—</div>
-    </div>
-    <div class="tarjeta ancha">
-      <div class="titulo">最近动态</div>
-      <div class="dato" id="tActividad">—</div>
-    </div>
   </div>
 </main>
 <div id="lector">
@@ -295,9 +276,35 @@ function renderPage() {
 <div id="cajon">
   <div class="cab"><span><b>操 作 台</b></span><button onclick="cerrarCajon()" title="关闭">✕</button></div>
   <div class="cuerpo">
-    <div class="texto" id="cajonTexto"></div>
-    <div id="cajonFoto"></div>
-    <div id="cajonBotones"></div>
+    <div id="cajonInicio">
+      <div id="pills">
+        <button class="pill" onclick="run('/llegada')">打印今天清单</button>
+        <button class="pill" onclick="run('/promociones')">刷新促销</button>
+        <button class="pill" onclick="run('/ahorro_pedido')">PDA 省钱分析</button>
+        <button class="pill" onclick="run('/pedido')">叫货提醒</button>
+        <button class="pill" onclick="run('/carne')">肉类盘点</button>
+        <button class="pill" onclick="run('/ahorro')">总体省钱策略</button>
+      </div>
+      <div id="tarjetas">
+        <div class="tarjeta">
+          <div class="titulo">今日</div>
+          <div class="dato" id="tHoy">—</div>
+        </div>
+        <div class="tarjeta">
+          <div class="titulo">促销</div>
+          <div class="dato" id="tPromo">—</div>
+        </div>
+        <div class="tarjeta ancha">
+          <div class="titulo">最近动态</div>
+          <div class="dato" id="tActividad">—</div>
+        </div>
+      </div>
+    </div>
+    <div id="cajonTeclado">
+      <div class="texto" id="cajonTexto"></div>
+      <div id="cajonFoto"></div>
+      <div id="cajonBotones"></div>
+    </div>
   </div>
 </div>
 <div id="aviso"></div>
@@ -398,6 +405,8 @@ const datos = new Map();      // id → último estado del mensaje (para re-rend
 const cajonCerrados = new Set(); // teclados que el usuario cerró a mano
 let cajonId = null;
 function renderCajon(m) {
+  document.getElementById('cajonInicio').style.display = 'none';
+  document.getElementById('cajonTeclado').style.display = 'block';
   document.getElementById('cajonTexto').textContent = sinEmoji(m.text);
   const foto = document.getElementById('cajonFoto');
   foto.innerHTML = '';
@@ -431,6 +440,14 @@ function abrirCajon(id) {
 function cerrarCajon() {
   if (cajonId != null) cajonCerrados.add(cajonId);
   document.getElementById('cajon').classList.remove('abierto');
+}
+// Vista por defecto del cajón: los accesos rápidos y las tarjetas de estado
+// (antes vivían en el centro de la página; el chat necesitaba el sitio).
+function abrirCajonInicio() {
+  cajonId = null;
+  document.getElementById('cajonTeclado').style.display = 'none';
+  document.getElementById('cajonInicio').style.display = 'block';
+  document.getElementById('cajon').classList.add('abierto');
 }
 
 async function pulsar(data) {
