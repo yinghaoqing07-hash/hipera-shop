@@ -35,6 +35,7 @@ import {
 } from './orderAssistant.js';
 
 const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
+const START_TIME = Date.now(); // identifica ESTE arranque (ver status.boot)
 const config = loadConfig(readArg('--config'));
 const logger = createLogger(config.logsDir);
 const supplierIndex = loadSupplierIndex(config.supplierCsv);
@@ -1745,6 +1746,10 @@ if (config.panel?.enabled !== false) {
       let arrivingToday = 0;
       try { arrivingToday = ordersArrivingOn(config, todayString(config)).length; } catch { /* sin historial */ }
       return {
+        // boot cambia en cada reinicio: la página lo usa para saber con
+        // certeza que la actualización terminó aunque el corte fuera breve.
+        boot: START_TIME,
+        updateLine: lastUpdateLogLine(),
         uptime: humanUptime(process.uptime()),
         promoCsv,
         promoStats: promoStatsForPanel(),
@@ -1772,7 +1777,7 @@ if (config.panel?.enabled !== false) {
         logger.info('panel admin: update', { updater });
         // Desacoplado del bot: el updater para este proceso a mitad de
         // faena, asi que debe sobrevivirle (detached + unref).
-        const child = spawnDetached('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', updater], config.__toolRoot);
+        const child = spawnDetached('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', updater], config.__toolRoot, path.resolve(config.logsDir || '.', UPDATE_LOG));
         if (!child) return '启动更新器失败，看看 logs 里的报错';
         return '正在后台更新。面板会断开一两分钟，更新完 bot 自己回来，刷新即可';
       }
@@ -1781,15 +1786,38 @@ if (config.panel?.enabled !== false) {
   });
 }
 
-function spawnDetached(command, args, cwd) {
+function spawnDetached(command, args, cwd, logFile) {
+  let out = 'ignore';
   try {
-    const child = spawn(command, args, { cwd, detached: true, stdio: 'ignore', windowsHide: true });
+    // Con logFile, stdout/stderr del hijo van a ese archivo: sin él, un
+    // updater que muere nada más nacer no deja NINGUNA pista.
+    if (logFile) {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.appendFileSync(logFile, `\n--- ${new Date().toISOString()} ---\n`);
+      out = fs.openSync(logFile, 'a');
+    }
+    const child = spawn(command, args, { cwd, detached: true, stdio: ['ignore', out, out], windowsHide: true });
     child.unref();
+    if (out !== 'ignore') fs.closeSync(out);
     return child;
   } catch (error) {
+    if (out !== 'ignore') { try { fs.closeSync(out); } catch { /* ya */ } }
     logger.error('spawn detached failed', { command, error: error.message });
     return null;
   }
+}
+
+const UPDATE_LOG = 'update-panel.log';
+// Última línea del log del updater lanzado desde el panel (si es reciente):
+// la página la enseña en la barra de estado mientras dura la actualización.
+function lastUpdateLogLine() {
+  try {
+    const file = path.resolve(config.logsDir || '.', UPDATE_LOG);
+    const st = fs.statSync(file);
+    if (Date.now() - st.mtimeMs > 10 * 60000) return '';
+    const lines = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('---'));
+    return lines.length ? lines[lines.length - 1].slice(0, 140) : '';
+  } catch { return ''; }
 }
 
 function humanUptime(seconds) {
