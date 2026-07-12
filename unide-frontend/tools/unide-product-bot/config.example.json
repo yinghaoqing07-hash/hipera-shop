@@ -7,11 +7,17 @@
   "supplierCsv": "data/supplier_products_clean.csv",
   "storeCsv": "data/store_products_clean.csv",
   "logsDir": "logs",
+  "llm": {
+    "enabled": true,
+    "allRepliesViaApi": true,
+    "replyTimeoutMs": 60000,
+    "replyMaxTokens": 2400
+  },
   "memory": {
     "enabled": true,
     "path": "data/bot-memory.json",
     "autoLearn": true,
-    "autoNotify": true,
+    "autoNotify": false,
     "maxEntries": 500,
     "contextLimit": 12,
     "extractionTimeoutMs": 45000

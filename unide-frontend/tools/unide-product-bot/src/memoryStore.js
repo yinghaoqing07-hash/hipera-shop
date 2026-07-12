@@ -213,9 +213,12 @@ export function parseMemoryCommand(input) {
 
 export function shouldConsiderForMemory(input) {
   const text = String(input || '').trim();
-  if (text.length < 6 || text.length > 2000 || text.startsWith('/')) return false;
+  if (text.length < 4 || text.length > 2000 || text.startsWith('/')) return false;
   if (containsSensitiveData(text)) return false;
-  return /记住|以后|从现在|默认|每次|一直|通常|一般来说|规则|流程|习惯|必须|不要|别再|更正|纠正|不是.{0,40}(?:而是|应该是)|(?:星期|周[一二三四五六日天]).{0,30}(?:叫货|到货)|(?:叫货|到货).{0,30}(?:星期|周[一二三四五六日天])|recuerda|a partir de ahora|por defecto|cada vez|siempre|nunca|normalmente|regla|proceso|prefiero|correcci[oó]n|no es.{0,50}sino/iu.test(text);
+  // El modelo decide si hay algo duradero. El filtro local solo evita ruido
+  // obvio: así también aprende correcciones coloquiales sin palabras clave.
+  if (/^(?:好|好的|行|可以|知道了|明白了|谢谢|vale|ok|gracias)[。.!！ ]*$/iu.test(text)) return false;
+  return true;
 }
 
 export function containsSensitiveData(input) {

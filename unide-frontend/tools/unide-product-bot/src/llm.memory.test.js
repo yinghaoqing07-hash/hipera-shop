@@ -41,6 +41,9 @@ test('extracts and validates durable memory candidates from structured LLM outpu
   const result = await llmExtractMemories('以后肉类通常星期一和星期三叫货', {
     llm: { apiKey: 'test-key', model: 'test-model' },
     memory: { extractionTimeoutMs: 1000 }
+  }, undefined, {
+    history: [{ role: 'user', content: '我们在说叫货时间' }, { role: 'assistant', content: '明白' }],
+    existingMemory: '[M1][schedule] 肉类星期一叫货。'
   });
 
   assert.equal(result.length, 1);
@@ -49,6 +52,8 @@ test('extracts and validates durable memory candidates from structured LLM outpu
   assert.equal(requestBody.model, 'test-model');
   assert.equal(requestBody.output_config.format.type, 'json_schema');
   assert.match(requestBody.system, /NO guardes/);
+  assert.match(requestBody.system, /MEMORIA EXISTENTE/);
+  assert.equal(requestBody.messages.length, 3);
 });
 
 test('returns no memory when the model refuses extraction', async (t) => {
