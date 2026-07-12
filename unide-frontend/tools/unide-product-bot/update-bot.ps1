@@ -26,6 +26,18 @@ function Paso([string]$texto) {
 # Transcripcion completa para depurar (captura tambien Write-Host).
 try { Start-Transcript -Path (Join-Path $logsDir "update-transcript.log") -Append -Force | Out-Null } catch { }
 
+# REGLA DE ORO: si llegamos a parar el bot, SIEMPRE hay que volver a
+# arrancarlo — aunque la instalacion falle a mitad, el bot vuelve con lo
+# que haya en disco. Un update fallido no puede dejar la tienda sin bot.
+$botParado = $false
+function Reiniciar-Bot {
+  $vbs = Join-Path $root "run-bot-hidden.vbs"
+  if (Test-Path $vbs) {
+    try { Start-Process -FilePath "wscript.exe" -ArgumentList "`"$vbs`""; return $true } catch { }
+  }
+  return $false
+}
+
 try {
   Paso "preparando..."
 
@@ -92,12 +104,25 @@ try {
       # peleandose por Telegram): mejor parar aqui y contarlo.
       throw "No pude parar el bot (el puerto del panel sigue ocupado). Prueba stop-bot.cmd y vuelve a actualizar."
     }
+    $botParado = $true
     Start-Sleep -Seconds 1
   } else {
     Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow
   }
 
-  powershell -NoProfile -ExecutionPolicy Bypass -File $applyScript -ZipPath $zipPath
+  # La instalacion tiene su propio try/catch: aunque falle (OneDrive
+  # bloqueando un archivo, zip corrupto...), el reinicio de abajo se
+  # ejecuta IGUAL y el bot vuelve con lo que haya en disco.
+  $instalado = $true
+  $motivoInstalacion = ""
+  try {
+    powershell -NoProfile -ExecutionPolicy Bypass -File $applyScript -ZipPath $zipPath
+    if ($LASTEXITCODE -ne 0) { throw "apply-update.ps1 salio con codigo $LASTEXITCODE" }
+  } catch {
+    $instalado = $false
+    $motivoInstalacion = $_.Exception.Message
+    Write-Host "Fallo instalando: $motivoInstalacion" -ForegroundColor Red
+  }
 
   # Version instalada: el numero de version.txt (v127, v128...) es lo que
   # el panel pinta en su esquina — comparar numeros es trivial.
@@ -112,19 +137,28 @@ try {
   # Reinicio en segundo plano (sin ventana): este proceso ya va elevado,
   # asi que el vbs oculto arranca el bot sin ningun aviso UAC.
   Paso "reiniciando el bot..."
-  $vbs = Join-Path $root "run-bot-hidden.vbs"
-  if (Test-Path $vbs) {
-    Start-Process -FilePath "wscript.exe" -ArgumentList "`"$vbs`""
-  } else {
-    Write-Host "Double-click start-bot.cmd to start the new version."
+  if (-not (Reiniciar-Bot)) {
+    Write-Host "Double-click start-bot.cmd to start the bot." -ForegroundColor Yellow
   }
 
-  Paso "hecho: instalado $v"
-  Write-Host ""
-  Write-Host "Update finished. Version instalada: $v" -ForegroundColor Green
-  Write-Host "Saved .env and config.local.json were preserved."
+  if ($instalado) {
+    Paso "hecho: instalado $v"
+    Write-Host ""
+    Write-Host "Update finished. Version instalada: $v" -ForegroundColor Green
+    Write-Host "Saved .env and config.local.json were preserved."
+  } else {
+    Paso "ERROR instalando ($motivoInstalacion) - el bot vuelve con la version anterior"
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
+  }
 } catch {
-  Paso ("ERROR: " + $_.Exception.Message)
+  $motivo = $_.Exception.Message
+  # Si el bot ya estaba parado, revivirlo antes de rendirnos.
+  if ($botParado -and (Reiniciar-Bot)) {
+    Paso ("ERROR: " + $motivo + " - el bot se ha reiniciado con la version anterior")
+  } else {
+    Paso ("ERROR: " + $motivo)
+  }
   try { Stop-Transcript | Out-Null } catch { }
   exit 1
 }
