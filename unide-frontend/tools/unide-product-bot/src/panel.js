@@ -569,12 +569,13 @@ function abrirCajonInicio() {
 let actualizando = 0;   // timestamp del clic, 0 = no estamos actualizando
 let vioCaida = false;   // ya pasó por la fase "bot apagado"
 let hechoVisto = 0;     // cuándo apareció "hecho:" sin que el bot reiniciara
+let caidaDesde = 0;     // desde cuándo lleva el bot sin responder
 async function admin(accion) {
   if (!confirm('现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。')) return;
   try {
     const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
     if (r.toast) aviso(r.toast);
-    if (accion === 'update') { actualizando = Date.now(); vioCaida = false; hechoVisto = 0; refrescar(); }
+    if (accion === 'update') { actualizando = Date.now(); vioCaida = false; hechoVisto = 0; caidaDesde = 0; refrescar(); }
   } catch { aviso('连不上 BOT'); }
 }
 // La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
@@ -686,6 +687,7 @@ async function refrescar() {
       aviso('更新超时 — 看一眼 logs/update-estado.txt 或跑 start-bot.cmd');
     }
     if (s.boot) bootVisto = s.boot;
+    caidaDesde = 0;
     punto.classList.remove('rojo');
     const partes = ['在线 ' + s.uptime];
     partes.push('促销 ' + (s.promoCsv || '无'));
@@ -702,9 +704,14 @@ async function refrescar() {
     pintarTarjetas(s);
   } catch {
     punto.classList.add('rojo');
+    if (!caidaDesde) caidaDesde = Date.now();
     if (actualizando) {
       vioCaida = true;
-      txt.textContent = '正在更新（安装中，面板马上自己回来）…';
+      // La instalación normal tarda segundos; si el bot lleva minutos sin
+      // volver, algo se torció — decir la verdad y el remedio.
+      txt.textContent = Date.now() - caidaDesde > 180000
+        ? '更新后 bot 一直没回来 — 去电脑上双击 panel.cmd 或 start-bot.cmd'
+        : '正在更新（安装中，面板马上自己回来）…';
     } else {
       txt.textContent = '离线 — 黑窗口开着吗？';
     }
