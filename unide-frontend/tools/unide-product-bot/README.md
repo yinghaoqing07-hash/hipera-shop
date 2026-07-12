@@ -382,3 +382,9 @@ margen: 30
 ```
 
 如果写 `margen`，程序会直接把这个百分比填入 `P.defecto`。如果只写 `precio` 或 `precio: auto`，程序会按 UnideGes 公式 `(目标 P.TPV / (1 + IVA%) - 成本) / 目标 P.TPV * 100` 计算要填的 `P.defecto%`。
+
+## Respuestas naturales y memoria automática (v136)
+
+Desde v136, el bot envía cada respuesta de texto y cada pie de captura/documento por la API de IA antes de mostrarlo. El código operativo sigue produciendo el resultado factual y la IA solo lo redacta; códigos, precios, cantidades, fechas, estados y advertencias deben conservarse. Si la API falla, se envía el borrador factual para no dejar la tienda sin respuesta. Puede desactivarse con `llm.allRepliesViaApi: false`.
+
+La memoria automática ya no depende de que la usuaria diga «记住» ni de palabras clave concretas. Todas las frases naturales no sensibles pasan por el extractor, que decide si contienen una preferencia, regla, proceso, horario, corrección o hecho estable. Las preguntas y peticiones puntuales se descartan. El aprendizaje es silencioso por defecto (`memory.autoNotify: false`), mientras `/memories` y `/forget` siguen disponibles para auditar o borrar.

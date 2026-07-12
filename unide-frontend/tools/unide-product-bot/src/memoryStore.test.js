@@ -79,9 +79,11 @@ test('supports remember, list and safe forget commands', () => {
   assert.equal(parseMemoryCommand('忘记全部'), null);
 });
 
-test('auto learning only considers durable-looking statements', () => {
+test('auto learning lets the model inspect natural conversation without storing commands or acknowledgements', () => {
   assert.equal(shouldConsiderForMemory('以后每次叫货前都先看促销和库存'), true);
-  assert.equal(shouldConsiderForMemory('帮我查一下最新三个 pedidos'), false);
+  assert.equal(shouldConsiderForMemory('这个页面以后不要自动点 Guardar'), true);
+  assert.equal(shouldConsiderForMemory('帮我查一下最新三个 pedidos'), true);
+  assert.equal(shouldConsiderForMemory('好的'), false);
   assert.equal(shouldConsiderForMemory('/pedido_nuevo\n620006 2'), false);
 });
 

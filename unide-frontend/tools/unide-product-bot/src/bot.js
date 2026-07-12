@@ -8,7 +8,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmConfigured, llmExtractMemories, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
@@ -44,6 +44,7 @@ const logger = createLogger(config.logsDir);
 const memoryStore = new MemoryStore(config.memory, logger);
 const operationLedger = new OperationLedger(config.operationLedger, logger);
 let memoryLearnQueue = Promise.resolve();
+const replyContextByChat = new Map();
 const supplierIndex = loadSupplierIndex(config.supplierCsv);
 const storeIndex = loadStoreIndex(config.storeCsv);
 const sessions = new Map();
@@ -132,19 +133,28 @@ const panelToasts = new Map();
   };
   const origSendMessage = telegram.sendMessage.bind(telegram);
   telegram.sendMessage = async (chatId, text, options = {}) => {
-    const { __noLog, ...rest } = options || {};
-    const entry = __noLog ? null : recordChat('bot', text, { buttons: buttonsFromMarkup(rest) });
-    const result = await origSendMessage(chatId, text, rest);
+    const { __noLog, __apiReady, __skipAI, __replyKind, ...rest } = options || {};
+    const original = String(text ?? '');
+    const finalText = (__noLog || __apiReady || __skipAI)
+      ? original
+      : await composeOutgoingReply(chatId, original, { kind: __replyKind, maxChars: 3900 });
+    const entry = __noLog ? null : recordChat('bot', finalText, { buttons: buttonsFromMarkup(rest) });
+    const result = await origSendMessage(chatId, finalText, rest);
     if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
     return result;
   };
   for (const method of ['sendPhoto', 'sendDocument']) {
     const original = telegram[method].bind(telegram);
-    telegram[method] = async (chatId, filePath, caption = '', options) => {
+    telegram[method] = async (chatId, filePath, caption = '', options = {}) => {
+      const { __apiReady, __skipAI, __replyKind, ...rest } = options || {};
+      const rawCaption = String(caption || '');
+      const finalCaption = (!rawCaption || __apiReady || __skipAI)
+        ? rawCaption
+        : await composeOutgoingReply(chatId, rawCaption, { kind: __replyKind || 'caption', maxChars: 950 });
       const entry = method === 'sendPhoto'
-        ? recordChat('bot', caption, { photo: String(filePath), buttons: buttonsFromMarkup(options) })
-        : recordChat('bot', `📎 ${path.basename(String(filePath))}${caption ? ` — ${caption}` : ''}`, { doc: String(filePath), buttons: buttonsFromMarkup(options) });
-      const result = await original(chatId, filePath, caption, options);
+        ? recordChat('bot', finalCaption, { photo: String(filePath), buttons: buttonsFromMarkup(rest) })
+        : recordChat('bot', `📎 ${path.basename(String(filePath))}${finalCaption ? ` — ${finalCaption}` : ''}`, { doc: String(filePath), buttons: buttonsFromMarkup(rest) });
+      const result = await original(chatId, filePath, finalCaption, rest);
       if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
       return result;
     };
@@ -194,6 +204,7 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   notePanelActivity(text);
   recordChat(update.__panel ? 'panel' : 'user', text);
+  replyContextByChat.set(String(chatId), { text, at: Date.now() });
   const memoryCommand = parseMemoryCommand(text);
   if (memoryCommand) {
     await handleMemoryCommand(chatId, memoryCommand);
@@ -288,10 +299,12 @@ async function handlePriceHistory(chatId, requestOrText) {
 
 function queueAutoMemory(chatId, text) {
   if (!memoryStore.enabled || config.memory?.autoLearn === false || !llmConfigured(config) || !shouldConsiderForMemory(text)) return;
+  const history = assistHistory(text);
+  const existingMemory = memoryStore.buildContext(text);
   memoryLearnQueue = memoryLearnQueue
     .catch(() => {})
     .then(async () => {
-      const extracted = await llmExtractMemories(text, config, logger);
+      const extracted = await llmExtractMemories(text, config, logger, { history, existingMemory });
       const learned = [];
       for (const memory of extracted) {
         const result = memoryStore.remember({ ...memory, source: 'auto' });
@@ -442,6 +455,37 @@ function assistHistory(currentText) {
 // Errores para humanos: el texto tecnico completo va al log; al chat va
 // una frase sencilla en chino (traducida por la IA). Sin IA configurada,
 // o si la IA falla, se manda el texto tecnico de siempre.
+function replyHistory() {
+  return chatLog
+    .slice(-14)
+    .filter((entry) => entry.text)
+    .map((entry) => ({
+      role: entry.from === 'bot' ? 'assistant' : 'user',
+      content: String(entry.text).slice(0, 800)
+    }));
+}
+
+async function composeOutgoingReply(chatId, draft, options = {}) {
+  const original = String(draft ?? '');
+  if (!original.trim() || config.llm?.allRepliesViaApi === false || !llmConfigured(config)) return original;
+  const active = replyContextByChat.get(String(chatId));
+  const userText = active && Date.now() - active.at < 30 * 60 * 1000 ? active.text : '';
+  try {
+    return await llmComposeReply(original, config, logger, {
+      userText,
+      history: replyHistory(),
+      memoryContext: memoryStore.buildContext(userText || original),
+      maxChars: options.maxChars
+    });
+  } catch (error) {
+    logger.warn('api reply composition failed; using factual fallback', {
+      kind: options.kind || 'message',
+      error: error.message
+    });
+    return original;
+  }
+}
+
 async function humanizarError(contexto, textoTecnico) {
   logger.warn('operation failed', { contexto, error: String(textoTecnico || '').slice(0, 500) });
   if (!llmConfigured(config)) return textoTecnico;
@@ -532,7 +576,7 @@ async function handleFreeText(chatId, text) {
       await telegram.sendMessage(chatId, formatCommandList());
       return;
     default:
-      await telegram.sendMessage(chatId, intent.respuesta || '没太明白你想做什么，可以发 /help 看看我会什么。');
+      await telegram.sendMessage(chatId, intent.respuesta || '没太明白你想做什么，可以发 /help 看看我会什么。', { __apiReady: true });
   }
 }
 
