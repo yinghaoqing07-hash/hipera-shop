@@ -47,6 +47,9 @@ export function startPanel(config, logger, hooks) {
       }
       if (req.method === 'GET' && req.url === '/status') {
         const status = await hooks.status();
+        // La página compara esta versión con la suya: si difieren, se
+        // recarga sola (así el aviso de "actualización terminada" es real).
+        status.version = VERSION;
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(status));
         return;
@@ -544,11 +547,20 @@ function abrirCajonInicio() {
 
 // Mantenimiento desde el panel: actualizar el bot sin tocar ningun script.
 // Para apagarlo basta cerrar la ventana (la X): el bot se apaga solo.
+// Ciclo de la actualización, con feedback real de principio a fin:
+//   1. se marca actualizando y el estado pasa a "正在更新…" (polling rápido)
+//   2. el bot cae (fase de instalación) — el estado lo dice, no "离线"
+//   3. vuelve: si /status trae otra versión, la página se recarga sola y
+//      tras recargar enseña "更新完成"; si vuelve con la MISMA versión,
+//      se avisa de que no ha cambiado nada.
+let actualizando = 0;   // timestamp del clic, 0 = no estamos actualizando
+let vioCaida = false;   // ya pasó por la fase "bot apagado"
 async function admin(accion) {
   if (!confirm('现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。')) return;
   try {
     const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
     if (r.toast) aviso(r.toast);
+    if (accion === 'update') { actualizando = Date.now(); vioCaida = false; refrescar(); }
   } catch { aviso('连不上 BOT'); }
 }
 // La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
@@ -622,11 +634,28 @@ function aviso(txt) {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('visible'), 2400);
 }
+const VERSION_PAGINA = '${VERSION}';
 async function refrescar() {
   const punto = document.getElementById('punto');
   const txt = document.getElementById('txtEstado');
   try {
     const s = await (await fetch('/status')).json();
+    // Versión del servidor distinta de la de esta página = el bot ya corre
+    // código nuevo: recargar para estrenar la interfaz nueva. El aviso de
+    // "hecho" se enseña tras la recarga (sessionStorage sobrevive a ella).
+    if (s.version && VERSION_PAGINA && s.version !== VERSION_PAGINA) {
+      try { sessionStorage.setItem('jarvisActualizado', s.version); } catch { }
+      location.reload();
+      return;
+    }
+    if (actualizando && vioCaida) {
+      // Volvió de la instalación con la MISMA versión: decirlo claro.
+      actualizando = 0;
+      aviso('更新结束，但版本没变 — 可能本来就是最新');
+    } else if (actualizando && Date.now() - actualizando > 300000) {
+      actualizando = 0;
+      aviso('更新超时了 — 去电脑上跑一下 start-bot.cmd 看看报错');
+    }
     punto.classList.remove('rojo');
     const partes = ['在线 ' + s.uptime];
     partes.push('促销 ' + (s.promoCsv || '无'));
@@ -636,11 +665,17 @@ async function refrescar() {
     if (!s.desktop) off.push('桌面');
     if (!s.llm) off.push('AI');
     if (off.length) partes.push(off.join('/') + ' 关');
+    if (actualizando) partes.unshift('正在更新（下载中）…');
     txt.textContent = partes.join('　·　');
     pintarTarjetas(s);
   } catch {
     punto.classList.add('rojo');
-    txt.textContent = '离线 — 黑窗口开着吗？';
+    if (actualizando) {
+      vioCaida = true;
+      txt.textContent = '正在更新（安装中，面板马上自己回来）…';
+    } else {
+      txt.textContent = '离线 — 黑窗口开着吗？';
+    }
   }
 }
 function tic() {
@@ -674,7 +709,18 @@ function pintarTarjetas(s) {
 }
 function escapar(x) { const d = document.createElement('div'); d.textContent = x; return d.innerHTML; }
 refrescar();
-setInterval(refrescar, 15000);
+// Polling adaptativo: cada 15 s en reposo, cada 3 s mientras se actualiza
+// (para pillar el momento en que el bot vuelve con la versión nueva).
+(function cicloEstado() {
+  setTimeout(async () => { await refrescar(); cicloEstado(); }, actualizando ? 3000 : 15000);
+})();
+// Aviso post-recarga: la actualización terminó y ESTA página ya es la nueva.
+try {
+  if (sessionStorage.getItem('jarvisActualizado')) {
+    sessionStorage.removeItem('jarvisActualizado');
+    aviso('更新完成，现在是 ' + (VERSION_PAGINA || '新版本'));
+  }
+} catch { }
 </script>
 </body>
 </html>`;
