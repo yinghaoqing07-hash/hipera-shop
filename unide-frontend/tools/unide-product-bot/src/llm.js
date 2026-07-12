@@ -148,6 +148,55 @@ export async function llmRouteIntent(text, config, logger, extras = {}) {
   };
 }
 
+// ---------- errores para humanos ----------
+// Un fallo de scraping/desktop genera párrafos técnicos (stage, URLs,
+// stack). A la dueña le sirve UNA frase: qué pasó y qué hacer. El texto
+// técnico completo se queda en los logs.
+
+const FRIENDLY_SYSTEM = `Al bot de un supermercado le ha fallado una operación y te llega su error técnico. Resúmelo para la dueña (no técnica) EN CHINO: una o dos frases cortas — qué pasó y qué tiene que hacer ella (si no tiene que hacer nada, dilo).
+Pistas para diagnosticar:
+- URL que contiene LoginPage → la sesión de UnideGes caducó: hay que abrir la ventana del Edge de automatización e iniciar sesión de nuevo; después reintentar el comando.
+- No se puede conectar al puerto 9222 / Edge → el Edge de automatización no está abierto o se cerró; el bot suele abrirlo solo, basta reintentar; si se repite, abrir desktop\\launch-edge-debug.cmd.
+- Timeout / Network.enable → la página estaba dormida o la red va lenta: reintentar suele bastar.
+Mantén los nombres propios (UnideGes, Edge, Pedidos, Promociones) tal cual. Nada de URLs completas, ni códigos de error, ni disculpas.`;
+
+export async function llmFriendlyError(contexto, rawMessage, config, logger) {
+  const apiKey = llmApiKey(config);
+  if (!apiKey) throw new Error('LLM sin apiKey');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 30000);
+  let response;
+  try {
+    response = await fetch(API_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION
+      },
+      body: JSON.stringify({
+        model: config?.llm?.model || DEFAULT_MODEL,
+        max_tokens: 300,
+        system: FRIENDLY_SYSTEM,
+        messages: [{ role: 'user', content: `操作：${contexto}\n技术错误：\n${String(rawMessage || '').slice(0, 1500)}` }]
+      })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  if (data.stop_reason === 'refusal') throw new Error('refusal');
+  const text = (data.content || []).find((b) => b.type === 'text')?.text;
+  if (!text) throw new Error('respuesta sin texto');
+  logger?.info('llm friendly error', { contexto, inputTokens: data.usage?.input_tokens });
+  return text.trim();
+}
+
 // orderLines: [{code, nombre}] — líneas a precio normal.
 // promoItems: [{code, name, pct}] — promociones candidatas (ya filtradas por ahorro mínimo).
 // Devuelve [{lineCode, promoCode, motivo}], validado contra las listas de entrada.
