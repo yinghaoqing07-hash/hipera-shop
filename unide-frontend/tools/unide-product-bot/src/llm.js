@@ -68,7 +68,7 @@ const INTENT_SCHEMA = {
   properties: {
     accion: {
       type: 'string',
-      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'bloq_venta', 'pedidos_recientes', 'pedido', 'carne', 'articulo', 'ayuda', 'responder'],
+      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'price_history', 'bloq_venta', 'pedidos_recientes', 'pedido', 'carne', 'articulo', 'ayuda', 'responder'],
       description: 'Comando del bot al que corresponde el mensaje, o "responder" si no corresponde a ninguno'
     },
     argumento: { type: 'string', description: 'Argumento del comando (números de pedido, "nombre precio", código…); vacío si no aplica' },
@@ -131,6 +131,7 @@ Comandos disponibles:
 - promociones — descargar de la web las promociones vigentes (CSV). Palabras clave: 促销, 刷新促销.
 - precio_fruta — cambiar el precio de UNA fruta/verdura en el UnideGes de escritorio (con confirmación). argumento: "nombre precio", p. ej. "platano 2,99". Palabras clave: 改价, 换价格.
 - precios_fruta — cambio de precios de fruta EN LOTE. argumento: una línea por artículo "nombre precio".
+- price_history — consultar el REGISTRO PERSISTENTE real de cambios de precio: cuántos se cambiaron, cuáles, fallos o desde qué producto. argumento EXACTO: "today", "week", "all", "recent", "latest_batch", "last 20" o "since first <producto> <precio>" / "since last <producto> <precio>". Ejemplos: “刚刚批量改了几个” → latest_batch; “今天总共改了几个” → today; “从第一个 limon 改成 3.5 后到现在几个” → since first limon 3.5; una continuación como “现在总共几个知道了吗” tras hablar de cambios de precio → all.
 - bloq_venta — marcar o desmarcar el checkbox Bloq.Venta de un artículo en el UnideGes de escritorio. argumento: "nombre_o_codigo off" (desmarcar = 恢复可卖/解锁, p.ej. "把X的bloc venta关了") o "nombre_o_codigo on" (marcar = 停卖/锁上). Palabras clave: bloq venta, bloc venta, 停卖, 开卖, 解锁, 锁.
 - pedidos_recientes — abrir y revisar en solo lectura los N pedidos más recientes. argumento: cantidad ("3"), por defecto 3. Palabras clave: 最新订单, 最近几张单, 看最新三个 pedidos, últimos pedidos.
 - pedido — plantillas/recordatorio de pedido. argumento: "carne", "fruta", "pda" o vacío.

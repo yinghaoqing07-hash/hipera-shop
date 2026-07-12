@@ -43,6 +43,13 @@ const defaultConfig = {
     contextLimit: 12,
     extractionTimeoutMs: 45000
   },
+  operationLedger: {
+    enabled: true,
+    path: 'data/operation-ledger.json',
+    maxEntries: 10000,
+    timeZone: 'Europe/Madrid',
+    importRecentChat: true
+  },
   ordering: {
     enabled: true,
     timezone: 'Europe/Madrid',
@@ -191,12 +198,14 @@ export function loadConfig(configPath) {
   config.storeCsv = resolveToolPath(config.storeCsv);
   config.logsDir = resolveToolPath(config.logsDir);
   config.memory.path = resolveToolPath(config.memory.path);
+  config.operationLedger.path = resolveToolPath(config.operationLedger.path);
   config.desktop.script = resolveToolPath(config.desktop.script);
   config.desktop.screenshotDir = resolveToolPath(config.desktop.screenshotDir);
   normalizeDesktopDefaults(config);
 
   tryMkdir(config.logsDir);
   tryMkdir(path.dirname(config.memory.path));
+  tryMkdir(path.dirname(config.operationLedger.path));
   tryMkdir(config.desktop.screenshotDir);
 
   return config;

@@ -10,6 +10,7 @@ import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { llmConfigured, llmExtractMemories, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
+import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
@@ -41,6 +42,7 @@ const START_TIME = Date.now(); // identifica ESTE arranque (ver status.boot)
 const config = loadConfig(readArg('--config'));
 const logger = createLogger(config.logsDir);
 const memoryStore = new MemoryStore(config.memory, logger);
+const operationLedger = new OperationLedger(config.operationLedger, logger);
 let memoryLearnQueue = Promise.resolve();
 const supplierIndex = loadSupplierIndex(config.supplierCsv);
 const storeIndex = loadStoreIndex(config.storeCsv);
@@ -70,6 +72,13 @@ try {
     chatEntryId = Number(saved.entryId) || chatLog.length;
   }
 } catch { /* primera vez */ }
+try {
+  if (config.operationLedger?.importRecentChat !== false) {
+    operationLedger.importLegacyChat(chatLog);
+  }
+} catch (error) {
+  logger.warn('legacy operation import failed', { error: error.message });
+}
 let chatSaveTimer = null;
 function scheduleChatSave() {
   clearTimeout(chatSaveTimer);
@@ -146,7 +155,7 @@ const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
 const autoAdvisor = new AutoAdvisorScheduler(config, logger);
 let offset = 0;
 
-logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length, memories: memoryStore.count });
+logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length, memories: memoryStore.count, operations: operationLedger.count });
 
 // OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).
 // Antes era un `while (true)` aquí en medio: como no termina nunca, los
@@ -188,6 +197,11 @@ async function handleUpdate(update) {
   const memoryCommand = parseMemoryCommand(text);
   if (memoryCommand) {
     await handleMemoryCommand(chatId, memoryCommand);
+    return;
+  }
+  const operationHistoryRequest = parseOperationHistoryRequest(text);
+  if (operationHistoryRequest) {
+    await handlePriceHistory(chatId, operationHistoryRequest);
     return;
   }
   queueAutoMemory(chatId, text);
@@ -267,6 +281,11 @@ async function handleMemoryCommand(chatId, command) {
   await telegram.sendMessage(chatId, formatMemoryList(entries, memoryStore.count, command.query || ''));
 }
 
+async function handlePriceHistory(chatId, requestOrText) {
+  const request = typeof requestOrText === 'string' ? parseOperationHistoryRequest(requestOrText) : requestOrText;
+  await telegram.sendMessage(chatId, formatOperationHistory(operationLedger.summarize(request || { scope: 'today' })));
+}
+
 function queueAutoMemory(chatId, text) {
   if (!memoryStore.enabled || config.memory?.autoLearn === false || !llmConfigured(config) || !shouldConsiderForMemory(text)) return;
   memoryLearnQueue = memoryLearnQueue
@@ -317,6 +336,8 @@ function formatCommandList() {
     '【果蔬改价（桌面 UnideGes）】',
     '/precio_fruta platano 2,99 — 改一个价（会先让你确认）',
     '/precios_fruta 加多行「名字 价格」— 批量改',
+    '/price_history — 看今天改价账本（也可加 week / all / last 30）',
+    '也可以直接问「刚刚批量改了几个」「从 limón 改成 3.5 后总共几个」',
     '/fruta_add — 教我一个新的水果编号',
     '/bloq platano off — 取消/勾选 Bloq.Venta（off=恢复可卖，on=停卖；其他商品用编号）',
     '',
@@ -357,6 +378,8 @@ function buildAssistDatos(query = '') {
   const partes = [`Fecha de hoy: ${todayString(config)}`];
   const memoryContext = memoryStore.buildContext(query);
   if (memoryContext) partes.push(memoryContext);
+  const operationContext = operationLedger.buildContext();
+  if (operationContext) partes.push(operationContext);
   try {
     const latest = findLatestPromotionsCsv(config);
     if (latest) {
@@ -386,7 +409,7 @@ function buildAssistDatos(query = '') {
       if (ultimos.length) partes.push(`ÚLTIMOS PEDIDOS RELLENADOS (historial de 60 días):\n${lineas.join('\n')}`);
     }
   } catch (error) { logger.warn('assist datos pedidos failed', { error: error.message }); }
-  partes.push('NO tienes acceso a: stock de la tienda, ventas, facturas ni histórico de precios de fruta.');
+  partes.push('NO tienes acceso a: stock de la tienda, ventas ni facturas. El historial de cambios de precio sí está en el registro persistente anterior.');
   return partes.join('\n\n');
 }
 
@@ -469,6 +492,12 @@ async function handleFreeText(chatId, text) {
       await say('/precios_fruta（批量）');
       await handleFruitPriceBatch(chatId, `/precios_fruta\n${arg}`);
       return;
+    case 'price_history': {
+      const cmd = `/price_history${arg ? ` ${arg}` : ''}`;
+      await say(cmd);
+      await handlePriceHistory(chatId, cmd);
+      return;
+    }
     case 'pedidos_recientes': {
       const request = parseRecentOrdersRequest(`/pedidos ${arg || 3}`);
       const cmd = `/pedidos ${request?.limit || 3}`;
@@ -754,10 +783,10 @@ async function processFruitPriceOnce(item, options = {}) {
     }
   }
   const planResult = buildPricePlan({ item, supplier, store }, read);
-  if (!planResult.ok) return { ok: false, stage: 'plan', error: planResult.error };
+  if (!planResult.ok) return { ok: false, stage: 'plan', error: planResult.error, read };
   const applied = await applyPriceDesktop(planResult.plan, config, logger);
-  if (applied.status !== 'ok') return { ok: false, stage: 'apply', error: applied.error || applied.reason || '未知', screenshot: applied.screenshot };
-  return { ok: true, plan: planResult.plan, screenshot: applied.screenshot };
+  if (applied.status !== 'ok') return { ok: false, stage: 'apply', error: applied.error || applied.reason || '未知', screenshot: applied.screenshot, plan: planResult.plan, read };
+  return { ok: true, plan: planResult.plan, read, screenshot: applied.screenshot };
 }
 
 function fruitStageLabel(stage) {
@@ -808,13 +837,20 @@ async function handleFruitPriceOne(chatId, callbackId, id) {
   const label = one.item.nombre;
   // El artículo ya está en pantalla desde la búsqueda de la tarjeta: se
   // salta la re-búsqueda (la lectura verifica el código igualmente).
-  const result = await processFruitPriceOnce(one.item, { skipSearch: true });
+  let result;
+  try {
+    result = await processFruitPriceOnce(one.item, { skipSearch: true });
+  } catch (error) {
+    result = { ok: false, stage: 'unexpected', error: error.message };
+  }
   sessions.delete(id);
   if (!result.ok) {
+    recordPriceExecution({ status: 'failed', source: 'fruit_single', groupId: `fruit-single:${id}`, item: one.item, requestedPrice: one.priceRaw, plan: result.plan, read: result.read, stage: result.stage, error: result.error });
     const text = `❌ ${label} 没改（${fruitStageLabel(result.stage)}）：${result.error}\n没有写入。`;
     await sendWithOptionalScreenshot(chatId, { status: result.screenshot ? 'ok' : 'error', screenshot: result.screenshot }, text);
     return;
   }
+  recordPriceExecution({ status: 'success', source: 'fruit_single', groupId: `fruit-single:${id}`, item: one.item, requestedPrice: one.priceRaw, plan: result.plan, read: result.read });
   await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot },
     `✅ 已改：${label} → ${one.priceRaw} €（P.defecto ${result.plan.pDefecto}%）。看截图确认 P.defecto / Bloq.Venta / 保存状态。`);
   await telegram.sendMessage(chatId, LABEL_STEPS.join('\n'));
@@ -1137,14 +1173,17 @@ async function runFruitPriceBatch(chatId, callbackId, id) {
         const item = makeFruitItem(it.name, it.codigo, it.articulo, it.priceRaw, false);
         const result = await processFruitPriceOnce(item);
         if (!result.ok) {
+          recordPriceExecution({ status: 'failed', source: 'fruit_batch', groupId: `fruit-batch:${id}`, item, requestedPrice: it.priceRaw, plan: result.plan, read: result.read, stage: result.stage, error: result.error });
           failItems.push({ it, error: `${fruitStageLabel(result.stage)}失败：${result.error}` });
           await telegram.sendMessage(chatId, `${progress} ❌ ${label}：${fruitStageLabel(result.stage)}失败`);
           continue;
         }
+        recordPriceExecution({ status: 'success', source: 'fruit_batch', groupId: `fruit-batch:${id}`, item, requestedPrice: it.priceRaw, plan: result.plan, read: result.read });
         okItems.push(it);
         await telegram.sendMessage(chatId, `${progress} ✅ ${label} → ${it.priceRaw} €（P.defecto ${result.plan.pDefecto}%）`);
       } catch (error) {
         logger.error('fruit batch item failed', { codigo: it.codigo, error: error.message });
+        recordPriceExecution({ status: 'failed', source: 'fruit_batch', groupId: `fruit-batch:${id}`, item: makeFruitItem(it.name, it.codigo, it.articulo, it.priceRaw, false), requestedPrice: it.priceRaw, stage: 'unexpected', error: error.message });
         failItems.push({ it, error: error.message });
         await telegram.sendMessage(chatId, `${progress} ❌ ${label}：${error.message}`);
       }
@@ -1628,8 +1667,30 @@ async function handleProcess(chatId, callbackId, id) {
 async function handleApply(chatId, callbackId, id) {
   const session = sessions.get(id);
   if (!session?.plan) { await telegram.answerCallbackQuery(callbackId, '没有可执行计划'); await telegram.sendMessage(chatId, '没有可执行计划，请先点“确认处理”。'); return; }
+  if (session.applyRunning || session.applyDone) { await telegram.answerCallbackQuery(callbackId, session.applyDone ? '这条已经执行过了' : '正在写入，别重复点'); return; }
+  session.applyRunning = true;
+  sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, '正在写入');
-  const result = await applyPriceDesktop(session.plan, config, logger);
+  let result;
+  try {
+    result = await applyPriceDesktop(session.plan, config, logger);
+  } catch (error) {
+    result = { status: 'error', error: error.message };
+  }
+  session.applyRunning = false;
+  session.applyDone = result.status === 'ok';
+  sessions.set(id, session);
+  recordPriceExecution({
+    status: result.status === 'ok' ? 'success' : 'failed',
+    source: 'article',
+    groupId: `article:${id}`,
+    item: session.item,
+    requestedPrice: session.item?.precio?.value,
+    plan: session.plan,
+    read: session.priceRead,
+    stage: result.status === 'ok' ? '' : 'apply',
+    error: result.error || result.reason
+  });
   const text = result.status === 'ok'
     ? '写入：已执行。请看截图确认 PC Medio、PC Último、P.defecto、P.TPV、Bloq.Venta 和保存状态。'
     : `写入失败：\n${result.error || result.reason || '未知错误'}`;
@@ -1645,6 +1706,54 @@ async function handleApply(chatId, callbackId, id) {
       '4. 点 Imprimir'
     ].join('\n'));
   }
+}
+
+function recordPriceExecution({ status, source, groupId, item, requestedPrice, plan, read, stage = '', error = '' }) {
+  try {
+    const store = lookupStore(storeIndex, item || {});
+    const values = read?.values || {};
+    const desktopPreviousPrice = firstLedgerNumber(
+      values.pTpv,
+      values.ptpv,
+      values.pTPV,
+      values.precioActual
+    );
+    const cachedPreviousPrice = firstLedgerNumber(store?.product?.pvp_tienda);
+    const previousPrice = desktopPreviousPrice ?? cachedPreviousPrice;
+    const previousPriceSource = desktopPreviousPrice !== null ? 'desktop' : cachedPreviousPrice !== null ? 'store_cache' : '';
+    const newPrice = plan?.mode === 'ptpv'
+      ? firstLedgerNumber(plan.price, requestedPrice)
+      : firstLedgerNumber(requestedPrice);
+    return operationLedger.record({
+      type: 'price_change',
+      status,
+      code: item?.codigo,
+      ean: item?.ean,
+      name: item?.nombre || store?.product?.articulo_tienda,
+      previousPrice,
+      previousPriceSource,
+      newPrice,
+      requestedPrice,
+      pDefecto: plan?.pDefecto,
+      mode: plan?.mode,
+      source,
+      groupId,
+      stage,
+      error,
+      note: previousPrice === null ? 'Old P.TPV was not available from desktop/cache.' : previousPriceSource === 'store_cache' ? 'Old price came from the local store cache.' : ''
+    });
+  } catch (ledgerError) {
+    logger.warn('price operation ledger failed', { error: ledgerError.message, code: item?.codigo });
+    return { status: 'error', error: ledgerError.message };
+  }
+}
+
+function firstLedgerNumber(...values) {
+  for (const value of values) {
+    const parsed = parseNumber(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return null;
 }
 
 async function sendProductResult(chatId, item, index, total) {
@@ -1900,6 +2009,8 @@ if (config.panel?.enabled !== false) {
         desktop: Boolean(config.desktop?.enabled),
         llm: llmConfigured(config),
         memories: memoryStore.count,
+        operations: operationLedger.count,
+        successfulPriceChanges: operationLedger.successfulPriceChanges,
         activity: panelActivity
       };
     },

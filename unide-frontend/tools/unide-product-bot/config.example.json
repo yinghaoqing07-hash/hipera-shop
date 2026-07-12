@@ -16,6 +16,13 @@
     "contextLimit": 12,
     "extractionTimeoutMs": 45000
   },
+  "operationLedger": {
+    "enabled": true,
+    "path": "data/operation-ledger.json",
+    "maxEntries": 10000,
+    "timeZone": "Europe/Madrid",
+    "importRecentChat": true
+  },
   "processing": {
     "defaultIva": 10
   },

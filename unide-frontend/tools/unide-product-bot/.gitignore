@@ -9,6 +9,9 @@ updates/
 # Memoria privada y duradera de la tienda (se conserva al actualizar)
 data/bot-memory.json*
 
+# Historial privado de operaciones (se conserva al actualizar)
+data/operation-ledger.json*
+
 # Volcado de diagnóstico de la web de Pedidos (/pedido_web_test)
 order-page-dump.html
 *-dump.html
