@@ -26,6 +26,23 @@ function Paso([string]$texto) {
 # Transcripcion completa para depurar (captura tambien Write-Host).
 try { Start-Transcript -Path (Join-Path $logsDir "update-transcript.log") -Append -Force | Out-Null } catch { }
 
+# Impide que dos clics o una actualización manual y otra desde el panel
+# escriban el mismo directorio al mismo tiempo. El bloqueo se libera aunque
+# PowerShell termine por error, porque Windows cierra el handle del proceso.
+$lockFile = Join-Path $logsDir "update.lock"
+try {
+  $updateLock = [System.IO.File]::Open(
+    $lockFile,
+    [System.IO.FileMode]::OpenOrCreate,
+    [System.IO.FileAccess]::ReadWrite,
+    [System.IO.FileShare]::None
+  )
+} catch {
+  Paso "ERROR: ya hay una actualización en curso"
+  try { Stop-Transcript | Out-Null } catch { }
+  exit 2
+}
+
 # REGLA DE ORO: si llegamos a parar el bot, SIEMPRE hay que volver a
 # arrancarlo — aunque la instalacion falle a mitad, el bot vuelve con lo
 # que haya en disco. Un update fallido no puede dejar la tienda sin bot.

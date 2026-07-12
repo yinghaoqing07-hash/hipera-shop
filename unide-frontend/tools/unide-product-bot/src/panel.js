@@ -350,7 +350,7 @@ function renderPage() {
         </div>
       </div>
       <div id="mantenimiento">
-        <button class="pill" onclick="admin('update')">更新 BOT</button>
+        <button class="pill" id="btnActualizar" onclick="admin('update')">更新 BOT</button>
       </div>
     </div>
     <div id="cajonTeclado">
@@ -571,17 +571,26 @@ let vioCaida = false;   // ya pasó por la fase "bot apagado"
 let hechoVisto = 0;     // cuándo apareció "hecho:" sin que el bot reiniciara
 let caidaDesde = 0;     // desde cuándo lleva el bot sin responder
 async function admin(accion) {
+  if (accion === 'update' && actualizando) return;
   if (!confirm('现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。')) return;
+  const btn = document.getElementById('btnActualizar');
+  if (accion === 'update' && btn) { btn.disabled = true; btn.textContent = '正在更新…'; }
   try {
     const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
     if (r.toast) aviso(r.toast);
     if (accion === 'update') { actualizando = Date.now(); vioCaida = false; hechoVisto = 0; caidaDesde = 0; refrescar(); }
-  } catch { aviso('连不上 BOT'); }
+  } catch {
+    if (accion === 'update' && btn) { btn.disabled = false; btn.textContent = '更新 BOT'; }
+    aviso('连不上 BOT');
+  }
 }
 // La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
 // Una recarga también lo manda, pero la página vuelve al instante y el bot
 // cancela el apagado (margen de 3 s en el servidor).
 addEventListener('pagehide', () => {
+  let recargaDeActualizacion = false;
+  try { recargaDeActualizacion = Boolean(sessionStorage.getItem('jarvisActualizado')); } catch { }
+  if (actualizando || recargaDeActualizacion) return;
   try { navigator.sendBeacon('/admin', new Blob([JSON.stringify({ accion: 'adios' })], { type: 'application/json' })); } catch { }
 });
 async function pulsar(data) {
@@ -669,10 +678,14 @@ async function refrescar() {
     // aunque el corte fuera tan corto que ningún poll lo pillara.
     if (actualizando && bootVisto && s.boot && s.boot !== bootVisto) {
       actualizando = 0;
+      const btn = document.getElementById('btnActualizar');
+      if (btn) { btn.disabled = false; btn.textContent = '更新 BOT'; }
       aviso('更新跑完了，但版本没变 — 可能本来就是最新');
     } else if (actualizando && s.updateLine && s.updateLine.indexOf('ERROR') === 0) {
       // El updater dejó escrito el motivo del fallo: enseñarlo tal cual.
       actualizando = 0;
+      const btn = document.getElementById('btnActualizar');
+      if (btn) { btn.disabled = false; btn.textContent = '更新 BOT'; }
       aviso('更新失败 — ' + s.updateLine.slice(0, 90));
     } else if (actualizando && s.updateLine && s.updateLine.indexOf('hecho') === 0) {
       // "hecho" pero el bot sigue siendo el MISMO proceso (boot igual):
@@ -680,10 +693,14 @@ async function refrescar() {
       if (!hechoVisto) hechoVisto = Date.now();
       else if (Date.now() - hechoVisto > 30000) {
         actualizando = 0;
+        const btn = document.getElementById('btnActualizar');
+        if (btn) { btn.disabled = false; btn.textContent = '更新 BOT'; }
         aviso('装完了但 bot 没重启成 — 跑一下 stop-bot.cmd 再开 panel.cmd');
       }
     } else if (actualizando && Date.now() - actualizando > 300000) {
       actualizando = 0;
+      const btn = document.getElementById('btnActualizar');
+      if (btn) { btn.disabled = false; btn.textContent = '更新 BOT'; }
       aviso('更新超时 — 看一眼 logs/update-estado.txt 或跑 start-bot.cmd');
     }
     if (s.boot) bootVisto = s.boot;

@@ -1,6 +1,6 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { loadConfig, readArg } from './config.js';
 import { createLogger } from './logger.js';
 import { formatTemplateHelp, parsePrice, parseProductMessage } from './templateParser.js';
@@ -1798,16 +1798,9 @@ if (config.panel?.enabled !== false) {
   });
 }
 
-// Lanza update-bot.ps1 en segundo plano, con autopsia incluida:
-// - SIN detached: en Windows ese flag deja a PowerShell sin consola y en
-//   algunos equipos muere en silencio; los hijos sobreviven igualmente a
-//   la muerte del padre (Stop-Process no mata descendientes), que es lo
-//   único que necesitamos cuando el updater pare este proceso.
-// - Mismo patrón de spawn que desktopSearch/updater.js, que en el PC de
-//   la tienda funcionan a diario.
-// - Antes de arrancar se deja 'lanzando…' en update-estado.txt; si el
-//   updater muere sin llegar a escribir su primer paso, el handler de
-//   exit lo convierte en un ERROR visible en el panel.
+// Lanza update-bot.ps1 mediante una tarea programada independiente. El
+// actualizador tiene que sobrevivir cuando stop-bot.ps1 mate este proceso;
+// si se lanza como hijo directo de Node, Windows puede cerrar los dos juntos.
 function lanzarUpdater(updater) {
   const estadoFile = path.resolve(config.logsDir || '.', UPDATE_ESTADO);
   const logFile = path.resolve(config.logsDir || '.', UPDATE_LOG);
@@ -1817,26 +1810,19 @@ function lanzarUpdater(updater) {
     fs.writeFileSync(estadoFile, 'lanzando el actualizador…');
     fs.appendFileSync(logFile, `\n--- ${new Date().toISOString()} ---\n`);
     out = fs.openSync(logFile, 'a');
+    const launcher = path.join(config.__toolRoot, 'launch-update.ps1');
+    if (!fs.existsSync(launcher)) throw new Error('falta launch-update.ps1');
     const psExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const child = spawn(fs.existsSync(psExe) ? psExe : 'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', updater],
-      { cwd: config.__toolRoot, stdio: ['ignore', out, out], windowsHide: true });
-    child.on('error', (error) => {
-      logger.error('updater spawn error', { error: error.message });
-      try { fs.writeFileSync(estadoFile, `ERROR: no se pudo lanzar powershell (${error.message})`); } catch { /* sin logs */ }
-    });
-    child.on('exit', (code) => {
-      logger.info('updater exited', { code });
-      try {
-        const cur = fs.readFileSync(estadoFile, 'utf8').replace(/^\uFEFF/, '').trim();
-        if (cur.startsWith('lanzando')) {
-          fs.writeFileSync(estadoFile, `ERROR: el updater murió al arrancar (código ${code}). Mira logs/${UPDATE_LOG}`);
-        }
-      } catch { /* sin estado */ }
-    });
-    child.unref();
+    const result = spawnSync(fs.existsSync(psExe) ? psExe : 'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', launcher,
+        '-Updater', updater, '-WorkingDirectory', config.__toolRoot],
+      { cwd: config.__toolRoot, stdio: ['ignore', out, out], windowsHide: true, timeout: 15000 });
     fs.closeSync(out);
-    return child;
+    out = 'ignore';
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`launch-update.ps1 salió con código ${result.status}`);
+    logger.info('independent updater task started');
+    return true;
   } catch (error) {
     if (out !== 'ignore') { try { fs.closeSync(out); } catch { /* ya */ } }
     logger.error('updater launch failed', { error: error.message });

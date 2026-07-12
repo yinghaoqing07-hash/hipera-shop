@@ -33,6 +33,7 @@ if ($NoData) {
 
 Get-ChildItem -LiteralPath $root -Force | ForEach-Object {
   if ($excludeNames -contains $_.Name) { return }
+  if ($_.Name -like "*-dump.html") { return }
   Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
 }
 
