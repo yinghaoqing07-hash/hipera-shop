@@ -1808,16 +1808,23 @@ function spawnDetached(command, args, cwd, logFile) {
 }
 
 const UPDATE_LOG = 'update-panel.log';
-// Última línea del log del updater lanzado desde el panel (si es reciente):
-// la página la enseña en la barra de estado mientras dura la actualización.
+const UPDATE_ESTADO = 'update-estado.txt';
+// Estado del updater para la barra del panel. Primero el archivo de estado
+// que escribe el propio update-bot.ps1 (un paso por línea, fiable incluso
+// oculto — Write-Host no llega a stdout); si no, la última línea del log
+// donde cae stdout/stderr del proceso. Solo si es reciente.
 function lastUpdateLogLine() {
-  try {
-    const file = path.resolve(config.logsDir || '.', UPDATE_LOG);
-    const st = fs.statSync(file);
-    if (Date.now() - st.mtimeMs > 10 * 60000) return '';
-    const lines = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('---'));
-    return lines.length ? lines[lines.length - 1].slice(0, 140) : '';
-  } catch { return ''; }
+  for (const name of [UPDATE_ESTADO, UPDATE_LOG]) {
+    try {
+      const file = path.resolve(config.logsDir || '.', name);
+      const st = fs.statSync(file);
+      if (Date.now() - st.mtimeMs > 10 * 60000) continue;
+      const lines = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').trim().split(/\r?\n/)
+        .filter((l) => l.trim() && !l.startsWith('---'));
+      if (lines.length) return lines[lines.length - 1].slice(0, 140);
+    } catch { /* probar el siguiente */ }
+  }
+  return '';
 }
 
 function humanUptime(seconds) {
