@@ -87,6 +87,11 @@ try {
   $stopScript = Join-Path $root "stop-bot.ps1"
   if (Test-Path $stopScript) {
     powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript
+    if ($LASTEXITCODE -ne 0) {
+      # Si el bot viejo no muere, arrancar otro encima seria PEOR (dos bots
+      # peleandose por Telegram): mejor parar aqui y contarlo.
+      throw "No pude parar el bot (el puerto del panel sigue ocupado). Prueba stop-bot.cmd y vuelve a actualizar."
+    }
     Start-Sleep -Seconds 1
   } else {
     Write-Host "Please close start-bot.cmd before updating." -ForegroundColor Yellow

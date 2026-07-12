@@ -129,7 +129,15 @@ export function startPanel(config, logger, hooks) {
       try { res.writeHead(500, { 'content-type': 'application/json' }); res.end('{"ok":false}'); } catch { /* ya cerrado */ }
     }
   });
-  server.on('error', (error) => logger?.warn('panel server error', { error: error.message }));
+  server.on('error', (error) => {
+    logger?.warn('panel server error', { error: error.message });
+    // Puerto ocupado = casi seguro que ya hay OTRO bot corriendo. Dos bots
+    // a la vez se pelean por los mensajes de Telegram: este proceso sale.
+    if (error.code === 'EADDRINUSE') {
+      logger?.error('panel port already in use: another bot is running, exiting to avoid a duplicate', { port });
+      setTimeout(() => process.exit(1), 300);
+    }
+  });
   // SOLO loopback: el panel no lleva autenticación, no debe salir del PC.
   server.listen(port, '127.0.0.1', () => logger?.info('panel listening', { url: `http://127.0.0.1:${port}`, version: VERSION }));
   return server;
@@ -555,12 +563,13 @@ function abrirCajonInicio() {
 //      se avisa de que no ha cambiado nada.
 let actualizando = 0;   // timestamp del clic, 0 = no estamos actualizando
 let vioCaida = false;   // ya pasó por la fase "bot apagado"
+let hechoVisto = 0;     // cuándo apareció "hecho:" sin que el bot reiniciara
 async function admin(accion) {
   if (!confirm('现在后台更新 BOT？更新期间面板会断开一两分钟，完成后自己恢复。')) return;
   try {
     const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
     if (r.toast) aviso(r.toast);
-    if (accion === 'update') { actualizando = Date.now(); vioCaida = false; refrescar(); }
+    if (accion === 'update') { actualizando = Date.now(); vioCaida = false; hechoVisto = 0; refrescar(); }
   } catch { aviso('连不上 BOT'); }
 }
 // La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
@@ -655,9 +664,21 @@ async function refrescar() {
     if (actualizando && bootVisto && s.boot && s.boot !== bootVisto) {
       actualizando = 0;
       aviso('更新跑完了，但版本没变 — 可能本来就是最新');
+    } else if (actualizando && s.updateLine && s.updateLine.indexOf('ERROR') === 0) {
+      // El updater dejó escrito el motivo del fallo: enseñarlo tal cual.
+      actualizando = 0;
+      aviso('更新失败 — ' + s.updateLine.slice(0, 90));
+    } else if (actualizando && s.updateLine && s.updateLine.indexOf('hecho') === 0) {
+      // "hecho" pero el bot sigue siendo el MISMO proceso (boot igual):
+      // el reinicio no cuajó. Darle medio minuto y avisar con el remedio.
+      if (!hechoVisto) hechoVisto = Date.now();
+      else if (Date.now() - hechoVisto > 30000) {
+        actualizando = 0;
+        aviso('装完了但 bot 没重启成 — 跑一下 stop-bot.cmd 再开 panel.cmd');
+      }
     } else if (actualizando && Date.now() - actualizando > 300000) {
       actualizando = 0;
-      aviso('更新超时 — 看一眼 logs/update-panel.log 或跑 start-bot.cmd');
+      aviso('更新超时 — 看一眼 logs/update-estado.txt 或跑 start-bot.cmd');
     }
     if (s.boot) bootVisto = s.boot;
     punto.classList.remove('rojo');
