@@ -1,15 +1,20 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import { dirname as pathDirname, join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Fecha de compilación de ESTE archivo (git archive fija el mtime al commit;
-// el zip y Expand-Archive lo conservan). Se pinta en una esquina del panel
-// para poder ver de un vistazo qué versión está corriendo la tienda.
+// Versión que corre la tienda, pintada en una esquina del panel. Manda el
+// número de version.txt (se incrementa en cada release: v127, v128…), que
+// es fácil de comparar de un vistazo; de apoyo va la fecha de compilación
+// de este archivo (git archive fija el mtime al commit y el zip lo conserva).
 let VERSION = '';
 try {
-  const st = fs.statSync(fileURLToPath(import.meta.url));
-  const d = st.mtime;
-  VERSION = `v ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const propio = fileURLToPath(import.meta.url);
+  const d = fs.statSync(propio).mtime;
+  const fecha = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  let num = '';
+  try { num = fs.readFileSync(pathJoin(pathDirname(propio), '..', 'version.txt'), 'utf8').trim(); } catch { /* sin numero */ }
+  VERSION = num ? `v${num} · ${fecha}` : `v ${fecha}`;
 } catch { /* sin versión */ }
 
 // Panel de escritorio del bot: un mini servidor HTTP SOLO en 127.0.0.1 con

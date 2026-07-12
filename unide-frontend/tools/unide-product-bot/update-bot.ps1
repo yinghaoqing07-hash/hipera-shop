@@ -99,10 +99,14 @@ try {
 
   powershell -NoProfile -ExecutionPolicy Bypass -File $applyScript -ZipPath $zipPath
 
+  # Version instalada: el numero de version.txt (v127, v128...) es lo que
+  # el panel pinta en su esquina — comparar numeros es trivial.
   $v = ""
-  $panelFile = Join-Path $root "src\panel.js"
-  if (Test-Path $panelFile) {
-    $v = "v " + (Get-Item -LiteralPath $panelFile).LastWriteTime.ToString("dd/MM HH:mm")
+  $verFile = Join-Path $root "version.txt"
+  if (Test-Path $verFile) {
+    $v = "v" + (Get-Content -Raw -LiteralPath $verFile).Trim()
+  } elseif (Test-Path (Join-Path $root "src\panel.js")) {
+    $v = "v " + (Get-Item -LiteralPath (Join-Path $root "src\panel.js")).LastWriteTime.ToString("dd/MM HH:mm")
   }
 
   # Reinicio en segundo plano (sin ventana): este proceso ya va elevado,
