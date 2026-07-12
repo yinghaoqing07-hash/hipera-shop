@@ -13,7 +13,8 @@ import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, listOrders } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
+import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
 import { TelegramClient } from './telegram.js';
@@ -181,6 +182,11 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   notePanelActivity(text);
   recordChat(update.__panel ? 'panel' : 'user', text);
+  const recentOrdersRequest = parseRecentOrdersRequest(text);
+  if (recentOrdersRequest) {
+    await handleRecentOrders(chatId, recentOrdersRequest);
+    return;
+  }
   if (text === '/start' || text === '/help' || /^\/(comandos|commands|menu)\b/i.test(text)) { await telegram.sendMessage(chatId, formatCommandList()); return; }
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
@@ -237,6 +243,7 @@ function formatCommandList() {
     '',
     '【叫货】',
     '/pedido — 今天的叫货提醒（也可 /pedido carne、/pedido fruta、/pedido pda）',
+    '/pedidos 3 — 只读检查最新 3 张订单和明显异常',
     '/carne — 开始肉类盘点',
     '/pedido_nuevo — 手动建一张单的草稿',
     '',
@@ -375,6 +382,13 @@ async function handleFreeText(chatId, text) {
       await say('/precios_fruta（批量）');
       await handleFruitPriceBatch(chatId, `/precios_fruta\n${arg}`);
       return;
+    case 'pedidos_recientes': {
+      const request = parseRecentOrdersRequest(`/pedidos ${arg || 3}`);
+      const cmd = `/pedidos ${request?.limit || 3}`;
+      await say(cmd);
+      await handleRecentOrders(chatId, request || { requested: 3, limit: 3, capped: false });
+      return;
+    }
     case 'pedido': {
       const cmd = `/pedido${arg ? ` ${arg}` : ''}`;
       await say(cmd);
@@ -1372,6 +1386,31 @@ async function maybeRunAutoAdvisor() {
     logger.error('auto advisor failed', { error: error.message });
     try { await telegram.sendMessage(chatId, `自动分析新单出错：${error.message}`); } catch { /* noop */ }
   }
+}
+
+// /pedidos 3 — inspección de solo lectura de los pedidos más recientes.
+// Abre cada detalle y lee TODAS sus páginas; nunca pulsa Guardar ni Enviar.
+async function handleRecentOrders(chatId, request) {
+  if (config.webOrder?.enabled === false) {
+    await telegram.sendMessage(chatId, '网页订单功能没有启用，先在 config.local.json 里打开 webOrder.enabled。');
+    return;
+  }
+  const limit = Number(request?.limit) || 3;
+  await telegram.sendMessage(
+    chatId,
+    `正在只读检查最近 ${limit} 张 Pedidos…\n会逐张翻完全部明细页，不会 Guardar，也不会 Enviar Pedido。`
+  );
+  const result = await fetchLatestOrders(config, limit, logger);
+  if (!result.ok) {
+    const friendly = await humanizarError('查看最近订单', result.error || '无法读取 Pedidos');
+    await telegram.sendMessage(chatId, `最近订单检查失败：${friendly}`);
+    return;
+  }
+  if (!result.orders?.length) {
+    await telegram.sendMessage(chatId, 'Pedidos 列表里没有读到订单。请确认自动化 Edge 已登录，并停在可访问 UnideGes 的状态。');
+    return;
+  }
+  await telegram.sendMessage(chatId, formatRecentOrdersSummary(result.orders, request));
 }
 
 // /llegada — saca la lista a demanda (imprime + Telegram).

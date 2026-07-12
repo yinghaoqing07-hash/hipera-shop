@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
 import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
+import { selectLatestOrderRows } from './recentOrders.js';
 
 // Sube (o localiza) la pestaña de UnideGes, la trae al frente y se asegura
 // de que estamos en Pedidos. Esto evita pulsar por error un "Nuevo" de otra
@@ -433,9 +434,66 @@ export async function listOrders(config, logger) {
     const page = opened.page;
     const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
     const rows = await waitForListRows(page, timeout);
-    return { ok: true, rows: rows.map((r) => ({ nombre: r.nombre, fechaIso: r.fechaIso, estado: r.estado })) };
+    return { ok: true, rows: rows.map((r) => ({ id: r.id, nombre: r.nombre, fechaIso: r.fechaIso, estado: r.estado, pesoTotal: r.pesoTotal, importeTotal: r.importeTotal })) };
   } catch (error) {
     logger?.error('list orders failed', { error: error.message });
+    return { ok: false, error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+// Abre los N pedidos más recientes y lee todas las páginas de sus líneas.
+// Es estrictamente de solo lectura: no pulsa Guardar ni Enviar Pedido.
+export async function fetchLatestOrders(config, limit = 3, logger) {
+  let browser;
+  try {
+    const opened = await openOrderPage(config);
+    browser = opened.browser;
+    const page = opened.page;
+    const timeout = Number(config.webOrder?.pageNavigationTimeoutMs) || 20000;
+    let rows = await waitForListRows(page, timeout);
+    rows = await rewindOrderListToFirst(page, rows, timeout);
+    const selected = selectLatestOrderRows(rows, limit);
+    const orders = [];
+
+    for (const target of selected) {
+      let items = [];
+      let detailError = '';
+      try {
+        const openedDetail = await openOrderDetailByRow(page, target, timeout);
+        if (!openedDetail) {
+          detailError = '没有打开这张订单的明细页';
+        } else {
+          await sleep(Number(config.webOrder?.detailRenderMs) || Number(config.webOrder?.formRenderMs) || 2800);
+          items = await scrapeAllOrderLines(page, config);
+          if (!items.length) detailError = '明细页打开了，但没有读到商品行';
+        }
+      } catch (error) {
+        detailError = error.message;
+        logger?.warn('latest order detail failed', { order: target.nombre, error: error.message });
+      }
+
+      orders.push({
+        id: target.id,
+        orderName: target.nombre,
+        orderDate: target.fechaIso || target.fecha,
+        estado: target.estado,
+        pesoTotal: target.pesoTotal,
+        importeTotal: target.importeTotal,
+        items,
+        ...(detailError ? { detailError } : {})
+      });
+
+      // Volver de forma determinista a la lista antes del siguiente pedido.
+      // Como esta función nunca escribe, no hay cambios que guardar.
+      await ensurePedidoPage(page, config);
+      await waitForListRows(page, timeout);
+    }
+
+    return { ok: true, orders, totalListed: rows.length, requested: selected.length };
+  } catch (error) {
+    logger?.error('fetch latest orders failed', { error: error.message });
     return { ok: false, error: error.message };
   } finally {
     try { browser?.disconnect(); } catch { /* noop */ }
@@ -534,6 +592,8 @@ async function waitForListRows(page, timeoutMs) {
         const idxId = headers.findIndex((h) => /^id$/i.test(h));
         const idxFecha = headers.findIndex((h) => /fecha de creaci/i.test(h));
         const idxEstado = headers.findIndex((h) => /estado de pedido/i.test(h));
+        const idxPeso = headers.findIndex((h) => /peso total/i.test(h));
+        const idxImporte = headers.findIndex((h) => /importe total/i.test(h));
         const out = [];
         const trs = Array.from(table.querySelectorAll('tr[role="row"]'));
         for (let i = 0; i < trs.length; i += 1) {
@@ -546,7 +606,9 @@ async function waitForListRows(page, timeoutMs) {
             id: idxId >= 0 ? (cells[idxId] || '') : '',
             nombre,
             fecha: idxFecha >= 0 ? (cells[idxFecha] || '') : '',
-            estado: idxEstado >= 0 ? (cells[idxEstado] || '') : ''
+            estado: idxEstado >= 0 ? (cells[idxEstado] || '') : '',
+            pesoTotal: idxPeso >= 0 ? (cells[idxPeso] || '') : '',
+            importeTotal: idxImporte >= 0 ? (cells[idxImporte] || '') : ''
           });
         }
         return out;
@@ -560,6 +622,27 @@ async function waitForListRows(page, timeoutMs) {
     if (Date.now() - start >= timeoutMs) return [];
     await sleep(300);
   }
+}
+
+async function rewindOrderListToFirst(page, rows, timeoutMs) {
+  try {
+    const active = await gridActivePage(page);
+    if (active <= 1) return rows;
+    const before = orderListSignature(rows);
+    if (!(await gridClickPageDelta(page, { toPage: 1 }))) return rows;
+
+    const deadline = Date.now() + Math.min(Number(timeoutMs) || 5000, 5000);
+    while (Date.now() < deadline) {
+      await sleep(250);
+      const next = await waitForListRows(page, 600);
+      if (next.length && orderListSignature(next) !== before) return next;
+    }
+  } catch { /* sin paginador o ya en la primera página */ }
+  return rows;
+}
+
+function orderListSignature(rows) {
+  return (rows || []).map((row) => `${row.id}|${row.nombre}|${row.fechaIso}`).join('||');
 }
 
 // '24/6/2026' (con o sin hora detrás) → '2026-06-24'.
