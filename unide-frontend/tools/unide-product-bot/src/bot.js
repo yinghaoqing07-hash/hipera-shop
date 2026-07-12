@@ -8,7 +8,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmConfigured, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { llmConfigured, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
@@ -322,6 +322,21 @@ function assistHistory(currentText) {
   return corte;
 }
 
+// Errores para humanos: el texto tecnico completo va al log; al chat va
+// una frase sencilla en chino (traducida por la IA). Sin IA configurada,
+// o si la IA falla, se manda el texto tecnico de siempre.
+async function humanizarError(contexto, textoTecnico) {
+  logger.warn('operation failed', { contexto, error: String(textoTecnico || '').slice(0, 500) });
+  if (!llmConfigured(config)) return textoTecnico;
+  try {
+    const simple = await llmFriendlyError(contexto, textoTecnico, config, logger);
+    return simple || textoTecnico;
+  } catch (error) {
+    logger.warn('friendly error failed', { error: error.message });
+    return textoTecnico;
+  }
+}
+
 async function handleFreeText(chatId, text) {
   let intent;
   try {
@@ -481,7 +496,7 @@ async function resolveNextNameLine(chatId, id) {
   await telegram.sendMessage(chatId, `正在网页搜第 ${idx + 1} 行「${item.name}」…`);
   const res = await searchArticleOptions(config, item.name, logger);
   if (!res.ok) {
-    await telegram.sendMessage(chatId, `搜「${item.name}」失败（${res.stage || '?'}）：\n${res.error}`);
+    await telegram.sendMessage(chatId, await humanizarError(`网页搜索「${item.name}」`, `搜「${item.name}」失败（${res.stage || '?'}）：\n${res.error}`));
     return;
   }
   if (!res.options.length) {
@@ -1124,7 +1139,7 @@ async function handlePromotions(chatId, text = '') {
   await telegram.sendMessage(chatId, `正在读取 Promociones，筛选 ${dateStr} 未过期项目，并逐个打开抓商品明细…（Edge 要开着）`);
   const result = await fetchActivePromotions(config, dateStr, logger);
   if (!result.ok) {
-    await sendWithOptionalScreenshot(chatId, result, `Promociones 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`);
+    await sendWithOptionalScreenshot(chatId, result, await humanizarError('刷新促销', `Promociones 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`));
     if (result.dumpFile) { try { await telegram.sendDocument(chatId, result.dumpFile, 'Promociones 页面结构（发给 Claude）'); } catch { /* noop */ } }
     return;
   }
@@ -1182,7 +1197,7 @@ async function handleOrderApply(chatId, callbackId, id) {
     if (result.ok) recordFilledOrder(config, session.orderDraft, logger);
     const text = result.ok
       ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；程序没有点 Guardar，也没有点 Enviar Pedido。')
-      : `订单填入失败（${result.stage || '?'}）：\n${result.error}`;
+      : await humanizarError('填入订单', `订单填入失败（${result.stage || '?'}）：\n${result.error}`);
     // La captura del navegador (si existe) es la mejor confirmación; el
     // volcado de DOM solo se manda cuando una línea falla en edición.
     if (result.screenshot) {
@@ -1211,7 +1226,7 @@ async function handlePedidoWebTest(chatId) {
   await telegram.sendMessage(chatId, '正在连接 Edge 并读取 Pedidos 页面…（如果失败，请先双击 launch-edge-debug.cmd）');
   const result = await inspectOrderPage(config, logger);
   if (!result.ok) {
-    await telegram.sendMessage(chatId, `读取失败（${result.stage}）：\n${result.error}`);
+    await telegram.sendMessage(chatId, await humanizarError('读取 Pedidos 页面', `读取失败（${result.stage}）：\n${result.error}`));
     return;
   }
   const i = result.info;
@@ -1240,7 +1255,7 @@ async function handlePedidoWebForm(chatId) {
   await telegram.sendMessage(chatId, '正在点开 "Nuevo" 并读取订单编辑表单…（会留一个未保存的空订单草稿，不会保存也不会发送）');
   const result = await inspectFormPage(config, logger);
   if (!result.ok) {
-    await telegram.sendMessage(chatId, `读取失败（${result.stage}）：\n${result.error}`);
+    await telegram.sendMessage(chatId, await humanizarError('读取 Pedidos 页面', `读取失败（${result.stage}）：\n${result.error}`));
     return;
   }
   const i = result.info;
@@ -1331,7 +1346,7 @@ async function maybeRunAutoAdvisor() {
     await telegram.sendMessage(chatId, '⏰ 每日自动任务：先刷新促销数据…');
     const result = await fetchActivePromotions(config, due.dateStr, logger);
     if (result.ok) await telegram.sendMessage(chatId, `促销数据已刷新 ✅\n${formatPromotionsSummary(result, config).split('\n').slice(0, 3).join('\n')}`);
-    else await telegram.sendMessage(chatId, `自动刷新促销失败（${result.stage || '?'}）：${result.error || '未知'}。今天先用旧数据。`);
+    else await telegram.sendMessage(chatId, await humanizarError('每日自动刷新促销', `自动刷新促销失败（${result.stage || '?'}）：${result.error || '未知'}。今天先用旧数据。`));
   } catch (error) {
     logger.error('auto promotions failed', { error: error.message });
     try { await telegram.sendMessage(chatId, `自动刷新促销出错：${error.message}`); } catch { /* noop */ }
