@@ -7,6 +7,15 @@
   "supplierCsv": "data/supplier_products_clean.csv",
   "storeCsv": "data/store_products_clean.csv",
   "logsDir": "logs",
+  "memory": {
+    "enabled": true,
+    "path": "data/bot-memory.json",
+    "autoLearn": true,
+    "autoNotify": true,
+    "maxEntries": 500,
+    "contextLimit": 12,
+    "extractionTimeoutMs": 45000
+  },
   "processing": {
     "defaultIva": 10
   },

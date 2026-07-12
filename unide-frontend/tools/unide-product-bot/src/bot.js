@@ -8,7 +8,8 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmConfigured, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { llmConfigured, llmExtractMemories, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
@@ -39,6 +40,8 @@ const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
 const START_TIME = Date.now(); // identifica ESTE arranque (ver status.boot)
 const config = loadConfig(readArg('--config'));
 const logger = createLogger(config.logsDir);
+const memoryStore = new MemoryStore(config.memory, logger);
+let memoryLearnQueue = Promise.resolve();
 const supplierIndex = loadSupplierIndex(config.supplierCsv);
 const storeIndex = loadStoreIndex(config.storeCsv);
 const sessions = new Map();
@@ -143,7 +146,7 @@ const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
 const autoAdvisor = new AutoAdvisorScheduler(config, logger);
 let offset = 0;
 
-logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length });
+logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length, memories: memoryStore.count });
 
 // OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).
 // Antes era un `while (true)` aquí en medio: como no termina nunca, los
@@ -182,6 +185,12 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   notePanelActivity(text);
   recordChat(update.__panel ? 'panel' : 'user', text);
+  const memoryCommand = parseMemoryCommand(text);
+  if (memoryCommand) {
+    await handleMemoryCommand(chatId, memoryCommand);
+    return;
+  }
+  queueAutoMemory(chatId, text);
   const recentOrdersRequest = parseRecentOrdersRequest(text);
   if (recentOrdersRequest) {
     await handleRecentOrders(chatId, recentOrdersRequest);
@@ -215,6 +224,76 @@ async function handleUpdate(update) {
   const items = parsed.items.slice(0, maxItems);
   if (parsed.items.length > items.length) await telegram.sendMessage(chatId, `这次先处理前 ${items.length} 个商品，剩下的请分批发。`);
   for (let index = 0; index < items.length; index += 1) await sendProductResult(chatId, items[index], index, items.length);
+}
+
+async function handleMemoryCommand(chatId, command) {
+  if (!memoryStore.enabled) {
+    await telegram.sendMessage(chatId, '长期记忆现在是关闭的。把 config.local.json 里的 memory.enabled 改成 true 后重启。');
+    return;
+  }
+  if (command.action === 'remember') {
+    if (!command.text) {
+      await telegram.sendMessage(chatId, '要记住什么？例如：记住：每次叫肉类前先看库存和促销');
+      return;
+    }
+    const result = memoryStore.remember({
+      text: command.text,
+      category: inferExplicitMemoryCategory(command.text),
+      source: 'explicit',
+      importance: 5
+    });
+    if (result.status === 'sensitive') {
+      await telegram.sendMessage(chatId, '这段内容像密码、token 或密钥，我不会把它写进长期记忆。');
+      return;
+    }
+    if (!result.entry) {
+      await telegram.sendMessage(chatId, '这条内容没有保存。');
+      return;
+    }
+    const verb = result.status === 'updated' ? '已更新' : result.status === 'duplicate' ? '已经记得' : '已记住';
+    await telegram.sendMessage(chatId, `🧠 ${verb} #${result.entry.id}：${result.entry.text}`);
+    return;
+  }
+  if (command.action === 'forget') {
+    const removed = memoryStore.forgetById(command.id);
+    if (!removed) {
+      await telegram.sendMessage(chatId, `没有找到 #${command.id}。先发 /memories 看编号。`);
+      return;
+    }
+    await telegram.sendMessage(chatId, `已忘记 #${removed.id}：${removed.text}`);
+    return;
+  }
+  const entries = memoryStore.list({ query: command.query || '', limit: 20 });
+  await telegram.sendMessage(chatId, formatMemoryList(entries, memoryStore.count, command.query || ''));
+}
+
+function queueAutoMemory(chatId, text) {
+  if (!memoryStore.enabled || config.memory?.autoLearn === false || !llmConfigured(config) || !shouldConsiderForMemory(text)) return;
+  memoryLearnQueue = memoryLearnQueue
+    .catch(() => {})
+    .then(async () => {
+      const extracted = await llmExtractMemories(text, config, logger);
+      const learned = [];
+      for (const memory of extracted) {
+        const result = memoryStore.remember({ ...memory, source: 'auto' });
+        if (['added', 'updated'].includes(result.status) && result.entry) learned.push(result.entry);
+      }
+      if (learned.length && config.memory?.autoNotify !== false) {
+        const lines = learned.map((entry) => `#${entry.id} ${entry.text}`);
+        try { await telegram.sendMessage(chatId, `🧠 我把这些放进长期记忆了：\n${lines.join('\n')}\n不对的话发 /forget 编号。`); }
+        catch (error) { logger.warn('memory notification failed', { error: error.message }); }
+      }
+    })
+    .catch((error) => logger.warn('automatic memory learning failed', { error: error.message }));
+}
+
+function inferExplicitMemoryCategory(text) {
+  const source = String(text || '');
+  if (/星期|周[一二三四五六日天]|每天|每周|点前|截止|horario|cada (?:lunes|martes|miércoles|miercoles|jueves|viernes|domingo)/iu.test(source)) return 'schedule';
+  if (/更正|纠正|不是.{0,40}(?:而是|应该是)|correcci[oó]n|no es.{0,50}sino/iu.test(source)) return 'correction';
+  if (/流程|步骤|先.{0,40}再|必须|每次|proceso|pasos|siempre hay que/iu.test(source)) return 'procedure';
+  if (/默认|喜欢|偏好|不要|别|prefiero|por defecto|nunca/iu.test(source)) return 'preference';
+  return 'fact';
 }
 
 // Menú completo de comandos (/help, /comandos). Se mantiene A MANO: cuando
@@ -251,6 +330,12 @@ function formatCommandList() {
     '/articulo 模板 — 查/改一个商品（发 /plantilla 看模板怎么写）',
     '直接发编号或 EAN 也可以',
     '',
+    '【长期记忆】',
+    '记住：内容 — 手动保存一条永久记忆',
+    '/memories — 查看记忆；后面可加关键词搜索',
+    '/forget 12 — 删除编号 12 的记忆',
+    '带“以后、默认、每次、规则、纠正”的话会自动判断是否值得记住',
+    '',
     '【其他】',
     '直接用中文说事也行，比如「帮我打一下152的清单」（需要配好 AI key）',
     '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（config 里 autoAdvisor 可调）',
@@ -268,8 +353,10 @@ function formatCommandList() {
 // Datos del día para el asistente: promociones vigentes (código, precios,
 // caducidad) y últimos pedidos rellenados. Van en texto plano dentro del
 // system prompt para que accion=responder conteste con cifras REALES.
-function buildAssistDatos() {
+function buildAssistDatos(query = '') {
   const partes = [`Fecha de hoy: ${todayString(config)}`];
+  const memoryContext = memoryStore.buildContext(query);
+  if (memoryContext) partes.push(memoryContext);
   try {
     const latest = findLatestPromotionsCsv(config);
     if (latest) {
@@ -347,7 +434,7 @@ async function humanizarError(contexto, textoTecnico) {
 async function handleFreeText(chatId, text) {
   let intent;
   try {
-    intent = await llmRouteIntent(text, config, logger, { history: assistHistory(text), datos: buildAssistDatos() });
+    intent = await llmRouteIntent(text, config, logger, { history: assistHistory(text), datos: buildAssistDatos(text) });
   } catch (error) {
     logger.warn('llm intent failed', { error: error.message });
     await telegram.sendMessage(chatId, formatTemplateHelp());
@@ -1812,6 +1899,7 @@ if (config.panel?.enabled !== false) {
         webOrder: Boolean(config.webOrder?.enabled),
         desktop: Boolean(config.desktop?.enabled),
         llm: llmConfigured(config),
+        memories: memoryStore.count,
         activity: panelActivity
       };
     },

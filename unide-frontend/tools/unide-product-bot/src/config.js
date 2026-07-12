@@ -34,6 +34,15 @@ const defaultConfig = {
   supplierCsv: 'data/supplier_products_clean.csv',
   storeCsv: 'data/store_products_clean.csv',
   logsDir: 'logs',
+  memory: {
+    enabled: true,
+    path: 'data/bot-memory.json',
+    autoLearn: true,
+    autoNotify: true,
+    maxEntries: 500,
+    contextLimit: 12,
+    extractionTimeoutMs: 45000
+  },
   ordering: {
     enabled: true,
     timezone: 'Europe/Madrid',
@@ -181,11 +190,13 @@ export function loadConfig(configPath) {
   config.supplierCsv = resolveToolPath(config.supplierCsv);
   config.storeCsv = resolveToolPath(config.storeCsv);
   config.logsDir = resolveToolPath(config.logsDir);
+  config.memory.path = resolveToolPath(config.memory.path);
   config.desktop.script = resolveToolPath(config.desktop.script);
   config.desktop.screenshotDir = resolveToolPath(config.desktop.screenshotDir);
   normalizeDesktopDefaults(config);
 
   tryMkdir(config.logsDir);
+  tryMkdir(path.dirname(config.memory.path));
   tryMkdir(config.desktop.screenshotDir);
 
   return config;

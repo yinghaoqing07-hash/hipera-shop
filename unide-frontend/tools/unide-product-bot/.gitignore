@@ -6,6 +6,9 @@ node_modules/
 *.zip
 updates/
 
+# Memoria privada y duradera de la tienda (se conserva al actualizar)
+data/bot-memory.json*
+
 # Volcado de diagnóstico de la web de Pedidos (/pedido_web_test)
 order-page-dump.html
 *-dump.html
