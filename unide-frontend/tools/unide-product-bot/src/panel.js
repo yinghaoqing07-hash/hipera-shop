@@ -635,6 +635,7 @@ function aviso(txt) {
   el._t = setTimeout(() => el.classList.remove('visible'), 2400);
 }
 const VERSION_PAGINA = '${VERSION}';
+let bootVisto = null; // arranque del bot visto en el último /status
 async function refrescar() {
   const punto = document.getElementById('punto');
   const txt = document.getElementById('txtEstado');
@@ -648,14 +649,17 @@ async function refrescar() {
       location.reload();
       return;
     }
-    if (actualizando && vioCaida) {
-      // Volvió de la instalación con la MISMA versión: decirlo claro.
+    // El bot se ha REINICIADO (boot nuevo) pero la versión es la misma: la
+    // actualización terminó sin traer nada nuevo. Marcador duro — funciona
+    // aunque el corte fuera tan corto que ningún poll lo pillara.
+    if (actualizando && bootVisto && s.boot && s.boot !== bootVisto) {
       actualizando = 0;
-      aviso('更新结束，但版本没变 — 可能本来就是最新');
+      aviso('更新跑完了，但版本没变 — 可能本来就是最新');
     } else if (actualizando && Date.now() - actualizando > 300000) {
       actualizando = 0;
-      aviso('更新超时了 — 去电脑上跑一下 start-bot.cmd 看看报错');
+      aviso('更新超时 — 看一眼 logs/update-panel.log 或跑 start-bot.cmd');
     }
+    if (s.boot) bootVisto = s.boot;
     punto.classList.remove('rojo');
     const partes = ['在线 ' + s.uptime];
     partes.push('促销 ' + (s.promoCsv || '无'));
@@ -665,7 +669,9 @@ async function refrescar() {
     if (!s.desktop) off.push('桌面');
     if (!s.llm) off.push('AI');
     if (off.length) partes.push(off.join('/') + ' 关');
-    if (actualizando) partes.unshift('正在更新（下载中）…');
+    // Mientras se actualiza, la línea real del updater (de su log) es el
+    // mejor indicador de por dónde va; si aún no hay, un genérico.
+    if (actualizando) partes.unshift('正在更新：' + (s.updateLine || '启动更新器…'));
     txt.textContent = partes.join('　·　');
     pintarTarjetas(s);
   } catch {
