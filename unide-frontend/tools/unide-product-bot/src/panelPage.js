@@ -469,7 +469,70 @@ const messageRows = new Map();
 let chatSeq = 0;
 let bootSeen = null;
 let updating = false;
+let updateStartedAt = 0; // clic en 更新 BOT (para el timeout)
+let offlineSince = 0;    // desde cuando no responde /status
 let toastTimer = null;
+
+// El panel es sobrio: los emojis de los mensajes (pensados para Telegram)
+// se filtran solo en la VISUALIZACION; en Telegram y el registro siguen.
+function sinEmoji(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{2300}-\\u{23FF}\\u{FE0F}\\u{200D}]/gu, '')
+    .replace(/  +/g, ' ').replace(/^ +/gm, '').trim();
+}
+
+// El CSV de promociones (pensado para Excel) es ilegible en crudo: se
+// agrupa por promocion con precio oferta, precio normal y condiciones.
+// Cuando ambos precios coinciden (NOVEDAD/STOCK semanal) se marca como
+// precio de la semana. Otros CSV caen a la tabla generica.
+function trocearCsv(texto) {
+  const tabla = []; let fila = []; let campo = ''; let dentro = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (dentro) {
+      if (c === '"') { if (texto[i + 1] === '"') { campo += '"'; i++; } else { dentro = false; } }
+      else { campo += c; }
+    } else if (c === '"') { dentro = true; }
+    else if (c === ';') { fila.push(campo); campo = ''; }
+    else if (c === '\\n') { fila.push(campo); tabla.push(fila); fila = []; campo = ''; }
+    else if (c !== '\\r') { campo += c; }
+  }
+  if (campo !== '' || fila.length) { fila.push(campo); tabla.push(fila); }
+  return tabla;
+}
+function csvLegible(texto) {
+  const tabla = trocearCsv(texto);
+  if (tabla.length < 2) return null;
+  const cab = tabla[0].map(function (x) { return x.trim().toLowerCase(); });
+  const col = function (n) { return cab.indexOf(n); };
+  const iCod = col('codigo_promocion');
+  const iNom = col('promocion'), iD = col('desde_promocion'), iH = col('hasta_promocion');
+  const iArt = col('descripcion_articulo'), iPvp = col('pvp'), iOf = col('oferta'), iTx = col('texto_oferta');
+  if (iCod < 0 || iArt < 0) return null;
+  const grupos = new Map();
+  for (const f of tabla.slice(1)) {
+    if (f.length < 6) continue;
+    const k = f[iCod] + '|' + (f[iNom] || '');
+    if (!grupos.has(k)) grupos.set(k, { nombre: (f[iNom] || f[iCod] || '').trim(), desde: (f[iD] || '').trim(), hasta: (f[iH] || '').trim(), arts: [] });
+    grupos.get(k).arts.push(f);
+  }
+  const aNum = function (x) { return parseFloat(String(x || '').replace(/[^0-9,.]/g, '').replace(',', '.')); };
+  const L = ['共 ' + grupos.size + ' 个促销活动', ''];
+  for (const g of grupos.values()) {
+    L.push('◆ ' + g.nombre + (g.desde ? '　（' + g.desde + ' → ' + g.hasta + '）' : ''));
+    for (const f of g.arts) {
+      let precio = (f[iOf] || '').trim();
+      if (precio && precio.indexOf('€') < 0) precio = precio.replace(/(,\\d\\d)0$/, '$1') + ' €';
+      const antes = (f[iPvp] || '').trim().replace(/(,\\d\\d)0(\\s*€)/, '$1$2');
+      const sinRebaja = antes && Number.isFinite(aNum(precio)) && Math.abs(aNum(precio) - aNum(antes)) < 0.0005;
+      L.push('　· ' + (f[iArt] || '').trim() + '　→ ' + precio + (sinRebaja ? '（本周价，无折扣）' : antes ? '（原价 ' + antes + '）' : ''));
+      const tx = (f[iTx] || '').trim();
+      if (tx && !sinRebaja) L.push('　　' + tx.toLowerCase());
+    }
+    L.push('');
+  }
+  return L.join('\\n');
+}
 
 function escapeText(value) {
   const div = document.createElement('div');
@@ -544,7 +607,7 @@ function renderButtons(message, container) {
     if (!button || !button.t || !button.d) return;
     const el = document.createElement('button');
     el.type = 'button';
-    el.textContent = button.t;
+    el.textContent = sinEmoji(button.t) || button.t;
     el.addEventListener('click', async function () {
       el.disabled = true;
       try {
@@ -602,7 +665,7 @@ function renderMessage(message) {
   meta.append(author, time);
   const body = document.createElement('div');
   body.className = 'message-body';
-  body.textContent = message.text || '';
+  body.textContent = sinEmoji(message.text || '');
   row.append(meta, body);
   renderAttachment(message, row);
   renderButtons(message, row);
@@ -625,7 +688,7 @@ async function pollChat() {
 }
 
 function openReader(title) {
-  document.getElementById('readerTitle').textContent = title || '内容';
+  document.getElementById('readerTitle').textContent = sinEmoji(title || '内容') || '内容';
   document.getElementById('readerContent').replaceChildren();
   document.getElementById('readerModal').classList.add('open');
 }
@@ -686,8 +749,13 @@ async function openDocument(id, seq, title) {
     const response = await fetch('/file/' + id + '?s=' + seq, { cache: 'no-store' });
     const text = await response.text();
     target.replaceChildren();
+    const amable = csvLegible(text);
     const first = text.split(/\\r?\\n/, 1)[0] || '';
-    if ((first.match(/;/g) || []).length >= 2) renderTable(parseDelimited(text), target);
+    if (amable) {
+      const pre = document.createElement('pre');
+      pre.textContent = amable;
+      target.appendChild(pre);
+    } else if ((first.match(/;/g) || []).length >= 2) renderTable(parseDelimited(text), target);
     else {
       const pre = document.createElement('pre');
       pre.textContent = text;
@@ -799,21 +867,41 @@ async function refreshStatus() {
     }
     if (updating && bootSeen && status.boot && status.boot !== bootSeen) {
       updating = false;
-      const button = document.getElementById('updateButton');
-      button.disabled = false;
-      button.textContent = '更新 BOT';
+      resetUpdateButton();
       showToast('更新结束，版本没有变化');
+    } else if (updating && status.updateLine && status.updateLine.indexOf('ERROR') === 0) {
+      // El updater dejo escrito el motivo del fallo: enseñarlo y no
+      // dejar el boton en 更新中 para siempre.
+      updating = false;
+      resetUpdateButton();
+      showToast('更新失败 — ' + status.updateLine.slice(0, 90));
+    } else if (updating && updateStartedAt && Date.now() - updateStartedAt > 300000) {
+      updating = false;
+      resetUpdateButton();
+      showToast('更新超时 — 看 logs/update-estado.txt 或跑 start-bot.cmd');
     }
     bootSeen = status.boot || bootSeen;
+    offlineSince = 0;
     dot.className = 'dot online';
     text.textContent = 'Bot 在线';
     paintStatus(status);
     if (updating && status.updateLine) document.getElementById('railMeta').textContent = status.updateLine;
   } catch {
     dot.className = 'dot offline';
+    if (!offlineSince) offlineSince = Date.now();
     text.textContent = updating ? '正在更新' : 'Bot 离线';
-    document.getElementById('railMeta').textContent = updating ? '等待 Bot 重新启动' : '检查黑色运行窗口';
+    // La instalacion tarda segundos; minutos sin volver = algo se torcio.
+    document.getElementById('railMeta').textContent = updating
+      ? (Date.now() - offlineSince > 180000 ? '更新后 Bot 一直没回来 — 双击 panel.cmd 或 start-bot.cmd' : '等待 Bot 重新启动')
+      : '检查黑色运行窗口';
   }
+  // Mientras se actualiza, poll extra rapido para pillar el desenlace.
+  if (updating) setTimeout(refreshStatus, 3000);
+}
+
+function resetUpdateButton() {
+  const button = document.getElementById('updateButton');
+  if (button) { button.disabled = false; button.textContent = '更新 BOT'; }
 }
 
 async function runAdmin(action) {
@@ -822,6 +910,8 @@ async function runAdmin(action) {
   button.disabled = true;
   button.textContent = '更新中';
   updating = true;
+  updateStartedAt = Date.now();
+  offlineSince = 0;
   try {
     const response = await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion: action }) });
     const data = await response.json();
