@@ -11,6 +11,7 @@ import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPro
 import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
+import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
@@ -43,12 +44,14 @@ const config = loadConfig(readArg('--config'));
 const logger = createLogger(config.logsDir);
 const memoryStore = new MemoryStore(config.memory, logger);
 const operationLedger = new OperationLedger(config.operationLedger, logger);
+const scheduledTasks = new ScheduledTaskStore(config.scheduledTasks, logger);
 let memoryLearnQueue = Promise.resolve();
 const replyContextByChat = new Map();
 const supplierIndex = loadSupplierIndex(config.supplierCsv);
 const storeIndex = loadStoreIndex(config.storeCsv);
 const sessions = new Map();
 let nextSessionId = 1;
+let scheduledTaskRunnerActive = false;
 
 if (process.argv.includes('--help')) { console.log('Usage: node src/bot.js --config config.local.json'); process.exit(0); }
 
@@ -187,6 +190,7 @@ async function mainLoop() {
       await maybeSendOrderReminder();
       await maybePrintArrivalChecklist();
       await maybeRunAutoAdvisor();
+      await maybeRunScheduledTasks();
     } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
   }
 }
@@ -213,6 +217,11 @@ async function handleUpdate(update) {
   const operationHistoryRequest = parseOperationHistoryRequest(text);
   if (operationHistoryRequest) {
     await handlePriceHistory(chatId, operationHistoryRequest);
+    return;
+  }
+  const scheduleCommand = parseScheduleCommand(text, new Date());
+  if (scheduleCommand) {
+    await handleScheduledTaskCommand(chatId, scheduleCommand, text);
     return;
   }
   queueAutoMemory(chatId, text);
@@ -297,6 +306,38 @@ async function handlePriceHistory(chatId, requestOrText) {
   await telegram.sendMessage(chatId, formatOperationHistory(operationLedger.summarize(request || { scope: 'today' })));
 }
 
+async function handleScheduledTaskCommand(chatId, command, sourceText = '') {
+  const timeZone = config.scheduledTasks?.timeZone || 'Europe/Madrid';
+  if (!scheduledTasks.enabled) { await telegram.sendMessage(chatId, '定时任务功能现在是关闭的。'); return; }
+  if (command.action === 'invalid') { await telegram.sendMessage(chatId, command.error); return; }
+  if (command.action === 'list') {
+    await telegram.sendMessage(chatId, formatTaskList(scheduledTasks.list({ status: 'pending', limit: 30 }), timeZone));
+    return;
+  }
+  if (command.action === 'cancel') {
+    const cancelled = scheduledTasks.cancel(command.id);
+    await telegram.sendMessage(chatId, cancelled
+      ? '已取消定时任务：' + formatScheduledTask(cancelled, timeZone)
+      : '没有找到这个待执行任务，可能已经执行或取消了。');
+    return;
+  }
+  if (command.action === 'create') {
+    await createScheduledTask(chatId, command, sourceText);
+  }
+}
+
+async function createScheduledTask(chatId, parsed, sourceText = '') {
+  try {
+    const task = scheduledTasks.add({
+      action: parsed.taskAction, argument: parsed.argument, label: parsed.label,
+      chatId, runAt: parsed.runAt, sourceText
+    });
+    await telegram.sendMessage(chatId, '定时任务已创建：\n' + formatScheduledTask(task, scheduledTasks.timeZone) + '\n到时间会由店里电脑自动运行；不会自动 Guardar 或 Enviar Pedido。');
+  } catch (error) {
+    await telegram.sendMessage(chatId, '没有创建任务：' + error.message);
+  }
+}
+
 function queueAutoMemory(chatId, text) {
   if (!memoryStore.enabled || config.memory?.autoLearn === false || !llmConfigured(config) || !shouldConsiderForMemory(text)) return;
   const history = assistHistory(text);
@@ -359,6 +400,8 @@ function formatCommandList() {
     '/pedidos 3 — 只读检查最新 3 张订单和明显异常',
     '/carne — 开始肉类盘点',
     '/pedido_nuevo — 手动建一张单的草稿',
+    '/tarea 2026-07-14 10:00 /carne — 新建定时任务',
+    '/tareas — 查看待执行任务；/cancelar_tarea 12 — 取消',
     '',
     '【查商品】',
     '/articulo 模板 — 查/改一个商品（发 /plantilla 看模板怎么写）',
@@ -388,7 +431,8 @@ function formatCommandList() {
 // caducidad) y últimos pedidos rellenados. Van en texto plano dentro del
 // system prompt para que accion=responder conteste con cifras REALES.
 function buildAssistDatos(query = '') {
-  const partes = [`Fecha de hoy: ${todayString(config)}`];
+  const localNow = new Intl.DateTimeFormat('sv-SE', { timeZone: config.scheduledTasks?.timeZone || 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short', hour12: false }).format(new Date());
+  const partes = ['FECHA Y HORA LOCAL: ' + localNow, 'Fecha de hoy: ' + todayString(config)];
   const memoryContext = memoryStore.buildContext(query);
   if (memoryContext) partes.push(memoryContext);
   const operationContext = operationLedger.buildContext();
@@ -559,6 +603,18 @@ async function handleFreeText(chatId, text) {
       await say('/carne');
       await startTally(chatId, 'carne');
       return;
+    case 'programar': {
+      const parsedTask = parseLlmScheduleArgument(arg, new Date());
+      if (!parsedTask.ok) { await telegram.sendMessage(chatId, parsedTask.error + '。请告诉我准确日期、时间和要做什么。'); return; }
+      await createScheduledTask(chatId, parsedTask, text);
+      return;
+    }
+    case 'tareas': {
+      const cancel = String(arg || '').match(/^cancel\s+(\d+)$/i);
+      if (cancel) await handleScheduledTaskCommand(chatId, { action: 'cancel', id: Number(cancel[1]) }, text);
+      else await handleScheduledTaskCommand(chatId, { action: 'list' }, text);
+      return;
+    }
     case 'bloq_venta':
       if (!arg) { await telegram.sendMessage(chatId, '要动哪个商品的 Bloq.Venta？发我：/bloq 名字或编号 off（恢复可卖）/ on（停卖）'); return; }
       await say(`/bloq ${arg}`);
@@ -1511,6 +1567,53 @@ async function maybePrintArrivalChecklist() {
   if (delivered) arrivalScheduler.markSent(due.key);
 }
 
+// Tareas futuras creadas desde Telegram o el panel. Solo ejecutan la
+// lista blanca de scheduledTasks.js; nunca Guardar ni Enviar Pedido.
+async function maybeRunScheduledTasks() {
+  if (scheduledTaskRunnerActive || !scheduledTasks.enabled) return;
+  const due = scheduledTasks.claimDue(new Date());
+  if (!due.length) return;
+  scheduledTaskRunnerActive = true;
+  try {
+    for (const task of due) {
+      try {
+        notePanelActivity('定时：' + task.label);
+        replyContextByChat.set(String(task.chatId), { text: '定时任务：' + task.label, at: Date.now() });
+        await telegram.sendMessage(task.chatId, '定时任务到点 #' + task.id + '：' + task.label + '\n现在开始执行 ' + task.command + '。');
+        await executeScheduledTask(task);
+        scheduledTasks.complete(task.id);
+      } catch (error) {
+        scheduledTasks.fail(task.id, error.message);
+        logger.error('scheduled task failed', { taskId: task.id, action: task.action, error: error.message });
+        try { await telegram.sendMessage(task.chatId, '定时任务 #' + task.id + ' 执行失败：' + error.message); } catch { /* sin red */ }
+      }
+    }
+  } finally {
+    scheduledTaskRunnerActive = false;
+  }
+}
+
+async function executeScheduledTask(task) {
+  switch (task.action) {
+    case 'carne': await startTally(task.chatId, 'carne'); return;
+    case 'pedido': {
+      const cmd = '/pedido' + (task.argument ? ' ' + task.argument : '');
+      await telegram.sendMessage(task.chatId, formatOrderResponse(parseOrderMode(cmd), new Date(), config), makeOrderButtons());
+      return;
+    }
+    case 'promociones': await handlePromotions(task.chatId, '/promociones'); return;
+    case 'pedidos_recientes': {
+      const request = parseRecentOrdersRequest('/pedidos ' + (task.argument || 3));
+      await handleRecentOrders(task.chatId, request || { requested: 3, limit: 3, capped: false });
+      return;
+    }
+    case 'llegada': await handleArrivalChecklist(task.chatId, '/llegada' + (task.argument ? ' ' + task.argument : '')); return;
+    case 'ahorro': await handleAhorro(task.chatId); return;
+    case 'ahorro_pedido': await handleAhorroPedido(task.chatId, '/ahorro_pedido' + (task.argument ? ' ' + task.argument : '')); return;
+    default: throw new Error('不允许的定时任务动作');
+  }
+}
+
 // Tarea diaria automática (config.autoAdvisor): refrescar promociones y
 // analizar pedidos PDA nuevos sin que nadie lo pida. Corre una vez al día a
 // la hora configurada (por defecto 07:15, antes de abrir la tienda, para no
@@ -2055,10 +2158,19 @@ if (config.panel?.enabled !== false) {
         memories: memoryStore.count,
         operations: operationLedger.count,
         successfulPriceChanges: operationLedger.successfulPriceChanges,
+        scheduledTasks: scheduledTasks.list({ status: 'pending', limit: 12 }).map((task) => ({
+          id: task.id, label: task.label, command: task.command, runAt: task.runAt
+        })),
         activity: panelActivity
       };
     },
     commandList: () => formatCommandList(),
+    cancelTask: (id) => {
+      const cancelled = scheduledTasks.cancel(id);
+      if (!cancelled) throw new Error('任务不存在，或者已经不是待执行状态');
+      notePanelActivity('取消定时：' + cancelled.label);
+      return '已取消 #' + cancelled.id + ' ' + cancelled.label;
+    },
     // Mantenimiento desde el propio panel: como el bot ya corre elevado,
     // puede lanzar el updater o pararse a si mismo sin UAC ni ventanas.
     admin: async (accion) => {

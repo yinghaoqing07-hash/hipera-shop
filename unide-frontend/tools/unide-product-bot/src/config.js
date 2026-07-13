@@ -56,6 +56,13 @@ const defaultConfig = {
     timeZone: 'Europe/Madrid',
     importRecentChat: true
   },
+  scheduledTasks: {
+    enabled: true,
+    path: 'data/scheduled-tasks.json',
+    timeZone: 'Europe/Madrid',
+    maxEntries: 500,
+    maxLateMinutes: 360
+  },
   ordering: {
     enabled: true,
     timezone: 'Europe/Madrid',
@@ -205,6 +212,7 @@ export function loadConfig(configPath) {
   config.logsDir = resolveToolPath(config.logsDir);
   config.memory.path = resolveToolPath(config.memory.path);
   config.operationLedger.path = resolveToolPath(config.operationLedger.path);
+  config.scheduledTasks.path = resolveToolPath(config.scheduledTasks.path);
   config.desktop.script = resolveToolPath(config.desktop.script);
   config.desktop.screenshotDir = resolveToolPath(config.desktop.screenshotDir);
   normalizeDesktopDefaults(config);
@@ -212,6 +220,7 @@ export function loadConfig(configPath) {
   tryMkdir(config.logsDir);
   tryMkdir(path.dirname(config.memory.path));
   tryMkdir(path.dirname(config.operationLedger.path));
+  tryMkdir(path.dirname(config.scheduledTasks.path));
   tryMkdir(config.desktop.screenshotDir);
 
   return config;
