@@ -294,7 +294,13 @@ function pintarBurbuja(m) {
   const b = document.createElement('div');
   b.className = 'burbuja';
   const cuerpo = document.createElement('div');
-  const completo = sinEmoji(m.buttons && m.buttons.length && m.resumen ? m.resumen : m.text);
+  // Los mensajes de teclado NUNCA enseñan su plantilla en el chat: frase de
+  // la IA si llegó (resumen), y si no una fija — las instrucciones completas
+  // viven junto a los botones, en la columna izquierda.
+  const textoBruto = String(m.text || '');
+  const esTeclado = m.buttons && m.buttons.length;
+  const tecladoLargo = esTeclado && (textoBruto.length > 30 || textoBruto.split('\\n').length > 1);
+  const completo = sinEmoji(m.resumen ? m.resumen : (tecladoLargo ? '操作面板已在左侧打开，按提示点就行。' : textoBruto));
   const esLargo = completo.length > 380 || completo.split('\\n').length > 8;
   if (esLargo) {
     // Los informes largos no llenan el chat: recorte + "展开" en el lector.
