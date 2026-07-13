@@ -102,20 +102,18 @@ export function renderPanelPage(version) {
   #cajon {
     grid-column: 1; grid-row: 1;
     min-height: 0; display: none; flex-direction: column;
-    border: 1px solid rgba(200,211,220,.12); border-radius: 14px;
-    background: rgba(148,180,205,.04);
   }
   #cajon.abierto { display: flex; }
   #cajon .cab {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 18px 20px 12px; font-size: 11px; letter-spacing: .3em; color: #76879a;
+    display: flex; justify-content: flex-end; align-items: center;
+    padding: 0 6px 2px; font-size: 11px; color: #76879a;
   }
   #cajon .cab b { color: #7dd3fc; font-weight: 600; }
   #cajon .cab button {
     background: none; border: none; color: #76879a; font-size: 18px; cursor: pointer; padding: 2px 6px;
   }
   #cajon .cab button:hover { color: #cfe9f7; }
-  #cajon .cuerpo { flex: 1; overflow-y: auto; padding: 4px 20px 24px; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent; }
+  #cajon .cuerpo { flex: 1; overflow-y: auto; padding: 4px 6px 24px; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent; }
   #cajon .texto { font-size: 13.5px; color: #aebdcb; line-height: 1.6; white-space: pre-wrap; margin-bottom: 14px; }
   #cajon img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); margin-bottom: 14px; display: block; }
   #cajon .filaB { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -128,22 +126,20 @@ export function renderPanelPage(version) {
   #lector {
     grid-column: 3; grid-row: 1;
     min-height: 0; display: none; flex-direction: column;
-    border: 1px solid rgba(200,211,220,.12); border-radius: 14px;
-    background: rgba(148,180,205,.04);
   }
   #lector.abierto { display: flex; }
   #lector .cab {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
-    padding: 18px 20px 12px; font-size: 11px; letter-spacing: .2em; color: #76879a;
+    padding: 0 6px 2px; font-size: 11px; color: #76879a;
   }
   #lector .cab b { color: #7dd3fc; font-weight: 600; white-space: nowrap; }
-  #lectorFoto { padding: 0 20px; }
+  #lectorFoto { padding: 0 6px; }
   #lectorFoto img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); }
-  #lector .cab span.titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: right; }
+  #lector .cab span.titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; letter-spacing: .1em; }
   #lector .cab button { background: none; border: none; color: #76879a; font-size: 18px; cursor: pointer; padding: 2px 6px; }
   #lector .cab button:hover { color: #cfe9f7; }
   #lector pre {
-    flex: 1; overflow: auto; margin: 0; padding: 6px 20px 24px;
+    flex: 1; overflow: auto; margin: 0; padding: 6px 6px 24px;
     font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.6;
     color: #bdcad7; white-space: pre-wrap; word-break: break-word;
     scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
@@ -168,7 +164,7 @@ export function renderPanelPage(version) {
   <div id="saludo">需要我做什么</div>
   <div id="zona">
     <div id="cajon">
-  <div class="cab"><span><b>操 作 台</b></span><button onclick="cerrarCajon()" title="关闭">✕</button></div>
+  <div class="cab"><button onclick="cerrarCajon()" title="关闭">✕</button></div>
   <div class="cuerpo">
     <div id="cajonInicio">
       <div id="pills">
@@ -215,7 +211,7 @@ export function renderPanelPage(version) {
       </div>
     </div>
     <div id="lector">
-      <div class="cab"><b>阅 读</b><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
+      <div class="cab"><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
       <div id="lectorFoto"></div>
       <pre id="lectorTexto"></pre>
     </div>
