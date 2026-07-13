@@ -83,7 +83,7 @@ export function renderPanelPage(version = '') {
     width: 100%;
     min-height: 43px;
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
     gap: 9px;
     border: 0;
@@ -95,7 +95,6 @@ export function renderPanelPage(version = '') {
   }
   .nav-button:hover { background: #141c20; color: #dfe7e9; }
   .nav-button.active { background: #172226; border-left-color: var(--teal); color: #fff; }
-  .nav-code { color: var(--teal); font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; font-weight: 700; }
   .nav-label { font-size: 12px; font-weight: 650; }
   .rail-footer { margin-top: auto; display: grid; gap: 10px; }
   .update-button {
@@ -120,7 +119,6 @@ export function renderPanelPage(version = '') {
     border-bottom: 1px solid var(--line);
   }
   .topbar-copy { min-width: 0; }
-  .eyebrow { margin: 0 0 5px; color: var(--teal); font-size: 9px; font-weight: 800; letter-spacing: .2em; }
   h1 { margin: 0; font-size: 21px; line-height: 1.2; font-weight: 680; }
   .clock { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
   #clockTime { font-size: 26px; font-weight: 670; font-variant-numeric: tabular-nums; }
@@ -177,13 +175,8 @@ export function renderPanelPage(version = '') {
   .quick-action:nth-child(3n) { border-right: 0; }
   .quick-action:nth-last-child(-n+3) { border-bottom: 0; }
   .quick-action:hover { background: var(--surface-2); }
-  .quick-code { color: var(--teal); font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; }
   .quick-name { font-size: 12px; font-weight: 650; }
   .quick-note { color: var(--muted); font-size: 10px; }
-  .focus { min-height: 116px; padding: 17px; border-bottom: 1px solid var(--line); }
-  .focus-label { color: var(--amber); font-size: 9px; font-weight: 800; letter-spacing: .14em; }
-  .focus-title { margin-top: 9px; font-size: 15px; font-weight: 680; }
-  .focus-copy { margin-top: 7px; color: #9aabb1; font-size: 11px; line-height: 1.6; }
   .compact-list { padding: 6px 17px 12px; }
   .task-row, .activity-row { min-height: 43px; display: grid; align-items: center; gap: 10px; border-bottom: 1px solid #202c31; }
   .task-row { grid-template-columns: 82px minmax(0, 1fr) 30px; }
@@ -240,12 +233,14 @@ export function renderPanelPage(version = '') {
   .operation-list-time { color: #65767d; font-size: 10px; font-variant-numeric: tabular-nums; }
   .conversation-panel { height: calc(100vh - 225px); min-height: 560px; display: grid; grid-template-rows: auto minmax(0, 1fr); }
   .transcript { min-height: 0; overflow: auto; padding: 6px 18px 18px; scroll-behavior: smooth; }
-  .message { position: relative; padding: 14px 10px 14px 15px; border-bottom: 1px solid #202c31; }
+  .message { position: relative; padding: 11px 10px 11px 15px; }
+  .message.user, .message.from-panel { text-align: right; padding: 11px 15px 11px 10px; }
   .message::before { content: ""; position: absolute; left: 0; top: 17px; bottom: 17px; width: 2px; background: var(--teal); }
-  .message.user::before, .message.panel::before { background: var(--amber); }
+  .message.user::before, .message.from-panel::before { background: var(--amber); left: auto; right: 0; }
   .message-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 7px; }
+  .message.user .message-meta, .message.from-panel .message-meta { flex-direction: row-reverse; }
   .message-author { color: var(--teal); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
-  .message.user .message-author, .message.panel .message-author { color: var(--amber); }
+  .message.user .message-author, .message.from-panel .message-author { color: var(--amber); }
   .message-time { color: #65757c; font-size: 9px; font-variant-numeric: tabular-nums; }
   .message-body { color: #c3cdd0; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
   .open-operation { margin-top: 10px; min-height: 32px; border: 1px solid #366a66; border-radius: 4px; padding: 0 11px; background: #142c2a; color: #a9e6df; font-size: 10px; font-weight: 700; }
@@ -339,17 +334,17 @@ export function renderPanelPage(version = '') {
     <div class="brand"><div class="brand-mark">J</div><div class="brand-copy"><div class="brand-name">JARVIS</div><div class="brand-sub">UNIDE OPERATIONS</div></div></div>
     <div class="connection-block"><div class="connection"><span class="dot" id="connectionDot"></span><span id="connectionText">正在连接</span></div><div class="rail-meta" id="railMeta">等待 Bot 状态</div></div>
     <nav class="rail-nav" aria-label="主导航">
-      <button class="nav-button active" data-view="overview"><span class="nav-code">OV</span><span class="nav-label">总览</span></button>
-      <button class="nav-button" data-view="execution"><span class="nav-code">EX</span><span class="nav-label">执行台</span></button>
-      <button class="nav-button" data-view="conversation"><span class="nav-code">AI</span><span class="nav-label">对话</span></button>
-      <button class="nav-button" data-view="tasks"><span class="nav-code">TK</span><span class="nav-label">任务</span></button>
-      <button class="nav-button" data-view="system"><span class="nav-code">SY</span><span class="nav-label">系统</span></button>
+      <button class="nav-button active" data-view="overview"><span class="nav-label">总览</span></button>
+      <button class="nav-button" data-view="execution"><span class="nav-label">执行台</span></button>
+      <button class="nav-button" data-view="conversation"><span class="nav-label">对话</span></button>
+      <button class="nav-button" data-view="tasks"><span class="nav-label">任务</span></button>
+      <button class="nav-button" data-view="system"><span class="nav-label">系统</span></button>
     </nav>
     <div class="rail-footer"><button class="update-button" id="updateButton" onclick="runAdmin('update')">更新 BOT</button><div class="version">BUILD ${safeVersion}</div></div>
   </aside>
 
   <main class="workspace">
-    <header class="topbar"><div class="topbar-copy"><p class="eyebrow" id="viewEyebrow">OPERATIONS OVERVIEW</p><h1 id="viewTitle">店务总览</h1></div><div class="clock"><span id="clockTime">--:--</span><span id="clockDate">—</span></div></header>
+    <header class="topbar"><div class="topbar-copy"><h1 id="viewTitle">店务总览</h1></div><div class="clock"><span id="clockTime">--:--</span><span id="clockDate">—</span></div></header>
     <form class="command-bar" id="composer"><span class="command-prefix">JARVIS &gt;</span><input id="commandInput" autocomplete="off" placeholder="输入问题、任务或命令"><button class="send-button" type="submit" title="发送">›</button></form>
 
     <section class="view active" id="view-overview">
@@ -361,14 +356,14 @@ export function renderPanelPage(version = '') {
       </div>
       <div class="overview-grid">
         <section class="panel"><div class="panel-head"><h2 class="panel-title">常用行动</h2><span class="panel-meta">直接执行</span></div><div class="quick-grid">
-          <button class="quick-action" onclick="runCommand('/carne','execution')"><span class="quick-code">01 / CARNE</span><span class="quick-name">肉类点货</span><span class="quick-note">进入专用执行台</span></button>
-          <button class="quick-action" onclick="runCommand('/pedido')"><span class="quick-code">02 / PEDIDO</span><span class="quick-name">叫货检查</span><span class="quick-note">当天工作提醒</span></button>
-          <button class="quick-action" onclick="runCommand('/llegada')"><span class="quick-code">03 / LLEGADA</span><span class="quick-name">到货清单</span><span class="quick-note">生成打印文件</span></button>
-          <button class="quick-action" onclick="runCommand('/pedidos 3')"><span class="quick-code">04 / HISTORIAL</span><span class="quick-name">最近三张订单</span><span class="quick-note">快速核对异常</span></button>
-          <button class="quick-action" onclick="runCommand('/promociones')"><span class="quick-code">05 / PROMO</span><span class="quick-name">刷新促销</span><span class="quick-note">读取有效活动</span></button>
-          <button class="quick-action" onclick="runCommand('/ahorro_pedido')"><span class="quick-code">06 / AHORRO</span><span class="quick-name">PDA 省钱分析</span><span class="quick-note">检查订单差异</span></button>
+          <button class="quick-action" onclick="runCommand('/carne','execution')"><span class="quick-name">肉类点货</span><span class="quick-note">进入专用执行台</span></button>
+          <button class="quick-action" onclick="runCommand('/pedido')"><span class="quick-name">叫货检查</span><span class="quick-note">当天工作提醒</span></button>
+          <button class="quick-action" onclick="runCommand('/llegada')"><span class="quick-name">到货清单</span><span class="quick-note">生成打印文件</span></button>
+          <button class="quick-action" onclick="runCommand('/pedidos 3')"><span class="quick-name">最近三张订单</span><span class="quick-note">快速核对异常</span></button>
+          <button class="quick-action" onclick="runCommand('/promociones')"><span class="quick-name">刷新促销</span><span class="quick-note">读取有效活动</span></button>
+          <button class="quick-action" onclick="runCommand('/ahorro_pedido')"><span class="quick-name">PDA 省钱分析</span><span class="quick-note">检查订单差异</span></button>
         </div></section>
-        <section class="panel"><div class="focus"><div class="focus-label">TODAY / 今日重点</div><div class="focus-title" id="focusTitle">读取今日计划</div><div class="focus-copy" id="focusCopy">正在结合星期、库存和现有任务生成今日重点。</div></div><div class="panel-head"><h2 class="panel-title">下一步</h2><span class="panel-meta" id="overviewTaskCount">0 项</span></div><div class="compact-list" id="overviewTaskList"><div class="empty">还没有待执行任务</div></div></section>
+        <section class="panel"><div class="panel-head"><h2 class="panel-title">下一步</h2><span class="panel-meta" id="overviewTaskCount">0 项</span></div><div class="compact-list" id="overviewTaskList"><div class="empty">还没有待执行任务</div></div></section>
         <section class="panel"><div class="panel-head"><h2 class="panel-title">最近动态</h2><span class="panel-meta">本次运行</span></div><div class="compact-list" id="overviewActivityList"><div class="empty">还没有操作记录</div></div></section>
         <section class="panel"><div class="panel-head"><h2 class="panel-title">运行状态</h2><span class="panel-meta" id="overviewUptime">—</span></div><div class="system-list" id="overviewSystemList"></div></section>
       </div>
@@ -498,9 +493,11 @@ function showView(name) {
   currentView = name;
   document.querySelectorAll('.view').forEach(function (view) { view.classList.toggle('active', view.id === 'view-' + name); });
   document.querySelectorAll('.nav-button').forEach(function (button) { button.classList.toggle('active', button.dataset.view === name); });
-  document.getElementById('viewEyebrow').textContent = viewMeta[name][0];
   document.getElementById('viewTitle').textContent = viewMeta[name][1];
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  // La transcripción solo se puede colocar cuando la vista es visible: al
+  // entrar en 对话 se salta directo a lo más reciente (el final).
+  if (name === 'conversation') chatElement.scrollTop = chatElement.scrollHeight;
 }
 
 document.querySelectorAll('.nav-button').forEach(function (button) { button.addEventListener('click', function () { showView(button.dataset.view); }); });
@@ -724,7 +721,7 @@ function renderMessage(message) {
     messageRows.set(message.id, row);
     chatElement.appendChild(row);
   }
-  row.className = 'message ' + (message.from === 'bot' ? 'assistant' : message.from === 'panel' ? 'panel' : 'user');
+  row.className = 'message ' + (message.from === 'bot' ? 'assistant' : message.from === 'panel' ? 'from-panel' : 'user');
   row.replaceChildren();
   const meta = document.createElement('div');
   meta.className = 'message-meta';
@@ -763,7 +760,7 @@ async function pollChat() {
     chatSeq = Math.max(chatSeq, Number(data.seq) || 0);
     const empty = document.getElementById('emptyChat');
     if (empty && messageRows.size) empty.remove();
-    if (wasNearBottom && messages.length) chatElement.scrollTop = chatElement.scrollHeight;
+    if ((wasNearBottom || !chatInitialized) && messages.length) chatElement.scrollTop = chatElement.scrollHeight;
     document.getElementById('syncLabel').textContent = '已同步';
     chatInitialized = true;
   } catch {
@@ -985,19 +982,6 @@ function renderOverviewSystems(status) {
   });
 }
 
-function paintFocus() {
-  const day = new Date().getDay();
-  const titles = { 0: 'PDA 自动订单确认', 1: '第一轮肉类与果蔬叫货', 3: '第二轮肉类与果蔬叫货', 4: '周末前补货检查' };
-  const copies = {
-    0: '11:00 前确认 Pedido importado desde PDA 是否生成，并核对状态、数量与金额。',
-    1: '先看库存、历史订单、促销和缺货，准备周三到货。',
-    3: '结合本周消耗和缺货，准备周五到货。',
-    4: '检查周末到周一的肉类与果蔬缺口，再决定是否补货。'
-  };
-  document.getElementById('focusTitle').textContent = titles[day] || '例行店务检查';
-  document.getElementById('focusCopy').textContent = copies[day] || '查看待执行任务、近期订单、促销和异常记录。';
-}
-
 function paintStatus(status) {
   document.getElementById('metricArrival').textContent = status.arrivingToday == null ? '—' : status.arrivingToday;
   document.getElementById('metricArrivalNote').textContent = status.arrivingToday ? '今天需要核对' : '今天暂无记录';
@@ -1095,7 +1079,6 @@ window.addEventListener('beforeunload', function () {
   try { navigator.sendBeacon('/admin', new Blob([JSON.stringify({ accion: 'adios' })], { type: 'application/json' })); } catch { /* noop */ }
 });
 
-paintFocus();
 updateClock();
 setInterval(updateClock, 1000);
 pollChat();
