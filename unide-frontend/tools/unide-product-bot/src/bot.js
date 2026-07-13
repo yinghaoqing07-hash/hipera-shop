@@ -8,7 +8,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
@@ -144,6 +144,15 @@ const panelToasts = new Map();
     const entry = __noLog ? null : recordChat('bot', finalText, { buttons: buttonsFromMarkup(rest) });
     const result = await origSendMessage(chatId, finalText, rest);
     if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
+    // Mensajes con teclado: el panel ya enseña las instrucciones junto a los
+    // botones (columna izquierda); en el chat del panel se sustituyen por una
+    // frase corta escrita por la IA (entry.resumen). Telegram no cambia — en
+    // el movil el teclado cuelga de este mensaje y necesita su texto.
+    if (entry && entry.buttons?.length && finalText.length > 60 && llmConfigured(config)) {
+      llmKeyboardIntro(finalText, config, logger)
+        .then((frase) => { entry.resumen = frase.slice(0, 120); bumpChatEntry(entry); })
+        .catch((error) => logger.warn('keyboard intro failed', { error: error.message }));
+    }
     return result;
   };
   for (const method of ['sendPhoto', 'sendDocument']) {
