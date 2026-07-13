@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { dirname as pathDirname, join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderPanelPage } from './panelPage.js';
+import { renderPanelPage } from './panelPageV139.js';
 
 // Versión que corre la tienda, pintada en una esquina del panel. Manda el
 // número de version.txt (se incrementa en cada release: v127, v128…), que
