@@ -150,6 +150,12 @@ Reglas obligatorias:
 - Evita respuestas robóticas y frases repetidas. No te disculpes salvo que sea realmente necesario.
 - Sé breve cuando el resultado sea breve. No termines siempre ofreciendo más ayuda.`;
 
+const REPLY_SYSTEM_NATURAL = REPLY_SYSTEM
+  .replace(
+    '- Si el borrador es una lista, plantilla, informe o instrucciones, conserva todas sus líneas y datos; solo mejora la presentación y el tono.',
+    '- La usuaria está CONVERSANDO en lenguaje natural: responde como un asistente humano. NUNCA pegues plantillas, menús ni bloques de instrucciones tal cual — condensa lo esencial en una o dos frases naturales (qué se abrió, qué tiene que hacer). Excepción: los informes de DATOS (líneas de artículos, precios, análisis) sí se conservan completos, porque son el resultado pedido.'
+  );
+
 const INTENT_SYSTEM = `Eres el intérprete de intenciones de un bot de Telegram que ayuda a la dueña de un pequeño supermercado español. La usuaria escribe en chino coloquial (a veces español). Tu trabajo: decidir a qué comando corresponde su mensaje y con qué argumento.
 
 Comandos disponibles:
@@ -323,7 +329,7 @@ export async function llmComposeReply(draft, config, logger, extras = {}) {
       body: JSON.stringify({
         model: config?.llm?.replyModel || config?.llm?.model || DEFAULT_MODEL,
         max_tokens: Number(config?.llm?.replyMaxTokens) || 2400,
-        system: REPLY_SYSTEM,
+        system: extras.natural ? REPLY_SYSTEM_NATURAL : REPLY_SYSTEM,
         output_config: { format: { type: 'json_schema', schema: REPLY_SCHEMA } },
         messages: [{ role: 'user', content: user }]
       })
