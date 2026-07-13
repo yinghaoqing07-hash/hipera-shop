@@ -148,7 +148,9 @@ const panelToasts = new Map();
     // botones (columna izquierda); en el chat del panel se sustituyen por una
     // frase corta escrita por la IA (entry.resumen). Telegram no cambia — en
     // el movil el teclado cuelga de este mensaje y necesita su texto.
-    if (entry && entry.buttons?.length && finalText.length > 60 && llmConfigured(config)) {
+    // Umbral bajo: el texto del recuento son ~56 caracteres CJK en 3 lineas
+    // y el primer umbral (60) lo dejaba pasar sin resumen.
+    if (entry && entry.buttons?.length && (finalText.length > 30 || finalText.includes('\n')) && llmConfigured(config)) {
       llmKeyboardIntro(finalText, config, logger)
         .then((frase) => { entry.resumen = frase.slice(0, 120); bumpChatEntry(entry); })
         .catch((error) => logger.warn('keyboard intro failed', { error: error.message }));
