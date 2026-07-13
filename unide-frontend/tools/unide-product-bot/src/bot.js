@@ -219,7 +219,9 @@ async function handleUpdate(update) {
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
   notePanelActivity(text);
   recordChat(update.__panel ? 'panel' : 'user', text);
-  replyContextByChat.set(String(chatId), { text, at: Date.now() });
+  // natural=true cuando la dueña escribe en lenguaje natural (no un
+  // comando /): en ese modo las respuestas se redactan SIN plantillas.
+  replyContextByChat.set(String(chatId), { text, at: Date.now(), natural: !String(text || '').trim().startsWith('/') });
   const memoryCommand = parseMemoryCommand(text);
   if (memoryCommand) {
     await handleMemoryCommand(chatId, memoryCommand);
@@ -524,10 +526,13 @@ async function composeOutgoingReply(chatId, draft, options = {}) {
   const original = String(draft ?? '');
   if (!original.trim() || config.llm?.allRepliesViaApi === false || !llmConfigured(config)) return original;
   const active = replyContextByChat.get(String(chatId));
-  const userText = active && Date.now() - active.at < 30 * 60 * 1000 ? active.text : '';
+  const vigente = active && Date.now() - active.at < 30 * 60 * 1000;
+  const userText = vigente ? active.text : '';
+  const natural = vigente ? Boolean(active.natural) : false;
   try {
     return await llmComposeReply(original, config, logger, {
       userText,
+      natural,
       history: replyHistory(),
       memoryContext: memoryStore.buildContext(userText || original),
       maxChars: options.maxChars
