@@ -35,9 +35,15 @@ export function renderPanelPage(version) {
   #punto.rojo { background: #ef4444; animation: none; }
   @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 24px 24px; min-height: 0; }
+  #zona {
+    flex: 1; min-height: 0; width: 100%;
+    display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(300px, 380px);
+    gap: 18px; padding-top: 6px;
+  }
+  #centro { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
   #saludo { font-size: 13px; letter-spacing: .3em; color: #5f7184; margin-bottom: 26px; text-transform: uppercase; }
   #linea {
-    width: min(800px, 94vw); display: flex; align-items: center; gap: 14px;
+    width: min(800px, 100%); display: flex; align-items: center; gap: 14px;
     border-bottom: 1px solid rgba(125,211,252,.25); padding: 6px 4px 12px;
     transition: border-color .25s;
   }
@@ -69,7 +75,7 @@ export function renderPanelPage(version) {
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
   #charla {
     /* flex 1: el chat se estira hasta la línea de comando, pegada abajo */
-    flex: 1 1 0; min-height: 0; width: min(800px, 94vw); overflow-y: auto;
+    flex: 1 1 0; min-height: 0; width: min(800px, 100%); overflow-y: auto;
     margin: 8px 0 20px; scrollbar-width: thin;
     scrollbar-color: rgba(125,211,252,.2) transparent;
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
@@ -90,14 +96,16 @@ export function renderPanelPage(version) {
   }
   .chipTeclado:hover, .chipLeer:hover { border-color: rgba(125,211,252,.6); color: #d5ecf8; }
   /* --- cajón lateral: donde viven los teclados interactivos --- */
+  /* Nada de paneles que se deslizan por encima: el cajón y el lector viven
+     en las columnas laterales, que siempre están ahí vacías — el contenido
+     aparece en el hueco y el chat no se mueve ni se tapa. */
   #cajon {
-    position: fixed; top: 0; left: 0; bottom: 0; width: min(400px, 88vw);
-    background: rgba(20,29,41,.97); border-right: 1px solid rgba(125,211,252,.22);
-    box-shadow: 18px 0 50px rgba(0,0,0,.45);
-    transform: translateX(-102%); transition: transform .28s ease;
-    display: flex; flex-direction: column; z-index: 30;
+    grid-column: 1; grid-row: 1;
+    min-height: 0; display: none; flex-direction: column;
+    border: 1px solid rgba(200,211,220,.12); border-radius: 14px;
+    background: rgba(148,180,205,.04);
   }
-  #cajon.abierto { transform: translateX(0); }
+  #cajon.abierto { display: flex; }
   #cajon .cab {
     display: flex; justify-content: space-between; align-items: center;
     padding: 18px 20px 12px; font-size: 11px; letter-spacing: .3em; color: #76879a;
@@ -118,13 +126,12 @@ export function renderPanelPage(version) {
   #cajon .filaB button:hover { background: rgba(56,189,248,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
   #lector {
-    position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 94vw);
-    background: rgba(20,29,41,.97); border-left: 1px solid rgba(125,211,252,.22);
-    box-shadow: -18px 0 50px rgba(0,0,0,.45);
-    transform: translateX(102%); transition: transform .28s ease;
-    display: flex; flex-direction: column; z-index: 30;
+    grid-column: 3; grid-row: 1;
+    min-height: 0; display: none; flex-direction: column;
+    border: 1px solid rgba(200,211,220,.12); border-radius: 14px;
+    background: rgba(148,180,205,.04);
   }
-  #lector.abierto { transform: translateX(0); }
+  #lector.abierto { display: flex; }
   #lector .cab {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 18px 20px 12px; font-size: 11px; letter-spacing: .2em; color: #76879a;
@@ -159,17 +166,8 @@ export function renderPanelPage(version) {
   <div id="reloj">--:--</div>
   <div id="fecha">&nbsp;</div>
   <div id="saludo">需要我做什么</div>
-  <div id="charla"></div>
-  <div id="linea">
-    <input id="libre" autofocus>
-  </div>
-</main>
-<div id="lector">
-  <div class="cab"><b>阅 读</b><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
-  <div id="lectorFoto"></div>
-  <pre id="lectorTexto"></pre>
-</div>
-<div id="cajon">
+  <div id="zona">
+    <div id="cajon">
   <div class="cab"><span><b>操 作 台</b></span><button onclick="cerrarCajon()" title="关闭">✕</button></div>
   <div class="cuerpo">
     <div id="cajonInicio">
@@ -209,7 +207,20 @@ export function renderPanelPage(version) {
       <div id="cajonBotones"></div>
     </div>
   </div>
-</div>
+    </div>
+    <div id="centro">
+      <div id="charla"></div>
+      <div id="linea">
+        <input id="libre" autofocus>
+      </div>
+    </div>
+    <div id="lector">
+      <div class="cab"><b>阅 读</b><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
+      <div id="lectorFoto"></div>
+      <pre id="lectorTexto"></pre>
+    </div>
+  </div>
+</main>
 <div id="aviso"></div>
 <div id="ver">${version}</div>
 <script>
