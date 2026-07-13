@@ -109,7 +109,7 @@ export function renderPanelPage(version = '') {
   .update-button:hover { border-color: var(--teal); color: var(--teal); }
   .update-button:disabled { opacity: .45; cursor: wait; }
   .version { color: #5f6d73; font-size: 10px; overflow-wrap: anywhere; }
-  .workspace { min-width: 0; padding: 0 30px 32px; }
+  .workspace { min-width: 0; padding: 0 30px 22px; height: 100vh; display: flex; flex-direction: column; }
   .topbar {
     min-height: 82px;
     display: flex;
@@ -145,8 +145,15 @@ export function renderPanelPage(version = '') {
   .command-bar input:focus { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(79,200,187,.09); }
   .send-button { width: 40px; height: 40px; border: 1px solid #397e77; border-radius: 4px; background: #17423e; color: #d9fffa; font-size: 18px; }
   .send-button:hover { background: #1d514b; }
-  .view { display: none; min-width: 0; padding-top: 24px; }
-  .view.active { display: block; }
+  /* Una sola pagina: el chat crece hasta la entrada, la columna lateral
+     solo existe cuando alguna tarjeta tiene contenido. */
+  .single-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; padding-top: 18px; }
+  .single-grid.sin-lado { grid-template-columns: minmax(0, 1fr); }
+  .single-grid.sin-lado .side-column { display: none; }
+  .chat-column { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .chat-column .command-bar { margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+  .side-column { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin; }
+  .side-card .operation-stage { border: 0; background: transparent; }
   .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); background: var(--surface); }
   .metric { min-width: 0; padding: 17px 19px; }
   .metric + .metric { border-left: 1px solid var(--line); }
@@ -333,72 +340,50 @@ export function renderPanelPage(version = '') {
   <aside class="rail">
     <div class="brand"><div class="brand-mark">J</div><div class="brand-copy"><div class="brand-name">JARVIS</div><div class="brand-sub">UNIDE OPERATIONS</div></div></div>
     <div class="connection-block"><div class="connection"><span class="dot" id="connectionDot"></span><span id="connectionText">正在连接</span></div><div class="rail-meta" id="railMeta">等待 Bot 状态</div></div>
-    <nav class="rail-nav" aria-label="主导航">
-      <button class="nav-button active" data-view="overview"><span class="nav-label">总览</span></button>
-      <button class="nav-button" data-view="execution"><span class="nav-label">执行台</span></button>
-      <button class="nav-button" data-view="conversation"><span class="nav-label">对话</span></button>
-      <button class="nav-button" data-view="tasks"><span class="nav-label">任务</span></button>
-      <button class="nav-button" data-view="system"><span class="nav-label">系统</span></button>
+    <nav class="rail-nav" aria-label="常用行动">
+      <button class="nav-button" onclick="runCommand('/carne')"><span class="nav-label">肉类点货</span></button>
+      <button class="nav-button" onclick="runCommand('/pedido')"><span class="nav-label">叫货检查</span></button>
+      <button class="nav-button" onclick="runCommand('/llegada')"><span class="nav-label">到货清单</span></button>
+      <button class="nav-button" onclick="runCommand('/pedidos 3')"><span class="nav-label">最近订单</span></button>
+      <button class="nav-button" onclick="runCommand('/promociones')"><span class="nav-label">刷新促销</span></button>
+      <button class="nav-button" onclick="runCommand('/ahorro_pedido')"><span class="nav-label">PDA 省钱分析</span></button>
     </nav>
     <div class="rail-footer"><button class="update-button" id="updateButton" onclick="runAdmin('update')">更新 BOT</button><div class="version">BUILD ${safeVersion}</div></div>
   </aside>
 
   <main class="workspace">
-    <header class="topbar"><div class="topbar-copy"><h1 id="viewTitle">店务总览</h1></div><div class="clock"><span id="clockTime">--:--</span><span id="clockDate">—</span></div></header>
-    <form class="command-bar" id="composer"><span class="command-prefix">JARVIS &gt;</span><input id="commandInput" autocomplete="off" placeholder="输入问题、任务或命令"><button class="send-button" type="submit" title="发送">›</button></form>
+    <header class="topbar"><div class="topbar-copy"><h1>JARVIS 店务</h1></div><div class="clock"><span id="clockTime">--:--</span><span id="clockDate">—</span></div></header>
 
-    <section class="view active" id="view-overview">
-      <div class="metrics">
-        <div class="metric"><div class="metric-label">预计到货</div><div class="metric-value" id="metricArrival">—</div><div class="metric-note" id="metricArrivalNote">等待读取</div></div>
-        <div class="metric"><div class="metric-label">有效促销商品</div><div class="metric-value" id="metricPromo">—</div><div class="metric-note" id="metricPromoNote">等待读取</div></div>
-        <div class="metric"><div class="metric-label">待执行任务</div><div class="metric-value" id="metricTasks">—</div><div class="metric-note" id="metricTaskNote">没有任务</div></div>
-        <div class="metric"><div class="metric-label">已记录改价</div><div class="metric-value" id="metricPrices">—</div><div class="metric-note" id="metricPriceNote">持久账本</div></div>
-      </div>
-      <div class="overview-grid">
-        <section class="panel"><div class="panel-head"><h2 class="panel-title">常用行动</h2><span class="panel-meta">直接执行</span></div><div class="quick-grid">
-          <button class="quick-action" onclick="runCommand('/carne','execution')"><span class="quick-name">肉类点货</span><span class="quick-note">进入专用执行台</span></button>
-          <button class="quick-action" onclick="runCommand('/pedido')"><span class="quick-name">叫货检查</span><span class="quick-note">当天工作提醒</span></button>
-          <button class="quick-action" onclick="runCommand('/llegada')"><span class="quick-name">到货清单</span><span class="quick-note">生成打印文件</span></button>
-          <button class="quick-action" onclick="runCommand('/pedidos 3')"><span class="quick-name">最近三张订单</span><span class="quick-note">快速核对异常</span></button>
-          <button class="quick-action" onclick="runCommand('/promociones')"><span class="quick-name">刷新促销</span><span class="quick-note">读取有效活动</span></button>
-          <button class="quick-action" onclick="runCommand('/ahorro_pedido')"><span class="quick-name">PDA 省钱分析</span><span class="quick-note">检查订单差异</span></button>
-        </div></section>
-        <section class="panel"><div class="panel-head"><h2 class="panel-title">下一步</h2><span class="panel-meta" id="overviewTaskCount">0 项</span></div><div class="compact-list" id="overviewTaskList"><div class="empty">还没有待执行任务</div></div></section>
-        <section class="panel"><div class="panel-head"><h2 class="panel-title">最近动态</h2><span class="panel-meta">本次运行</span></div><div class="compact-list" id="overviewActivityList"><div class="empty">还没有操作记录</div></div></section>
-        <section class="panel"><div class="panel-head"><h2 class="panel-title">运行状态</h2><span class="panel-meta" id="overviewUptime">—</span></div><div class="system-list" id="overviewSystemList"></div></section>
-      </div>
-    </section>
+    <div class="single-grid" id="singleGrid">
+      <section class="panel chat-column">
+        <div class="panel-head"><h2 class="panel-title">对话</h2><span class="panel-meta" id="syncLabel">同步中</span></div>
+        <div class="transcript" id="chat"><div class="empty" id="emptyChat">最近的对话会显示在这里</div></div>
+        <form class="command-bar" id="composer"><span class="command-prefix">JARVIS &gt;</span><input id="commandInput" autocomplete="off" placeholder="输入问题、任务或命令"><button class="send-button" type="submit" title="发送">›</button></form>
+      </section>
 
-    <section class="view" id="view-execution">
-      <div class="view-head"><div><h2 class="view-heading">交互执行台</h2><div class="view-copy">当前 Telegram 操作会话</div></div><span class="panel-meta" id="operationCount">0 个会话</span></div>
-      <div class="execution-layout">
-        <section class="panel operation-stage" id="operationStage"><div class="operation-empty"><div><strong>没有待处理操作</strong>从总览启动肉类点货或其他交互任务</div></div></section>
-        <aside class="panel"><div class="panel-head"><h2 class="panel-title">操作会话</h2><span class="panel-meta">最近</span></div><div class="operation-list" id="operationList"><div class="empty">新的交互任务会显示在这里</div></div></aside>
-      </div>
-    </section>
-
-    <section class="view" id="view-conversation">
-      <div class="view-head"><div><h2 class="view-heading">JARVIS 对话</h2><div class="view-copy">问题、判断和执行结果</div></div><span class="panel-meta" id="syncLabel">同步中</span></div>
-      <section class="panel conversation-panel"><div class="panel-head"><h2 class="panel-title">会话记录</h2><span class="panel-meta">Telegram / Panel</span></div><div class="transcript" id="chat"><div class="empty" id="emptyChat">最近的对话会显示在这里</div></div></section>
-    </section>
-
-    <section class="view" id="view-tasks">
-      <div class="view-head"><div><h2 class="view-heading">定时任务</h2><div class="view-copy">等待自动执行的店务工作</div></div><span class="panel-meta" id="taskCount">0 项</span></div>
-      <section class="panel"><table class="task-table"><thead><tr><th>执行时间</th><th>任务</th><th>命令</th><th></th></tr></thead><tbody id="taskTableBody"><tr><td colspan="4"><div class="empty">还没有待执行任务</div></td></tr></tbody></table></section>
-    </section>
-
-    <section class="view" id="view-system">
-      <div class="view-head"><div><h2 class="view-heading">系统状态</h2><div class="view-copy">Bot、自动化与数据能力</div></div><span class="panel-meta" id="uptime">—</span></div>
-      <div class="system-grid">
-        <section class="panel"><div class="panel-head"><h2 class="panel-title">服务</h2><span class="panel-meta">实时</span></div><div class="system-list">
-          <div class="system-row"><span class="system-name">订单网页</span><span class="system-state"><i class="state-dot" id="stateWeb"></i><span id="stateWebText">—</span></span></div>
-          <div class="system-row"><span class="system-name">桌面自动化</span><span class="system-state"><i class="state-dot" id="stateDesktop"></i><span id="stateDesktopText">—</span></span></div>
-          <div class="system-row"><span class="system-name">AI 回复</span><span class="system-state"><i class="state-dot" id="stateLlm"></i><span id="stateLlmText">—</span></span></div>
-          <div class="system-row"><span class="system-name">长期记忆</span><span class="system-state"><i class="state-dot ok"></i><span id="stateMemory">—</span></span></div>
-        </div></section>
-        <section class="panel"><div class="panel-head"><h2 class="panel-title">操作记录</h2><span class="panel-meta">最近</span></div><div class="compact-list" id="systemActivityList"><div class="empty">还没有操作记录</div></div></section>
-      </div>
-    </section>
+      <aside class="side-column" id="sideColumn">
+        <section class="panel side-card" id="cardOperation" hidden>
+          <div class="panel-head"><h2 class="panel-title">操作台</h2><button class="icon-button" onclick="dismissOperation()" title="收起">×</button></div>
+          <div class="operation-stage" id="operationStage"></div>
+        </section>
+        <section class="panel side-card" id="cardTasks" hidden>
+          <div class="panel-head"><h2 class="panel-title">定时任务</h2><span class="panel-meta" id="taskCount">0 项</span></div>
+          <div class="compact-list" id="tareasLista"></div>
+        </section>
+        <section class="panel side-card" id="cardToday" hidden>
+          <div class="panel-head"><h2 class="panel-title">今日</h2><span class="panel-meta" id="hoyMeta"></span></div>
+          <div class="compact-list" id="hoyLista"></div>
+        </section>
+        <section class="panel side-card" id="cardActivity" hidden>
+          <div class="panel-head"><h2 class="panel-title">最近动态</h2><span class="panel-meta">本次运行</span></div>
+          <div class="compact-list" id="actividadLista"></div>
+        </section>
+        <section class="panel side-card" id="cardSystem" hidden>
+          <div class="panel-head"><h2 class="panel-title">需要注意</h2><span class="panel-meta">系统</span></div>
+          <div class="system-list" id="alertasLista"></div>
+        </section>
+      </aside>
+    </div>
   </main>
 </div>
 
@@ -410,15 +395,18 @@ const VERSION_PAGINA = ${versionJson};
 const chatElement = document.getElementById('chat');
 const messageRows = new Map();
 const operationMessages = new Map();
-const viewMeta = {
-  overview: ['OPERATIONS OVERVIEW', '店务总览'],
-  execution: ['INTERACTIVE WORKSPACE', '执行台'],
-  conversation: ['JARVIS INTELLIGENCE', 'JARVIS 对话'],
-  tasks: ['AUTOMATION QUEUE', '定时任务'],
-  system: ['SYSTEM CONTROL', '系统状态']
-};
 // El panel es sobrio: los emojis de los mensajes (pensados para Telegram)
 // se filtran solo en la VISUALIZACION; en Telegram y el registro siguen.
+// Tarjetas laterales que solo existen cuando tienen algo que decir; si
+// ninguna tiene contenido, el chat ocupa todo el ancho.
+function mostrarCard(id, visible) {
+  document.getElementById(id).hidden = !visible;
+}
+function ajustarLado() {
+  const alguna = Array.from(document.querySelectorAll('.side-card')).some(function (card) { return !card.hidden; });
+  document.getElementById('singleGrid').classList.toggle('sin-lado', !alguna);
+}
+
 function sinEmoji(value) {
   return String(value == null ? '' : value)
     .replace(/[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{2300}-\\u{23FF}\\u{FE0F}\\u{200D}]/gu, '')
@@ -478,7 +466,6 @@ function csvLegible(texto) {
   return L.join('\\n');
 }
 
-let currentView = 'overview';
 let activeOperationId = null;
 let chatSeq = 0;
 let chatInitialized = false;
@@ -488,19 +475,6 @@ let updateStartedAt = 0; // clic en 更新 BOT (para el timeout)
 let offlineSince = 0;    // desde cuando no responde /status
 let toastTimer = null;
 
-function showView(name) {
-  if (!viewMeta[name]) name = 'overview';
-  currentView = name;
-  document.querySelectorAll('.view').forEach(function (view) { view.classList.toggle('active', view.id === 'view-' + name); });
-  document.querySelectorAll('.nav-button').forEach(function (button) { button.classList.toggle('active', button.dataset.view === name); });
-  document.getElementById('viewTitle').textContent = viewMeta[name][1];
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  // La transcripción solo se puede colocar cuando la vista es visible: al
-  // entrar en 对话 se salta directo a lo más reciente (el final).
-  if (name === 'conversation') chatElement.scrollTop = chatElement.scrollHeight;
-}
-
-document.querySelectorAll('.nav-button').forEach(function (button) { button.addEventListener('click', function () { showView(button.dataset.view); }); });
 
 function showToast(text) {
   const el = document.getElementById('toast');
@@ -575,49 +549,24 @@ function makeOperationButton(button, control) {
   return el;
 }
 
-function renderOperationList() {
-  const list = document.getElementById('operationList');
-  const messages = Array.from(operationMessages.values()).sort(function (a, b) { return Number(b.seq || 0) - Number(a.seq || 0); }).slice(0, 12);
-  document.getElementById('operationCount').textContent = messages.length + ' 个会话';
-  list.replaceChildren();
-  if (!messages.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty';
-    empty.textContent = '新的交互任务会显示在这里';
-    list.appendChild(empty);
-    return;
-  }
-  messages.forEach(function (message) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'operation-list-button' + (message.id === activeOperationId ? ' active' : '');
-    const title = document.createElement('span');
-    title.className = 'operation-list-title';
-    title.textContent = operationTitle(message);
-    const time = document.createElement('span');
-    time.className = 'operation-list-time';
-    time.textContent = formatTime(message.at);
-    button.append(title, time);
-    button.addEventListener('click', function () { activeOperationId = message.id; renderActiveOperation(); showView('execution'); });
-    list.appendChild(button);
-  });
-}
-
 function renderActiveOperation() {
   const stage = document.getElementById('operationStage');
   const message = operationMessages.get(activeOperationId);
-  if (!message) {
-    stage.innerHTML = '<div class="operation-empty"><div><strong>没有待处理操作</strong>从总览启动肉类点货或其他交互任务</div></div>';
-    renderOperationList();
+  // Sin operacion (o ya sin botones tras editarse) o recogida a mano: fuera.
+  if (!message || !validButtons(message).length || operationDismissed) {
+    mostrarCard('cardOperation', false);
+    ajustarLado();
     return;
   }
+  mostrarCard('cardOperation', true);
+  ajustarLado();
   stage.replaceChildren();
   const head = document.createElement('div');
   head.className = 'stage-head';
   const copy = document.createElement('div');
   const kicker = document.createElement('div');
   kicker.className = 'stage-kicker';
-  kicker.textContent = 'ACTIVE OPERATION';
+  kicker.textContent = '等待你操作';
   const title = document.createElement('div');
   title.className = 'stage-title';
   title.textContent = operationTitle(message);
@@ -655,22 +604,22 @@ function renderActiveOperation() {
     footer.appendChild(label);
   }
   stage.append(head, body, footer);
-  renderOperationList();
 }
 
-function registerOperation(message, autoOpen) {
+let operationDismissed = false;
+function registerOperation(message) {
   operationMessages.set(message.id, message);
+  if (message.id !== activeOperationId) operationDismissed = false;
   activeOperationId = message.id;
   renderActiveOperation();
-  if (autoOpen) showView('execution');
+}
+function dismissOperation() {
+  operationDismissed = true;
+  mostrarCard('cardOperation', false);
+  ajustarLado();
 }
 
-async function runCommand(command, destination) {
-  if (destination === 'execution') {
-    showView('execution');
-    const stage = document.getElementById('operationStage');
-    stage.innerHTML = '<div class="operation-empty"><div><strong>正在启动操作</strong>' + String(command || '') + '</div></div>';
-  }
+async function runCommand(command) {
   try {
     const response = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: command }) });
     showToast(response.ok ? '任务已交给 Bot' : '发送失败');
@@ -734,15 +683,26 @@ function renderMessage(message) {
   meta.append(author, time);
   const body = document.createElement('div');
   body.className = 'message-body';
-  body.textContent = sinEmoji(message.text || '');
+  const completo = sinEmoji(message.text || '');
+  const lineas = completo.split('\\n');
+  const esLargo = completo.length > 380 || lineas.length > 8;
+  body.textContent = esLargo ? (lineas.slice(0, 4).join('\\n').slice(0, 380) + ' …') : completo;
   row.append(meta, body);
+  if (esLargo) {
+    const leer = document.createElement('button');
+    leer.type = 'button';
+    leer.className = 'attachment';
+    leer.textContent = '展开阅读';
+    leer.addEventListener('click', function () { openText(lineas[0].slice(0, 40), completo); });
+    row.appendChild(leer);
+  }
   renderAttachment(message, row);
   if (validButtons(message).length) {
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'open-operation';
-    open.textContent = '在执行台打开 · ' + validButtons(message).length + ' 个操作';
-    open.addEventListener('click', function () { activeOperationId = message.id; renderActiveOperation(); showView('execution'); });
+    open.textContent = '打开操作台 · ' + validButtons(message).length + ' 个选项';
+    open.addEventListener('click', function () { activeOperationId = message.id; operationDismissed = false; renderActiveOperation(); });
     row.appendChild(open);
   }
 }
@@ -755,7 +715,8 @@ async function pollChat() {
     const wasNearBottom = chatElement.scrollHeight - chatElement.scrollTop - chatElement.clientHeight < 90;
     messages.forEach(function (message) {
       renderMessage(message);
-      if (validButtons(message).length) registerOperation(message, chatInitialized && message.from === 'bot');
+      if (validButtons(message).length && message.from === 'bot') registerOperation(message);
+      else if (message.id === activeOperationId) { operationMessages.set(message.id, message); renderActiveOperation(); }
     });
     chatSeq = Math.max(chatSeq, Number(data.seq) || 0);
     const empty = document.getElementById('emptyChat');
@@ -766,6 +727,13 @@ async function pollChat() {
   } catch {
     document.getElementById('syncLabel').textContent = '同步暂停';
   }
+}
+
+function openText(title, text) {
+  openReader(title);
+  const pre = document.createElement('pre');
+  pre.textContent = text;
+  document.getElementById('readerContent').appendChild(pre);
 }
 
 function openReader(title) {
@@ -861,65 +829,31 @@ async function cancelTask(id) {
   }
 }
 
-function makeTaskRow(task, compact) {
-  if (compact) {
-    const row = document.createElement('div');
-    row.className = 'task-row';
-    const time = document.createElement('span');
-    time.className = 'task-time';
-    time.textContent = formatTaskTime(task.runAt);
-    const name = document.createElement('span');
-    name.className = 'task-name';
-    name.textContent = task.label || task.command || '定时任务';
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.className = 'icon-button';
-    cancel.title = '取消任务';
-    cancel.textContent = '×';
-    cancel.addEventListener('click', function () { cancelTask(task.id); });
-    row.append(time, name, cancel);
-    return row;
-  }
-  const tr = document.createElement('tr');
-  const time = document.createElement('td');
+function makeTaskRow(task) {
+  const row = document.createElement('div');
+  row.className = 'task-row';
+  const time = document.createElement('span');
+  time.className = 'task-time';
   time.textContent = formatTaskTime(task.runAt);
-  const name = document.createElement('td');
+  const name = document.createElement('span');
+  name.className = 'task-name';
   name.textContent = task.label || task.command || '定时任务';
-  const command = document.createElement('td');
-  command.textContent = task.command || '—';
-  const action = document.createElement('td');
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'icon-button';
   cancel.title = '取消任务';
   cancel.textContent = '×';
   cancel.addEventListener('click', function () { cancelTask(task.id); });
-  action.appendChild(cancel);
-  tr.append(time, name, command, action);
-  return tr;
+  row.append(time, name, cancel);
+  return row;
 }
 
 function renderTasks(tasks) {
   document.getElementById('taskCount').textContent = tasks.length + ' 项';
-  document.getElementById('overviewTaskCount').textContent = tasks.length + ' 项';
-  const preview = document.getElementById('overviewTaskList');
-  preview.replaceChildren();
-  if (!tasks.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty';
-    empty.textContent = '还没有待执行任务';
-    preview.appendChild(empty);
-  } else tasks.slice(0, 4).forEach(function (task) { preview.appendChild(makeTaskRow(task, true)); });
-  const body = document.getElementById('taskTableBody');
-  body.replaceChildren();
-  if (!tasks.length) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    td.innerHTML = '<div class="empty">还没有待执行任务</div>';
-    tr.appendChild(td);
-    body.appendChild(tr);
-  } else tasks.forEach(function (task) { body.appendChild(makeTaskRow(task, false)); });
+  const lista = document.getElementById('tareasLista');
+  lista.replaceChildren();
+  tasks.slice(0, 6).forEach(function (task) { lista.appendChild(makeTaskRow(task)); });
+  mostrarCard('cardTasks', tasks.length > 0);
 }
 
 function makeActivityRow(item) {
@@ -936,35 +870,20 @@ function makeActivityRow(item) {
 }
 
 function renderActivities(items) {
-  ['overviewActivityList', 'systemActivityList'].forEach(function (id) {
-    const target = document.getElementById(id);
-    target.replaceChildren();
-    if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = '还没有操作记录';
-      target.appendChild(empty);
-    } else items.slice(0, id === 'overviewActivityList' ? 5 : 12).forEach(function (item) { target.appendChild(makeActivityRow(item)); });
-  });
+  const lista = document.getElementById('actividadLista');
+  lista.replaceChildren();
+  items.slice(0, 5).forEach(function (item) { lista.appendChild(makeActivityRow(item)); });
+  mostrarCard('cardActivity', items.length > 0);
 }
 
-function setSystem(id, enabled, yesText, noText) {
-  const dot = document.getElementById(id);
-  const text = document.getElementById(id + 'Text');
-  dot.className = 'state-dot ' + (enabled ? 'ok' : 'warn');
-  text.textContent = enabled ? yesText : noText;
-}
-
-function renderOverviewSystems(status) {
-  const target = document.getElementById('overviewSystemList');
-  const rows = [
-    ['订单网页', Boolean(status.webOrder) ? '已连接' : '未启用', Boolean(status.webOrder)],
-    ['桌面自动化', Boolean(status.desktop) ? '已启用' : '未启用', Boolean(status.desktop)],
-    ['AI 回复', Boolean(status.llm) ? '可用' : '未配置', Boolean(status.llm)],
-    ['长期记忆', String(status.memories == null ? 0 : status.memories) + ' 条', true]
-  ];
-  target.replaceChildren();
-  rows.forEach(function (item) {
+function renderSystemAlerts(status) {
+  const problemas = [];
+  if (!status.webOrder) problemas.push(['订单网页', '未启用']);
+  if (!status.desktop) problemas.push(['桌面自动化', '未启用']);
+  if (!status.llm) problemas.push(['AI 回复', '未配置']);
+  const lista = document.getElementById('alertasLista');
+  lista.replaceChildren();
+  problemas.forEach(function (item) {
     const row = document.createElement('div');
     row.className = 'system-row';
     const name = document.createElement('span');
@@ -973,36 +892,44 @@ function renderOverviewSystems(status) {
     const state = document.createElement('span');
     state.className = 'system-state';
     const dot = document.createElement('i');
-    dot.className = 'state-dot ' + (item[2] ? 'ok' : 'warn');
+    dot.className = 'state-dot warn';
     const text = document.createElement('span');
     text.textContent = item[1];
     state.append(dot, text);
     row.append(name, state);
-    target.appendChild(row);
+    lista.appendChild(row);
   });
+  mostrarCard('cardSystem', problemas.length > 0);
 }
 
 function paintStatus(status) {
-  document.getElementById('metricArrival').textContent = status.arrivingToday == null ? '—' : status.arrivingToday;
-  document.getElementById('metricArrivalNote').textContent = status.arrivingToday ? '今天需要核对' : '今天暂无记录';
-  document.getElementById('metricPromo').textContent = status.promoStats ? status.promoStats.items : '—';
-  document.getElementById('metricPromoNote').textContent = status.promoStats ? status.promoStats.promos + ' 个活动 · 今明到期 ' + status.promoStats.endingSoon : '还没有促销数据';
   const tasks = Array.isArray(status.scheduledTasks) ? status.scheduledTasks : [];
-  document.getElementById('metricTasks').textContent = tasks.length;
-  document.getElementById('metricTaskNote').textContent = tasks.length ? '下一项 ' + formatTaskTime(tasks[0].runAt) : '没有待执行任务';
-  document.getElementById('metricPrices').textContent = status.successfulPriceChanges == null ? '—' : status.successfulPriceChanges;
-  document.getElementById('metricPriceNote').textContent = '共 ' + (status.operations == null ? 0 : status.operations) + ' 条操作记录';
   renderTasks(tasks);
-  const activities = Array.isArray(status.activity) ? status.activity : [];
-  renderActivities(activities);
-  setSystem('stateWeb', Boolean(status.webOrder), '已连接', '未启用');
-  setSystem('stateDesktop', Boolean(status.desktop), '已启用', '未启用');
-  setSystem('stateLlm', Boolean(status.llm), '可用', '未配置');
-  document.getElementById('stateMemory').textContent = (status.memories == null ? 0 : status.memories) + ' 条';
-  document.getElementById('uptime').textContent = '运行 ' + (status.uptime || '—');
-  document.getElementById('overviewUptime').textContent = '运行 ' + (status.uptime || '—');
+  renderActivities(Array.isArray(status.activity) ? status.activity : []);
+  // 今日: solo lineas con contenido; sin lineas, sin tarjeta.
+  const hoy = [];
+  if (status.arrivingToday) hoy.push(['到货', status.arrivingToday + ' 单，今天需要核对']);
+  if (status.promoStats) hoy.push(['促销', status.promoStats.items + ' 个商品 · ' + status.promoStats.promos + ' 个活动 · 今明到期 ' + status.promoStats.endingSoon]);
+  if (status.successfulPriceChanges) hoy.push(['改价', '已记录 ' + status.successfulPriceChanges + ' 次成功改价']);
+  const hoyLista = document.getElementById('hoyLista');
+  hoyLista.replaceChildren();
+  hoy.forEach(function (item) {
+    const row = document.createElement('div');
+    row.className = 'activity-row';
+    const label = document.createElement('span');
+    label.className = 'activity-time';
+    label.textContent = item[0];
+    const text = document.createElement('span');
+    text.className = 'activity-text';
+    text.textContent = item[1];
+    row.append(label, text);
+    hoyLista.appendChild(row);
+  });
+  document.getElementById('hoyMeta').textContent = status.promoCsv ? '促销数据 ' + status.promoCsv : '';
+  mostrarCard('cardToday', hoy.length > 0);
+  renderSystemAlerts(status);
   document.getElementById('railMeta').textContent = '运行 ' + (status.uptime || '—') + ' · ' + (status.promoCsv ? '促销 ' + status.promoCsv : '促销未刷新');
-  renderOverviewSystems(status);
+  ajustarLado();
 }
 
 async function refreshStatus() {
