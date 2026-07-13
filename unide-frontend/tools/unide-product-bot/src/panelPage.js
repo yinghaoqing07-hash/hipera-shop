@@ -37,8 +37,8 @@ export function renderPanelPage(version) {
   main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 24px 24px; min-height: 0; }
   #zona {
     flex: 1; min-height: 0; width: 100%;
-    display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(300px, 380px);
-    gap: 18px; padding-top: 6px;
+    display: grid; grid-template-columns: minmax(320px, 470px) minmax(0, 1fr) minmax(300px, 400px);
+    gap: 18px;
   }
   #centro { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
   #saludo { font-size: 13px; letter-spacing: .3em; color: #5f7184; margin-bottom: 26px; text-transform: uppercase; }
@@ -118,8 +118,9 @@ export function renderPanelPage(version) {
   #cajon img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); margin-bottom: 14px; display: block; }
   #cajon .filaB { display: flex; gap: 8px; margin-bottom: 8px; }
   #cajon .filaB button {
-    flex: 1; background: rgba(56,189,248,.06); border: 1px solid rgba(56,189,248,.35); color: #b9e2f6;
-    border-radius: 10px; padding: 13px 10px; font-size: 15px; cursor: pointer; transition: all .15s;
+    flex: 1; min-width: 0; background: rgba(56,189,248,.06); border: 1px solid rgba(56,189,248,.35); color: #b9e2f6;
+    border-radius: 10px; padding: 11px 8px; font-size: 14px; cursor: pointer; transition: all .15s;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #cajon .filaB button:hover { background: rgba(56,189,248,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
@@ -159,9 +160,6 @@ export function renderPanelPage(version) {
   <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><span><span id="punto"></span><span id="txtEstado">连接中</span></span></span>
 </header>
 <main>
-  <div id="reloj">--:--</div>
-  <div id="fecha">&nbsp;</div>
-  <div id="saludo">需要我做什么</div>
   <div id="zona">
     <div id="cajon">
   <div class="cab"><button onclick="cerrarCajon()" title="关闭">✕</button></div>
@@ -205,6 +203,9 @@ export function renderPanelPage(version) {
   </div>
     </div>
     <div id="centro">
+      <div id="reloj">--:--</div>
+      <div id="fecha">&nbsp;</div>
+      <div id="saludo">需要我做什么</div>
       <div id="charla"></div>
       <div id="linea">
         <input id="libre" autofocus>
@@ -382,7 +383,20 @@ function renderCajon(m) {
   }
   const zona = document.getElementById('cajonBotones');
   zona.innerHTML = '';
+  // Los teclados de lista (un boton por fila en Telegram) se reempaquetan a
+  // DOS por fila; las filas que ya traen varios botones no se tocan.
+  const filas = [];
+  let sueltos = [];
+  const volcar = () => {
+    for (let i = 0; i < sueltos.length; i += 2) filas.push(sueltos.slice(i, i + 2));
+    sueltos = [];
+  };
   for (const fila of m.buttons || []) {
+    if (fila.length === 1) sueltos.push(fila[0]);
+    else { volcar(); filas.push(fila); }
+  }
+  volcar();
+  for (const fila of filas) {
     const f = document.createElement('div');
     f.className = 'filaB';
     for (const bot of fila) {
