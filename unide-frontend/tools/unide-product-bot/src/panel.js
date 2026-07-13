@@ -94,6 +94,16 @@ export function startPanel(config, logger, hooks) {
         res.end(hooks.commandList());
         return;
       }
+      if (req.method === 'POST' && req.url === '/task/cancel') {
+        const body = await readBody(req);
+        let id = 0;
+        try { id = Number(JSON.parse(body || '{}').id); } catch { /* json roto */ }
+        if (!Number.isInteger(id) || id <= 0) { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        const toast = hooks.cancelTask ? await hooks.cancelTask(id) : '';
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, toast }));
+        return;
+      }
       if (req.method === 'POST' && req.url === '/admin') {
         const body = await readBody(req);
         let accion = '';
@@ -221,6 +231,11 @@ function renderPage() {
   .tarjeta .dato { font-size: 14px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  .tarea { display: grid; grid-template-columns: 54px 1fr 28px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(200,211,220,.08); }
+  .tarea:last-child { border-bottom: 0; }
+  .tarea .cuando { color: #7f93a5; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .tarea .nombre { min-width: 0; color: #c6d5e0; overflow-wrap: anywhere; }
+  .tarea button { width: 28px; height: 28px; border: 1px solid rgba(200,211,220,.18); border-radius: 6px; background: transparent; color: #8195a7; cursor: pointer; }
   #charla {
     /* flex 1: el chat se estira hasta la línea de comando, pegada abajo */
     flex: 1 1 0; min-height: 0; width: min(800px, 94vw); overflow-y: auto;
@@ -343,6 +358,10 @@ function renderPage() {
         <div class="tarjeta">
           <div class="titulo">促销</div>
           <div class="dato" id="tPromo">—</div>
+        </div>
+        <div class="tarjeta ancha">
+          <div class="titulo">定时任务</div>
+          <div class="dato" id="tTareas">—</div>
         </div>
         <div class="tarjeta ancha">
           <div class="titulo">最近动态</div>
@@ -644,6 +663,14 @@ async function pollChat() {
 }
 pollChat();
 setInterval(pollChat, 2500);
+async function cancelarTarea(id) {
+  try {
+    const r = await fetch('/task/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) });
+    const data = await r.json();
+    aviso(r.ok ? (data.toast || '已取消') : '取消失败');
+    if (r.ok) refrescar();
+  } catch { aviso('连不上 BOT'); }
+}
 async function run(cmd) {
   try {
     const r = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd }) });
@@ -756,6 +783,12 @@ function pintarTarjetas(s) {
   } else {
     document.getElementById('tPromo').textContent = '还没有促销数据，点「刷新促销」';
   }
+  const tasks = (s.scheduledTasks || []).slice(0, 8);
+  document.getElementById('tTareas').innerHTML = tasks.length ? tasks.map((task) => {
+    const d = new Date(task.runAt);
+    const when = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    return '<div class="tarea"><span class="cuando">' + when + '</span><span class="nombre">' + escapar(task.label) + '</span><button title="取消" onclick="cancelarTarea(' + Number(task.id) + ')">×</button></div>';
+  }).join('') : '还没有任务。直接说“明天10点下肉类 pedido”。';
   const act = (s.activity || []).slice(0, 4).map((a) => {
     const t = new Date(a.at);
     const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');

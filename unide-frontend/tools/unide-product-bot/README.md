@@ -388,3 +388,8 @@ margen: 30
 Desde v136, el bot envía cada respuesta de texto y cada pie de captura/documento por la API de IA antes de mostrarlo. El código operativo sigue produciendo el resultado factual y la IA solo lo redacta; códigos, precios, cantidades, fechas, estados y advertencias deben conservarse. Si la API falla, se envía el borrador factual para no dejar la tienda sin respuesta. Puede desactivarse con `llm.allRepliesViaApi: false`.
 
 La memoria automática ya no depende de que la usuaria diga «记住» ni de palabras clave concretas. Todas las frases naturales no sensibles pasan por el extractor, que decide si contienen una preferencia, regla, proceso, horario, corrección o hecho estable. Las preguntas y peticiones puntuales se descartan. El aprendizaje es silencioso por defecto (`memory.autoNotify: false`), mientras `/memories` y `/forget` siguen disponibles para auditar o borrar.
+
+
+## 定时任务
+
+可以直接对 Telegram 或 Panel 说“明天10点我要下肉类 pedido”。任务会持久化到 `data/scheduled-tasks.json`，在 Panel 的“定时任务”卡片显示，到点由店里电脑自动触发。也可使用 `/tarea 2026-07-14 10:00 /carne`、`/tareas` 和 `/cancelar_tarea 12`。定时白名单不包含改价、Guardar 或 Enviar Pedido。

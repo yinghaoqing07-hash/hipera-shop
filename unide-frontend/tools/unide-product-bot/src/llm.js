@@ -68,7 +68,7 @@ const INTENT_SCHEMA = {
   properties: {
     accion: {
       type: 'string',
-      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'price_history', 'bloq_venta', 'pedidos_recientes', 'pedido', 'carne', 'articulo', 'ayuda', 'responder'],
+      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'price_history', 'bloq_venta', 'pedidos_recientes', 'pedido', 'carne', 'programar', 'tareas', 'articulo', 'ayuda', 'responder'],
       description: 'Comando del bot al que corresponde el mensaje, o "responder" si no corresponde a ninguno'
     },
     argumento: { type: 'string', description: 'Argumento del comando (números de pedido, "nombre precio", código…); vacío si no aplica' },
@@ -164,11 +164,13 @@ Comandos disponibles:
 - pedidos_recientes — abrir y revisar en solo lectura los N pedidos más recientes. argumento: cantidad ("3"), por defecto 3. Palabras clave: 最新订单, 最近几张单, 看最新三个 pedidos, últimos pedidos.
 - pedido — plantillas/recordatorio de pedido. argumento: "carne", "fruta", "pda" o vacío.
 - carne — empezar el recuento de carne para el pedido.
+- programar — crear una tarea futura segura. Para frases como “明天10点我要下肉类pedido”, “el lunes a las 9 revisa los últimos 3 pedidos”. argumento OBLIGATORIO y exacto: "YYYY-MM-DD HH:mm|/comando|etiqueta breve". Solo se permiten /carne, /pedido [carne|fruta|pda], /promociones, /pedidos N, /llegada [argumento], /ahorro y /ahorro_pedido [número]. Convierte mañana/周一 usando la FECHA Y HORA LOCAL de DATOS DE HOY. Nunca programes Guardar, Enviar Pedido, cambios de precio ni otros comandos de escritura.
+- tareas — listar o cancelar tareas futuras. argumento vacío = listar; "cancel 12" = cancelar la tarea 12.
 - articulo — consultar un producto por código o EAN. argumento: el código.
 - ayuda — mostrar la ayuda del bot.
 - responder — el mensaje NO corresponde a ningún comando: una PREGUNTA (sobre promociones, precios, pedidos, fechas…), una duda, un saludo o algo ambiguo. Contesta tú en el campo "respuesta", EN CHINO (los nombres de productos y promociones quedan en español tal cual). Si la pregunta se puede contestar con los DATOS DE HOY del final, respóndela con cifras, fechas y nombres CONCRETOS de esos datos. Si los datos no llegan para contestar, dilo claramente y sugiere el comando útil. Usa el historial de la conversación para resolver referencias ("那152呢", "第二个", "那个促销").
 
-Reglas: en la duda entre ejecutar algo y preguntar, pregunta (responder). Nunca inventes argumentos que la usuaria no dijo. Los números de pedido van tal cual en el argumento. Los DATOS DE HOY (si los hay al final) cuentan como la verdad: no inventes promociones, precios ni pedidos que no estén ahí.`;
+Reglas: en la duda entre ejecutar algo y preguntar, pregunta (responder). Para programar, si falta día u hora exactos, usa responder y pregunta; no inventes la hora. Nunca inventes argumentos que la usuaria no dijo. Los números de pedido van tal cual en el argumento. Los DATOS DE HOY (si los hay al final) cuentan como la verdad: no inventes promociones, precios ni pedidos que no estén ahí.`;
 
 // Devuelve { accion, argumento, respuesta }. extras (opcional):
 //   history — últimos turnos del chat [{role:'user'|'assistant', content}] para
