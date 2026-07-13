@@ -294,7 +294,7 @@ function pintarBurbuja(m) {
   const b = document.createElement('div');
   b.className = 'burbuja';
   const cuerpo = document.createElement('div');
-  const completo = sinEmoji(m.text);
+  const completo = sinEmoji(m.buttons && m.buttons.length && m.resumen ? m.resumen : m.text);
   const esLargo = completo.length > 380 || completo.split('\\n').length > 8;
   if (esLargo) {
     // Los informes largos no llenan el chat: recorte + "展开" en el lector.

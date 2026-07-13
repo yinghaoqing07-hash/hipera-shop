@@ -400,6 +400,46 @@ export async function llmFriendlyError(contexto, rawMessage, config, logger) {
   return text.trim();
 }
 
+// ---------- frase de compañía para teclados ----------
+// Cuando el bot manda un teclado interactivo, el panel enseña los botones y
+// las instrucciones en la columna izquierda; repetir el mismo parrafo en el
+// chat es ruido. Esta llamada escribe UNA frase natural que lo sustituye
+// solo en la visualizacion del panel (Telegram conserva el texto entero,
+// alli el teclado cuelga de ese mensaje).
+export async function llmKeyboardIntro(texto, config, logger) {
+  const apiKey = llmApiKey(config);
+  if (!apiKey) throw new Error('LLM sin apiKey');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  let response;
+  try {
+    response = await fetch(API_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION
+      },
+      body: JSON.stringify({
+        model: config?.llm?.replyModel || config?.llm?.model || DEFAULT_MODEL,
+        max_tokens: 120,
+        system: 'El bot de una tienda acaba de abrir un teclado interactivo en el panel (columna izquierda) cuyo texto completo recibirás. Escribe UNA sola frase corta EN CHINO, natural y de compañía, que anuncie qué se abrió y qué hacer al terminar (p. ej. 点货单开好了，在左边点数量，点完按「生成订单」。). No repitas las instrucciones enteras, no uses emojis, máximo ~40 caracteres.',
+        messages: [{ role: 'user', content: String(texto || '').slice(0, 1200) }]
+      })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
+  const data = await response.json();
+  if (data.stop_reason === 'refusal') throw new Error('refusal');
+  const out = (data.content || []).find((b) => b.type === 'text')?.text;
+  if (!out || !out.trim()) throw new Error('respuesta vacía');
+  logger?.info('llm keyboard intro', { inputTokens: data.usage?.input_tokens });
+  return out.trim();
+}
+
 // orderLines: [{code, nombre}] — líneas a precio normal.
 // promoItems: [{code, name, pct}] — promociones candidatas (ya filtradas por ahorro mínimo).
 // Devuelve [{lineCode, promoCode, motivo}], validado contra las listas de entrada.
