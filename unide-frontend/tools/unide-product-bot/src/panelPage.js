@@ -150,6 +150,32 @@ export function renderPanelPage(version) {
     color: #bdcad7; white-space: pre-wrap; word-break: break-word;
     scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
   }
+  /* Registro en vivo (columna derecha): TODO lo que la automatización va
+     haciendo, con hora, sin caja. Texto seleccionable para copiar; la
+     flecha de abajo lo pliega. Invisible hasta que exista la primera
+     línea; si el lector se abre en esa columna, el registro se aparta. */
+  #registro {
+    grid-column: 3; grid-row: 1; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  #registro:not(.con) { display: none; }
+  #lector.abierto ~ #registro { display: none; }
+  #registroLineas {
+    margin-top: auto; overflow: auto; padding: 6px 6px 4px; min-height: 0;
+    font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.7;
+    color: #8fa2b5; white-space: pre-wrap; word-break: break-word;
+    user-select: text; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
+  }
+  #registroLineas .err { color: #f87171; }
+  #registroLineas .hora { color: #566b80; margin-right: 8px; }
+  #registro.oculto #registroLineas { display: none; }
+  #registroBtn {
+    background: none; border: none; color: rgba(125,211,252,.4); cursor: pointer;
+    font-size: 13px; padding: 2px 0 4px; align-self: center; letter-spacing: .2em;
+  }
+  #registroBtn:hover { color: #cfe9f7; }
+  /* Plegado, la flecha se queda abajo (donde el dueño la espera). */
+  #registro.oculto #registroBtn { margin-top: auto; }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
@@ -220,6 +246,10 @@ export function renderPanelPage(version) {
       <div class="cab"><span class="titulo" id="lectorTitulo"></span><button onclick="cerrarLector()" title="关闭">✕</button></div>
       <div id="lectorFoto"></div>
       <pre id="lectorTexto"></pre>
+    </div>
+    <div id="registro">
+      <div id="registroLineas"></div>
+      <button id="registroBtn" onclick="plegarRegistro()" title="收起/展开">︿</button>
     </div>
   </div>
 </main>
@@ -473,6 +503,19 @@ async function pulsar(data) {
     setTimeout(pollChat, 300);
   } catch { aviso('连不上 BOT'); }
 }
+function plegarRegistro() {
+  const reg = document.getElementById('registro');
+  const btn = document.getElementById('registroBtn');
+  const oculto = reg.classList.toggle('oculto');
+  btn.textContent = oculto ? '﹀' : '︿';
+  try { localStorage.setItem('registroPlegado', oculto ? '1' : ''); } catch (e) { }
+}
+try {
+  if (localStorage.getItem('registroPlegado')) {
+    document.getElementById('registro').classList.add('oculto');
+    document.getElementById('registroBtn').textContent = '﹀';
+  }
+} catch (e) { }
 async function pollChat() {
   try {
     const r = await (await fetch('/chat?since=' + chatSeq)).json();
@@ -489,6 +532,29 @@ async function pollChat() {
       }
       vivo.textContent = t;
       vivo.classList.toggle('err', t.indexOf('ERROR') >= 0);
+    }
+    const reg = document.getElementById('registro');
+    if (reg && Array.isArray(r.liveLog) && r.liveLog.length) {
+      reg.classList.add('con');
+      const cont = document.getElementById('registroLineas');
+      const clave = r.liveLog.length + '|' + r.liveLog[r.liveLog.length - 1].t;
+      if (cont && cont.dataset.clave !== clave) {
+        cont.dataset.clave = clave;
+        const pegado = cont.scrollHeight - cont.scrollTop - cont.clientHeight < 40;
+        cont.textContent = '';
+        for (const e of r.liveLog) {
+          const div = document.createElement('div');
+          if (String(e.line).indexOf('ERROR') >= 0) div.className = 'err';
+          const hora = document.createElement('span');
+          hora.className = 'hora';
+          const d = new Date(e.t);
+          hora.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+          div.appendChild(hora);
+          div.appendChild(document.createTextNode(String(e.line)));
+          cont.appendChild(div);
+        }
+        if (pegado || !cont.dataset.visto) { cont.scrollTop = cont.scrollHeight; cont.dataset.visto = '1'; }
+      }
     }
     if (r.messages && r.messages.length) {
       const caja = document.getElementById('charla');
