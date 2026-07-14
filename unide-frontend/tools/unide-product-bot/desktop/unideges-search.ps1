@@ -783,7 +783,12 @@ try {
         $valueTxt = Resolve-Template ([string]$step.value)
         $endKeys = "{ENTER}"
         if ($step.PSObject.Properties.Name -contains "keys") { $endKeys = [string]$step.keys }
-        $waitLimit = [DateTime]::Now.AddMilliseconds(4000)
+        # El catalejo de esta tienda NO abre ventana nueva: deja el foco en
+        # el campo EAN de la MISMA ventana. Se espera un poco por si en otra
+        # instalación sí hay diálogo; si no aparece, se escribe in situ.
+        $emergentWaitMs = 1500
+        if ($step.PSObject.Properties.Name -contains "waitMs") { $emergentWaitMs = [int]$step.waitMs }
+        $waitLimit = [DateTime]::Now.AddMilliseconds($emergentWaitMs)
         $emergent = [IntPtr]::Zero
         while ([DateTime]::Now -lt $waitLimit) {
           $ahora = [WinEnum]::VisibleWindowsOfPid([uint32]$script:TargetPid)
@@ -793,30 +798,48 @@ try {
           if ($emergent -ne [IntPtr]::Zero) { break }
           Start-Sleep -Milliseconds 250
         }
-        if ($emergent -eq [IntPtr]::Zero) { throw "typeInEmergent: no aparecio ninguna ventana nueva del proceso (¿el clic no abrio el dialogo?)" }
-        [Win32]::SetForegroundWindow($emergent) | Out-Null
-        Start-Sleep -Milliseconds 250
         $escrito = $false
-        try {
-          $emEl = [System.Windows.Automation.AutomationElement]::FromHandle($emergent)
-          $hijos = $emEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-          foreach ($cand in $hijos) {
-            if (([string]$cand.Current.ClassName) -match 'EDIT|RichEdit') {
-              $hwndEdit = Get-UiaHwnd $cand
-              if ($hwndEdit -ne [IntPtr]::Zero) {
-                [Win32]::SendMessage($hwndEdit, 0x000C, [IntPtr]::Zero, $valueTxt) | Out-Null   # WM_SETTEXT
-                $escrito = $true
-                break
+        if ($emergent -ne [IntPtr]::Zero) {
+          [Win32]::SetForegroundWindow($emergent) | Out-Null
+          Start-Sleep -Milliseconds 300
+          try {
+            $emEl = [System.Windows.Automation.AutomationElement]::FromHandle($emergent)
+            $hijos = $emEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($cand in $hijos) {
+              if (([string]$cand.Current.ClassName) -match 'EDIT|RichEdit') {
+                $hwndEdit = Get-UiaHwnd $cand
+                if ($hwndEdit -ne [IntPtr]::Zero) {
+                  [Win32]::SendMessage($hwndEdit, 0x000C, [IntPtr]::Zero, $valueTxt) | Out-Null   # WM_SETTEXT
+                  if ((Read-ControlText $cand) -eq $valueTxt) { $escrito = $true }
+                  break
+                }
               }
             }
-          }
-        } catch { }
+          } catch { }
+        } else {
+          # Editor in situ: traer la ventana PRINCIPAL al frente y escribir
+          # en el control que tiene el foco (el catalejo ya lo dejó en el
+          # campo EAN). Se verifica releyendo; si no cuadra, teclado.
+          [Win32]::SetForegroundWindow($script:TargetWindowHandle) | Out-Null
+          Start-Sleep -Milliseconds 300
+          try {
+            $foco = [System.Windows.Automation.AutomationElement]::FocusedElement
+            if ($foco -and (([string]$foco.Current.ClassName) -match 'EDIT|RichEdit')) {
+              $hwndEdit = Get-UiaHwnd $foco
+              if ($hwndEdit -ne [IntPtr]::Zero) {
+                [Win32]::SendMessage($hwndEdit, 0x000C, [IntPtr]::Zero, $valueTxt) | Out-Null   # WM_SETTEXT
+                if ((Read-ControlText $foco) -eq $valueTxt) { $escrito = $true }
+              }
+            }
+          } catch { }
+        }
         if (-not $escrito) {
-          # Sin EDIT localizable: teclear como lo haría un escáner.
-          Add-WarningText "typeInEmergent: sin campo EDIT en el dialogo, tecleando en primer plano"
+          # Último recurso: teclear como lo haría un escáner de códigos.
+          Add-WarningText "typeInEmergent: escribiendo por teclado (WM_SETTEXT no confirmado)"
+          Start-Sleep -Milliseconds 200
           [System.Windows.Forms.SendKeys]::SendWait($valueTxt)
         }
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds 250
         [System.Windows.Forms.SendKeys]::SendWait($endKeys)
       }
       "uiaClickAt" {
