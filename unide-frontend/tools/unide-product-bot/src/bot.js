@@ -14,7 +14,7 @@ import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest }
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
-import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
+import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, lookupSupplier, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
@@ -991,7 +991,23 @@ async function handleBloqVenta(chatId, text) {
   if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用（desktop.enabled=false）。'); return; }
   let codigo = '';
   let label = nameOrCode;
-  if (/^\d{3,}$/.test(nameOrCode)) {
+  if (/^\d{8,}$/.test(nameOrCode)) {
+    // Un numero largo es un EAN de barras, no un código Unide (6-7 cifras):
+    // meterlo en el campo Código no encuentra nada. Se traduce EAN → código
+    // con los CSV de tienda/proveedor (lo mismo que hace /articulo).
+    const porTienda = lookupStore(storeIndex, { ean: nameOrCode });
+    const porProveedor = porTienda?.status === 'found' ? null : lookupSupplier(supplierIndex, { ean: nameOrCode });
+    const fila = porTienda?.status === 'found' ? porTienda.product : (porProveedor?.status === 'found' ? porProveedor.product : null);
+    const codigoCsv = fila ? String(fila.codigo_unide || '').replace(/\D/g, '') : '';
+    if (codigoCsv) {
+      codigo = codigoCsv;
+      label = String(fila.articulo_tienda || fila.articulo || nameOrCode).trim() || nameOrCode;
+      await telegram.sendMessage(chatId, `EAN ${nameOrCode} → 「${label}」（código ${codigo}）。`);
+    } else {
+      await telegram.sendMessage(chatId, `这个数字像是条码 EAN（${nameOrCode}），但在商品表里没找到对应的 código Unide。给我商品名或 6-7 位的 código 再试。`);
+      return;
+    }
+  } else if (/^\d{3,}$/.test(nameOrCode)) {
     codigo = nameOrCode;
   } else {
     const resolved = resolveFruitCode(config, storeIndex, supplierIndex, nameOrCode);
