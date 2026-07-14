@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
+import { setLive } from './liveStatus.js';
 
 const DEFAULT_CANDIDATE_PATHS = [
   '/Promocion_ListView',
@@ -15,6 +16,7 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
   let browser;
   const startedAt = Date.now();
   try {
+    setLive('[promociones] 连接 Edge，打开 Promociones…');
     const opened = await openPromotionsPage(config);
     browser = opened.browser;
     const page = opened.page;
@@ -64,6 +66,7 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
       url: pageInfo.url
     });
 
+    setLive('[promociones] listo');
     return {
       ok: true,
       referenceDate: refIso,
@@ -87,6 +90,7 @@ export async function fetchActivePromotions(config, referenceDateIso, logger) {
       pageInfo
     };
   } catch (error) {
+    setLive('[promociones] ERROR: ' + error.message);
     logger?.error('promotions fetch failed', { stage: error.stage, error: error.message });
     return { ok: false, stage: error.stage || 'promotions', error: error.message };
   } finally {
@@ -320,6 +324,7 @@ async function scrapeAllPromotionRows(page, config) {
   let prevSig = '';
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    setLive('[promociones] 读列表第 ' + (pageIndex + 1) + ' 页…');
     // Tras pasar de página, NO se re-lee "en cuanto haya filas" (la página
     // vieja sigue visible un instante y se colaría), sino en cuanto el
     // contenido CAMBIA respecto a la página anterior. Así la paginación es
@@ -408,7 +413,11 @@ async function scrapeActivePromotionDetails(page, config, promotions, listUrl, l
   // solo navega, jamás guarda.
   let onDetailOfPrevious = false;
 
+  let numPromo = 0;
+  const totalPromos = Math.min(promotions.length, maxDetails);
   for (const promo of promotions.slice(0, maxDetails)) {
+    numPromo += 1;
+    setLive(`[promociones] 抓明细 ${numPromo}/${totalPromos}：${String(promo.nombre || promo.descripcion || '').slice(0, 40)}`);
     try {
       let onDetail = false;
       if (onDetailOfPrevious) {

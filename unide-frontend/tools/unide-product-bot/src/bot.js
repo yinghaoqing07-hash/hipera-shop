@@ -16,6 +16,7 @@ import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
+import { getLive } from './liveStatus.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -2324,8 +2325,11 @@ if (config.panel?.enabled !== false) {
       const messages = chatLog.filter((m) => m.seq > since).slice(-100)
         .map(({ photo, doc, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo), doc: Boolean(doc) }));
       // Viaja con el poll del chat (cada 2,5 s) para que el panel enseñe EN
-      // VIVO el paso de escritorio que corre ahora mismo.
-      return { seq: chatSeq, messages, desktopLive: desktopLiveLine() };
+      // VIVO el paso que corre ahora mismo. Dos fuentes: el fichero que
+      // escribe el PS de escritorio y el estado en memoria de los flujos
+      // web (pedido, promociones); gana la más reciente.
+      const vivos = [desktopLiveLine(), getLive()].filter(Boolean).sort((a, b) => a.ageSec - b.ageSec);
+      return { seq: chatSeq, messages, desktopLive: vivos[0] || null };
     },
     callback: async (data) => {
       const ids = arrivalChatIds();

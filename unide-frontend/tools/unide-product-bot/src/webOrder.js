@@ -24,6 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
+import { setLive } from './liveStatus.js';
 import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
 import { selectLatestOrderRows } from './recentOrders.js';
 
@@ -174,6 +175,7 @@ export async function inspectFormPage(config, logger) {
 export async function applyOrderWeb(draft, config, logger) {
   let browser;
   try {
+    setLive('[pedido] 连接 Edge，打开 Pedidos…');
     const opened = await openOrderPage(config);
     browser = opened.browser;
     const page = opened.page;
@@ -189,11 +191,14 @@ export async function applyOrderWeb(draft, config, logger) {
     // Paso 1: "Nuevo" (abre el DetailView del pedido). Si ya estamos en
     // un formulario abierto, se continúa ahí. No se pulsa Volver: UnideGes
     // puede mostrar una confirmación por cambios sin guardar.
+    setLive('[pedido] 点 Nuevo，等表单渲染…');
     const openedNewOrder = await openNewOrderForm(page, Number(w.pageNavigationTimeoutMs) || 20000);
     if (!openedNewOrder.ok) {
+      setLive('[pedido] ERROR: ' + openedNewOrder.error);
       return { ok: false, stage: 'nuevo', error: openedNewOrder.error };
     }
     await sleep(Number(w.formRenderMs) || 2800);
+    setLive('[pedido] 填订单名「' + draft.orderName + '」…');
 
     // Paso 2: Nombre del Pedido (input requerido, maxlength 150).
     if (!(await fillNombre(page, draft.orderName))) {
@@ -221,6 +226,7 @@ export async function applyOrderWeb(draft, config, logger) {
       // muestran ambos (original → EAN) para saber qué se buscó de verdad.
       const original = String(item.originalCode || '').trim();
       const codeLabel = original && original !== code ? `${original} → EAN ${code}` : (code || searchTerm);
+      setLive(`[pedido] 第 ${i + 1}/${draft.items.length} 行：${nombre || codeLabel}`);
       if (!searchTerm) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
 
       const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
@@ -314,6 +320,7 @@ export async function applyOrderWeb(draft, config, logger) {
       results.push({ code, qty, ok: true, repaired });
     }
 
+    setLive('[pedido] 行都填完了，截图核对…');
     const shot = await screenshot(page, config, 'done');
     const okCount = results.filter((r) => r.ok).length;
     logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked, repairedCount, unrepairedBlanks });
@@ -323,6 +330,7 @@ export async function applyOrderWeb(draft, config, logger) {
     if (repairedCount > 0) notes.push(`${repairedCount} 行提交后 Código Unide 显示空白，已自动重输修复`);
     if (unrepairedCodes.length > 0) notes.push(`⚠️ ${unrepairedCodes.join('、')} 提交后显示空白且自动修复失败，请人工点铅笔重输一遍这个代码`);
     const autoNote = notes.length ? `（${notes.join('；')}）` : '';
+    setLive('[pedido] listo');
     return {
       ok: true,
       screenshot: shot,
@@ -330,6 +338,7 @@ export async function applyOrderWeb(draft, config, logger) {
       results
     };
   } catch (error) {
+    setLive('[pedido] ERROR: ' + error.message);
     logger?.error('web order apply failed', { stage: error.stage, error: error.message });
     return { ok: false, stage: error.stage || 'apply', error: error.message };
   } finally {
@@ -408,9 +417,11 @@ async function readBlockingPopup(page) {
 export async function saveOrderWeb(config, logger, expectName) {
   let browser;
   try {
+    setLive('[pedido] 找到打开的订单，准备点 Guardar…');
     const opened = await openPedidoDetail(config, expectName);
     browser = opened.browser;
     const page = opened.page;
+    setLive('[pedido] 点 Guardar，等保存…');
     if (!(await clickActionByName(page, 'Guardar', 5000))) {
       const shot = await screenshot(page, config, 'guardar-missing');
       return { ok: false, stage: 'guardar', screenshot: shot, error: '页面上没找到可点的 Guardar 按钮。' };
@@ -422,8 +433,10 @@ export async function saveOrderWeb(config, logger, expectName) {
       return { ok: false, stage: 'validation', screenshot: shot, error: `点了 Guardar，但页面弹出了提示：「${popup}」。可能没保存成功，请看截图处理。` };
     }
     logger?.info('web order saved', { name: expectName });
+    setLive('[pedido] listo');
     return { ok: true, screenshot: shot, message: `已点 Guardar 保存「${expectName}」。看截图确认；没问题就可以发送。` };
   } catch (error) {
+    setLive('[pedido] ERROR: ' + error.message);
     logger?.error('web order save failed', { stage: error.stage, error: error.message });
     return { ok: false, stage: error.stage || 'save', error: error.message };
   } finally {
@@ -440,6 +453,7 @@ export async function sendOrderWeb(config, logger, expectName) {
     // El nombre exacto de la acción varía ("Enviar Pedido", "EnviarPedido"…):
     // se busca entre las acciones VISIBLES una cuyo data-action-name o texto
     // contenga "enviar".
+    setLive('[pedido] 点 Enviar Pedido，等确认框…');
     const clicked = await clickActionMatching(page, 'enviar', 5000);
     if (!clicked.ok) {
       const shot = await screenshot(page, config, 'enviar-missing');
@@ -463,8 +477,10 @@ export async function sendOrderWeb(config, logger, expectName) {
     }
     const sentHint = await page.evaluate(() => /enviado/i.test(document.body?.innerText || '')).catch(() => false);
     logger?.info('web order sent', { name: expectName, sentHint });
+    setLive('[pedido] listo');
     return { ok: true, screenshot: shot, message: `已点 Enviar Pedido 发送「${expectName}」${sentHint ? '，页面上已出现 Enviado 字样' : ''}。看截图做最终确认。` };
   } catch (error) {
+    setLive('[pedido] ERROR: ' + error.message);
     logger?.error('web order send failed', { stage: error.stage, error: error.message });
     return { ok: false, stage: error.stage || 'send', error: error.message };
   } finally {
