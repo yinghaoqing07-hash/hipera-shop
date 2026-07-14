@@ -157,6 +157,15 @@ const panelToasts = new Map();
     }
     return result;
   };
+  // Álbumes de diagnóstico: los pies son DATOS (número y tipo de paso),
+  // jamás pasan por la IA — ni un token gastado en fotos de debug. Solo se
+  // registran en el chat del panel para que también se vean allí.
+  const origSendMediaGroup = telegram.sendMediaGroup.bind(telegram);
+  telegram.sendMediaGroup = async (chatId, items, options = {}) => {
+    for (const item of items) recordChat('bot', String(item.caption || ''), { photo: String(item.path) });
+    scheduleChatSave();
+    return origSendMediaGroup(chatId, items, options);
+  };
   for (const method of ['sendPhoto', 'sendDocument']) {
     const original = telegram[method].bind(telegram);
     telegram[method] = async (chatId, filePath, caption = '', options = {}) => {
@@ -2092,11 +2101,21 @@ async function enviarTrazaEscritorio(chatId, result) {
     try { await telegram.sendMessage(chatId, bloques.join('\n\n').slice(0, 3900), { __skipAI: true }); } catch { /* la traza no es crítica */ }
   }
   if (debugOn && Array.isArray(result.traceShots) && result.traceShots.length) {
-    for (let i = 0; i < result.traceShots.length; i++) {
-      const foto = result.traceShots[i];
+    // En ÁLBUMES de hasta 10 (límite de Telegram), de una vez y sin IA:
+    // el pie de cada foto es el número y tipo de paso sacado del nombre
+    // del fichero — datos para diagnosticar, no prosa que redactar.
+    const fotos = result.traceShots.filter((f) => { try { return fs.existsSync(f); } catch { return false; } });
+    for (let i = 0; i < fotos.length; i += 10) {
+      const grupo = fotos.slice(i, i + 10).map((f) => {
+        const m = path.basename(f).match(/trace-(\d+)-([a-zA-Z]+)/);
+        return { path: f, caption: m ? `步骤 ${Number(m[1])} · ${m[2]}` : path.basename(f) };
+      });
       try {
-        if (fs.existsSync(foto)) await telegram.sendPhoto(chatId, foto, `debug 步骤 ${i + 1}/${result.traceShots.length}`);
-      } catch { /* seguir con las demás */ }
+        if (grupo.length === 1) await telegram.sendPhoto(chatId, grupo[0].path, grupo[0].caption, { __skipAI: true });
+        else await telegram.sendMediaGroup(chatId, grupo);
+      } catch (error) {
+        logger.warn('trace album send failed', { error: error.message });
+      }
     }
   }
 }
