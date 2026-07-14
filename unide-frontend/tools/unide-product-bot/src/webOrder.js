@@ -11,6 +11,12 @@
 //      Reglas de seguridad (idénticas a la versión de escritorio):
 //        - NUNCA pulsa Guardar / Enviar Pedido.
 //        - Deja el borrador a la vista y hace captura para revisión.
+//   3) saveOrderWeb() / sendOrderWeb() → los ÚNICOS puntos de todo el bot
+//      que pulsan Guardar y Enviar Pedido. Solo se llega a ellos desde los
+//      botones de confirmación de Telegram/panel (nunca desde tareas
+//      programadas ni desde el enrutador de lenguaje natural), no navegan
+//      (operan sobre el formulario YA abierto) y verifican que el nombre
+//      del pedido en pantalla es el que se confirmó.
 //
 // El grid de artículos de XAF es la parte delicada; sus selectores se
 // completan a partir del volcado de inspectOrderPage(). Hasta entonces,
@@ -320,7 +326,7 @@ export async function applyOrderWeb(draft, config, logger) {
     return {
       ok: true,
       screenshot: shot,
-      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。请看截图核对，然后人工点 Guardar。程序没有点 Guardar，也没有点 Enviar Pedido。`,
+      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
       results
     };
   } catch (error) {
@@ -329,6 +335,190 @@ export async function applyOrderWeb(draft, config, logger) {
   } finally {
     try { browser?.disconnect(); } catch { /* noop */ }
   }
+}
+
+// --- 2b) Guardar y Enviar Pedido (SOLO bajo confirmación explícita) ---
+// A diferencia de openOrderPage, aquí NO se navega (nada de page.goto a la
+// lista): eso descartaría el borrador recién rellenado. Se localiza la
+// pestaña, se exige que el DetailView del pedido siga abierto y se
+// comprueba que el "Nombre del Pedido" en pantalla es el confirmado.
+async function openPedidoDetail(config, expectName) {
+  const attempts = Number(config.webOrder?.connectRetries) || 2;
+  let browser = null;
+  let page = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      browser = await connectBrowser(config);
+      page = await findOrderPage(browser, config);
+      if (page) break;
+      try { browser.disconnect(); } catch { /* noop */ }
+      browser = null;
+      lastError = Object.assign(new Error('连上了 Edge，但没找到 UnideGes 的标签页。'), { stage: 'findPage' });
+    } catch (error) {
+      lastError = error;
+      try { browser?.disconnect(); } catch { /* noop */ }
+      browser = null;
+      page = null;
+    }
+    if (attempt < attempts) await sleep(2000);
+  }
+  if (!page) throw lastError || Object.assign(new Error('无法连接 Edge。'), { stage: 'connect' });
+  try { await page.bringToFront(); } catch { /* noop */ }
+  const state = await getPedidoPageState(page);
+  if (!state.isPedidoDetail) {
+    try { browser.disconnect(); } catch { /* noop */ }
+    const err = new Error(`当前页面不是打开中的订单表单（caption=${state.caption || '-'}, url=${state.url || '-'}）。订单可能已被关掉；请重新填单或手动操作。`);
+    err.stage = 'notDetail';
+    throw err;
+  }
+  const nameOnScreen = await page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const inp = Array.from(document.querySelectorAll('input[aria-required="true"][maxlength="150"], input.dxbl-text-edit-input[maxlength="150"]')).find(isVisible);
+    return inp ? String(inp.value || '').trim() : '';
+  });
+  if (expectName && nameOnScreen && nameOnScreen !== String(expectName).trim()) {
+    try { browser.disconnect(); } catch { /* noop */ }
+    const err = new Error(`屏幕上的订单名是「${nameOnScreen}」，不是「${expectName}」——为安全不动。`);
+    err.stage = 'nameMismatch';
+    throw err;
+  }
+  return { browser, page, nameOnScreen };
+}
+
+// Texto del primer popup/diálogo visible de Blazor (validaciones de XAF),
+// para reportarlo en Telegram junto a la captura. '' si no hay ninguno.
+async function readBlockingPopup(page) {
+  try {
+    return await page.evaluate(() => {
+      const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const pops = Array.from(document.querySelectorAll('.dxbl-popup, .dxbl-modal, [role="dialog"], [role="alertdialog"]')).filter(isVisible);
+      for (const p of pops) {
+        const text = clean(p.innerText);
+        if (text) return text.slice(0, 400);
+      }
+      return '';
+    });
+  } catch {
+    return '';
+  }
+}
+
+export async function saveOrderWeb(config, logger, expectName) {
+  let browser;
+  try {
+    const opened = await openPedidoDetail(config, expectName);
+    browser = opened.browser;
+    const page = opened.page;
+    if (!(await clickActionByName(page, 'Guardar', 5000))) {
+      const shot = await screenshot(page, config, 'guardar-missing');
+      return { ok: false, stage: 'guardar', screenshot: shot, error: '页面上没找到可点的 Guardar 按钮。' };
+    }
+    await sleep(Number(config.webOrder?.saveSettleMs) || 3000);
+    const popup = await readBlockingPopup(page);
+    const shot = await screenshot(page, config, 'guardar');
+    if (popup && /validaci|obligatori|requerid|error|problema/i.test(popup)) {
+      return { ok: false, stage: 'validation', screenshot: shot, error: `点了 Guardar，但页面弹出了提示：「${popup}」。可能没保存成功，请看截图处理。` };
+    }
+    logger?.info('web order saved', { name: expectName });
+    return { ok: true, screenshot: shot, message: `已点 Guardar 保存「${expectName}」。看截图确认；没问题就可以发送。` };
+  } catch (error) {
+    logger?.error('web order save failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'save', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+export async function sendOrderWeb(config, logger, expectName) {
+  let browser;
+  try {
+    const opened = await openPedidoDetail(config, expectName);
+    browser = opened.browser;
+    const page = opened.page;
+    // El nombre exacto de la acción varía ("Enviar Pedido", "EnviarPedido"…):
+    // se busca entre las acciones VISIBLES una cuyo data-action-name o texto
+    // contenga "enviar".
+    const clicked = await clickActionMatching(page, 'enviar', 5000);
+    if (!clicked.ok) {
+      const shot = await screenshot(page, config, 'enviar-missing');
+      return { ok: false, stage: 'enviar', screenshot: shot, error: `没找到 Enviar Pedido 按钮（页面上可见的操作：${clicked.seen.join('、') || '无'}）。可能要先 Guardar，或这个订单状态不能发送。` };
+    }
+    // XAF puede pedir confirmación: se acepta el confirm nativo si sale y,
+    // si es un popup de Blazor con Sí/Aceptar, se pulsa el afirmativo.
+    const onDialog = (d) => { d.accept().catch(() => {}); };
+    page.on('dialog', onDialog);
+    try {
+      await sleep(1200);
+      await confirmBlazorPopup(page);
+      await sleep(Number(config.webOrder?.sendSettleMs) || 3500);
+    } finally {
+      page.off('dialog', onDialog);
+    }
+    const popup = await readBlockingPopup(page);
+    const shot = await screenshot(page, config, 'enviar');
+    if (popup && /validaci|obligatori|requerid|error|problema/i.test(popup)) {
+      return { ok: false, stage: 'validation', screenshot: shot, error: `点了发送，但页面弹出了提示：「${popup}」。请看截图处理。` };
+    }
+    const sentHint = await page.evaluate(() => /enviado/i.test(document.body?.innerText || '')).catch(() => false);
+    logger?.info('web order sent', { name: expectName, sentHint });
+    return { ok: true, screenshot: shot, message: `已点 Enviar Pedido 发送「${expectName}」${sentHint ? '，页面上已出现 Enviado 字样' : ''}。看截图做最终确认。` };
+  } catch (error) {
+    logger?.error('web order send failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'send', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
+// Pulsa la primera acción de XAF visible cuyo data-action-name o texto
+// contenga la subcadena (sin distinguir mayúsculas). Si no aparece dentro
+// del plazo, devuelve además la lista de acciones visibles para el mensaje
+// de error.
+async function clickActionMatching(page, needle, timeoutMs = 0) {
+  const start = Date.now();
+  for (;;) {
+    const handle = await page.evaluateHandle((sub) => {
+      const clean = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const els = Array.from(document.querySelectorAll('[data-action-name]')).filter(isVisible);
+      return els.find((el) => clean(el.getAttribute('data-action-name')).includes(sub) || clean(el.innerText).includes(sub)) || null;
+    }, String(needle).toLowerCase());
+    const el = handle.asElement();
+    if (el) { await el.click(); await handle.dispose(); return { ok: true }; }
+    await handle.dispose();
+    if (Date.now() - start >= timeoutMs) {
+      const seen = await page.evaluate(() => Array.from(document.querySelectorAll('[data-action-name]'))
+        .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+        .map((el) => el.getAttribute('data-action-name'))
+        .filter((v, i, a) => v && a.indexOf(v) === i)).catch(() => []);
+      return { ok: false, seen };
+    }
+    await sleep(200);
+  }
+}
+
+// Si hay un popup de confirmación de Blazor con botón Sí/Aceptar/OK, lo
+// pulsa. Sin popup no hace nada.
+async function confirmBlazorPopup(page) {
+  try {
+    const handle = await page.evaluateHandle(() => {
+      const clean = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const pops = Array.from(document.querySelectorAll('.dxbl-popup, .dxbl-modal, [role="dialog"], [role="alertdialog"]')).filter(isVisible);
+      for (const p of pops) {
+        const btns = Array.from(p.querySelectorAll('button, [role="button"], a')).filter(isVisible);
+        const yes = btns.find((b) => /^(sí|si|aceptar|ok|yes|confirmar)$/.test(clean(b.innerText)));
+        if (yes) return yes;
+      }
+      return null;
+    });
+    const el = handle.asElement();
+    if (el) { await el.click(); await handle.dispose(); return true; }
+    await handle.dispose();
+  } catch { /* sin popup de confirmación */ }
+  return false;
 }
 
 // --- 3) Búsqueda por NOMBRE: devolver TODAS las opciones -------------

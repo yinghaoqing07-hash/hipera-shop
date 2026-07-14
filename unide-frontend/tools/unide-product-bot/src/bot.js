@@ -15,8 +15,8 @@ import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmSchedu
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
+import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, discardDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -691,6 +691,8 @@ async function handleCallback(callback) {
   if (data.startsWith('tcgo:')) { await handleTallyGo(chatId, callback.id, data.slice(5)); return; }
   if (data.startsWith('tcclr:')) { await handleTallyClear(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
+  if (data.startsWith('osave:')) { await handleOrderSave(chatId, callback.id, data.slice(6)); return; }
+  if (data.startsWith('osend:')) { await handleOrderSend(chatId, callback.id, data.slice(6)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
@@ -901,7 +903,13 @@ async function processFruitPriceOnce(item, options = {}) {
   const planResult = buildPricePlan({ item, supplier, store }, read);
   if (!planResult.ok) return { ok: false, stage: 'plan', error: planResult.error, read };
   const applied = await applyPriceDesktop(planResult.plan, config, logger);
-  if (applied.status !== 'ok') return { ok: false, stage: 'apply', error: applied.error || applied.reason || '未知', screenshot: applied.screenshot, plan: planResult.plan, read };
+  if (applied.status !== 'ok') {
+    // La escritura pudo quedarse a medias SIN guardar: descartar (vaciar +
+    // "No" al aviso) para que el formulario sucio no embosque a la
+    // siguiente búsqueda con el diálogo de "¿guardar cambios?".
+    await discardDesktop(config, logger);
+    return { ok: false, stage: 'apply', error: `${applied.error || applied.reason || '未知'}（已自动放弃未保存的改动并清屏）`, screenshot: applied.screenshot, plan: planResult.plan, read };
+  }
   return { ok: true, plan: planResult.plan, read, screenshot: applied.screenshot };
 }
 
@@ -1065,7 +1073,13 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
     await finish(true, `「${one.label}」的 Bloq.Venta 本来就是${one.marcar ? '勾选（停卖）' : '未勾选（可卖）'}状态，什么都不用改。`, read.screenshot); return;
   }
   const applied = await applyBloqDesktop(one.codigo, config, logger);
-  if (applied.status !== 'ok') { await finish(false, `写入失败：${applied.error || applied.reason || '未知'}`, applied.screenshot); return; }
+  if (applied.status !== 'ok') {
+    // El toggle puede haberse quedado a medias sin guardar: descartar para
+    // no dejar el formulario sucio (origen del diálogo "¿guardar cambios?"
+    // que bloqueaba la búsqueda siguiente).
+    await discardDesktop(config, logger);
+    await finish(false, `写入失败：${applied.error || applied.reason || '未知'}\n已自动放弃未保存的改动并清屏。`, applied.screenshot); return;
+  }
   // Verificación: releer y comprobar que el estado quedó como se pidió.
   const recheck = await readPriceDesktop(config, logger);
   const after = recheck.status === 'ok' ? Boolean(recheck.values?.bloqVentaChecked) : null;
@@ -1074,7 +1088,13 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
   } else if (after === null) {
     await finish(true, `已执行${one.marcar ? '勾选' : '取消勾选'}+保存，但复查读取失败（${recheck.error || '未知'}）——看截图确认一下。`, applied.screenshot);
   } else {
-    await finish(false, `点了勾选框但状态没变（可能保存时弹了必填项报错——Proveedor/Inventariable 为空会存不了）。看截图，必要时手动处理。`, recheck.screenshot || applied.screenshot);
+    // Guardar no cuajó (típico: campo obligatorio vacío). Descartar los
+    // cambios pendientes deja la pantalla limpia, sin diálogo emboscado.
+    const discarded = await discardDesktop(config, logger);
+    const nota = discarded.status === 'ok'
+      ? '已自动放弃这次未保存的改动并清屏，不影响下一次操作。'
+      : `自动清屏放弃改动也没成功（${discarded.error || discarded.reason || '未知'}），请手动处理，注意别保存。`;
+    await finish(false, `点了勾选框但状态没变（可能保存时弹了必填项报错——Proveedor/Inventariable 为空会存不了）。${nota}看截图确认。`, recheck.screenshot || applied.screenshot);
   }
 }
 
@@ -1473,15 +1493,26 @@ async function handleOrderApply(chatId, callbackId, id) {
     // de llegada (solo si todas las líneas entraron bien).
     if (result.ok) recordFilledOrder(config, session.orderDraft, logger);
     const text = result.ok
-      ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；程序没有点 Guardar，也没有点 Enviar Pedido。')
+      ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；这一步还没有点 Guardar，也没有点 Enviar Pedido。')
       : await humanizarError('填入订单', `订单填入失败（${result.stage || '?'}）：\n${result.error}`);
+    // Tras un llenado correcto se ofrece TERMINAR el pedido desde aquí:
+    // Guardar y después Enviar, cada uno con su propio botón de
+    // confirmación (los únicos caminos del bot que pulsan esos botones).
+    let options = {};
+    if (result.ok) {
+      const sendId = saveSession({ orderSend: { orderName: session.orderDraft.orderName } });
+      options = { reply_markup: { inline_keyboard: [[
+        { text: '点 Guardar 保存', callback_data: `osave:${sendId}` },
+        { text: '先不动', callback_data: `cancel:${sendId}` }
+      ]] } };
+    }
     // La captura del navegador (si existe) es la mejor confirmación; el
     // volcado de DOM solo se manda cuando una línea falla en edición.
     if (result.screenshot) {
-      try { await telegram.sendPhoto(chatId, result.screenshot, text); }
-      catch { await telegram.sendMessage(chatId, text); }
+      try { await telegram.sendPhoto(chatId, result.screenshot, text, options); }
+      catch { await telegram.sendMessage(chatId, text, options); }
     } else {
-      await telegram.sendMessage(chatId, text);
+      await telegram.sendMessage(chatId, text, options);
     }
     if (result.domDump) {
       try { await telegram.sendDocument(chatId, result.domDump, '编辑中页面结构（发给 Claude）'); } catch { /* noop */ }
@@ -1494,6 +1525,62 @@ async function handleOrderApply(chatId, callbackId, id) {
     ? '订单填入：已执行。请看截图确认订单名、商品和数量；程序没有点 Guardar，也没有点 Enviar Pedido。'
     : `订单填入失败：\n${result.error || result.reason || '未知错误'}`;
   await sendWithOptionalScreenshot(chatId, result, text);
+}
+
+// Guardar del pedido web recién rellenado, SOLO desde su botón de
+// confirmación. Tras guardar bien, ofrece el segundo paso (Enviar Pedido)
+// con otro botón — así el pedido de carne se termina entero desde aquí.
+async function handleOrderSave(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const os = session?.orderSend;
+  if (!os?.orderName) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); await telegram.sendMessage(chatId, '这条订单记录已过期。订单还在页面上，可以手动点 Guardar，或重新填单。'); return; }
+  if (os.running) { await telegram.answerCallbackQuery(callbackId, '正在处理，别重复点'); return; }
+  os.running = true;
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, '正在点 Guardar');
+  const result = await saveOrderWeb(config, logger, os.orderName);
+  os.running = false;
+  if (!result.ok) {
+    sessions.set(id, session);
+    const text = await humanizarError('保存订单', `保存失败（${result.stage || '?'}）：\n${result.error}`);
+    await sendWithOptionalScreenshot(chatId, { status: result.screenshot ? 'ok' : 'error', screenshot: result.screenshot }, `❌ ${text}`, { reply_markup: { inline_keyboard: [[
+      { text: '再试一次 Guardar', callback_data: `osave:${id}` },
+      { text: '算了', callback_data: `cancel:${id}` }
+    ]] } });
+    return;
+  }
+  os.saved = true;
+  sessions.set(id, session);
+  await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot },
+    `✅ ${result.message}`,
+    { reply_markup: { inline_keyboard: [[
+      { text: '点 Enviar Pedido 发送', callback_data: `osend:${id}` },
+      { text: '先不发', callback_data: `cancel:${id}` }
+    ]] } });
+}
+
+async function handleOrderSend(chatId, callbackId, id) {
+  const session = sessions.get(id);
+  const os = session?.orderSend;
+  if (!os?.orderName) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); await telegram.sendMessage(chatId, '这条订单记录已过期。可以在页面上手动点 Enviar Pedido。'); return; }
+  if (!os.saved) { await telegram.answerCallbackQuery(callbackId, '要先 Guardar'); await telegram.sendMessage(chatId, '这个订单还没经我保存过，先点「点 Guardar 保存」。'); return; }
+  if (os.running) { await telegram.answerCallbackQuery(callbackId, '正在处理，别重复点'); return; }
+  os.running = true;
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, '正在发送');
+  const result = await sendOrderWeb(config, logger, os.orderName);
+  if (!result.ok) {
+    os.running = false;
+    sessions.set(id, session);
+    const text = await humanizarError('发送订单', `发送失败（${result.stage || '?'}）：\n${result.error}`);
+    await sendWithOptionalScreenshot(chatId, { status: result.screenshot ? 'ok' : 'error', screenshot: result.screenshot }, `❌ ${text}`, { reply_markup: { inline_keyboard: [[
+      { text: '再试一次发送', callback_data: `osend:${id}` },
+      { text: '算了', callback_data: `cancel:${id}` }
+    ]] } });
+    return;
+  }
+  sessions.delete(id);
+  await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot }, `✅ ${result.message}`);
 }
 
 // /pedido_web_test — diagnóstico de la automatización web: conecta al
