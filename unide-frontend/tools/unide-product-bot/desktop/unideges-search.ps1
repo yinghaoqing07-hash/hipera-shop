@@ -942,11 +942,15 @@ try {
         $waitLimit = [DateTime]::Now.AddMilliseconds($emergentWaitMs)
         $emergent = [IntPtr]::Zero
         $editor = $null
+        $retryAt = [DateTime]::Now.AddMilliseconds(450)
+        $retriedPhysicalClick = $false
 
         while ([DateTime]::Now -lt $waitLimit) {
+          $newWindowSeen = $false
           $ahora = [WinEnum]::VisibleWindowsOfPid([uint32]$script:TargetPid)
           foreach ($h in $ahora) {
             if ($script:KnownHandles.Contains($h)) { continue }
+            $newWindowSeen = $true
             try {
               $candidateWindow = [IntPtr]$h
               $candidateRoot = [System.Windows.Automation.AutomationElement]::FromHandle($candidateWindow)
@@ -966,12 +970,21 @@ try {
             } catch { }
           }
 
+          if (-not $editor -and -not $newWindowSeen -and -not $retriedPhysicalClick -and [DateTime]::Now -ge $retryAt -and $script:LastUiaClickPoint) {
+            [Win32]::SetForegroundWindow($script:TargetWindowHandle) | Out-Null
+            Start-Sleep -Milliseconds 120
+            Click-Point ([int]$script:LastUiaClickPoint.x) ([int]$script:LastUiaClickPoint.y)
+            $retriedPhysicalClick = $true
+            Add-WarningText "Catalejo EAN: primer clic sin editor; se hizo un segundo clic fisico"
+            continue
+          }
+
           if ($editor) { break }
           Start-Sleep -Milliseconds 150
         }
 
         if (-not $editor) {
-          throw "typeInEmergent: no se encontro el campo EAN despues de abrir el catalejo"
+          throw "typeInEmergent: el catalejo no abrio un campo EAN despues del clic fisico"
         }
 
         $targetHandle = if ($emergent -ne [IntPtr]::Zero) { $emergent } else { $script:TargetWindowHandle }
@@ -988,12 +1001,10 @@ try {
         [System.Windows.Forms.SendKeys]::SendWait($endKeys)
       }
       "uiaClickAt" {
-        # Clic en un punto definido por un DESPLAZAMIENTO desde un control
-        # ancla (por clase; p. ej. la barra de herramientas, que es única y
-        # fija): sobrevive a que la ventana se mueva o cambie de monitor.
-        # Si en ese punto hay un control hijo con HWND, el clic va por
-        # MENSAJES dentro de ese control (el canal fiable con esta app,
-        # inmune a UIPI); si no, clic de ratón de verdad.
+        # Clic REAL en un punto definido por un desplazamiento desde un
+        # control ancla. WM_LBUTTONDOWN/UP parecia funcionar, pero UnideGes
+        # ignoraba esos mensajes en el catalejo EAN. El raton fisico replica
+        # exactamente el clic manual que si abre el editor.
         $anchor = $null
         $root = Get-UiaRoot
         $script:EditableSnapshot = Get-UiaEditableSnapshot $root
@@ -1002,32 +1013,19 @@ try {
           if (([string]$cand.Current.ClassName) -match [string]$step.anchorClassRegex) { $anchor = $cand; break }
         }
         if (-not $anchor) { throw "uiaClickAt: ancla no encontrada (classRegex '$($step.anchorClassRegex)')" }
+
         $ar = $anchor.Current.BoundingRectangle
         $px = [int]($ar.X + [int]$step.dx)
         $py = [int]($ar.Y + [int]$step.dy)
         $script:LastUiaClickPoint = [pscustomobject]@{ x = $px; y = $py }
-        $hit = $null
-        $hitArea = [double]::MaxValue
-        foreach ($cand in $all) {
-          $r = $cand.Current.BoundingRectangle
-          if ($r.Width -le 0 -or $r.Height -le 0) { continue }
-          if ($px -lt $r.X -or $px -gt ($r.X + $r.Width) -or $py -lt $r.Y -or $py -gt ($r.Y + $r.Height)) { continue }
-          $area = $r.Width * $r.Height
-          if ($area -lt $hitArea) { $hit = $cand; $hitArea = $area }
+
+        if ([Win32]::IsIconic($script:TargetWindowHandle)) {
+          [Win32]::ShowWindow($script:TargetWindowHandle, 9) | Out-Null
         }
-        $hwndAt = if ($hit) { Get-UiaHwnd $hit } else { [IntPtr]::Zero }
-        if ($hwndAt -ne [IntPtr]::Zero) {
-          $hr = $hit.Current.BoundingRectangle
-          $lx = [int]($px - $hr.X)
-          $ly = [int]($py - $hr.Y)
-          $ptAt = [IntPtr](($ly -shl 16) -bor ($lx -band 0xFFFF))
-          [Win32]::SendMessage($hwndAt, 0x0201, [IntPtr]1, $ptAt) | Out-Null   # WM_LBUTTONDOWN
-          Start-Sleep -Milliseconds 60
-          [Win32]::SendMessage($hwndAt, 0x0202, [IntPtr]0, $ptAt) | Out-Null   # WM_LBUTTONUP
-        } else {
-          Click-Point $px $py
-        }
-        Start-Sleep -Milliseconds 150
+        [Win32]::SetForegroundWindow($script:TargetWindowHandle) | Out-Null
+        Start-Sleep -Milliseconds 220
+        Click-Point $px $py
+        Start-Sleep -Milliseconds 200
       }
       "uiaFocus" {
         $el = Resolve-UiaTarget $step
