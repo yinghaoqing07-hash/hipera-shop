@@ -91,6 +91,8 @@ $variables = $VariablesJson | ConvertFrom-Json
 $script:TargetPid = $null
 $script:KnownHandles = $null
 $script:TargetWindowHandle = $null
+$script:EditableSnapshot = @{}
+$script:LastUiaClickPoint = $null
 
 function Add-WarningText([string]$Text) {
   if ($Text) { $warnings.Add($Text) | Out-Null }
@@ -200,6 +202,160 @@ function Write-ControlText($Element, [string]$Text) {
     [Win32]::SendMessage($hwnd, 0x000C, [IntPtr]::Zero, $Text) | Out-Null           # WM_SETTEXT
     return $true
   }
+  return $false
+}
+
+function Get-UiaElementKey($Element) {
+  if (-not $Element) { return "" }
+  $hwnd = Get-UiaHwnd $Element
+  if ($hwnd -ne [IntPtr]::Zero) { return "hwnd:$($hwnd.ToInt64())" }
+  try {
+    $runtimeId = @($Element.GetRuntimeId())
+    if ($runtimeId.Count -gt 0) { return "runtime:$($runtimeId -join '.')" }
+  } catch { }
+  try {
+    $r = $Element.Current.BoundingRectangle
+    return ("fallback:{0}|{1}|{2}|{3}|{4}|{5}" -f [string]$Element.Current.ClassName, [string]$Element.Current.AutomationId, [int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height)
+  } catch { return "" }
+}
+
+function Get-UiaEditableElements($Root) {
+  $result = @()
+  if (-not $Root) { return $result }
+  try {
+    $all = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($cand in $all) {
+      try {
+        $cls = [string]$cand.Current.ClassName
+        $controlType = [string]$cand.Current.ControlType.ProgrammaticName
+        if ($cls -notmatch 'EDIT|RichEdit' -and $controlType -notmatch 'ControlType.Edit') { continue }
+        $r = $cand.Current.BoundingRectangle
+        if ($r.Width -le 0 -or $r.Height -le 0 -or $cand.Current.IsOffscreen) { continue }
+        $result += ,$cand
+      } catch { }
+    }
+  } catch { }
+  return @($result)
+}
+
+function Get-UiaEditableSnapshot($Root) {
+  $snapshot = @{}
+  foreach ($cand in @(Get-UiaEditableElements $Root)) {
+    $key = Get-UiaElementKey $cand
+    if ($key) { $snapshot[$key] = $true }
+  }
+  return $snapshot
+}
+
+function Find-UiaEditorByLabel($Root, [string]$Label) {
+  if (-not $Root) { return $null }
+  $edits = @(Get-UiaEditableElements $Root)
+  if ($edits.Count -eq 0) { return $null }
+  try {
+    $all = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($labelEl in $all) {
+      if (([string]$labelEl.Current.Name).Trim() -notmatch ("^(?i:" + [regex]::Escape($Label) + ")$")) { continue }
+      $lr = $labelEl.Current.BoundingRectangle
+      $sameRow = @()
+      foreach ($edit in $edits) {
+        $er = $edit.Current.BoundingRectangle
+        $labelCenter = $lr.Y + ($lr.Height / 2)
+        $editCenter = $er.Y + ($er.Height / 2)
+        if ([Math]::Abs($editCenter - $labelCenter) -gt 18) { continue }
+        if ($er.X -le $lr.X -or ($er.X - ($lr.X + $lr.Width)) -gt 500) { continue }
+        $sameRow += ,$edit
+      }
+      $sorted = @($sameRow | Sort-Object { $_.Current.BoundingRectangle.X })
+      if ($sorted.Count -gt 0) { return $sorted[0] }
+    }
+  } catch { }
+  return $null
+}
+
+function Find-UiaInputEditor($Root, $BeforeSnapshot, [bool]$AllowExisting = $false) {
+  $candidates = @(Get-UiaEditableElements $Root)
+  if ($candidates.Count -eq 0) { return $null }
+  if (-not $BeforeSnapshot) { $BeforeSnapshot = @{} }
+
+  $newCandidates = @()
+  foreach ($cand in $candidates) {
+    $key = Get-UiaElementKey $cand
+    if ($key -and -not $BeforeSnapshot.ContainsKey($key)) { $newCandidates += ,$cand }
+  }
+
+  $focused = $null
+  try { $focused = [System.Windows.Automation.AutomationElement]::FocusedElement } catch { }
+  if ($focused) {
+    $focusedKey = Get-UiaElementKey $focused
+    foreach ($cand in $newCandidates) {
+      if ((Get-UiaElementKey $cand) -eq $focusedKey) { return $cand }
+    }
+  }
+
+  $labeled = Find-UiaEditorByLabel $Root "Ean"
+  if ($labeled -and $newCandidates.Count -gt 0) {
+    $labeledKey = Get-UiaElementKey $labeled
+    foreach ($cand in $newCandidates) {
+      if ((Get-UiaElementKey $cand) -eq $labeledKey) { return $labeled }
+    }
+  }
+
+  if ($newCandidates.Count -eq 1) { return $newCandidates[0] }
+  if ($newCandidates.Count -gt 1) {
+    if ($script:LastUiaClickPoint) {
+      $sorted = @($newCandidates | Sort-Object {
+        $r = $_.Current.BoundingRectangle
+        $cx = $r.X + ($r.Width / 2)
+        $cy = $r.Y + ($r.Height / 2)
+        [Math]::Pow($cx - $script:LastUiaClickPoint.x, 2) + [Math]::Pow($cy - $script:LastUiaClickPoint.y, 2)
+      })
+      return $sorted[0]
+    }
+    return $newCandidates[0]
+  }
+
+  # Some UnideGes builds create the EAN editor in advance. In that case it
+  # is not "new", but the modal's Ean label still identifies it safely.
+  if ($labeled) { return $labeled }
+
+  if ($AllowExisting) {
+    if ($focused) {
+      $focusedKey = Get-UiaElementKey $focused
+      foreach ($cand in $candidates) {
+        if ((Get-UiaElementKey $cand) -eq $focusedKey) { return $cand }
+      }
+    }
+    return $candidates[0]
+  }
+  return $null
+}
+
+function Write-UiaTextVerified($Element, [string]$Text) {
+  if (-not $Element) { return $false }
+  try { $Element.SetFocus() } catch { }
+  Start-Sleep -Milliseconds 80
+
+  if (Write-ControlText $Element $Text) {
+    Start-Sleep -Milliseconds 80
+    if ((Read-ControlText $Element) -eq $Text) { return $true }
+  }
+
+  try {
+    $vp = $null
+    if ($Element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) -and -not $vp.Current.IsReadOnly) {
+      $vp.SetValue($Text)
+      Start-Sleep -Milliseconds 80
+      if (([string]$vp.Current.Value).Trim() -eq $Text) { return $true }
+    }
+  } catch { }
+
+  try {
+    $Element.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait("^a")
+    [System.Windows.Forms.SendKeys]::SendWait($Text)
+    Start-Sleep -Milliseconds 100
+    if ((Read-ControlText $Element) -eq $Text) { return $true }
+  } catch { }
   return $false
 }
 
@@ -773,73 +929,62 @@ try {
       }
       "uiaDump" { $values["uiaDumpFile"] = Write-UiaDump $OutDir }
       "typeInEmergent" {
-        # Escribe en la ventana EMERGENTE que abrió el paso anterior (p. ej.
-        # el diálogo del catalejo EAN). El clic por mensajes abre el diálogo
-        # pero NO le pasa el foco de teclado, así que pegar/teclear sin esto
-        # caía en el vacío. Se espera a la ventana top-level del proceso que
-        # no estaba en la foto de Focus-Window, se trae al frente, se escribe
-        # el texto DIRECTO en su primer EDIT (WM_SETTEXT, sin teclado) y se
-        # remata con Enter (keys configurable).
         $valueTxt = Resolve-Template ([string]$step.value)
         $endKeys = "{ENTER}"
         if ($step.PSObject.Properties.Name -contains "keys") { $endKeys = [string]$step.keys }
-        # El catalejo de esta tienda NO abre ventana nueva: deja el foco en
-        # el campo EAN de la MISMA ventana. Se espera un poco por si en otra
-        # instalación sí hay diálogo; si no aparece, se escribe in situ.
+
+        # El catalejo puede crear otro top-level o mostrar el editor EAN
+        # dentro de la ventana principal. El clic por WM_* no transfiere
+        # necesariamente el foco, por lo que se identifica el EDIT real y
+        # se verifica que contenga el EAN antes de mandar Enter.
         $emergentWaitMs = 1500
         if ($step.PSObject.Properties.Name -contains "waitMs") { $emergentWaitMs = [int]$step.waitMs }
         $waitLimit = [DateTime]::Now.AddMilliseconds($emergentWaitMs)
         $emergent = [IntPtr]::Zero
+        $editor = $null
+
         while ([DateTime]::Now -lt $waitLimit) {
           $ahora = [WinEnum]::VisibleWindowsOfPid([uint32]$script:TargetPid)
           foreach ($h in $ahora) {
-            if (-not $script:KnownHandles.Contains($h)) { $emergent = [IntPtr]$h; break }
+            if ($script:KnownHandles.Contains($h)) { continue }
+            try {
+              $candidateWindow = [IntPtr]$h
+              $candidateRoot = [System.Windows.Automation.AutomationElement]::FromHandle($candidateWindow)
+              $candidateEditor = Find-UiaInputEditor $candidateRoot @{} $true
+              if ($candidateEditor) {
+                $emergent = $candidateWindow
+                $editor = $candidateEditor
+                break
+              }
+            } catch { }
           }
-          if ($emergent -ne [IntPtr]::Zero) { break }
-          Start-Sleep -Milliseconds 250
+
+          if (-not $editor) {
+            try {
+              $mainRoot = Get-UiaRoot
+              $editor = Find-UiaInputEditor $mainRoot $script:EditableSnapshot $false
+            } catch { }
+          }
+
+          if ($editor) { break }
+          Start-Sleep -Milliseconds 150
         }
-        $escrito = $false
-        if ($emergent -ne [IntPtr]::Zero) {
-          [Win32]::SetForegroundWindow($emergent) | Out-Null
-          Start-Sleep -Milliseconds 300
-          try {
-            $emEl = [System.Windows.Automation.AutomationElement]::FromHandle($emergent)
-            $hijos = $emEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-            foreach ($cand in $hijos) {
-              if (([string]$cand.Current.ClassName) -match 'EDIT|RichEdit') {
-                $hwndEdit = Get-UiaHwnd $cand
-                if ($hwndEdit -ne [IntPtr]::Zero) {
-                  [Win32]::SendMessage($hwndEdit, 0x000C, [IntPtr]::Zero, $valueTxt) | Out-Null   # WM_SETTEXT
-                  if ((Read-ControlText $cand) -eq $valueTxt) { $escrito = $true }
-                  break
-                }
-              }
-            }
-          } catch { }
-        } else {
-          # Editor in situ: traer la ventana PRINCIPAL al frente y escribir
-          # en el control que tiene el foco (el catalejo ya lo dejó en el
-          # campo EAN). Se verifica releyendo; si no cuadra, teclado.
-          [Win32]::SetForegroundWindow($script:TargetWindowHandle) | Out-Null
-          Start-Sleep -Milliseconds 300
-          try {
-            $foco = [System.Windows.Automation.AutomationElement]::FocusedElement
-            if ($foco -and (([string]$foco.Current.ClassName) -match 'EDIT|RichEdit')) {
-              $hwndEdit = Get-UiaHwnd $foco
-              if ($hwndEdit -ne [IntPtr]::Zero) {
-                [Win32]::SendMessage($hwndEdit, 0x000C, [IntPtr]::Zero, $valueTxt) | Out-Null   # WM_SETTEXT
-                if ((Read-ControlText $foco) -eq $valueTxt) { $escrito = $true }
-              }
-            }
-          } catch { }
+
+        if (-not $editor) {
+          throw "typeInEmergent: no se encontro el campo EAN despues de abrir el catalejo"
         }
-        if (-not $escrito) {
-          # Último recurso: teclear como lo haría un escáner de códigos.
-          Add-WarningText "typeInEmergent: escribiendo por teclado (WM_SETTEXT no confirmado)"
-          Start-Sleep -Milliseconds 200
-          [System.Windows.Forms.SendKeys]::SendWait($valueTxt)
+
+        $targetHandle = if ($emergent -ne [IntPtr]::Zero) { $emergent } else { $script:TargetWindowHandle }
+        [Win32]::SetForegroundWindow($targetHandle) | Out-Null
+        Start-Sleep -Milliseconds 150
+
+        if (-not (Write-UiaTextVerified $editor $valueTxt)) {
+          throw "typeInEmergent: se encontro el campo EAN, pero no se pudo escribir/verificar '$valueTxt'"
         }
-        Start-Sleep -Milliseconds 250
+
+        $values["eanEditor"] = Get-UiaElementKey $editor
+        try { $editor.SetFocus() } catch { }
+        Start-Sleep -Milliseconds 120
         [System.Windows.Forms.SendKeys]::SendWait($endKeys)
       }
       "uiaClickAt" {
@@ -851,6 +996,7 @@ try {
         # inmune a UIPI); si no, clic de ratón de verdad.
         $anchor = $null
         $root = Get-UiaRoot
+        $script:EditableSnapshot = Get-UiaEditableSnapshot $root
         $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($cand in $all) {
           if (([string]$cand.Current.ClassName) -match [string]$step.anchorClassRegex) { $anchor = $cand; break }
@@ -859,6 +1005,7 @@ try {
         $ar = $anchor.Current.BoundingRectangle
         $px = [int]($ar.X + [int]$step.dx)
         $py = [int]($ar.Y + [int]$step.dy)
+        $script:LastUiaClickPoint = [pscustomobject]@{ x = $px; y = $py }
         $hit = $null
         $hitArea = [double]::MaxValue
         foreach ($cand in $all) {
