@@ -3,11 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export async function searchDesktop(item, config, logger, options = {}) {
-  const query = item.codigo || item.ean || item.nombre;
-  // El cambio de precio de fruta busca por CÓDIGO, que en Artículos va en su
-  // propio campo, no en el catalejo/EAN. byCode usa el modo searchCode (que
-  // en el PS cae en `steps` si no se han calibrado codeSearchSteps).
-  const mode = options.byCode ? 'searchCode' : 'search';
+  // Tres búsquedas distintas en Artículos:
+  //   byCode → campo Código (searchCode);
+  //   byName → campo del nombre, con comodines *nombre* (searchName);
+  //   por defecto → el catalejo/EAN de siempre (search).
+  const query = options.byName
+    ? item.nombre
+    : (item.codigo || item.ean || item.nombre);
+  const mode = options.byName ? 'searchName' : (options.byCode ? 'searchCode' : 'search');
   return runDesktopAction(mode, query, {}, config, logger);
 }
 
