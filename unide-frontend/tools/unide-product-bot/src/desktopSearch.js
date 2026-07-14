@@ -53,6 +53,13 @@ export async function dumpUiaDesktop(config, logger) {
   return runDesktopAction('uiaDump', 'uia', {}, config, logger, { timeoutMs: 90000 });
 }
 
+// Modo diagnóstico (/debug on): cada acción de escritorio captura la
+// pantalla después de CADA paso, además de la traza de texto que ya viaja
+// siempre. Se activa aquí y el PS lo recibe como variable __trace.
+let TRACE_STEPS = false;
+export function setDesktopTrace(enabled) { TRACE_STEPS = Boolean(enabled); }
+export function isDesktopTrace() { return TRACE_STEPS; }
+
 async function runDesktopAction(mode, query, variables, config, logger, options = {}) {
   if (!config.desktop?.enabled) {
     return { status: 'disabled', reason: 'desktop.enabled=false' };
@@ -78,23 +85,25 @@ async function runDesktopAction(mode, query, variables, config, logger, options 
     '-Mode',
     mode,
     '-VariablesJson',
-    JSON.stringify(variables || {})
+    JSON.stringify(TRACE_STEPS ? { ...(variables || {}), __trace: true } : (variables || {}))
   ];
 
   logger?.info(`desktop ${mode} started`, { query });
   const result = await run('powershell.exe', args, { timeoutMs: options.timeoutMs ?? 45000 });
-  if (result.exitCode !== 0) {
-    return {
-      status: 'error',
-      error: result.stderr || result.stdout || `exit code ${result.exitCode}`
-    };
-  }
-
+  // El PS emite su JSON TAMBIÉN al fallar (status=error + paso exacto +
+  // captura del instante + traza) antes de salir con código 1: se parsea
+  // SIEMPRE. Antes el código de salida cortaba antes de parsear y toda esa
+  // estructura llegaba aplastada como texto plano en `error`.
   const parsed = parseLastJson(result.stdout);
   if (!parsed) {
-    return { status: 'error', error: 'desktop script did not return json', stdout: result.stdout };
+    return {
+      status: 'error',
+      error: (result.exitCode !== 0 ? (result.stderr || result.stdout) : '') || 'desktop script did not return json',
+      stdout: result.stdout
+    };
   }
   if (parsed.screenshot) parsed.screenshot = path.resolve(parsed.screenshot);
+  if (Array.isArray(parsed.traceShots)) parsed.traceShots = parsed.traceShots.filter(Boolean).map((p) => path.resolve(p));
   return parsed;
 }
 

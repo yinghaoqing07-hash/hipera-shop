@@ -15,7 +15,7 @@ import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmSchedu
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, discardDesktop, dumpUiaDesktop, readPriceDesktop, searchDesktop } from './desktopSearch.js';
+import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -252,6 +252,7 @@ async function handleUpdate(update) {
   if (/^\/fruta_add\b/i.test(text)) { await handleFruitAdd(chatId, text); return; }
   if (/^\/bloq(?:_venta)?\b/i.test(text)) { await handleBloqVenta(chatId, text); return; }
   if (/^\/uia_dump\b/i.test(text)) { await handleUiaDump(chatId); return; }
+  if (/^\/debug\b/i.test(text)) { await handleDebug(chatId, text); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
   if (/^\/ahorro_pedido\b/i.test(text)) { await handleAhorroPedido(chatId, text); return; }
@@ -431,6 +432,7 @@ function formatCommandList() {
     '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（config 里 autoAdvisor 可调）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
     '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
+    '/debug on — 桌面调试模式：每步截图+完整痕迹（用完 /debug off）',
     '/whoami — 看这个对话的 chat id'
   ].join('\n');
 }
@@ -864,10 +866,10 @@ async function processFruitPriceOnce(item, options = {}) {
   // código en pantalla es el esperado y aborta si alguien tocó la ventana.
   if (!options.skipSearch) {
     const found = await searchDesktop(item, config, logger, { byCode: true });
-    if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知' };
+    if (found.status !== 'ok') return { ok: false, stage: 'search', error: found.error || found.reason || '未知', screenshot: found.screenshot, trace: found.trace, warnings: found.warnings, traceShots: found.traceShots };
   }
   const read = await readPriceDesktop(config, logger);
-  if (read.status !== 'ok') return { ok: false, stage: 'read', error: read.error || read.reason || '未知' };
+  if (read.status !== 'ok') return { ok: false, stage: 'read', error: read.error || read.reason || '未知', screenshot: read.screenshot, trace: read.trace, warnings: read.warnings, traceShots: read.traceShots };
   // Verificación de que el artículo CORRECTO está en pantalla. La mejor
   // señal es leer el propio campo Código (copyField "codigoPantalla" en
   // priceReadSteps): si coincide, seguimos aunque PC Medio/PC Último estén
@@ -908,9 +910,9 @@ async function processFruitPriceOnce(item, options = {}) {
     // "No" al aviso) para que el formulario sucio no embosque a la
     // siguiente búsqueda con el diálogo de "¿guardar cambios?".
     await discardDesktop(config, logger);
-    return { ok: false, stage: 'apply', error: `${applied.error || applied.reason || '未知'}（已自动放弃未保存的改动并清屏）`, screenshot: applied.screenshot, plan: planResult.plan, read };
+    return { ok: false, stage: 'apply', error: `${applied.error || applied.reason || '未知'}（已自动放弃未保存的改动并清屏）`, screenshot: applied.screenshot, trace: applied.trace, warnings: applied.warnings, traceShots: applied.traceShots, plan: planResult.plan, read };
   }
-  return { ok: true, plan: planResult.plan, read, screenshot: applied.screenshot };
+  return { ok: true, plan: planResult.plan, read, screenshot: applied.screenshot, trace: applied.trace, warnings: applied.warnings, traceShots: applied.traceShots };
 }
 
 function fruitStageLabel(stage) {
@@ -971,11 +973,11 @@ async function handleFruitPriceOne(chatId, callbackId, id) {
   if (!result.ok) {
     recordPriceExecution({ status: 'failed', source: 'fruit_single', groupId: `fruit-single:${id}`, item: one.item, requestedPrice: one.priceRaw, plan: result.plan, read: result.read, stage: result.stage, error: result.error });
     const text = `❌ ${label} 没改（${fruitStageLabel(result.stage)}）：${result.error}\n没有写入。`;
-    await sendWithOptionalScreenshot(chatId, { status: result.screenshot ? 'ok' : 'error', screenshot: result.screenshot }, text);
+    await sendWithOptionalScreenshot(chatId, { status: result.screenshot ? 'ok' : 'error', screenshot: result.screenshot, trace: result.trace, warnings: result.warnings, traceShots: result.traceShots }, text);
     return;
   }
   recordPriceExecution({ status: 'success', source: 'fruit_single', groupId: `fruit-single:${id}`, item: one.item, requestedPrice: one.priceRaw, plan: result.plan, read: result.read });
-  await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot },
+  await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot, trace: result.trace, warnings: result.warnings, traceShots: result.traceShots },
     `✅ 已改：${label} → ${one.priceRaw} €（P.defecto ${result.plan.pDefecto}%）。看截图确认 P.defecto / Bloq.Venta / 保存状态。`);
   await telegram.sendMessage(chatId, LABEL_STEPS.join('\n'));
 }
@@ -1048,21 +1050,23 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
   sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, '正在处理');
 
-  const finish = async (ok, msg, screenshot) => {
+  // diag: el resultado crudo del paso que falló, para que la traza y los
+  // avisos del PS viajen hasta Telegram (antes se perdían al reempaquetar).
+  const finish = async (ok, msg, screenshot, diag) => {
     sessions.delete(id);
-    await sendWithOptionalScreenshot(chatId, { status: screenshot ? 'ok' : 'error', screenshot }, `${ok ? '✅' : '❌'} ${msg}`);
+    await sendWithOptionalScreenshot(chatId, { status: screenshot ? 'ok' : 'error', screenshot, trace: diag?.trace, warnings: diag?.warnings, traceShots: diag?.traceShots }, `${ok ? '✅' : '❌'} ${msg}`);
   };
   // El artículo ya está en pantalla desde la tarjeta de confirmación.
   const read = await readPriceDesktop(config, logger);
-  if (read.status !== 'ok') { await finish(false, `读取失败：${read.error || read.reason || '未知'}`, read.screenshot); return; }
+  if (read.status !== 'ok') { await finish(false, `读取失败：${read.error || read.reason || '未知'}`, read.screenshot, read); return; }
   const values = read.values || {};
   if ('bancoDatos' in values && !/tienda/i.test(String(values.bancoDatos ?? ''))) {
-    await finish(false, `屏幕上载入的是「${String(values.bancoDatos ?? '').trim() || '未知'}」记录，不是 TIENDA——为安全不动。`, read.screenshot); return;
+    await finish(false, `屏幕上载入的是「${String(values.bancoDatos ?? '').trim() || '未知'}」记录，不是 TIENDA——为安全不动。`, read.screenshot, read); return;
   }
   if ('codigoPantalla' in values) {
     const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
-    if (!screenCode) { await finish(false, 'Código 框读到空——商品没载入，为安全不动。', read.screenshot); return; }
-    if (one.codigo && screenCode !== String(one.codigo)) { await finish(false, `屏幕上是 código ${screenCode}，不是 ${one.codigo}——为安全不动。`, read.screenshot); return; }
+    if (!screenCode) { await finish(false, 'Código 框读到空——商品没载入，为安全不动。', read.screenshot, read); return; }
+    if (one.codigo && screenCode !== String(one.codigo)) { await finish(false, `屏幕上是 código ${screenCode}，不是 ${one.codigo}——为安全不动。`, read.screenshot, read); return; }
     // Búsqueda por EAN o por nombre: el código Unide no se conocía de
     // antemano; el de pantalla (que el usuario acaba de confirmar en la
     // captura) es el bueno.
@@ -1075,9 +1079,9 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
   if (!one.codigo) {
     // Sin codigoPantalla calibrado no hay forma de saber qué artículo cargó
     // la búsqueda por EAN/nombre: no se toca nada a ciegas.
-    await finish(false, '按 EAN/名字搜索时读不到屏幕上的 Código（priceReadSteps 里缺 codigoPantalla），为安全不动。', read.screenshot); return;
+    await finish(false, '按 EAN/名字搜索时读不到屏幕上的 Código（priceReadSteps 里缺 codigoPantalla），为安全不动。', read.screenshot, read); return;
   }
-  if (!('bloqVentaChecked' in values)) { await finish(false, '读不到 Bloq.Venta 的勾选状态（priceReadSteps 里缺这一步？），为安全不动。', read.screenshot); return; }
+  if (!('bloqVentaChecked' in values)) { await finish(false, '读不到 Bloq.Venta 的勾选状态（priceReadSteps 里缺这一步？），为安全不动。', read.screenshot, read); return; }
   const current = Boolean(values.bloqVentaChecked);
   if (current === one.marcar) {
     await finish(true, `「${one.label}」的 Bloq.Venta 本来就是${one.marcar ? '勾选（停卖）' : '未勾选（可卖）'}状态，什么都不用改。`, read.screenshot); return;
@@ -1088,7 +1092,7 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
     // no dejar el formulario sucio (origen del diálogo "¿guardar cambios?"
     // que bloqueaba la búsqueda siguiente).
     await discardDesktop(config, logger);
-    await finish(false, `写入失败：${applied.error || applied.reason || '未知'}\n已自动放弃未保存的改动并清屏。`, applied.screenshot); return;
+    await finish(false, `写入失败：${applied.error || applied.reason || '未知'}\n已自动放弃未保存的改动并清屏。`, applied.screenshot, applied); return;
   }
   // Verificación: releer y comprobar que el estado quedó como se pidió.
   const recheck = await readPriceDesktop(config, logger);
@@ -1096,7 +1100,7 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
   if (after === one.marcar) {
     await finish(true, `「${one.label}」Bloq.Venta 已${one.marcar ? '勾选（停卖）' : '取消（恢复可卖）'}并保存。`, recheck.screenshot || applied.screenshot);
   } else if (after === null) {
-    await finish(true, `已执行${one.marcar ? '勾选' : '取消勾选'}+保存，但复查读取失败（${recheck.error || '未知'}）——看截图确认一下。`, applied.screenshot);
+    await finish(true, `已执行${one.marcar ? '勾选' : '取消勾选'}+保存，但复查读取失败（${recheck.error || '未知'}）——看截图确认一下。`, applied.screenshot, recheck);
   } else {
     // Guardar no cuajó (típico: campo obligatorio vacío). Descartar los
     // cambios pendientes deja la pantalla limpia, sin diálogo emboscado.
@@ -1104,7 +1108,7 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
     const nota = discarded.status === 'ok'
       ? '已自动放弃这次未保存的改动并清屏，不影响下一次操作。'
       : `自动清屏放弃改动也没成功（${discarded.error || discarded.reason || '未知'}），请手动处理，注意别保存。`;
-    await finish(false, `点了勾选框但状态没变（可能保存时弹了必填项报错——Proveedor/Inventariable 为空会存不了）。${nota}看截图确认。`, recheck.screenshot || applied.screenshot);
+    await finish(false, `点了勾选框但状态没变（可能保存时弹了必填项报错——Proveedor/Inventariable 为空会存不了）。${nota}看截图确认。`, recheck.screenshot || applied.screenshot, recheck.status === 'ok' ? recheck : applied);
   }
 }
 
@@ -2048,22 +2052,66 @@ async function sendProductResult(chatId, item, index, total) {
 }
 
 async function sendWithOptionalScreenshot(chatId, result, text, options = {}) {
-  if (result?.status === 'ok' && result.screenshot) {
-    const screenshotPath = path.resolve(result.screenshot);
-    if (fs.existsSync(screenshotPath)) {
-      try {
-        await telegram.sendPhoto(chatId, screenshotPath, text, options);
-        return;
-      } catch (error) {
-        logger.error('telegram screenshot send failed', { screenshot: screenshotPath, error: error.message });
-        await telegram.sendMessage(chatId, `${text}\n\n截图发送失败：${error.message}\n截图文件：${screenshotPath}`, options);
-        return;
-      }
+  // La captura se manda SIEMPRE que exista — también en errores: la foto
+  // del instante del fallo es la mitad del diagnóstico.
+  const screenshotPath = result?.screenshot ? path.resolve(result.screenshot) : null;
+  if (screenshotPath && fs.existsSync(screenshotPath)) {
+    try {
+      await telegram.sendPhoto(chatId, screenshotPath, text, options);
+    } catch (error) {
+      logger.error('telegram screenshot send failed', { screenshot: screenshotPath, error: error.message });
+      await telegram.sendMessage(chatId, `${text}\n\n截图发送失败：${error.message}\n截图文件：${screenshotPath}`, options);
     }
+  } else if (screenshotPath && result?.status === 'ok') {
     await telegram.sendMessage(chatId, `${text}\n\n截图文件没有生成或路径不可读：${screenshotPath}`, options);
-    return;
+  } else {
+    await telegram.sendMessage(chatId, text, options);
   }
-  await telegram.sendMessage(chatId, text, options);
+  await enviarTrazaEscritorio(chatId, result);
+}
+
+// Diagnóstico de la automatización de escritorio. En cualquier FALLO se
+// enseña la traza (qué paso corrió, cuánto tardó) y los avisos — antes los
+// avisos se quedaban en el log y nadie los veía, y cada fallo era adivinar
+// a ciegas. Con /debug on, además, llegan las capturas de después de CADA
+// paso: en qué paso la realidad se separa del plan se ve de un vistazo.
+async function enviarTrazaEscritorio(chatId, result) {
+  if (!result || typeof result !== 'object') return;
+  const fallo = Boolean(result.status) && result.status !== 'ok';
+  const debugOn = isDesktopTrace();
+  const trazas = Array.isArray(result.trace) ? result.trace : [];
+  const avisos = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+  if ((fallo || debugOn) && (trazas.length || avisos.length)) {
+    const lineas = debugOn ? trazas : trazas.slice(-10);
+    const bloques = [];
+    if (lineas.length) {
+      const cabecera = lineas.length === trazas.length ? `${trazas.length} 步` : `共 ${trazas.length} 步，末 ${lineas.length} 步`;
+      bloques.push(`—— 执行痕迹（${cabecera}）——\n${lineas.join('\n')}`);
+    }
+    if (avisos.length) bloques.push(`警告：\n- ${avisos.join('\n- ')}`);
+    try { await telegram.sendMessage(chatId, bloques.join('\n\n').slice(0, 3900), { __skipAI: true }); } catch { /* la traza no es crítica */ }
+  }
+  if (debugOn && Array.isArray(result.traceShots) && result.traceShots.length) {
+    for (let i = 0; i < result.traceShots.length; i++) {
+      const foto = result.traceShots[i];
+      try {
+        if (fs.existsSync(foto)) await telegram.sendPhoto(chatId, foto, `debug 步骤 ${i + 1}/${result.traceShots.length}`);
+      } catch { /* seguir con las demás */ }
+    }
+  }
+}
+
+// /debug on|off — modo diagnóstico del escritorio: captura tras cada paso
+// y traza completa en cada operación. Para localizar problemas en minutos
+// en vez de horas; apagarlo al terminar (manda muchas fotos).
+async function handleDebug(chatId, text) {
+  const arg = String(text || '').replace(/^\/debug(?:@\w+)?\s*/i, '').trim().toLowerCase();
+  if (/^(on|si|sí|1|开)$/.test(arg)) setDesktopTrace(true);
+  else if (/^(off|no|0|关)$/.test(arg)) setDesktopTrace(false);
+  else if (arg) { await telegram.sendMessage(chatId, '用法：/debug on（开调试）或 /debug off（关调试）。'); return; }
+  await telegram.sendMessage(chatId, isDesktopTrace()
+    ? '桌面调试模式：已开启。接下来每次桌面操作都会发来每一步之后的屏幕截图和完整执行痕迹，问题出在哪一步一眼可见。定位完记得 /debug off（照片较多）。'
+    : '桌面调试模式：已关闭。失败时仍会自动附上出错瞬间的截图、执行痕迹和警告。');
 }
 
 function buildPricePlan(session, read) {
