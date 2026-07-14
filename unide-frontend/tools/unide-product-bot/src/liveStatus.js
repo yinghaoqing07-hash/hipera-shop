@@ -9,9 +9,32 @@
 let LINE = '';
 let AT = 0;
 
+// Historial para el registro del panel (columna derecha): cada línea nueva
+// se acumula con su hora. Consecutivas idénticas no se repiten.
+const HISTORY = [];
+function pushHistory(line) {
+  const l = String(line || '').slice(0, 160);
+  if (!l) return;
+  const last = HISTORY[HISTORY.length - 1];
+  if (last && last.line === l) return;
+  HISTORY.push({ t: Date.now(), line: l });
+  if (HISTORY.length > 400) HISTORY.splice(0, HISTORY.length - 400);
+}
+
+// Para las líneas que NO nacen aquí (las escribe el PS de escritorio en su
+// fichero y el bot las ve al leerlo): solo acumular en el historial.
+export function noteLive(line) {
+  pushHistory(line);
+}
+
+export function getLiveLog(limit = 250) {
+  return HISTORY.slice(-limit);
+}
+
 export function setLive(text) {
   LINE = String(text || '').slice(0, 160);
   AT = Date.now();
+  pushHistory(LINE);
 }
 
 export function clearLive() {
