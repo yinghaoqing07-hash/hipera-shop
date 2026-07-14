@@ -30,6 +30,15 @@ export async function applyBloqDesktop(codigo, config, logger) {
   return runDesktopAction('bloqApply', codigo, { toggleBloqVenta: true }, config, logger);
 }
 
+// Descarta los cambios SIN GUARDAR del artículo en pantalla: vaciar
+// pantalla y responder "No" al aviso de guardar. Se usa tras un guardado
+// fallido, para no dejar el formulario "sucio" (un formulario sucio hace
+// que la siguiente búsqueda, al vaciar, dispare el diálogo de confirmación
+// que se queda bloqueando la ventana).
+export async function discardDesktop(config, logger) {
+  return runDesktopAction('discard', 'discard', {}, config, logger);
+}
+
 export async function applyOrderDesktop(draft, config, logger) {
   return runDesktopAction('orderApply', draft.orderName, draft, config, logger, { timeoutMs: 120000 });
 }

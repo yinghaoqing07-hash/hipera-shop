@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "bloqApply", "orderApply", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "bloqApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -535,15 +535,67 @@ function Take-Screenshot([string]$Directory, [string]$QueryText) {
   }
 }
 
+# Garantía de orden en los modos que ESCRIBEN (priceApply/bloqApply):
+# Ctrl+S tiene que ser lo último que modifica. Dos protecciones:
+#   1. Un paso "vaciar/limpiar pantalla" ANTES del Ctrl+S se SALTA (con
+#      aviso): limpiar con cambios pendientes dispara el diálogo
+#      "¿guardar cambios?" que se queda bloqueando todo lo demás.
+#   2. Un paso que modifica DESPUÉS del último Ctrl+S corta con error
+#      claro: hay que moverlo antes del ^s en config.local.json.
+function Assert-SaveIsLast($Steps, [string]$ActionMode) {
+  $saveIdx = -1
+  for ($i = 0; $i -lt $Steps.Count; $i++) {
+    $s = $Steps[$i]
+    if (($s.type -eq "hotkey" -or $s.type -eq "key") -and (([string]$s.keys) -match "\^s")) { $saveIdx = $i }
+  }
+  if ($saveIdx -lt 0) { return ,@($Steps) }
+  $out = @()
+  for ($i = 0; $i -lt $Steps.Count; $i++) {
+    $s = $Steps[$i]
+    $stepName = ""
+    if ($s.PSObject.Properties.Name -contains "name") { $stepName = [string]$s.name }
+    if ($i -lt $saveIdx -and $stepName -match "(?i)vaciar|limpiar") {
+      Add-WarningText "Paso '$stepName' saltado en ${ActionMode}: limpiar pantalla antes de Ctrl+S dispara el dialogo de guardar"
+      continue
+    }
+    if ($i -gt $saveIdx -and @("wait", "closeDialog", "screenshot", "focus") -notcontains $s.type) {
+      throw "${ActionMode}: el paso '$($s.type)' va DESPUES del Ctrl+S. Guardar debe ser lo ultimo que modifica; mueve ese paso antes del hotkey ^s en config.local.json."
+    }
+    $out += $s
+  }
+  return ,$out
+}
+
 function Get-Steps($Config, [string]$ActionMode) {
   if ($ActionMode -eq "clear") { $steps = @($Config.desktop.clearSteps) }
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
-  elseif ($ActionMode -eq "priceApply") { $steps = @($Config.desktop.priceApplySteps) }
+  elseif ($ActionMode -eq "priceApply") { $steps = Assert-SaveIsLast @($Config.desktop.priceApplySteps) "priceApply" }
   elseif ($ActionMode -eq "bloqApply") {
     $steps = @($Config.desktop.bloqApplySteps)
     if ($steps.Count -eq 0) {
       throw "bloqApplySteps sin configurar en config.local.json: copia la plantilla de config.example.json (marcar/desmarcar Bloq.Venta + Ctrl+S)."
     }
+    $steps = Assert-SaveIsLast $steps "bloqApply"
+  }
+  elseif ($ActionMode -eq "discard") {
+    # Descartar cambios sin guardar: vaciar pantalla + responder "No" al
+    # aviso de guardar. Sin discardSteps calibrados se reutiliza el PREFIJO
+    # de codeSearchSteps (focus + clic en vaciar + closeDialog con 'n'),
+    # que la tienda ya tiene afinado — se corta justo antes del primer
+    # paso que escribe algo.
+    $steps = @()
+    if ($Config.desktop.PSObject.Properties.Name -contains "discardSteps") {
+      $steps = @($Config.desktop.discardSteps) | Where-Object { $_ }
+    }
+    if (@($steps).Count -eq 0) {
+      $steps = @()
+      foreach ($s in @($Config.desktop.codeSearchSteps)) {
+        if (-not $s) { continue }
+        if (@("uiaSet", "setField", "text", "hotkey", "key", "tab") -contains $s.type) { break }
+        $steps += $s
+      }
+    }
+    if (@($steps).Count -eq 0) { throw "discard: ni discardSteps ni un prefijo utilizable de codeSearchSteps en config.local.json" }
   }
   elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
   elseif ($ActionMode -eq "uiaDump") {
