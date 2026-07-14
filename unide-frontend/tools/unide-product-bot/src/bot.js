@@ -2323,7 +2323,9 @@ if (config.panel?.enabled !== false) {
       // booleano; la imagen se sirve por /file/<id> (hook file de abajo).
       const messages = chatLog.filter((m) => m.seq > since).slice(-100)
         .map(({ photo, doc, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo), doc: Boolean(doc) }));
-      return { seq: chatSeq, messages };
+      // Viaja con el poll del chat (cada 2,5 s) para que el panel enseñe EN
+      // VIVO el paso de escritorio que corre ahora mismo.
+      return { seq: chatSeq, messages, desktopLive: desktopLiveLine() };
     },
     callback: async (data) => {
       const ids = arrivalChatIds();
@@ -2432,6 +2434,23 @@ function lanzarUpdater(updater) {
 
 const UPDATE_LOG = 'update-panel.log';
 const UPDATE_ESTADO = 'update-estado.txt';
+const DESKTOP_ESTADO = 'desktop-estado.txt';
+
+// Línea viva de la automatización de escritorio: unideges-search.ps1 la
+// escribe ANTES de cada paso (y "listo"/"ERROR: ..." al terminar). El panel
+// la enseña junto al estado — ver en qué paso va, en tiempo real, sin
+// esperar a Telegram. Vieja no es "en vivo": más de 2 min, nada.
+function desktopLiveLine() {
+  try {
+    const file = path.resolve(config.logsDir || '.', DESKTOP_ESTADO);
+    const st = fs.statSync(file);
+    const ageSec = Math.floor((Date.now() - st.mtimeMs) / 1000);
+    if (ageSec > 120) return null;
+    const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').trim();
+    if (!text) return null;
+    return { line: text.split(/\r?\n/).pop().slice(0, 160), ageSec };
+  } catch { return null; }
+}
 // Estado del updater para la barra del panel. Primero el archivo de estado
 // que escribe el propio update-bot.ps1 (un paso por línea, fiable incluso
 // oculto — Write-Host no llega a stdout); si no, la última línea del log
