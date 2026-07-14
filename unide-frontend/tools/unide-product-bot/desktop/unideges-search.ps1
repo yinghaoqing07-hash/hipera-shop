@@ -660,8 +660,7 @@ function Get-Steps($Config, [string]$ActionMode) {
         $steps = $prefijo + @(
           [pscustomobject]@{ type = "uiaClickAt"; anchorClassRegex = "ToolbarWindow32"; dx = 299; dy = 491; name = "Catalejo del grid Ean (offset desde la barra de herramientas)" },
           [pscustomobject]@{ type = "wait"; ms = 900 },
-          [pscustomobject]@{ type = "text"; value = "{{query}}" },
-          [pscustomobject]@{ type = "hotkey"; keys = "{ENTER}" },
+          [pscustomobject]@{ type = "typeInEmergent"; value = "{{query}}"; name = "EAN en el dialogo del catalejo (foco + WM_SETTEXT + Enter)" },
           [pscustomobject]@{ type = "wait"; ms = 2000 },
           [pscustomobject]@{ type = "closeDialog"; name = "Aviso inutil post-busqueda; sin aviso no hace nada" },
           [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila TIENDA (la ultima)" },
@@ -773,6 +772,53 @@ try {
         if ($shouldSend) { Send-StepKeys ([string]$step.keys) }
       }
       "uiaDump" { $values["uiaDumpFile"] = Write-UiaDump $OutDir }
+      "typeInEmergent" {
+        # Escribe en la ventana EMERGENTE que abrió el paso anterior (p. ej.
+        # el diálogo del catalejo EAN). El clic por mensajes abre el diálogo
+        # pero NO le pasa el foco de teclado, así que pegar/teclear sin esto
+        # caía en el vacío. Se espera a la ventana top-level del proceso que
+        # no estaba en la foto de Focus-Window, se trae al frente, se escribe
+        # el texto DIRECTO en su primer EDIT (WM_SETTEXT, sin teclado) y se
+        # remata con Enter (keys configurable).
+        $valueTxt = Resolve-Template ([string]$step.value)
+        $endKeys = "{ENTER}"
+        if ($step.PSObject.Properties.Name -contains "keys") { $endKeys = [string]$step.keys }
+        $waitLimit = [DateTime]::Now.AddMilliseconds(4000)
+        $emergent = [IntPtr]::Zero
+        while ([DateTime]::Now -lt $waitLimit) {
+          $ahora = [WinEnum]::VisibleWindowsOfPid([uint32]$script:TargetPid)
+          foreach ($h in $ahora) {
+            if (-not $script:KnownHandles.Contains($h)) { $emergent = [IntPtr]$h; break }
+          }
+          if ($emergent -ne [IntPtr]::Zero) { break }
+          Start-Sleep -Milliseconds 250
+        }
+        if ($emergent -eq [IntPtr]::Zero) { throw "typeInEmergent: no aparecio ninguna ventana nueva del proceso (¿el clic no abrio el dialogo?)" }
+        [Win32]::SetForegroundWindow($emergent) | Out-Null
+        Start-Sleep -Milliseconds 250
+        $escrito = $false
+        try {
+          $emEl = [System.Windows.Automation.AutomationElement]::FromHandle($emergent)
+          $hijos = $emEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+          foreach ($cand in $hijos) {
+            if (([string]$cand.Current.ClassName) -match 'EDIT|RichEdit') {
+              $hwndEdit = Get-UiaHwnd $cand
+              if ($hwndEdit -ne [IntPtr]::Zero) {
+                [Win32]::SendMessage($hwndEdit, 0x000C, [IntPtr]::Zero, $valueTxt) | Out-Null   # WM_SETTEXT
+                $escrito = $true
+                break
+              }
+            }
+          }
+        } catch { }
+        if (-not $escrito) {
+          # Sin EDIT localizable: teclear como lo haría un escáner.
+          Add-WarningText "typeInEmergent: sin campo EDIT en el dialogo, tecleando en primer plano"
+          [System.Windows.Forms.SendKeys]::SendWait($valueTxt)
+        }
+        Start-Sleep -Milliseconds 200
+        [System.Windows.Forms.SendKeys]::SendWait($endKeys)
+      }
       "uiaClickAt" {
         # Clic en un punto definido por un DESPLAZAMIENTO desde un control
         # ancla (por clase; p. ej. la barra de herramientas, que es única y
