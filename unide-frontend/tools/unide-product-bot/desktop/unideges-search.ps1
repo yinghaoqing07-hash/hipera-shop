@@ -420,6 +420,35 @@ function Read-ControlChecked($Element) {
   return (Read-CheckBoxPixels ([int]($r.X + $r.Width - 8)) ([int]($r.Y + $r.Height / 2)))
 }
 
+function Toggle-UiaCheckboxPhysical($Element) {
+  $before = Read-ControlChecked $Element
+  $r = $Element.Current.BoundingRectangle
+  if ($r.IsEmpty -or $r.Width -lt 8 -or $r.Height -lt 8) {
+    throw "uiaToggleIf: rectangulo invalido para '$($Element.Current.Name)'"
+  }
+
+  if ([Win32]::IsIconic($script:TargetWindowHandle)) {
+    [Win32]::ShowWindow($script:TargetWindowHandle, 9) | Out-Null
+  }
+  [Win32]::SetForegroundWindow($script:TargetWindowHandle) | Out-Null
+  Start-Sleep -Milliseconds 220
+
+  # En este WinForms el cuadrado de Bloq.Venta esta a la DERECHA del texto.
+  # UnideGes ignora BM_CLICK/WM_LBUTTON*, por eso usamos un clic fisico real.
+  $clickX = [int]($r.X + $r.Width - 8)
+  $clickY = [int]($r.Y + ($r.Height / 2))
+  Click-Point $clickX $clickY
+
+  for ($attempt = 0; $attempt -lt 7; $attempt++) {
+    Start-Sleep -Milliseconds 160
+    $after = Read-ControlChecked $Element
+    if ($after -ne $before) { return $after }
+  }
+
+  $cls = [string]$Element.Current.ClassName
+  throw "uiaToggleIf: el clic fisico no cambio '$($Element.Current.Name)' (class='$cls', before=$before, x=$clickX, y=$clickY, bounds=$([int]$r.X),$([int]$r.Y),$([int]$r.Width),$([int]$r.Height))"
+}
+
 function Resolve-UiaTarget($Step) {
   $label = ""
   $index = 0
@@ -1076,8 +1105,10 @@ try {
         Start-Sleep -Milliseconds 150
       }
       "uiaToggleIf" {
-        # Alterna un checkbox (BM_CLICK, el clic se procesa DENTRO del
-        # propio control) solo si la variable/valor indicado es verdadero.
+        # Alterna el checkbox solo cuando la variable lo pide. Tiene que ser
+        # un clic fisico: esta version de UnideGes ignora BM_CLICK y mensajes
+        # WM_LBUTTON enviados en segundo plano aunque el cursor parezca estar
+        # encima del control.
         $flagName = [string]$step.if
         $shouldToggle = $false
         if ($variables.PSObject.Properties.Name -contains $flagName) { $shouldToggle = [System.Convert]::ToBoolean($variables.$flagName) }
@@ -1085,24 +1116,7 @@ try {
         if ($shouldToggle) {
           $el = Resolve-UiaTarget $step
           if (-not $el) { throw "uiaToggleIf: no se encontro el control (label='$($step.label)')" }
-          $hwnd = Get-UiaHwnd $el
-          if ($hwnd -eq [IntPtr]::Zero) { throw "uiaToggleIf: el control no tiene HWND" }
-          $before = Read-ControlChecked $el
-          [Win32]::SendMessage($hwnd, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # BM_CLICK
-          Start-Sleep -Milliseconds 250
-          if ((Read-ControlChecked $el) -eq $before) {
-            # BM_CLICK no surtió efecto: clic por mensajes DENTRO del control
-            # (no es un clic inyectado de los que esta app ignora).
-            $r = $el.Current.BoundingRectangle
-            $pt = [IntPtr]((([int]($r.Height / 2)) -shl 16) -bor 8)
-            [Win32]::SendMessage($hwnd, 0x0201, [IntPtr]1, $pt) | Out-Null  # WM_LBUTTONDOWN
-            Start-Sleep -Milliseconds 60
-            [Win32]::SendMessage($hwnd, 0x0202, [IntPtr]0, $pt) | Out-Null  # WM_LBUTTONUP
-            Start-Sleep -Milliseconds 250
-          }
-          if ((Read-ControlChecked $el) -eq $before) {
-            Add-WarningText "uiaToggleIf '$($step.label)': el estado NO cambió"
-          }
+          $values["bloqVentaAfterClick"] = Toggle-UiaCheckboxPhysical $el
         }
       }
       "listSelectLast" {

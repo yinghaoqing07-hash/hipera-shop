@@ -1111,13 +1111,18 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
   } else if (after === null) {
     await finish(true, `已执行${one.marcar ? '勾选' : '取消勾选'}+保存，但复查读取失败（${recheck.error || '未知'}）——看截图确认一下。`, applied.screenshot, recheck);
   } else {
-    // Guardar no cuajó (típico: campo obligatorio vacío). Descartar los
-    // cambios pendientes deja la pantalla limpia, sin diálogo emboscado.
+    // El estado leido despues de guardar sigue siendo el contrario. No
+    // inventamos una causa: Proveedor e Inventariable pueden estar completos.
     const discarded = await discardDesktop(config, logger);
     const nota = discarded.status === 'ok'
       ? '已自动放弃这次未保存的改动并清屏，不影响下一次操作。'
       : `自动清屏放弃改动也没成功（${discarded.error || discarded.reason || '未知'}），请手动处理，注意别保存。`;
-    await finish(false, `点了勾选框但状态没变（可能保存时弹了必填项报错——Proveedor/Inventariable 为空会存不了）。${nota}看截图确认。`, recheck.screenshot || applied.screenshot, recheck.status === 'ok' ? recheck : applied);
+    const avisosBajos = [...new Set([
+      ...(Array.isArray(applied.warnings) ? applied.warnings : []),
+      ...(Array.isArray(recheck.warnings) ? recheck.warnings : [])
+    ].filter(Boolean))];
+    const detalles = avisosBajos.length ? `\n底层提示：${avisosBajos.join('；')}` : '';
+    await finish(false, `Bloq.Venta 点击/保存后复查仍是${after ? '勾选' : '未勾选'}状态，脚本已停止；没有证据表明是 Proveedor 或 Inventariable 缺失。${nota}${detalles}`, recheck.screenshot || applied.screenshot, recheck.status === 'ok' ? recheck : applied);
   }
 }
 
