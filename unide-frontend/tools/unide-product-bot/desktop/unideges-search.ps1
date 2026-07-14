@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "clear", "priceRead", "priceApply", "bloqApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "priceApply", "bloqApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -600,6 +600,31 @@ function Get-Steps($Config, [string]$ActionMode) {
   elseif ($ActionMode -eq "orderApply") { $steps = @($Config.desktop.orderApplySteps) }
   elseif ($ActionMode -eq "uiaDump") {
     $steps = @([pscustomobject]@{ type = "focus" }, [pscustomobject]@{ type = "uiaDump" })
+  }
+  elseif ($ActionMode -eq "searchName") {
+    # Búsqueda por NOMBRE en Artículos: el campo del nombre está a UN Tab
+    # del campo Código, y admite comodines (*nombre*). Sin nameSearchSteps
+    # calibrados se deriva de codeSearchSteps: mismo flujo (vaciar, F3,
+    # fila TIENDA, captura), pero en vez de escribir en Código se enfoca
+    # Código, Tab al nombre y se pega *{{query}}*.
+    $steps = @()
+    if ($Config.desktop.PSObject.Properties.Name -contains "nameSearchSteps") {
+      $steps = @($Config.desktop.nameSearchSteps) | Where-Object { $_ }
+    }
+    if (@($steps).Count -eq 0) {
+      $steps = @()
+      foreach ($s in @($Config.desktop.codeSearchSteps)) {
+        if (-not $s) { continue }
+        if ($s.type -eq "uiaSet" -and ($s.PSObject.Properties.Name -contains "label") -and (([string]$s.label) -eq "Código")) {
+          $steps += [pscustomobject]@{ type = "uiaFocus"; label = "Código"; name = "Foco en Código para saltar al nombre" }
+          $steps += [pscustomobject]@{ type = "tab"; count = 1 }
+          $steps += [pscustomobject]@{ type = "text"; value = "*{{query}}*"; name = "Nombre con comodines" }
+        } else {
+          $steps += $s
+        }
+      }
+    }
+    if (@($steps).Count -eq 0) { throw "searchName: ni nameSearchSteps ni codeSearchSteps utilizables en config.local.json" }
   }
   elseif ($ActionMode -eq "searchCode") {
     # Búsqueda por CÓDIGO: exige codeSearchSteps calibrado. Antes caía en el

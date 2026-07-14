@@ -985,15 +985,16 @@ async function handleFruitPriceOne(chatId, callbackId, id) {
 // puede vender); on = marcar (bloquear la venta). Mismo esqueleto que el
 // cambio de precio de fruta: buscar → captura → confirmación → leer con
 // guardas (código en pantalla + registro TIENDA) → alternar SOLO si el
-// estado difiere → Ctrl+S → releer para verificar. El nombre se resuelve por
-// el diccionario de frutas; para cualquier otro artículo, dar el código
-// Unide (6-7 cifras, va al campo Código) o el EAN de barras (8+ cifras,
-// va al catalejo — la búsqueda EAN de siempre, sin tablas de por medio).
+// estado difiere → Ctrl+S → releer para verificar. Se acepta: código Unide
+// (6-7 cifras, campo Código), EAN de barras (8+ cifras, catalejo — la
+// búsqueda EAN de siempre, sin tablas de por medio), nombre de fruta del
+// diccionario (se traduce a código) o CUALQUIER nombre (búsqueda por el
+// campo del nombre con comodines *nombre*, a un Tab del campo Código).
 async function handleBloqVenta(chatId, text) {
   const arg = String(text || '').replace(/^\/\S+\s*/, '').trim();
   const m = arg.match(/^(.*?)[\s]+(on|off|si|no)$/i);
   if (!m) {
-    await telegram.sendMessage(chatId, '用法：/bloq 名字、código 或条码EAN off（取消勾选，恢复可卖）或 on（勾选，停卖）。\n比如：/bloq platano off、/bloq 620475 on 或 /bloq 8410100025346 off');
+    await telegram.sendMessage(chatId, '用法：/bloq 名字、código 或条码EAN off（取消勾选，恢复可卖）或 on（勾选，停卖）。\n比如：/bloq platano off、/bloq 620475 on、/bloq 8410100025346 off 或 /bloq nesquik on（按名字搜）');
     return;
   }
   const nameOrCode = m[1].trim();
@@ -1001,6 +1002,7 @@ async function handleBloqVenta(chatId, text) {
   if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用（desktop.enabled=false）。'); return; }
   let codigo = '';
   let ean = '';
+  let porNombre = '';
   let label = nameOrCode;
   if (/^\d{8,}$/.test(nameOrCode)) {
     // Un numero largo es un EAN de barras, no un código Unide (6-7 cifras):
@@ -1014,20 +1016,23 @@ async function handleBloqVenta(chatId, text) {
   } else {
     const resolved = resolveFruitCode(config, storeIndex, supplierIndex, nameOrCode);
     if (resolved?.codigo) { codigo = String(resolved.codigo); label = resolved.articulo || nameOrCode; }
-  }
-  if (!codigo && !ean) {
-    await telegram.sendMessage(chatId, `没认出「${nameOrCode}」。水果可以用名字；其他商品请给我 código 或条码 EAN，比如：/bloq 620475 ${marcar ? 'on' : 'off'}`);
-    return;
+    // Nombre que el diccionario no conoce: búsqueda por NOMBRE en Artículos
+    // (el campo a un Tab del Código admite comodines *nombre*). El código
+    // real se lee de la pantalla al confirmar, como con el EAN.
+    else porNombre = nameOrCode;
   }
   const objetivo = marcar ? '勾选 Bloq.Venta（停卖）' : '取消 Bloq.Venta（恢复可卖）';
   await telegram.sendMessage(chatId, ean
     ? `EAN ${ean}，目标：${objetivo}。正在桌面 Artículos 用望远镜（EAN 搜索）查找…`
-    : `「${label}」→ código ${codigo}，目标：${objetivo}。正在桌面 Artículos 里搜索…`);
-  const item = ean ? { ean, nombre: label } : { codigo, nombre: label };
-  const found = await searchDesktop(item, config, logger, { byCode: !ean });
-  const id = saveSession({ bloqOne: { codigo, ean, label, marcar } });
+    : porNombre
+      ? `「${porNombre}」，目标：${objetivo}。正在桌面 Artículos 按名字（*${porNombre}*）搜索…`
+      : `「${label}」→ código ${codigo}，目标：${objetivo}。正在桌面 Artículos 里搜索…`);
+  const item = ean ? { ean, nombre: label } : (porNombre ? { nombre: porNombre } : { codigo, nombre: label });
+  const found = await searchDesktop(item, config, logger, porNombre ? { byName: true } : { byCode: !ean });
+  const id = saveSession({ bloqOne: { codigo, ean, nombre: porNombre, label, marcar } });
+  const referencia = ean ? `EAN ${ean}` : porNombre ? `按名字「${porNombre}」搜到的，可能有多个匹配时载入的是最后一条` : `「${label}」，código ${codigo}`;
   await sendWithOptionalScreenshot(chatId, found,
-    `核对下截图是不是你要的商品（${ean ? `EAN ${ean}` : `「${label}」，código ${codigo}`}）。确认后我会：读状态 → ${marcar ? '勾选' : '取消勾选'} Bloq.Venta → Ctrl+S 保存 → 再读一遍验证。已经是目标状态就什么都不动。`,
+    `核对下截图是不是你要的商品（${referencia}）。确认后我会：读状态 → ${marcar ? '勾选' : '取消勾选'} Bloq.Venta → Ctrl+S 保存 → 再读一遍验证。已经是目标状态就什么都不动。`,
     { reply_markup: { inline_keyboard: [[
       { text: marcar ? '确认停卖' : '确认恢复可卖', callback_data: `bvone:${id}` },
       { text: '取消', callback_data: `cancel:${id}` }
@@ -1037,7 +1042,7 @@ async function handleBloqVenta(chatId, text) {
 async function handleBloqVentaOne(chatId, callbackId, id) {
   const session = sessions.get(id);
   const one = session?.bloqOne;
-  if (!one?.codigo && !one?.ean) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); await telegram.sendMessage(chatId, '这条记录已过期，请再发一次 /bloq。'); return; }
+  if (!one?.codigo && !one?.ean && !one?.nombre) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); await telegram.sendMessage(chatId, '这条记录已过期，请再发一次 /bloq。'); return; }
   if (one.running) { await telegram.answerCallbackQuery(callbackId, '正在处理，别重复点'); return; }
   one.running = true;
   sessions.set(id, session);
@@ -1058,14 +1063,19 @@ async function handleBloqVentaOne(chatId, callbackId, id) {
     const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
     if (!screenCode) { await finish(false, 'Código 框读到空——商品没载入，为安全不动。', read.screenshot); return; }
     if (one.codigo && screenCode !== String(one.codigo)) { await finish(false, `屏幕上是 código ${screenCode}，不是 ${one.codigo}——为安全不动。`, read.screenshot); return; }
-    // Búsqueda por EAN: el código Unide no se conocía de antemano; el de
-    // pantalla (que el usuario acaba de confirmar en la captura) es el bueno.
-    if (!one.codigo) { one.codigo = screenCode; one.label = one.label === one.ean ? `EAN ${one.ean}（código ${screenCode}）` : one.label; }
+    // Búsqueda por EAN o por nombre: el código Unide no se conocía de
+    // antemano; el de pantalla (que el usuario acaba de confirmar en la
+    // captura) es el bueno.
+    if (!one.codigo) {
+      one.codigo = screenCode;
+      if (one.label === one.ean) one.label = `EAN ${one.ean}（código ${screenCode}）`;
+      else if (one.nombre && one.label === one.nombre) one.label = `${one.nombre}（código ${screenCode}）`;
+    }
   }
-  if (!one.codigo && one.ean) {
+  if (!one.codigo) {
     // Sin codigoPantalla calibrado no hay forma de saber qué artículo cargó
-    // el catalejo: con solo el EAN no se toca nada a ciegas.
-    await finish(false, '按 EAN 搜索时读不到屏幕上的 Código（priceReadSteps 里缺 codigoPantalla），为安全不动。', read.screenshot); return;
+    // la búsqueda por EAN/nombre: no se toca nada a ciegas.
+    await finish(false, '按 EAN/名字搜索时读不到屏幕上的 Código（priceReadSteps 里缺 codigoPantalla），为安全不动。', read.screenshot); return;
   }
   if (!('bloqVentaChecked' in values)) { await finish(false, '读不到 Bloq.Venta 的勾选状态（priceReadSteps 里缺这一步？），为安全不动。', read.screenshot); return; }
   const current = Boolean(values.bloqVentaChecked);

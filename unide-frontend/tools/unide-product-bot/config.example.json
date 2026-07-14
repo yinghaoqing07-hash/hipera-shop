@@ -97,6 +97,7 @@
     },
     "clearSteps": [],
     "discardSteps": [],
+    "nameSearchSteps": [],
     "steps": [],
     "codeSearchSteps": [
       {
