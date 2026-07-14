@@ -108,6 +108,21 @@ function Add-WarningText([string]$Text) {
   if ($Text) { $warnings.Add($Text) | Out-Null }
 }
 
+# Estado VIVO para el panel JARVIS: cada paso se escribe en
+# logs\desktop-estado.txt ANTES de ejecutarse (misma mecánica que
+# update-estado.txt del updater). El panel lo enseña en tiempo real: se ve
+# en qué paso está la automatización sin esperar a Telegram.
+$script:EstadoVivoFile = $null
+try {
+  $carpetaLogsVivo = Join-Path (Split-Path -Parent $ConfigPath) "logs"
+  New-Item -ItemType Directory -Force -Path $carpetaLogsVivo | Out-Null
+  $script:EstadoVivoFile = Join-Path $carpetaLogsVivo "desktop-estado.txt"
+} catch { }
+function Write-EstadoVivo([string]$Texto) {
+  if (-not $script:EstadoVivoFile) { return }
+  try { Set-Content -LiteralPath $script:EstadoVivoFile -Value $Texto -Encoding UTF8 } catch { }
+}
+
 function Get-ScreenInfo {
   $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
   [ordered]@{ width = $bounds.Width; height = $bounds.Height }
@@ -893,6 +908,7 @@ try {
     $nombrePaso = ""
     if ($step.PSObject.Properties.Name -contains "name") { $nombrePaso = [string]$step.name }
     $script:StepActual = "paso $numPaso/$(@($stepsToRun).Count) $($step.type)" + $(if ($nombrePaso) { " ($nombrePaso)" } else { "" })
+    Write-EstadoVivo "[$Mode] $script:StepActual"
     $cronoPaso = [System.Diagnostics.Stopwatch]::StartNew()
     $avisosAntes = $warnings.Count
     switch ($step.type) {
@@ -1258,6 +1274,7 @@ try {
     Start-Sleep -Milliseconds 120
   }
   $script:StepActual = ""
+  Write-EstadoVivo "[$Mode] listo"
 
   if (-not $screenshotPath) { $screenshotPath = Take-Screenshot $OutDir $Query }
 
@@ -1273,6 +1290,7 @@ try {
   try { $fotoFallo = Take-Screenshot $OutDir "error" } catch { }
   $msgError = $_.Exception.Message
   if ($script:StepActual) { $msgError = "$($script:StepActual): $msgError" }
+  Write-EstadoVivo "[$Mode] ERROR: $msgError"
   [ordered]@{
     status = "error"; mode = $Mode; query = $Query; error = $msgError;
     step = $script:StepActual; screenshot = $fotoFallo;

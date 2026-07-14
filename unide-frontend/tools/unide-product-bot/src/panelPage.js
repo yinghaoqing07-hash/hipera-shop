@@ -33,6 +33,11 @@ export function renderPanelPage(version) {
   #btnCajon:hover { border-color: rgba(125,211,252,.65); color: #d5ecf8; }
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
+  /* Paso de escritorio EN VIVO (lo escribe unideges-search.ps1 antes de
+     cada paso): vacío = invisible, error en rojo. */
+  #vivoEsc { margin-left: 16px; color: #7dd3fc; }
+  #vivoEsc:empty { display: none; }
+  #vivoEsc.err { color: #f87171; }
   @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 24px 24px; min-height: 0; }
   #zona {
@@ -157,7 +162,7 @@ export function renderPanelPage(version) {
 <body>
 <header>
   <span id="logo">J A R V I S</span>
-  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><span><span id="punto"></span><span id="txtEstado">连接中</span></span></span>
+  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
 </header>
 <main>
   <div id="zona">
@@ -471,6 +476,20 @@ async function pulsar(data) {
 async function pollChat() {
   try {
     const r = await (await fetch('/chat?since=' + chatSeq)).json();
+    // Paso de escritorio en vivo: viaja con este poll (2,5 s) porque el de
+    // /status es demasiado lento (15 s) para ver pasos de 1-2 segundos.
+    const vivo = document.getElementById('vivoEsc');
+    if (vivo) {
+      const dl = r.desktopLive;
+      let t = '';
+      if (dl && dl.line) {
+        if (dl.line.indexOf('ERROR') >= 0) { if (dl.ageSec < 120) t = dl.line.slice(0, 110); }
+        else if (dl.line.indexOf('listo') >= 0) { if (dl.ageSec < 8) t = dl.line.slice(0, 40); }
+        else if (dl.ageSec < 60) t = dl.line.slice(0, 110);
+      }
+      vivo.textContent = t;
+      vivo.classList.toggle('err', t.indexOf('ERROR') >= 0);
+    }
     if (r.messages && r.messages.length) {
       const caja = document.getElementById('charla');
       const pegado = caja.scrollHeight - caja.scrollTop - caja.clientHeight < 60;
