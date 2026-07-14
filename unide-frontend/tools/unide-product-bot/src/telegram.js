@@ -69,6 +69,28 @@ export class TelegramClient {
     return unwrap(await response.json());
   }
 
+  // Álbum de fotos (2-10 por llamada, límite de Telegram). items:
+  // [{ path, caption }]. Los pies se mandan TAL CUAL: esto se usa para
+  // diagnóstico y los pies son datos, no prosa.
+  async sendMediaGroup(chatId, items, options = {}) {
+    const files = {};
+    const media = items.map((item, i) => {
+      files[`photo${i}`] = { path: item.path, contentType: 'image/png' };
+      return { type: 'photo', media: `attach://photo${i}`, caption: truncate(item.caption || '', 1000) };
+    });
+    const fields = { chat_id: String(chatId), media: JSON.stringify(media) };
+    for (const [key, value] of Object.entries(options)) {
+      fields[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    }
+    const body = multipartBody(fields, files);
+    const response = await fetch(`${this.baseUrl}/sendMediaGroup`, {
+      method: 'POST',
+      headers: { 'content-type': body.contentType },
+      body: body.buffer
+    });
+    return unwrap(await response.json());
+  }
+
   async sendDocument(chatId, filePath, caption = '', options = {}) {
     const fields = {
       chat_id: String(chatId),
