@@ -88,6 +88,16 @@ public class WinEnum {
 $warnings = New-Object System.Collections.Generic.List[string]
 $values = [ordered]@{}
 $variables = $VariablesJson | ConvertFrom-Json
+# Traza de ejecución: una línea por paso (número, tipo, duración, avisos)
+# que viaja SIEMPRE en el JSON de salida. Con __trace=true en las
+# variables, además se captura la pantalla después de CADA paso — ver en
+# qué paso la realidad se separa del plan es lo que convierte horas de
+# adivinar en un vistazo.
+$trace = New-Object System.Collections.Generic.List[string]
+$traceShots = New-Object System.Collections.Generic.List[string]
+$traceMode = $false
+try { if ($variables.PSObject.Properties.Name -contains "__trace") { $traceMode = [System.Convert]::ToBoolean($variables.__trace) } } catch { }
+$script:StepActual = ""
 $script:TargetPid = $null
 $script:KnownHandles = $null
 $script:TargetWindowHandle = $null
@@ -848,7 +858,14 @@ try {
     }
   }
 
+  $numPaso = 0
   foreach ($step in $stepsToRun) {
+    $numPaso++
+    $nombrePaso = ""
+    if ($step.PSObject.Properties.Name -contains "name") { $nombrePaso = [string]$step.name }
+    $script:StepActual = "paso $numPaso/$(@($stepsToRun).Count) $($step.type)" + $(if ($nombrePaso) { " ($nombrePaso)" } else { "" })
+    $cronoPaso = [System.Diagnostics.Stopwatch]::StartNew()
+    $avisosAntes = $warnings.Count
     switch ($step.type) {
       "focus" {
         $reactivate = $false
@@ -1212,19 +1229,41 @@ try {
       "screenshot" { $screenshotPath = Take-Screenshot $OutDir $Query }
       default { Add-WarningText "Unknown desktop step type: $($step.type)" }
     }
+    $cronoPaso.Stop()
+    $extraTraza = ""
+    if ($warnings.Count -gt $avisosAntes) {
+      $nuevos = @()
+      for ($w = $avisosAntes; $w -lt $warnings.Count; $w++) { $nuevos += $warnings[$w] }
+      $extraTraza = " AVISO: " + ($nuevos -join " / ")
+    }
+    $trace.Add(("{0}|{1}{2}|{3}ms{4}" -f $numPaso, $step.type, $(if ($nombrePaso) { " " + $nombrePaso } else { "" }), $cronoPaso.ElapsedMilliseconds, $extraTraza)) | Out-Null
+    if ($traceMode) {
+      $fotoPaso = Take-Screenshot $OutDir ("trace-{0:d2}-{1}" -f $numPaso, $step.type)
+      if ($fotoPaso) { $traceShots.Add($fotoPaso) | Out-Null }
+    }
     Start-Sleep -Milliseconds 120
   }
+  $script:StepActual = ""
 
   if (-not $screenshotPath) { $screenshotPath = Take-Screenshot $OutDir $Query }
 
   [ordered]@{
     status = "ok"; mode = $Mode; query = $Query; values = $values; screenshot = $screenshotPath;
-    screen = $screen; windowTitle = $windowTitle; warnings = @($warnings); ranAt = (Get-Date).ToString("o")
+    screen = $screen; windowTitle = $windowTitle; warnings = @($warnings);
+    trace = @($trace); traceShots = @($traceShots); ranAt = (Get-Date).ToString("o")
   } | ConvertTo-Json -Compress -Depth 8
 } catch {
+  # Foto del INSTANTE del fallo + el paso exacto en el mensaje: la mitad
+  # del diagnóstico es saber en qué paso y qué había en pantalla.
+  $fotoFallo = $null
+  try { $fotoFallo = Take-Screenshot $OutDir "error" } catch { }
+  $msgError = $_.Exception.Message
+  if ($script:StepActual) { $msgError = "$($script:StepActual): $msgError" }
   [ordered]@{
-    status = "error"; mode = $Mode; query = $Query; error = $_.Exception.Message;
-    values = $values; warnings = @($warnings); ranAt = (Get-Date).ToString("o")
+    status = "error"; mode = $Mode; query = $Query; error = $msgError;
+    step = $script:StepActual; screenshot = $fotoFallo;
+    values = $values; warnings = @($warnings);
+    trace = @($trace); traceShots = @($traceShots); ranAt = (Get-Date).ToString("o")
   } | ConvertTo-Json -Compress -Depth 8
   exit 1
 }
