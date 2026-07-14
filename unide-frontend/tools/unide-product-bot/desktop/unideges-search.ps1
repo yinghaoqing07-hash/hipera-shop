@@ -635,8 +635,44 @@ function Get-Steps($Config, [string]$ActionMode) {
       throw "codeSearchSteps sin configurar en config.local.json: copia la plantilla de config.example.json y pon la coordenada del campo Código (la búsqueda por código NO funciona por el catalejo/EAN)."
     }
   }
-  else { $steps = @($Config.desktop.steps) }
-  if ($steps.Count -eq 0) { throw "$ActionMode steps are not configured in config.local.json" }
+  else {
+    # Modo search = búsqueda por EAN (el "catalejo" junto al grid Ean).
+    # Prioridad: eanSearchSteps calibrados > secuencia integrada > steps
+    # legado. Los steps legados eran coordenadas de pantalla de hace mucho
+    # y en la tienda ya no dan en el botón (clics al vacío, "no pasa nada").
+    # La secuencia integrada no usa coordenadas absolutas: reutiliza el
+    # prefijo de codeSearchSteps de la tienda (vaciar pantalla + responder
+    # No al aviso) y pulsa el catalejo por su desplazamiento respecto a la
+    # BARRA DE HERRAMIENTAS (ancla estable), teclea el EAN y Enter; después
+    # el mismo cierre que la búsqueda por código (aviso, fila TIENDA, foto).
+    $steps = @()
+    if ($Config.desktop.PSObject.Properties.Name -contains "eanSearchSteps") {
+      $steps = @($Config.desktop.eanSearchSteps) | Where-Object { $_ }
+    }
+    if (@($steps).Count -eq 0) {
+      $prefijo = @()
+      foreach ($s in @($Config.desktop.codeSearchSteps)) {
+        if (-not $s) { continue }
+        if (@("uiaSet", "setField", "text", "hotkey", "key", "tab") -contains $s.type) { break }
+        $prefijo += $s
+      }
+      if (@($prefijo).Count -gt 0) {
+        $steps = $prefijo + @(
+          [pscustomobject]@{ type = "uiaClickAt"; anchorClassRegex = "ToolbarWindow32"; dx = 299; dy = 491; name = "Catalejo del grid Ean (offset desde la barra de herramientas)" },
+          [pscustomobject]@{ type = "wait"; ms = 900 },
+          [pscustomobject]@{ type = "text"; value = "{{query}}" },
+          [pscustomobject]@{ type = "hotkey"; keys = "{ENTER}" },
+          [pscustomobject]@{ type = "wait"; ms = 2000 },
+          [pscustomobject]@{ type = "closeDialog"; name = "Aviso inutil post-busqueda; sin aviso no hace nada" },
+          [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila TIENDA (la ultima)" },
+          [pscustomobject]@{ type = "wait"; ms = 800 },
+          [pscustomobject]@{ type = "screenshot"; name = "Articulo cargado por EAN" }
+        )
+      }
+    }
+    if (@($steps).Count -eq 0) { $steps = @($Config.desktop.steps) }
+  }
+  if (@($steps).Count -eq 0) { throw "$ActionMode steps are not configured in config.local.json" }
   return $steps
 }
 
@@ -737,6 +773,46 @@ try {
         if ($shouldSend) { Send-StepKeys ([string]$step.keys) }
       }
       "uiaDump" { $values["uiaDumpFile"] = Write-UiaDump $OutDir }
+      "uiaClickAt" {
+        # Clic en un punto definido por un DESPLAZAMIENTO desde un control
+        # ancla (por clase; p. ej. la barra de herramientas, que es única y
+        # fija): sobrevive a que la ventana se mueva o cambie de monitor.
+        # Si en ese punto hay un control hijo con HWND, el clic va por
+        # MENSAJES dentro de ese control (el canal fiable con esta app,
+        # inmune a UIPI); si no, clic de ratón de verdad.
+        $anchor = $null
+        $root = Get-UiaRoot
+        $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($cand in $all) {
+          if (([string]$cand.Current.ClassName) -match [string]$step.anchorClassRegex) { $anchor = $cand; break }
+        }
+        if (-not $anchor) { throw "uiaClickAt: ancla no encontrada (classRegex '$($step.anchorClassRegex)')" }
+        $ar = $anchor.Current.BoundingRectangle
+        $px = [int]($ar.X + [int]$step.dx)
+        $py = [int]($ar.Y + [int]$step.dy)
+        $hit = $null
+        $hitArea = [double]::MaxValue
+        foreach ($cand in $all) {
+          $r = $cand.Current.BoundingRectangle
+          if ($r.Width -le 0 -or $r.Height -le 0) { continue }
+          if ($px -lt $r.X -or $px -gt ($r.X + $r.Width) -or $py -lt $r.Y -or $py -gt ($r.Y + $r.Height)) { continue }
+          $area = $r.Width * $r.Height
+          if ($area -lt $hitArea) { $hit = $cand; $hitArea = $area }
+        }
+        $hwndAt = if ($hit) { Get-UiaHwnd $hit } else { [IntPtr]::Zero }
+        if ($hwndAt -ne [IntPtr]::Zero) {
+          $hr = $hit.Current.BoundingRectangle
+          $lx = [int]($px - $hr.X)
+          $ly = [int]($py - $hr.Y)
+          $ptAt = [IntPtr](($ly -shl 16) -bor ($lx -band 0xFFFF))
+          [Win32]::SendMessage($hwndAt, 0x0201, [IntPtr]1, $ptAt) | Out-Null   # WM_LBUTTONDOWN
+          Start-Sleep -Milliseconds 60
+          [Win32]::SendMessage($hwndAt, 0x0202, [IntPtr]0, $ptAt) | Out-Null   # WM_LBUTTONUP
+        } else {
+          Click-Point $px $py
+        }
+        Start-Sleep -Milliseconds 150
+      }
       "uiaFocus" {
         $el = Resolve-UiaTarget $step
         if (-not $el) { throw "uiaFocus: no se encontro el control (label='$($step.label)' id='$($step.automationId)')" }
