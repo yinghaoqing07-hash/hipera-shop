@@ -776,14 +776,58 @@ function Assert-SaveIsLast($Steps, [string]$ActionMode) {
   return ,$out
 }
 
+function Get-DefaultBloqApplySteps {
+  # config.local.json se conserva durante las actualizaciones. Las tiendas
+  # instaladas antes de bloqApply no tienen esta propiedad y PowerShell 5.1
+  # convierte @($null) en un array de un elemento: el flujo parecia ejecutado
+  # pero solo registraba un paso vacio, no alternaba ni guardaba nada.
+  return @(
+    [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
+    [pscustomobject]@{
+      type = "uiaToggleIf"
+      label = "Bloq.Venta"
+      self = $true
+      if = "toggleBloqVenta"
+      name = "Alternar Bloq.Venta solo si el estado actual difiere"
+    },
+    [pscustomobject]@{ type = "wait"; ms = 400 },
+    [pscustomobject]@{
+      type = "hotkey"
+      keys = "^s"
+      name = "Guardar Bloq.Venta"
+    },
+    [pscustomobject]@{ type = "wait"; ms = 900 },
+    [pscustomobject]@{
+      type = "closeDialog"
+      keys = "{ENTER}"
+      name = "Aceptar aviso de guardado si aparece"
+    },
+    [pscustomobject]@{ type = "wait"; ms = 500 },
+    [pscustomobject]@{ type = "screenshot"; name = "Bloq.Venta guardado" }
+  )
+}
+
 function Get-Steps($Config, [string]$ActionMode) {
   if ($ActionMode -eq "clear") { $steps = @($Config.desktop.clearSteps) }
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
   elseif ($ActionMode -eq "priceApply") { $steps = Assert-SaveIsLast @($Config.desktop.priceApplySteps) "priceApply" }
   elseif ($ActionMode -eq "bloqApply") {
-    $steps = @($Config.desktop.bloqApplySteps)
-    if ($steps.Count -eq 0) {
-      throw "bloqApplySteps sin configurar en config.local.json: copia la plantilla de config.example.json (marcar/desmarcar Bloq.Venta + Ctrl+S)."
+    $steps = @()
+    if ($Config.desktop.PSObject.Properties.Name -contains "bloqApplySteps") {
+      $steps = @($Config.desktop.bloqApplySteps) | Where-Object {
+        $null -ne $_ -and
+        ($_.PSObject.Properties.Name -contains "type") -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.type)
+      }
+    }
+
+    $hasToggle = @($steps | Where-Object { $_.type -eq "uiaToggleIf" }).Count -gt 0
+    $hasSave = @($steps | Where-Object {
+      ($_.type -eq "hotkey" -or $_.type -eq "key") -and (([string]$_.keys) -match "\^s")
+    }).Count -gt 0
+    if (@($steps).Count -eq 0 -or -not $hasToggle -or -not $hasSave) {
+      Add-WarningText "bloqApplySteps ausente o incompleto; se usa el flujo interno seguro (alternar Bloq.Venta + Ctrl+S)"
+      $steps = @(Get-DefaultBloqApplySteps)
     }
     $steps = Assert-SaveIsLast $steps "bloqApply"
   }
