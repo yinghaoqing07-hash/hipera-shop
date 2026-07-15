@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
-import { dirname as pathDirname, join as pathJoin } from 'node:path';
+import { basename as pathBasename, dirname as pathDirname, join as pathJoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderPanelPage } from './panelPage.js';
 
@@ -79,6 +79,8 @@ export function startPanel(config, logger, hooks) {
       }
       if (req.method === 'GET' && req.url.startsWith('/file/')) {
         // El id llega con ?s=<seq> para saltar la caché del navegador.
+        // Con ?dl=1 el archivo se DESCARGA con su nombre real (los volcados
+        // .html "para mandar a Claude" no se pueden leer en el lector).
         const filePath = hooks.file ? hooks.file(req.url.slice(6).split('?')[0]) : null;
         if (!filePath) { res.writeHead(404); res.end(); return; }
         const low = filePath.toLowerCase();
@@ -86,7 +88,14 @@ export function startPanel(config, logger, hooks) {
           : low.endsWith('.png') ? 'image/png'
           : low.endsWith('.csv') ? 'text/csv; charset=utf-8'
           : 'text/plain; charset=utf-8';
-        res.writeHead(200, { 'content-type': tipo });
+        const cabeceras = { 'content-type': tipo };
+        let descarga = false;
+        try { descarga = new URL(req.url, 'http://x').searchParams.get('dl') === '1'; } catch { /* sin query */ }
+        if (descarga) {
+          cabeceras['content-type'] = 'application/octet-stream';
+          cabeceras['content-disposition'] = `attachment; filename="${pathBasename(filePath).replace(/"/g, '')}"`;
+        }
+        res.writeHead(200, cabeceras);
         fs.createReadStream(filePath).pipe(res);
         return;
       }

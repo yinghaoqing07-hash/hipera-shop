@@ -2323,7 +2323,7 @@ if (config.panel?.enabled !== false) {
       // Al cliente no se le manda la ruta del fichero de la captura, solo un
       // booleano; la imagen se sirve por /file/<id> (hook file de abajo).
       const messages = chatLog.filter((m) => m.seq > since).slice(-100)
-        .map(({ photo, doc, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo), doc: Boolean(doc) }));
+        .map(({ photo, doc, tgMessageId, ...rest }) => ({ ...rest, photo: Boolean(photo), doc: Boolean(doc), docName: doc ? path.basename(String(doc)) : undefined }));
       // Viaja con el poll del chat (cada 2,5 s) para que el panel enseñe EN
       // VIVO el paso que corre ahora mismo. Dos fuentes: el fichero que
       // escribe el PS de escritorio y el estado en memoria de los flujos
