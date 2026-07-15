@@ -354,18 +354,36 @@ function pintarBurbuja(m) {
     chips.appendChild(chip);
   }
   if (m.doc) {
-    const chip = document.createElement('span');
-    chip.className = 'chipLeer';
-    chip.textContent = '打开文件';
-    chip.onclick = async () => {
-      try {
-        const r = await fetch('/file/' + m.id);
-        if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
-        const crudo = await r.text();
-        abrirLector(sinEmoji(m.text).slice(0, 40), csvLegible(crudo) || crudo);
-      } catch { aviso('连不上 BOT'); }
+    const nombreDoc = String(m.docName || '');
+    // Los volcados .html/.zip no se pueden leer en el lector: para esos
+    // solo tiene sentido descargarlos (p. ej. para mandarlos a Claude).
+    const esLegible = !nombreDoc || /\.(csv|txt|log|json)$/i.test(nombreDoc);
+    if (esLegible) {
+      const chip = document.createElement('span');
+      chip.className = 'chipLeer';
+      chip.textContent = '打开文件';
+      chip.onclick = async () => {
+        try {
+          const r = await fetch('/file/' + m.id);
+          if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
+          const crudo = await r.text();
+          abrirLector(sinEmoji(m.text).slice(0, 40), csvLegible(crudo) || crudo);
+        } catch { aviso('连不上 BOT'); }
+      };
+      chips.appendChild(chip);
+    }
+    const chipD = document.createElement('span');
+    chipD.className = 'chipLeer';
+    chipD.textContent = '下载';
+    chipD.onclick = () => {
+      const a = document.createElement('a');
+      a.href = '/file/' + m.id + '?dl=1&s=' + m.seq;
+      a.download = nombreDoc || 'archivo';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     };
-    chips.appendChild(chip);
+    chips.appendChild(chipD);
   }
   if (m.photo && !(m.buttons && m.buttons.length)) {
     // Las capturas no se incrustan en el chat: se abren en el lector. Las de
