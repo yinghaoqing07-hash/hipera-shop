@@ -1247,6 +1247,7 @@ async function fillNombre(page, name) {
     return true;
   });
   if (!focused) return false;
+  if (!(await focoEnCampo(page))) return false;
   await page.keyboard.down('Control');
   await page.keyboard.press('KeyA');
   await page.keyboard.up('Control');
@@ -1524,6 +1525,10 @@ async function searchAndSelect(page, term, anchorCode, timeoutMs, settleMs, requ
 // Backspace; volver a teclear reemplaza cualquier desplegable abierto.
 async function clearArticleEditor(page) {
   await focusArticleEditor(page);
+  // Ctrl+A SOLO con el foco de verdad dentro de un campo: suelto sobre la
+  // página selecciona el documento ENTERO (la página "toda azul" que vio
+  // el dueño). Si el editor no cogió el foco, no hay nada que limpiar.
+  if (!(await focoEnCampo(page))) return;
   await page.keyboard.down('Control');
   await page.keyboard.press('KeyA');
   await page.keyboard.up('Control');
@@ -1531,10 +1536,25 @@ async function clearArticleEditor(page) {
   await sleep(150);
 }
 
+// ¿El foco está en un campo de texto editable?
+async function focoEnCampo(page) {
+  try {
+    return await page.evaluate(() => {
+      const el = document.activeElement;
+      return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+    });
+  } catch {
+    return false;
+  }
+}
+
 // Captura de pantalla del navegador (mejor que la de PowerShell). Devuelve
 // la ruta del PNG o null.
 async function screenshot(page, config, tag) {
   try {
+    // Deshacer cualquier selección colgada (un Ctrl+A desviado dejaba la
+    // página entera en azul, también en la captura y para el usuario).
+    try { await page.evaluate(() => { const s = window.getSelection(); if (s) s.removeAllRanges(); }); } catch { /* noop */ }
     const dir = path.resolve(config.__toolRoot || '.', 'screenshots');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `weborder-${String(tag).replace(/[^\w.-]+/g, '_')}-${Date.now()}.png`);
