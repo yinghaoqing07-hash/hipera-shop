@@ -12,6 +12,7 @@ import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, l
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
+import { ActiveConversationStore, classifyShortDecision } from './activeConversation.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
@@ -46,6 +47,7 @@ const logger = createLogger(config.logsDir);
 const memoryStore = new MemoryStore(config.memory, logger);
 const operationLedger = new OperationLedger(config.operationLedger, logger);
 const scheduledTasks = new ScheduledTaskStore(config.scheduledTasks, logger);
+const activeConversations = new ActiveConversationStore(path.resolve(config.logsDir || '.', 'active-conversations.json'));
 let memoryLearnQueue = Promise.resolve();
 const replyContextByChat = new Map();
 const supplierIndex = loadSupplierIndex(config.supplierCsv);
@@ -232,6 +234,7 @@ async function handleUpdate(update) {
   // natural=true cuando la dueña escribe en lenguaje natural (no un
   // comando /): en ese modo las respuestas se redactan SIN plantillas.
   replyContextByChat.set(String(chatId), { text, at: Date.now(), natural: !String(text || '').trim().startsWith('/') });
+  if (await maybeHandleActiveDecision(chatId, text)) return;
   const memoryCommand = parseMemoryCommand(text);
   if (memoryCommand) {
     await handleMemoryCommand(chatId, memoryCommand);
@@ -455,13 +458,15 @@ function formatCommandList() {
 // Datos del día para el asistente: promociones vigentes (código, precios,
 // caducidad) y últimos pedidos rellenados. Van en texto plano dentro del
 // system prompt para que accion=responder conteste con cifras REALES.
-function buildAssistDatos(query = '') {
+function buildAssistDatos(query = '', chatId = '') {
   const localNow = new Intl.DateTimeFormat('sv-SE', { timeZone: config.scheduledTasks?.timeZone || 'Europe/Madrid', dateStyle: 'short', timeStyle: 'short', hour12: false }).format(new Date());
   const partes = ['FECHA Y HORA LOCAL: ' + localNow, 'Fecha de hoy: ' + todayString(config)];
   const memoryContext = memoryStore.buildContext(query);
   if (memoryContext) partes.push(memoryContext);
   const operationContext = operationLedger.buildContext();
   if (operationContext) partes.push(operationContext);
+  const activeContext = activeConversations.formatContext(chatId);
+  if (activeContext) partes.push(activeContext);
   try {
     const latest = findLatestPromotionsCsv(config);
     if (latest) {
@@ -573,7 +578,7 @@ async function humanizarError(contexto, textoTecnico) {
 async function handleFreeText(chatId, text) {
   let intent;
   try {
-    intent = await llmRouteIntent(text, config, logger, { history: assistHistory(text), datos: buildAssistDatos(text) });
+    intent = await llmRouteIntent(text, config, logger, { history: assistHistory(text), datos: buildAssistDatos(text, chatId) });
   } catch (error) {
     logger.warn('llm intent failed', { error: error.message });
     await telegram.sendMessage(chatId, formatTemplateHelp());
@@ -708,7 +713,12 @@ async function handleCallback(callback) {
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
-  if (data.startsWith('cancel:')) { sessions.delete(data.slice(7)); await telegram.answerCallbackQuery(callback.id, '已取消'); await telegram.sendMessage(chatId, '已取消，不会执行任何桌面操作。'); return; }
+  if (data.startsWith('cancel:')) {
+    const id = data.slice(7);
+    sessions.delete(id);
+    activeConversations.clearMatchingSession(chatId, id);
+    await telegram.answerCallbackQuery(callback.id, '已取消'); await telegram.sendMessage(chatId, '已取消，不会执行任何桌面操作。', { __skipAI: true }); return;
+  }
   if (data.startsWith('todo:')) { const label = futureActionLabel(data.slice(5)); await telegram.answerCallbackQuery(callback.id, `${label}还没实现`); await telegram.sendMessage(chatId, `${label}：按钮入口已预留，但现在还不会执行任何桌面操作。`); return; }
   await telegram.answerCallbackQuery(callback.id, '这个按钮已经失效');
 }
@@ -734,7 +744,8 @@ async function handleOrderDraft(chatId, text) {
     await resolveNextNameLine(chatId, id);
     return;
   }
-  await telegram.sendMessage(chatId, formatOrderDraft(draft), makeOrderDraftButtons(id));
+  rememberOrderConfirmation(chatId, id, draft);
+  await telegram.sendMessage(chatId, formatOrderDraft(draft), { ...makeOrderDraftButtons(id), __skipAI: true });
 }
 
 // Resuelve la SIGUIENTE línea por nombre pendiente: busca en la web y manda
@@ -745,7 +756,8 @@ async function resolveNextNameLine(chatId, id) {
   if (!session?.orderDraft) return;
   const idx = session.orderDraft.items.findIndex(isPendingNameItem);
   if (idx === -1) {
-    await telegram.sendMessage(chatId, `都选好了：\n${formatOrderDraft(session.orderDraft)}`, makeOrderDraftButtons(id));
+    rememberOrderConfirmation(chatId, id, session.orderDraft);
+    await telegram.sendMessage(chatId, `都选好了：\n${formatOrderDraft(session.orderDraft)}`, { ...makeOrderDraftButtons(id), __skipAI: true });
     return;
   }
   const item = session.orderDraft.items[idx];
@@ -1447,7 +1459,8 @@ async function handleTallyGo(chatId, callbackId, id) {
   // Mismo camino que /pedido_nuevo: enriquecer + confirmación + 确认填入.
   const { draft: enriched } = enrichOrderItems(draft, storeIndex, supplierIndex);
   const draftId = saveSession({ orderDraft: enriched });
-  await telegram.sendMessage(chatId, formatOrderDraft(enriched), makeOrderDraftButtons(draftId));
+  rememberOrderConfirmation(chatId, draftId, enriched);
+  await telegram.sendMessage(chatId, formatOrderDraft(enriched), { ...makeOrderDraftButtons(draftId), __skipAI: true });
 }
 
 // /promociones [fecha] — lee Promociones, filtra las no caducadas y abre
@@ -1506,31 +1519,63 @@ async function handleFruitAdd(chatId, text) {
 }
 
 async function handleOrderApply(chatId, callbackId, id) {
-  const session = sessions.get(id);
+  let session = sessions.get(id);
+  const persisted = activeConversations.get(chatId);
+  const persistedMatches = persisted?.kind === 'order_apply' && String(persisted.sessionId) === String(id);
+  if (!session?.orderDraft && persistedMatches) {
+    session = { orderDraft: persisted.orderDraft, createdAt: Date.now() };
+    sessions.set(id, session);
+  }
   if (!session?.orderDraft) {
-    await telegram.answerCallbackQuery(callbackId, '记录已过期');
+    if (callbackId) await telegram.answerCallbackQuery(callbackId, '记录已过期');
     await telegram.sendMessage(chatId, '这条订单记录已过期，请重新发送 /pedido_nuevo。');
     return;
   }
-  await telegram.answerCallbackQuery(callbackId, '开始填入');
+  if (callbackId) await telegram.answerCallbackQuery(callbackId, '开始填入');
+  if (!persistedMatches) {
+    rememberOrderConfirmation(chatId, id, session.orderDraft);
+  }
+  const currentTask = activeConversations.get(chatId);
+  if (currentTask?.status === 'running') {
+    await telegram.sendMessage(chatId, '这张订单正在填入，请等当前操作完成，别重复启动。', { __skipAI: true });
+    return;
+  }
+  activeConversations.update(chatId, { status: 'running', failure: '' });
 
   // Pedidos es una página web: si webOrder está activo, conducimos el
   // navegador (DOM) en vez de la app de escritorio por coordenadas.
   if (config.webOrder?.enabled) {
-    const result = await applyOrderWeb(session.orderDraft, config, logger);
+    let result;
+    try {
+      result = await applyOrderWeb(session.orderDraft, config, logger);
+    } catch (error) {
+      const failure = `unexpected: ${error.message}`;
+      logger.error('order apply crashed', { error: error.stack || error.message });
+      activeConversations.update(chatId, { status: 'awaiting_retry', failure });
+      await telegram.sendMessage(
+        chatId,
+        `订单填入意外中断：${error.message}\n\n订单草稿还在。可以直接回复“重试”重新填入，或回复“取消”。`,
+        { __skipAI: true }
+      );
+      return;
+    }
     // Registrar el pedido rellenado para la lista de comprobación del día
     // de llegada (solo si todas las líneas entraron bien).
     if (result.ok) recordFilledOrder(config, session.orderDraft, logger);
+    if (result.ok) activeConversations.clearMatchingSession(chatId, id);
+    else activeConversations.update(chatId, {
+      status: 'awaiting_retry', failure: `${result.stage || '?'}: ${result.error || '未知错误'}`
+    });
     const text = result.ok
       ? (result.message || '订单填入：已执行。请检查 Pedidos 页面；这一步还没有点 Guardar，也没有点 Enviar Pedido。')
-      : await humanizarError('填入订单', `订单填入失败（${result.stage || '?'}）：\n${result.error}`);
+      : `订单填入失败（${result.stage || '?'}）：\n${result.error || '未知错误'}\n\n可以直接回复“重试”重新填入同一张订单，或回复“取消”。`;
     // Tras un llenado correcto se ofrece TERMINAR el pedido desde aquí:
     // Guardar y después Enviar, cada uno con su propio botón de
     // confirmación (los únicos caminos del bot que pulsan esos botones).
-    let options = {};
+    let options = { __skipAI: true };
     if (result.ok) {
       const sendId = saveSession({ orderSend: { orderName: session.orderDraft.orderName } });
-      options = { reply_markup: { inline_keyboard: [[
+      options = { __skipAI: true, reply_markup: { inline_keyboard: [[
         { text: '点 Guardar 保存', callback_data: `osave:${sendId}` },
         { text: '先不动', callback_data: `cancel:${sendId}` }
       ]] } };
@@ -1549,11 +1594,28 @@ async function handleOrderApply(chatId, callbackId, id) {
     return;
   }
 
-  const result = await applyOrderDesktop(session.orderDraft, config, logger);
+  let result;
+  try {
+    result = await applyOrderDesktop(session.orderDraft, config, logger);
+  } catch (error) {
+    const failure = `unexpected: ${error.message}`;
+    logger.error('desktop order apply crashed', { error: error.stack || error.message });
+    activeConversations.update(chatId, { status: 'awaiting_retry', failure });
+    await telegram.sendMessage(
+      chatId,
+      `订单填入意外中断：${error.message}\n\n订单草稿还在。可以直接回复“重试”重新填入，或回复“取消”。`,
+      { __skipAI: true }
+    );
+    return;
+  }
   const text = result.status === 'ok'
     ? '订单填入：已执行。请看截图确认订单名、商品和数量；程序没有点 Guardar，也没有点 Enviar Pedido。'
-    : `订单填入失败：\n${result.error || result.reason || '未知错误'}`;
-  await sendWithOptionalScreenshot(chatId, result, text);
+    : `订单填入失败：\n${result.error || result.reason || '未知错误'}\n\n可以直接回复“重试”重新填入同一张订单，或回复“取消”。`;
+  await sendWithOptionalScreenshot(chatId, result, text, { __skipAI: true });
+  if (result.status === 'ok') activeConversations.clearMatchingSession(chatId, id);
+  else activeConversations.update(chatId, {
+    status: 'awaiting_retry', failure: result.error || result.reason || '未知错误'
+  });
 }
 
 // Guardar del pedido web recién rellenado, SOLO desde su botón de
@@ -2223,6 +2285,51 @@ function saveSession(session) {
   sessions.set(id, { ...session, createdAt: Date.now() });
   for (const [key, value] of sessions) if (Date.now() - value.createdAt > 30 * 60 * 1000) sessions.delete(key);
   return id;
+}
+
+function rememberOrderConfirmation(chatId, sessionId, orderDraft, status = 'awaiting_confirmation', failure = '') {
+  activeConversations.set(chatId, {
+    kind: 'order_apply',
+    sessionId,
+    orderDraft,
+    status,
+    failure
+  });
+}
+
+async function maybeHandleActiveDecision(chatId, text) {
+  const decision = classifyShortDecision(text);
+  if (!decision) return false;
+  const active = activeConversations.get(chatId);
+  if (!active || active.kind !== 'order_apply') return false;
+
+  if (decision === 'cancel') {
+    sessions.delete(active.sessionId);
+    activeConversations.clear(chatId);
+    await telegram.sendMessage(chatId, `已取消订单「${active.orderDraft?.orderName || ''}」，不会填入或保存。`, { __skipAI: true });
+    return true;
+  }
+  if (active.status === 'running') {
+    await telegram.sendMessage(chatId, '这张订单正在填入，请等当前操作完成，别重复启动。', { __skipAI: true });
+    return true;
+  }
+  if (!active.orderDraft?.items?.length) {
+    activeConversations.clear(chatId);
+    await telegram.sendMessage(chatId, '这张待处理订单没有商品，已经清掉。请重新生成点货单。', { __skipAI: true });
+    return true;
+  }
+  if (!sessions.has(active.sessionId)) {
+    sessions.set(active.sessionId, { orderDraft: active.orderDraft, createdAt: Date.now() });
+  }
+  const count = active.orderDraft.items.length;
+  const action = active.status === 'awaiting_retry' ? '重新尝试填入' : '开始填入';
+  await telegram.sendMessage(
+    chatId,
+    `收到，${action}订单「${active.orderDraft.orderName}」的 ${count} 条商品。完成后会发截图；不会点 Guardar，也不会点 Enviar Pedido。`,
+    { __skipAI: true }
+  );
+  await handleOrderApply(chatId, '', active.sessionId);
+  return true;
 }
 
 function makeRepeatItem(query) { return { raw: query, codigo: query, ean: '', nombre: '', precio: { mode: 'auto', raw: 'auto' }, margen: { mode: 'missing', raw: '' }, desbloquear: true, etiqueta: false, nota: 'button repeat' }; }

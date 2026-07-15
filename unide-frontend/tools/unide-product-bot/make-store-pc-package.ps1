@@ -37,7 +37,45 @@ Get-ChildItem -LiteralPath $root -Force | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
 }
 
-Compress-Archive -LiteralPath $dest -DestinationPath $zip -Force
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+# Compress-Archive can emit Windows-style backslashes in entry names. Those
+# archives extract incorrectly with some updater/runtime combinations, so add
+# every file explicitly with the ZIP-standard forward slash separator.
+$zipStream = $null
+$archive = $null
+try {
+  $zipStream = [System.IO.File]::Open($zip, [System.IO.FileMode]::CreateNew)
+  $archive = New-Object System.IO.Compression.ZipArchive(
+    $zipStream,
+    [System.IO.Compression.ZipArchiveMode]::Create,
+    $false
+  )
+
+  Get-ChildItem -LiteralPath $dest -File -Recurse -Force | ForEach-Object {
+    $entryName = $_.FullName.Substring($temp.Length + 1).Replace("\", "/")
+    $entry = $archive.CreateEntry(
+      $entryName,
+      [System.IO.Compression.CompressionLevel]::Optimal
+    )
+    $entry.LastWriteTime = $_.LastWriteTime
+
+    $inputStream = $null
+    $outputStream = $null
+    try {
+      $inputStream = $_.OpenRead()
+      $outputStream = $entry.Open()
+      $inputStream.CopyTo($outputStream)
+    } finally {
+      if ($outputStream) { $outputStream.Dispose() }
+      if ($inputStream) { $inputStream.Dispose() }
+    }
+  }
+} finally {
+  if ($archive) { $archive.Dispose() }
+  if ($zipStream) { $zipStream.Dispose() }
+}
 Remove-Item -LiteralPath $temp -Recurse -Force
 
 Write-Host "Created package:"

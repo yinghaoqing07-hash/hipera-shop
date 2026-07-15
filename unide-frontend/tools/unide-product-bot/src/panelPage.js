@@ -109,6 +109,18 @@ export function renderPanelPage(version) {
   }
   .mia .burbuja { color: #cfe9f7; text-align: right; }
   .burbuja.actualizada { animation: burbujaActualizada 460ms var(--motion-ease); }
+  .textoMensaje.escribiendo::after {
+    content: ''; display: inline-block; width: 1px; height: 1.05em;
+    margin-left: 4px; vertical-align: -.12em; background: #38bdf8;
+    animation: cursorEscritura 620ms steps(1, end) infinite;
+  }
+  @keyframes cursorEscritura {
+    0%, 46% { opacity: .95; }
+    47%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .textoMensaje.escribiendo::after { display: none; }
+  }
   .burbuja.esperando { display: inline-flex; align-items: center; gap: 10px; color: #7dd3fc; }
   .esperandoTexto { font-size: 11px; letter-spacing: .2em; color: #7c91a6; }
   .esperandoPuntos { display: inline-flex; gap: 5px; }
@@ -464,10 +476,28 @@ function csvLegible(texto) {
   }
   return L.join('\\n');
 }
-function pintarBurbuja(m) {
+function escribirTexto(el, texto) {
+  const contenido = String(texto || '');
+  const reducir = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!contenido || reducir) { el.textContent = contenido; return; }
+  el.textContent = '';
+  el.classList.add('escribiendo');
+  const duracion = Math.min(1050, Math.max(260, contenido.length * 13));
+  const inicio = performance.now();
+  const avanzar = (ahora) => {
+    const progreso = Math.min(1, (ahora - inicio) / duracion);
+    const visibles = Math.min(contenido.length, Math.max(1, Math.ceil(progreso * contenido.length)));
+    el.textContent = contenido.slice(0, visibles);
+    if (visibles < contenido.length) requestAnimationFrame(avanzar);
+    else el.classList.remove('escribiendo');
+  };
+  requestAnimationFrame(avanzar);
+}
+function pintarBurbuja(m, { escribir = false } = {}) {
   const b = document.createElement('div');
   b.className = 'burbuja';
   const cuerpo = document.createElement('div');
+  cuerpo.className = 'textoMensaje';
   // Los mensajes de teclado NUNCA enseñan su plantilla en el chat: frase de
   // la IA si llegó (resumen), y si no una fija — las instrucciones completas
   // viven junto a los botones, en la columna izquierda.
@@ -476,13 +506,14 @@ function pintarBurbuja(m) {
   const tecladoLargo = esTeclado && (textoBruto.length > 30 || textoBruto.split('\\n').length > 1);
   const completo = sinEmoji(m.resumen ? m.resumen : (tecladoLargo ? '操作面板已在左侧打开，按提示点就行。' : textoBruto));
   const esLargo = completo.length > 380 || completo.split('\\n').length > 8;
+  let textoVisible = completo;
   if (esLargo) {
     // Los informes largos no llenan el chat: recorte + "展开" en el lector.
     const lineas = completo.split('\\n').slice(0, 4).join('\\n');
-    cuerpo.textContent = (lineas.length > 380 ? lineas.slice(0, 380) : lineas) + ' …';
-  } else {
-    cuerpo.textContent = completo;
+    textoVisible = (lineas.length > 380 ? lineas.slice(0, 380) : lineas) + ' …';
   }
+  if (escribir) escribirTexto(cuerpo, textoVisible);
+  else cuerpo.textContent = textoVisible;
   b.appendChild(cuerpo);
   const chips = document.createElement('div');
   if (esLargo) {
@@ -753,7 +784,7 @@ async function pollChat() {
         }
         const fila = document.createElement('div');
         fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia') + (!cargaInicial ? ' entrando' : '');
-        fila.appendChild(pintarBurbuja(m));
+        fila.appendChild(pintarBurbuja(m, { escribir: !cargaInicial && m.from === 'bot' }));
         caja.appendChild(fila);
         filas.set(m.id, fila);
         nuevos = true;
