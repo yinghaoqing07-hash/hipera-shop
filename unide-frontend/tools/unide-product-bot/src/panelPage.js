@@ -11,6 +11,12 @@ export function renderPanelPage(version) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JARVIS</title>
 <style>
+  :root {
+    --motion-fast: 180ms;
+    --motion-base: 260ms;
+    --motion-slow: 360ms;
+    --motion-ease: cubic-bezier(.22, 1, .36, 1);
+  }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
@@ -22,6 +28,7 @@ export function renderPanelPage(version) {
   header {
     display: flex; justify-content: space-between; align-items: center;
     padding: 18px 26px; font-size: 12px; letter-spacing: .18em; color: #76879a;
+    animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
   }
   #logo { color: #7dd3fc; font-weight: 600; }
   #estado { display: flex; gap: 18px; align-items: center; }
@@ -38,8 +45,13 @@ export function renderPanelPage(version) {
   #vivoEsc { margin-left: 16px; color: #7dd3fc; }
   #vivoEsc:empty { display: none; }
   #vivoEsc.err { color: #f87171; }
+  #vivoEsc.cambio { animation: destelloEstado 520ms var(--motion-ease); }
   @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-  main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 24px 24px; min-height: 0; }
+  main {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    padding: 0 24px 24px; min-height: 0;
+    animation: subirSuave var(--motion-slow) var(--motion-ease) 70ms both;
+  }
   #zona {
     flex: 1; min-height: 0; width: 100%;
     display: grid; grid-template-columns: minmax(320px, 470px) minmax(0, 1fr) minmax(300px, 400px);
@@ -85,30 +97,52 @@ export function renderPanelPage(version) {
     scrollbar-color: rgba(125,211,252,.2) transparent;
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
   }
-  .msg { display: flex; margin: 13px 0; }
-  .msg.mia { justify-content: flex-end; }
+  .msg { display: flex; margin: 13px 0; transform-origin: left center; }
+  .msg.mia { justify-content: flex-end; transform-origin: right center; }
+  .msg.entrando { animation: mensajeEntra var(--motion-base) var(--motion-ease) both; }
+  .msg.mia.entrando { animation-name: mensajePropioEntra; }
+  .msg.saliendo { animation: mensajeSale var(--motion-fast) ease-in both; pointer-events: none; }
   .burbuja {
     max-width: 84%;
     font-size: 15.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
     color: #b4c2cf;
   }
   .mia .burbuja { color: #cfe9f7; text-align: right; }
+  .burbuja.actualizada { animation: burbujaActualizada 460ms var(--motion-ease); }
+  .burbuja.esperando { display: inline-flex; align-items: center; gap: 10px; color: #7dd3fc; }
+  .esperandoTexto { font-size: 11px; letter-spacing: .2em; color: #7c91a6; }
+  .esperandoPuntos { display: inline-flex; gap: 5px; }
+  .esperandoPuntos i {
+    width: 5px; height: 5px; border-radius: 50%; background: #38bdf8;
+    animation: puntoPensando 1.05s ease-in-out infinite;
+  }
+  .esperandoPuntos i:nth-child(2) { animation-delay: 120ms; }
+  .esperandoPuntos i:nth-child(3) { animation-delay: 240ms; }
   .burbuja .meta { display: block; font-size: 10.5px; color: #53657a; letter-spacing: .14em; margin-top: 4px; }
   .chipTeclado, .chipLeer {
     display: inline-flex; align-items: center; margin: 8px 8px 0 0;
     background: none; border: 1px solid rgba(56,189,248,.4); color: #97c9e3;
     border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer; letter-spacing: .12em;
+    transition: transform var(--motion-fast) var(--motion-ease), border-color var(--motion-fast), color var(--motion-fast), background var(--motion-fast);
   }
-  .chipTeclado:hover, .chipLeer:hover { border-color: rgba(125,211,252,.6); color: #d5ecf8; }
+  .chipTeclado:hover, .chipLeer:hover { border-color: rgba(125,211,252,.6); color: #d5ecf8; background: rgba(56,189,248,.06); transform: translateY(-1px); }
+  .chipTeclado:active, .chipLeer:active { transform: translateY(0) scale(.97); }
   /* --- cajón lateral: donde viven los teclados interactivos --- */
   /* Nada de paneles que se deslizan por encima: el cajón y el lector viven
      en las columnas laterales, que siempre están ahí vacías — el contenido
      aparece en el hueco y el chat no se mueve ni se tapa. */
   #cajon {
     grid-column: 1; grid-row: 1;
-    min-height: 0; display: none; flex-direction: column;
+    min-height: 0; display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: translateX(-14px);
+    transition: opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease), visibility 0s linear var(--motion-base);
   }
-  #cajon.abierto { display: flex; }
+  #cajon.abierto {
+    opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0);
+    transition-delay: 0s;
+  }
+  #cajon .contenidoNuevo { animation: contenidoLateral var(--motion-base) var(--motion-ease) both; }
   #cajon .cab {
     display: flex; justify-content: flex-end; align-items: center;
     padding: 0 6px 2px; font-size: 11px; color: #76879a;
@@ -131,9 +165,16 @@ export function renderPanelPage(version) {
   #cajon .filaB button:active { transform: scale(.97); }
   #lector {
     grid-column: 3; grid-row: 1;
-    min-height: 0; display: none; flex-direction: column;
+    min-height: 0; display: flex; flex-direction: column;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: translateX(14px);
+    transition: opacity var(--motion-base) var(--motion-ease), transform var(--motion-base) var(--motion-ease), visibility 0s linear var(--motion-base);
   }
-  #lector.abierto { display: flex; }
+  #lector.abierto {
+    opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0);
+    transition-delay: 0s;
+  }
+  #lector .contenidoNuevo { animation: contenidoLateral var(--motion-base) var(--motion-ease) both; }
   #lector .cab {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 0 6px 2px; font-size: 11px; color: #76879a;
@@ -166,6 +207,8 @@ export function renderPanelPage(version) {
     color: #8fa2b5; white-space: pre-wrap; word-break: break-word;
     user-select: text; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
   }
+  #registroLineas > div { transform-origin: right bottom; }
+  #registroLineas > div.lineaNueva { animation: lineaRegistroEntra var(--motion-base) var(--motion-ease) both; }
   #registroLineas .err { color: #f87171; }
   #registroLineas .hora { color: #566b80; margin-right: 8px; }
   #registro.oculto #registroLineas { display: none; }
@@ -177,12 +220,61 @@ export function renderPanelPage(version) {
   /* Plegado, la flecha se queda abajo (donde el dueño la espera). */
   #registro.oculto #registroBtn { margin-top: auto; }
   #aviso {
-    position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
+    position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 8px);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
-    opacity: 0; transition: opacity .35s; pointer-events: none;
+    opacity: 0; transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease); pointer-events: none;
   }
-  #aviso.visible { opacity: .9; }
+  #aviso.visible { opacity: .9; transform: translate(-50%, 0); }
   #ver { position: fixed; right: 16px; bottom: 10px; font-size: 10px; letter-spacing: .12em; color: rgba(125,211,252,.45); pointer-events: none; }
+  @keyframes aparecerSuave {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes subirSuave {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes mensajeEntra {
+    from { opacity: 0; transform: translate(-10px, 5px) scale(.985); }
+    to { opacity: 1; transform: translate(0, 0) scale(1); }
+  }
+  @keyframes mensajePropioEntra {
+    from { opacity: 0; transform: translate(10px, 5px) scale(.985); }
+    to { opacity: 1; transform: translate(0, 0) scale(1); }
+  }
+  @keyframes mensajeSale {
+    to { opacity: 0; transform: translateY(-5px) scale(.98); }
+  }
+  @keyframes burbujaActualizada {
+    0% { opacity: .58; transform: translateY(3px); }
+    45% { color: #d8f2ff; }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes puntoPensando {
+    0%, 70%, 100% { opacity: .25; transform: translateY(0); }
+    35% { opacity: 1; transform: translateY(-3px); }
+  }
+  @keyframes contenidoLateral {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes lineaRegistroEntra {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes destelloEstado {
+    0% { opacity: .35; filter: brightness(.8); }
+    45% { opacity: 1; filter: brightness(1.45); }
+    100% { opacity: 1; filter: brightness(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -265,6 +357,53 @@ libre.addEventListener('keydown', (e) => {
 // panel la va pidiendo (solo lo nuevo, por seq). Lo tecleado aquí llega a
 // Telegram como eco "🖥 …", y lo del móvil aparece aquí solo.
 let chatSeq = 0;
+let cargaInicial = true;
+let pensandoFila = null;
+let pensandoTimer = 0;
+
+function relanzarAnimacion(el, clase) {
+  if (!el) return;
+  el.classList.remove(clase);
+  void el.offsetWidth;
+  el.classList.add(clase);
+}
+function animarContenido(el) {
+  relanzarAnimacion(el, 'contenidoNuevo');
+}
+function mostrarPensando() {
+  if (pensandoFila) return;
+  const caja = document.getElementById('charla');
+  const fila = document.createElement('div');
+  fila.className = 'msg entrando';
+  fila.dataset.transitorio = 'pensando';
+  const b = document.createElement('div');
+  b.className = 'burbuja esperando';
+  const nombre = document.createElement('span');
+  nombre.className = 'esperandoTexto';
+  nombre.textContent = 'JARVIS';
+  const puntos = document.createElement('span');
+  puntos.className = 'esperandoPuntos';
+  for (let i = 0; i < 3; i++) puntos.appendChild(document.createElement('i'));
+  b.appendChild(nombre);
+  b.appendChild(puntos);
+  fila.appendChild(b);
+  caja.appendChild(fila);
+  pensandoFila = fila;
+  caja.scrollTop = caja.scrollHeight;
+  clearTimeout(pensandoTimer);
+  pensandoTimer = setTimeout(() => ocultarPensando(), 120000);
+}
+function ocultarPensando(inmediato = false) {
+  clearTimeout(pensandoTimer);
+  if (!pensandoFila) return;
+  const fila = pensandoFila;
+  pensandoFila = null;
+  if (inmediato) { fila.remove(); return; }
+  fila.classList.remove('entrando');
+  fila.classList.add('saliendo');
+  setTimeout(() => fila.remove(), 190);
+}
+
 const filas = new Map(); // id → elemento .msg (para actualizar botones editados en sitio)
 // El panel es sobrio: los emojis de los mensajes (pensados para Telegram)
 // se filtran solo en la VISUALIZACION; en Telegram y en el registro siguen.
@@ -422,6 +561,8 @@ function abrirLector(titulo, texto, fotoUrl) {
     foto.appendChild(img);
   }
   document.getElementById('lector').classList.add('abierto');
+  animarContenido(document.getElementById('lectorTexto'));
+  animarContenido(foto);
 }
 function cerrarLector() { document.getElementById('lector').classList.remove('abierto'); }
 
@@ -467,6 +608,7 @@ function renderCajon(m) {
     zona.appendChild(f);
   }
   document.getElementById('cajon').classList.add('abierto');
+  animarContenido(document.getElementById('cajonTeclado'));
 }
 function abrirCajon(id) {
   const m = datos.get(id);
@@ -486,6 +628,7 @@ function abrirCajonInicio() {
   document.getElementById('cajonTeclado').style.display = 'none';
   document.getElementById('cajonInicio').style.display = 'block';
   document.getElementById('cajon').classList.add('abierto');
+  animarContenido(document.getElementById('cajonInicio'));
 }
 
 // Mantenimiento desde el panel: actualizar el bot sin tocar ningun script.
@@ -515,11 +658,12 @@ addEventListener('pagehide', () => {
   try { navigator.sendBeacon('/admin', new Blob([JSON.stringify({ accion: 'adios' })], { type: 'application/json' })); } catch { }
 });
 async function pulsar(data) {
+  mostrarPensando();
   try {
     const r = await (await fetch('/callback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }) })).json();
     if (r.toast) aviso(r.toast);
     setTimeout(pollChat, 300);
-  } catch { aviso('连不上 BOT'); }
+  } catch { ocultarPensando(); aviso('连不上 BOT'); }
 }
 function plegarRegistro() {
   const reg = document.getElementById('registro');
@@ -548,7 +692,10 @@ async function pollChat() {
         else if (dl.line.indexOf('listo') >= 0) { if (dl.ageSec < 8) t = dl.line.slice(0, 40); }
         else if (dl.ageSec < 60) t = dl.line.slice(0, 110);
       }
-      vivo.textContent = t;
+      if (vivo.textContent !== t) {
+        vivo.textContent = t;
+        if (t) relanzarAnimacion(vivo, 'cambio');
+      }
       vivo.classList.toggle('err', t.indexOf('ERROR') >= 0);
     }
     const reg = document.getElementById('registro');
@@ -559,10 +706,15 @@ async function pollChat() {
       if (cont && cont.dataset.clave !== clave) {
         cont.dataset.clave = clave;
         const pegado = cont.scrollHeight - cont.scrollTop - cont.clientHeight < 40;
+        const clavesAnteriores = new Set(Array.from(cont.children).map((el) => el.dataset.claveLinea).filter(Boolean));
+        const habiaLineas = cont.children.length > 0;
         cont.textContent = '';
         for (const e of r.liveLog) {
           const div = document.createElement('div');
-          if (String(e.line).indexOf('ERROR') >= 0) div.className = 'err';
+          const claveLinea = String(e.t) + '|' + String(e.line);
+          div.dataset.claveLinea = claveLinea;
+          if (String(e.line).indexOf('ERROR') >= 0) div.classList.add('err');
+          if (habiaLineas && !clavesAnteriores.has(claveLinea)) div.classList.add('lineaNueva');
           const hora = document.createElement('span');
           hora.className = 'hora';
           const d = new Date(e.t);
@@ -580,6 +732,7 @@ async function pollChat() {
       let nuevos = false;
       for (const m of r.messages) {
         chatSeq = Math.max(chatSeq, m.seq);
+        if (m.from === 'bot') ocultarPensando();
         if (m.buttons && m.buttons.length) {
           datos.set(m.id, m);
           if (!cajonCerrados.has(m.id) && (cajonId == null || m.seq >= (datos.get(cajonId)?.seq || 0) || m.id === cajonId)) {
@@ -593,11 +746,13 @@ async function pollChat() {
         if (previa) {
           // Entrada editada (teclado del recuento, etc.): refrescar en sitio.
           const vieja = previa.querySelector('.burbuja');
-          previa.replaceChild(pintarBurbuja(m), vieja);
+          const nueva = pintarBurbuja(m);
+          nueva.classList.add('actualizada');
+          previa.replaceChild(nueva, vieja);
           continue;
         }
         const fila = document.createElement('div');
-        fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia');
+        fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia') + (!cargaInicial ? ' entrando' : '');
         fila.appendChild(pintarBurbuja(m));
         caja.appendChild(fila);
         filas.set(m.id, fila);
@@ -611,16 +766,19 @@ async function pollChat() {
       caja.classList.add('con');
       if (pegado && nuevos) caja.scrollTop = caja.scrollHeight;
     }
+    cargaInicial = false;
   } catch { /* bot apagado: el punto rojo ya lo dice */ }
 }
 pollChat();
 setInterval(pollChat, 2500);
 async function run(cmd) {
+  mostrarPensando();
   try {
     const r = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd }) });
     aviso(r.ok ? '已收到' : '发送失败');
+    if (!r.ok) ocultarPensando();
     setTimeout(pollChat, 350);
-  } catch { aviso('连不上 BOT'); }
+  } catch { ocultarPensando(); aviso('连不上 BOT'); }
 }
 function aviso(txt) {
   const el = document.getElementById('aviso');
