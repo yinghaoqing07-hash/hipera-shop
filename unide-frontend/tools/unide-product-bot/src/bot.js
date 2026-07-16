@@ -18,7 +18,7 @@ import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
-import { getLive, getLiveLog, noteLive, setLive } from './liveStatus.js';
+import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatus.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -2634,7 +2634,8 @@ if (config.panel?.enabled !== false) {
       const vivoPs = desktopLiveLine();
       if (vivoPs) noteLive(vivoPs.line);
       const vivos = [vivoPs, getLive()].filter(Boolean).sort((a, b) => a.ageSec - b.ageSec);
-      return { seq: chatSeq, messages, desktopLive: vivos[0] || null, liveLog: getLiveLog() };
+      const foto = getLiveShot();
+      return { seq: chatSeq, messages, desktopLive: vivos[0] || null, liveLog: getLiveLog(), liveShot: foto ? { at: foto.at, ageSec: foto.ageSec } : null };
     },
     callback: async (data) => {
       const ids = arrivalChatIds();
@@ -2682,6 +2683,7 @@ if (config.panel?.enabled !== false) {
       };
     },
     commandList: () => formatCommandList(),
+    liveShot: () => getLiveShot(),
     // Archivo subido desde el panel: se guarda en local y se enruta como si
     // hubiera llegado por Telegram. Hoy lo usa /diagnostico_productos.
     upload: async (fileName, buffer) => {

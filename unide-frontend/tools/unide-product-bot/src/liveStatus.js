@@ -42,6 +42,23 @@ export function clearLive() {
   AT = 0;
 }
 
+// Captura que la IA está analizando AHORA: el panel la enseña sobre el
+// registro mientras esté fresca (fundido de entrada y salida).
+let SHOT = '';
+let SHOT_AT = 0;
+
+export function setLiveShot(path) {
+  SHOT = String(path || '');
+  SHOT_AT = SHOT ? Date.now() : 0;
+}
+
+export function getLiveShot() {
+  if (!SHOT) return null;
+  const ageSec = Math.floor((Date.now() - SHOT_AT) / 1000);
+  if (ageSec > 120) return null;
+  return { path: SHOT, at: SHOT_AT, ageSec };
+}
+
 export function getLive() {
   if (!LINE) return null;
   const ageSec = Math.floor((Date.now() - AT) / 1000);

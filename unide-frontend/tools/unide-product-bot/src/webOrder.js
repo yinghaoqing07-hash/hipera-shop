@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
-import { setLive } from './liveStatus.js';
+import { setLive, setLiveShot } from './liveStatus.js';
 import { llmConfigured, llmDiagnoseScreenshot } from './llm.js';
 import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
 import { selectLatestOrderRows } from './recentOrders.js';
@@ -292,6 +292,8 @@ export async function applyOrderWeb(draft, config, logger) {
         setLive(`[pedido] 第 ${i + 1} 行卡住，AI 看图分析中…`);
         const fotoDiag = await screenshot(page, config, `line-${i + 1}-diag`);
         if (fotoDiag) {
+          // El panel enseña ESTA captura mientras la IA la analiza.
+          setLiveShot(fotoDiag);
           diagnosticoIA = await llmDiagnoseScreenshot(fotoDiag, {
             tarea: `rellenar la línea ${i + 1}/${draft.items.length} del pedido web`,
             termino: searchTerm,
@@ -325,6 +327,21 @@ export async function applyOrderWeb(draft, config, logger) {
       }
 
       if (sel.status !== 'ok') {
+        // ¿Saltar o abortar? Si la IA CONFIRMÓ que el artículo no existe
+        // (desplegable "sin datos") o el match es ambiguo, parar el pedido
+        // entero castiga a las demás líneas: se SALTA esta, se sigue, y al
+        // final se listan las pendientes. Solo se aborta cuando no hay
+        // certeza (sin IA, o la IA dijo "recuperable" y aun así falló).
+        const motivoLinea = sel.status === 'ambiguous'
+          ? `有多个匹配、无法自动选（código ${anchorCode} 对不上任何一行）`
+          : (diagnosticoIA?.problema || '搜索无结果');
+        const saltable = sel.status === 'ambiguous' || diagnosticoIA?.recuperable === false;
+        if (saltable) {
+          results.push({ code, qty, ok: false, reason: sel.status, skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}` });
+          setLive(`[pedido] 第 ${i + 1}/${draft.items.length} 行跳过（${motivoLinea.slice(0, 40)}），继续下一行…`);
+          await clearArticleEditor(page);
+          continue;
+        }
         const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
         const shot = await screenshot(page, config, `code-${code}-${tag}`);
         const dom = await captureEditDom(page, config);
@@ -332,12 +349,10 @@ export async function applyOrderWeb(draft, config, logger) {
         const diagNote = diagnosticoIA?.problema
           ? `\nAI 看图诊断：${diagnosticoIA.problema}${diagnosticoIA.pista ? `（${diagnosticoIA.pista}）` : ''}`
           : '';
-        const detail = sel.status === 'nomatch'
-          ? `código ${codeLabel} 没有出现自动补全选项${nameNote}。已停止，未保存。${diagNote}`
-          : `código ${codeLabel} 有多个匹配，且没有一行的 Código Unide 正好等于 ${anchorCode}${nameNote}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。${diagNote}`;
+        const detail = `código ${codeLabel} 没有出现自动补全选项${nameNote}。已停止，未保存。${diagNote}`;
         results.push({ code, qty, ok: false, reason: sel.status });
         return {
-          ok: false, stage: sel.status === 'nomatch' ? 'autocomplete' : 'ambiguous',
+          ok: false, stage: 'autocomplete',
           screenshot: shot, domDump: dom, error: detail, results
         };
       }
@@ -390,11 +405,15 @@ export async function applyOrderWeb(draft, config, logger) {
     if (repairedCount > 0) notes.push(`${repairedCount} 行提交后 Código Unide 显示空白，已自动重输修复`);
     if (unrepairedCodes.length > 0) notes.push(`⚠️ ${unrepairedCodes.join('、')} 提交后显示空白且自动修复失败，请人工点铅笔重输一遍这个代码`);
     const autoNote = notes.length ? `（${notes.join('；')}）` : '';
+    const saltadas = results.filter((r) => r.skipped);
+    const notaSaltadas = saltadas.length
+      ? `\n没填上 ${saltadas.length} 行（需要人工加）：\n${saltadas.map((r) => `- ${r.nota}`).join('\n')}`
+      : '';
     setLive('[pedido] listo');
     return {
       ok: true,
       screenshot: shot,
-      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
+      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。${notaSaltadas}\n请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
       results
     };
   } catch (error) {

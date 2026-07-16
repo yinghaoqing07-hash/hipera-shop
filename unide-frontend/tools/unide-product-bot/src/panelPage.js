@@ -244,6 +244,26 @@ export function renderPanelPage(version) {
   #registroBtn:hover { color: #cfe9f7; }
   /* Plegado, la flecha se queda abajo (donde el dueño la espera). */
   #registro.oculto #registroBtn { margin-top: auto; }
+  /* Captura que la IA está analizando: aparece con fundido sobre el
+     registro de la derecha y se va sola al dejar de estar fresca. */
+  #fotoVivo {
+    grid-column: 3; grid-row: 1; min-height: 0; z-index: 2;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    gap: 8px; padding-bottom: 26px;
+    opacity: 0; visibility: hidden; transform: translateY(8px);
+    transition: opacity var(--motion-slow) var(--motion-ease), transform var(--motion-slow) var(--motion-ease), visibility 0s linear var(--motion-slow);
+    pointer-events: none;
+  }
+  #fotoVivo.visible { opacity: 1; visibility: visible; transform: translateY(0); transition-delay: 0s; }
+  #fotoVivo img {
+    max-width: 100%; max-height: 72%; border-radius: 10px;
+    border: 1px solid rgba(125,211,252,.28); box-shadow: 0 10px 42px rgba(0,0,0,.55);
+    background: #0b1220;
+  }
+  #fotoVivo .pie { font-size: 11px; letter-spacing: .18em; color: #7dd3fc; }
+  /* Mientras la foto está a la vista, el registro se esconde con fundido. */
+  #registro { transition: opacity var(--motion-base) ease; }
+  #registro.tapado { opacity: 0; }
   /* Media pantalla (la dueña pone UnideGes y JARVIS lado a lado): con tres
      columnas no cabe nada. Dos columnas, el registro cede su sitio y el
      lector se muda a la izquierda. */
@@ -254,6 +274,7 @@ export function renderPanelPage(version) {
       grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); gap: 18px;
     }
     #registro { display: none; }
+    #fotoVivo { grid-column: 1; }
     #lector { grid-column: 1; }
     #reloj { font-size: 54px; }
     #vivoEsc { max-width: 26vw; }
@@ -376,6 +397,10 @@ export function renderPanelPage(version) {
     <div id="registro">
       <div id="registroLineas"></div>
       <button id="registroBtn" onclick="plegarRegistro()" title="收起/展开">︿</button>
+    </div>
+    <div id="fotoVivo">
+      <div class="pie">AI 正在分析这张屏幕截图</div>
+      <img id="fotoVivoImg" alt="">
     </div>
   </div>
 </main>
@@ -797,6 +822,18 @@ async function pollChat() {
         if (t) relanzarAnimacion(vivo, 'cambio');
       }
       vivo.classList.toggle('err', t.indexOf('ERROR') >= 0);
+    }
+    const fv = document.getElementById('fotoVivo');
+    if (fv) {
+      const ls = r.liveShot;
+      const mostrarFoto = Boolean(ls && ls.ageSec < 90);
+      if (mostrarFoto && fv.dataset.at !== String(ls.at)) {
+        fv.dataset.at = String(ls.at);
+        document.getElementById('fotoVivoImg').src = '/vivo-foto?t=' + ls.at;
+      }
+      fv.classList.toggle('visible', mostrarFoto);
+      const regTap = document.getElementById('registro');
+      if (regTap) regTap.classList.toggle('tapado', mostrarFoto);
     }
     const reg = document.getElementById('registro');
     if (reg && Array.isArray(r.liveLog) && r.liveLog.length) {

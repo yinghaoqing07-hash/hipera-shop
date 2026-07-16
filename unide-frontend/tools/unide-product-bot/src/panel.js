@@ -99,6 +99,14 @@ export function startPanel(config, logger, hooks) {
         fs.createReadStream(filePath).pipe(res);
         return;
       }
+      if (req.method === 'GET' && req.url.startsWith('/vivo-foto')) {
+        // La captura que la IA está analizando ahora mismo (fresca o 404).
+        const foto = hooks.liveShot ? hooks.liveShot() : null;
+        if (!foto || !fs.existsSync(foto.path)) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+        fs.createReadStream(foto.path).pipe(res);
+        return;
+      }
       if (req.method === 'GET' && req.url === '/comandos') {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         res.end(hooks.commandList());
