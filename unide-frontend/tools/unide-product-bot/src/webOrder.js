@@ -1394,7 +1394,16 @@ async function selectDropdownRowByCode(page, code) {
     const opts = [...new Set(Array.from(document.querySelectorAll(
       '[role="option"], .dxbl-listbox-item, .dxbl-list-box-item, .dxbl-grid-dropdown-item'
     )))].filter(isVisible);
-    const matches = opts.filter((o) => tokens(o.innerText).includes(c));
+    // 1º: CELDA exacta. El Código Unide va en su propia celda, así que la
+    // igualdad de celda lo identifica sin ambigüedad; la celda EANS lleva
+    // la lista entera ("... ; 851707 ; ...") y nunca IGUALA al código —
+    // con tokens de toda la fila, un código que también aparecía en los
+    // EANs de OTRA fila hacía el match "múltiple" y se abortaba.
+    const celdas = (o) => Array.from(o.querySelectorAll('td, [role="gridcell"]'))
+      .map((x) => (x.innerText || '').replace(/\u00a0/g, ' ').trim());
+    let matches = opts.filter((o) => celdas(o).some((t) => t === c));
+    // 2º: sin estructura de celdas (opciones planas), tokens como antes.
+    if (!matches.length) matches = opts.filter((o) => tokens(o.innerText).includes(c));
     return matches.length === 1 ? matches[0] : null;
   }, code);
   const el = handle.asElement();
