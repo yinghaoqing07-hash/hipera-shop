@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
 import { setLive } from './liveStatus.js';
+import { llmConfigured, llmDiagnoseScreenshot } from './llm.js';
 import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
 import { selectLatestOrderRows } from './recentOrders.js';
 
@@ -280,14 +281,60 @@ export async function applyOrderWeb(draft, config, logger) {
       }
       if (sel.status !== 'ok' && triedName) sel.nameTried = true;
 
+      // Última bala antes de rendirse: el MODELO mira la captura. Si dice
+      // que es un atasco recuperable (desplegable que no salió, foco
+      // perdido, fila fuera de vista...), se hace una ronda de rescate:
+      // Escape, editor re-enfocado y a la vista, doble espera. Si dice que
+      // es un problema real, su diagnóstico viaja en el mensaje de error —
+      // la dueña sabe EXACTAMENTE qué pasó sin mandar capturas a nadie.
+      let diagnosticoIA = null;
+      if (sel.status === 'nomatch' && llmConfigured(config)) {
+        setLive(`[pedido] 第 ${i + 1} 行卡住，AI 看图分析中…`);
+        const fotoDiag = await screenshot(page, config, `line-${i + 1}-diag`);
+        if (fotoDiag) {
+          diagnosticoIA = await llmDiagnoseScreenshot(fotoDiag, {
+            tarea: `rellenar la línea ${i + 1}/${draft.items.length} del pedido web`,
+            termino: searchTerm,
+            nombre,
+            fallo: sel.status
+          }, config, logger).catch((error) => {
+            logger?.warn('screenshot diagnosis failed', { error: error.message });
+            return null;
+          });
+        }
+        if (diagnosticoIA?.recuperable) {
+          setLive(`[pedido] AI：${String(diagnosticoIA.problema || '').slice(0, 60)}，自动补救中…`);
+          try { await page.keyboard.press('Escape'); } catch { /* sin popup */ }
+          await sleep(400);
+          const listoDeNuevo = await prepareItemEditor(page, autocompleteTimeoutMs);
+          if (listoDeNuevo) {
+            await page.evaluate(() => {
+              const el = document.activeElement;
+              if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+            }).catch(() => {});
+            await sleep(600);
+            for (let t = 0; t < attempts.length && sel.status !== 'ok'; t += 1) {
+              if (t > 0) await clearArticleEditor(page);
+              const at = attempts[t];
+              const r = await searchAndSelect(page, at.term, anchorCode, autocompleteTimeoutMs * 2, autocompleteMs, at.requireAnchor);
+              sel = r.status === 'ok' ? { ...r, viaName: at.via === 'name' } : r;
+            }
+            if (sel.status === 'ok') logger?.info('line rescued after AI diagnosis', { line: i + 1, problema: diagnosticoIA.problema });
+          }
+        }
+      }
+
       if (sel.status !== 'ok') {
         const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
         const shot = await screenshot(page, config, `code-${code}-${tag}`);
         const dom = await captureEditDom(page, config);
         const nameNote = sel.nameTried ? `（也试了按商品名「${nombre}」搜，仍无法确定）` : '';
+        const diagNote = diagnosticoIA?.problema
+          ? `\nAI 看图诊断：${diagnosticoIA.problema}${diagnosticoIA.pista ? `（${diagnosticoIA.pista}）` : ''}`
+          : '';
         const detail = sel.status === 'nomatch'
-          ? `código ${codeLabel} 没有出现自动补全选项（可能焦点不对或代码无效）${nameNote}。已停止，未保存。`
-          : `código ${codeLabel} 有多个匹配，且没有一行的 Código Unide 正好等于 ${anchorCode}${nameNote}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。`;
+          ? `código ${codeLabel} 没有出现自动补全选项${nameNote}。已停止，未保存。${diagNote}`
+          : `código ${codeLabel} 有多个匹配，且没有一行的 Código Unide 正好等于 ${anchorCode}${nameNote}，无法自动选。已停止在这一行，未保存。前面 ${i} 行已填好。${diagNote}`;
         results.push({ code, qty, ok: false, reason: sel.status });
         return {
           ok: false, stage: sel.status === 'nomatch' ? 'autocomplete' : 'ambiguous',

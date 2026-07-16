@@ -184,6 +184,68 @@ Reglas: en la duda entre ejecutar algo y preguntar, pregunta (responder). Para p
 //             que el modelo resuelva referencias ("那152呢");
 //   datos   — texto con los datos del día (promociones, pedidos) para que
 //             accion=responder conteste con cifras reales, no de memoria.
+// El modelo MIRA una captura de pantalla de la automatización atascada y
+// dictamina: qué pasó (en chino, corto, para la dueña) y si merece la pena
+// reintentar. Es el "ojo" del bot: antes cada atasco era adivinar a ciegas.
+const DIAG_SCHEMA = {
+  type: 'object',
+  properties: {
+    problema: { type: 'string', description: 'Diagnóstico en chino, 1 frase concreta: qué se ve mal en la pantalla' },
+    recuperable: { type: 'boolean', description: 'true si con un reintento (Escape, re-enfocar, esperar más) puede salir; false si es un problema real (código inexistente, sesión caducada, ventana equivocada...)' },
+    pista: { type: 'string', description: 'Sugerencia de 1 frase en chino para el humano si NO es recuperable; vacío si lo es' }
+  },
+  required: ['problema', 'recuperable', 'pista'],
+  additionalProperties: false
+};
+
+export async function llmDiagnoseScreenshot(imagePath, contexto, config, logger) {
+  const apiKey = llmApiKey(config);
+  if (!apiKey) throw new Error('LLM sin apiKey');
+  const fs = await import('node:fs');
+  const bytes = fs.readFileSync(imagePath);
+  if (bytes.length > 4.5 * 1024 * 1024) throw new Error('captura demasiado grande para diagnosticar');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
+  let response;
+  try {
+    response = await fetch(API_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION
+      },
+      body: JSON.stringify({
+        model: config?.llm?.model || DEFAULT_MODEL,
+        max_tokens: 700,
+        system: 'Eres el ojo de un bot que automatiza UnideGes (pedidos web DevExpress/Blazor y la app de escritorio). Te llega la captura de pantalla del momento en que la automatización se atascó, más el contexto. Dictamina QUÉ se ve (¿salió el desplegable de autocompletado? ¿hay un diálogo/error? ¿el foco está donde debe? ¿la fila del editor quedó fuera de vista? ¿sesión caducada?) y si un reintento simple puede salvarlo. problema y pista van EN CHINO y cortos: los lee la dueña de la tienda.',
+        output_config: { format: { type: 'json_schema', schema: DIAG_SCHEMA } },
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } },
+            { type: 'text', text: `Contexto: ${String(contexto?.tarea || '')}。刚输入的搜索词: ${String(contexto?.termino || '')}（商品: ${String(contexto?.nombre || '')}）。程序判定的失败类型: ${String(contexto?.fallo || '')}（nomatch=没检测到自动补全下拉）。请看图诊断。` }
+          ]
+        }]
+      })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  if (data.stop_reason === 'refusal') throw new Error('refusal');
+  const textOut = (data.content || []).find((b) => b.type === 'text')?.text;
+  if (!textOut) throw new Error('respuesta sin texto');
+  const parsed = JSON.parse(textOut);
+  logger?.info('llm screenshot diagnosis', { problema: parsed.problema, recuperable: parsed.recuperable });
+  return parsed;
+}
+
 export async function llmRouteIntent(text, config, logger, extras = {}) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
