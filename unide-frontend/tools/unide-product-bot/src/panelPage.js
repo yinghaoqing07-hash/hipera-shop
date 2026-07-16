@@ -77,6 +77,12 @@ export function renderPanelPage(version) {
     font-size: 20px; font-weight: 300; letter-spacing: .02em; caret-color: #38bdf8;
   }
   #libre::placeholder { color: #53657a; }
+  /* Subir archivo: discreto al final de la línea de comandos. */
+  #btnSubir {
+    background: none; border: none; color: rgba(125,211,252,.4); cursor: pointer;
+    font-size: 22px; line-height: 1; padding: 0 2px; font-family: inherit;
+  }
+  #btnSubir:hover { color: #cfe9f7; }
   #pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
   .pill {
     background: none; border: 1px solid rgba(200,211,220,.22); color: #b6c4d1;
@@ -340,6 +346,8 @@ export function renderPanelPage(version) {
       <div id="charla"></div>
       <div id="linea">
         <input id="libre" autofocus>
+        <button id="btnSubir" title="上传文件（也可以直接拖进窗口）">＋</button>
+        <input type="file" id="ficheroSubir" accept=".xlsx,.csv" style="display:none">
       </div>
     </div>
     <div id="lector">
@@ -709,6 +717,30 @@ try {
     document.getElementById('registroBtn').textContent = '﹀';
   }
 } catch (e) { }
+// Subida de archivos al bot (hoy: el export de /diagnostico_productos).
+// Botón ＋ de la línea de comandos o arrastrar el archivo a la ventana.
+document.getElementById('btnSubir').onclick = () => document.getElementById('ficheroSubir').click();
+document.getElementById('ficheroSubir').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) subirArchivo(f);
+  e.target.value = '';
+});
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) subirArchivo(f);
+});
+async function subirArchivo(f) {
+  if (f.size > 30 * 1024 * 1024) { aviso('文件太大（上限 30MB）'); return; }
+  mostrarPensando();
+  try {
+    const r = await (await fetch('/subir', { method: 'POST', headers: { 'x-nombre': encodeURIComponent(f.name) }, body: f })).json();
+    aviso(r.toast || (r.ok ? '已上传' : '上传失败'));
+    if (!r.ok) ocultarPensando();
+    setTimeout(pollChat, 350);
+  } catch { ocultarPensando(); aviso('连不上 BOT'); }
+}
 async function pollChat() {
   try {
     const r = await (await fetch('/chat?since=' + chatSeq)).json();

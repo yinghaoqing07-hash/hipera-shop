@@ -702,6 +702,7 @@ async function startProductDiagnostics(chatId) {
   activeConversations.set(chatId, { kind: 'product_diagnostics', status: 'awaiting_file' });
   await telegram.sendMessage(chatId, [
     '请发送从 Pedido 商品明细导出的 .xlsx 或 .csv 文件。',
+    '手机在 Telegram 里当附件发；电脑在面板点输入行右边的「＋」选文件，或直接把文件拖进窗口。',
     '我会逐件打开 Artículos，只读检查 Bloq.Venta、价格、Proveedor、Inventariable 和 TIENDA/SDC 状态。',
     '',
     '本阶段不会改字段、Guardar、生成标签或发送订单。',
@@ -761,8 +762,13 @@ async function handleProductDiagnosticsDocument(message) {
 
   activeConversations.update(chatId, { status: 'running', fileName });
   try {
-    const file = await telegram.getFile(document.file_id);
-    await telegram.downloadFile(file.file_path, importPath);
+    if (document.__localPath) {
+      // Subido desde el panel: ya esta en disco, solo copiar.
+      fs.copyFileSync(document.__localPath, importPath);
+    } else {
+      const file = await telegram.getFile(document.file_id);
+      await telegram.downloadFile(file.file_path, importPath);
+    }
     const parsed = await parseProductExport(importPath, fileName);
     const maxItems = Number(config.productDiagnostics?.maxItems) || 300;
     if (parsed.items.length > maxItems) {
@@ -2677,6 +2683,28 @@ if (config.panel?.enabled !== false) {
       };
     },
     commandList: () => formatCommandList(),
+    // Archivo subido desde el panel: se guarda en local y se enruta como si
+    // hubiera llegado por Telegram. Hoy lo usa /diagnostico_productos.
+    upload: async (fileName, buffer) => {
+      const ids = arrivalChatIds();
+      if (!ids.length) throw new Error('sin chatIds configurados para el panel');
+      const chatId = ids[0];
+      const dir = path.join(config.__toolRoot, 'panel-uploads');
+      fs.mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const localPath = path.join(dir, `${stamp}-${safeDiagnosticFileName(fileName)}`);
+      fs.writeFileSync(localPath, buffer);
+      recordChat('user', `📎 ${fileName}`);
+      const active = activeConversations.get(chatId);
+      if (active?.kind === 'product_diagnostics') {
+        const mensaje = { chat: { id: chatId }, document: { file_name: fileName, __localPath: localPath } };
+        // El diagnostico tarda minutos: se despacha sin esperar, como /run.
+        handleProductDiagnosticsDocument(mensaje).catch((error) => logger.error('panel diagnostics upload failed', { error: error.message }));
+        return '文件已收到，开始诊断';
+      }
+      await telegram.sendMessage(chatId, `收到文件 ${fileName}。面板上传目前用于 /diagnostico_productos：先发那个命令，我提示要文件时再传。更新包请在 Telegram 里发。`, { __skipAI: true });
+      return '已收到（当前没有等待文件的任务）';
+    },
     cancelTask: (id) => {
       const cancelled = scheduledTasks.cancel(id);
       if (!cancelled) throw new Error('任务不存在，或者已经不是待执行状态');

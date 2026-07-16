@@ -134,6 +134,27 @@ export function startPanel(config, logger, hooks) {
         res.end(JSON.stringify({ ok: true, toast }));
         return;
       }
+      if (req.method === 'POST' && req.url === '/subir') {
+        // Subida de archivos desde el panel (p. ej. el export XLSX/CSV que
+        // pide /diagnostico_productos — hasta ahora solo se podia mandar
+        // por Telegram). Cuerpo binario crudo + nombre en cabecera.
+        let nombre = 'archivo';
+        try { nombre = decodeURIComponent(String(req.headers['x-nombre'] || 'archivo')); } catch { /* nombre raro */ }
+        let cuerpo;
+        try {
+          cuerpo = await readBodyBuffer(req, 30 * 1024 * 1024);
+        } catch (error) {
+          res.writeHead(413, { 'content-type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: error.message }));
+          return;
+        }
+        if (!cuerpo.length) { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false,"error":"archivo vacio"}'); return; }
+        logger?.info('panel upload', { nombre, bytes: cuerpo.length });
+        const toast = hooks.upload ? await hooks.upload(nombre, cuerpo) : '';
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, toast }));
+        return;
+      }
       if (req.method === 'POST' && req.url === '/run') {
         const body = await readBody(req);
         let cmd = '';
@@ -166,6 +187,22 @@ export function startPanel(config, logger, hooks) {
   // SOLO loopback: el panel no lleva autenticación, no debe salir del PC.
   server.listen(port, '127.0.0.1', () => logger?.info('panel listening', { url: `http://127.0.0.1:${port}`, version: VERSION }));
   return server;
+}
+
+// Cuerpo BINARIO con tope: para /subir (los readBody de texto corrompen
+// bytes y tienen un tope pensado para JSON pequeño).
+function readBodyBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const trozos = [];
+    let total = 0;
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) { reject(new Error('archivo demasiado grande (tope 30MB)')); req.destroy(); return; }
+      trozos.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(trozos)));
+    req.on('error', reject);
+  });
 }
 
 function readBody(req) {
