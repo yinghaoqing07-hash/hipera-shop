@@ -18,7 +18,7 @@ import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
-import { getLive, getLiveLog, noteLive } from './liveStatus.js';
+import { getLive, getLiveLog, noteLive, setLive } from './liveStatus.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -783,6 +783,7 @@ async function handleProductDiagnosticsDocument(message) {
     const results = [];
     for (let index = 0; index < parsed.items.length; index += 1) {
       const item = parsed.items[index];
+      setLive(`[diagnostico] ${index + 1}/${parsed.items.length}：${String(item.nombre || item.codigo || item.ean || '').slice(0, 60)}`);
       try {
         const search = await searchDesktop(
           item,
@@ -822,11 +823,13 @@ async function handleProductDiagnosticsDocument(message) {
       }
     }
 
+    setLive('[diagnostico] listo');
     writeDiagnosticsCsv(reportPath, results);
     await telegram.sendMessage(chatId, formatDiagnosticsSummary(results, parsed.meta));
     await telegram.sendDocument(chatId, reportPath, '商品逐件诊断明细（CSV）');
     activeConversations.clear(chatId);
   } catch (error) {
+    setLive('[diagnostico] ERROR: ' + error.message);
     logger.error('product diagnostics failed', { fileName, error: error.message });
     activeConversations.update(chatId, {
       status: 'awaiting_file',
