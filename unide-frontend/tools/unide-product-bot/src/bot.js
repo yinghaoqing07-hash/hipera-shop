@@ -104,6 +104,9 @@ function recordChat(from, text, extra = {}) {
   if (extra.buttons) entry.buttons = extra.buttons;
   if (extra.photo) entry.photo = extra.photo;
   if (extra.doc) entry.doc = extra.doc;
+  // Señal para el panel: este mensaje CIERRA el cajón de operaciones
+  // (cancelaciones — la tarjeta ya no aplica y debe recogerse sola).
+  if (extra.cierraCajon) entry.cierraCajon = true;
   chatLog.push(entry);
   if (chatLog.length > 300) chatLog = chatLog.slice(-300);
   scheduleChatSave();
@@ -140,12 +143,12 @@ const panelToasts = new Map();
   };
   const origSendMessage = telegram.sendMessage.bind(telegram);
   telegram.sendMessage = async (chatId, text, options = {}) => {
-    const { __noLog, __apiReady, __skipAI, __replyKind, ...rest } = options || {};
+    const { __noLog, __apiReady, __skipAI, __replyKind, __cierraCajon, ...rest } = options || {};
     const original = String(text ?? '');
     const finalText = (__noLog || __apiReady || __skipAI)
       ? original
       : await composeOutgoingReply(chatId, original, { kind: __replyKind, maxChars: 3900 });
-    const entry = __noLog ? null : recordChat('bot', finalText, { buttons: buttonsFromMarkup(rest) });
+    const entry = __noLog ? null : recordChat('bot', finalText, { buttons: buttonsFromMarkup(rest), cierraCajon: Boolean(__cierraCajon) });
     const result = await origSendMessage(chatId, finalText, rest);
     if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
     // Mensajes con teclado: el panel ya enseña las instrucciones junto a los
@@ -885,7 +888,7 @@ async function handleCallback(callback) {
     const id = data.slice(7);
     sessions.delete(id);
     activeConversations.clearMatchingSession(chatId, id);
-    await telegram.answerCallbackQuery(callback.id, '已取消'); await telegram.sendMessage(chatId, '已取消，不会执行任何桌面操作。', { __skipAI: true }); return;
+    await telegram.answerCallbackQuery(callback.id, '已取消'); await telegram.sendMessage(chatId, '已取消，不会执行任何桌面操作。', { __skipAI: true, __cierraCajon: true }); return;
   }
   if (data.startsWith('todo:')) { const label = futureActionLabel(data.slice(5)); await telegram.answerCallbackQuery(callback.id, `${label}还没实现`); await telegram.sendMessage(chatId, `${label}：按钮入口已预留，但现在还不会执行任何桌面操作。`); return; }
   await telegram.answerCallbackQuery(callback.id, '这个按钮已经失效');
@@ -2494,7 +2497,7 @@ async function maybeHandleActiveDecision(chatId, text) {
   if (decision === 'cancel') {
     sessions.delete(active.sessionId);
     activeConversations.clear(chatId);
-    await telegram.sendMessage(chatId, `已取消订单「${active.orderDraft?.orderName || ''}」，不会填入或保存。`, { __skipAI: true });
+    await telegram.sendMessage(chatId, `已取消订单「${active.orderDraft?.orderName || ''}」，不会填入或保存。`, { __skipAI: true, __cierraCajon: true });
     return true;
   }
   if (active.status === 'running') {

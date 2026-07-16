@@ -690,6 +690,8 @@ addEventListener('pagehide', () => {
   try { navigator.sendBeacon('/admin', new Blob([JSON.stringify({ accion: 'adios' })], { type: 'application/json' })); } catch { }
 });
 async function pulsar(data) {
+  // Cancelar recoge el cajón al instante, sin esperar la vuelta del bot.
+  if (String(data).indexOf('cancel:') === 0) cerrarCajon();
   mostrarPensando();
   try {
     const r = await (await fetch('/callback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data }) })).json();
@@ -765,6 +767,7 @@ async function pollChat() {
       for (const m of r.messages) {
         chatSeq = Math.max(chatSeq, m.seq);
         if (m.from === 'bot') ocultarPensando();
+        if (m.cierraCajon) cerrarCajon();
         if (m.buttons && m.buttons.length) {
           datos.set(m.id, m);
           if (!cajonCerrados.has(m.id) && (cajonId == null || m.seq >= (datos.get(cajonId)?.seq || 0) || m.id === cajonId)) {
@@ -804,6 +807,7 @@ async function pollChat() {
 pollChat();
 setInterval(pollChat, 2500);
 async function run(cmd) {
+  if (/^(取消|算了|不要|不用了?|no|cancelar?)$/i.test(String(cmd).trim())) cerrarCajon();
   mostrarPensando();
   try {
     const r = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd }) });
