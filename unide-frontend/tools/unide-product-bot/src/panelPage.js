@@ -449,6 +449,24 @@ function csvLegible(texto) {
   if (tabla.length < 2) return null;
   const cab = tabla[0].map((s) => s.trim().toLowerCase());
   const col = (n) => cab.indexOf(n);
+  // CSV del diagnóstico de productos: lista legible, una línea por artículo
+  // (nombre → estado; problemas solo si los hay).
+  if (col('codigo_entrada') >= 0 && col('resultado') >= 0) {
+    const iNomD = col('nombre_entrada'), iRes = col('resultado'), iProb = col('problemas'), iCodD = col('codigo_entrada'), iBloq = col('bloq_venta');
+    const L = [];
+    let bien = 0;
+    for (const f of tabla.slice(1)) {
+      if (!f || f.length < 3) continue;
+      const nombre = (f[iNomD] || f[iCodD] || '').trim();
+      const res = (f[iRes] || '').trim();
+      const prob = (iProb >= 0 ? f[iProb] || '' : '').trim();
+      const bloq = (iBloq >= 0 ? f[iBloq] || '' : '').trim();
+      if (res === 'ok' && !prob) { bien++; continue; }
+      L.push('· ' + nombre + '　→ ' + (res === 'error' ? '读取失败' : res) + (prob ? '：' + prob.split('|').map((x) => x.trim()).join('、') : '') + (bloq === 'true' ? '（停卖中）' : ''));
+    }
+    const cabecera = '共 ' + (tabla.length - 1) + ' 件，正常 ' + bien + ' 件' + (L.length ? '，有问题 ' + L.length + ' 件：' : '。');
+    return [cabecera, ''].concat(L.length ? L : ['全部正常，没什么要处理的。']).join('\\n');
+  }
   const iCod = col('codigo_promocion');
   const iNom = col('promocion'), iD = col('desde_promocion'), iH = col('hasta_promocion');
   const iArt = col('descripcion_articulo'), iPvp = col('pvp'), iOf = col('oferta'), iTx = col('texto_oferta');

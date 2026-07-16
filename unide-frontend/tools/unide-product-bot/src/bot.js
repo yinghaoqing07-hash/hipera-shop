@@ -775,10 +775,7 @@ async function handleProductDiagnosticsDocument(message) {
       throw new Error(`文件有 ${parsed.items.length} 个商品，超过安全上限 ${maxItems}。请拆成两批。`);
     }
 
-    await telegram.sendMessage(chatId, [
-      `已读到 ${parsed.meta.sourceRows} 行，去重后 ${parsed.items.length} 个商品。`,
-      '现在开始逐件只读检查；某一件失败会跳过继续。'
-    ].join('\n'));
+    await telegram.sendMessage(chatId, `已读到 ${parsed.meta.sourceRows} 行、${parsed.items.length} 件，开始逐件只读检查（进度看面板状态栏）。`, { __skipAI: true });
 
     const results = [];
     for (let index = 0; index < parsed.items.length; index += 1) {
@@ -819,13 +816,13 @@ async function handleProductDiagnosticsDocument(message) {
 
       const done = index + 1;
       if (done === parsed.items.length || done % 10 === 0) {
-        await telegram.sendMessage(chatId, `只读诊断进度：${done}/${parsed.items.length}`);
+        await telegram.sendMessage(chatId, `只读诊断进度：${done}/${parsed.items.length}`, { __skipAI: true });
       }
     }
 
     setLive('[diagnostico] listo');
     writeDiagnosticsCsv(reportPath, results);
-    await telegram.sendMessage(chatId, formatDiagnosticsSummary(results, parsed.meta));
+    await telegram.sendMessage(chatId, formatDiagnosticsSummary(results, parsed.meta), { __skipAI: true });
     await telegram.sendDocument(chatId, reportPath, '商品逐件诊断明细（CSV）');
     activeConversations.clear(chatId);
   } catch (error) {

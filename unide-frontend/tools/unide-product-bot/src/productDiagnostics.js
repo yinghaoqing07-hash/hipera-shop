@@ -168,20 +168,25 @@ export function buildProductDiagnosis({ input, desktop, supplier }) {
 }
 
 export function formatDiagnosticsSummary(results, meta = {}) {
-  const counts = { ok: 0, repair: 0, manual: 0, error: 0 };
-  for (const result of results) counts[result.outcome] = (counts[result.outcome] || 0) + 1;
-  const issueCounts = new Map();
-  for (const result of results) {
-    for (const issue of result.issues || []) issueCounts.set(issue, (issueCounts.get(issue) || 0) + 1);
+  // CORTO y al grano (petición de la dueña): una línea si todo está bien;
+  // si hay problemas, solo la lista de los artículos afectados con su
+  // problema en una línea cada uno. El detalle completo vive en el CSV.
+  const conProblemas = results.filter((r) => r.outcome !== 'ok');
+  if (!conProblemas.length) {
+    return `诊断完成：${results.length} 件全部正常。（全程只读，没改任何东西）`;
   }
-  const top = [...issueCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const nombreDe = (r) => String(r.input?.nombre || r.input?.codigo || r.input?.ean || '?').slice(0, 40);
+  const lineas = conProblemas.slice(0, 12).map((r) => {
+    const que = r.outcome === 'error'
+      ? `读取失败（${String((r.issues || [])[0] || '未知').slice(0, 60)}）`
+      : (r.issues || []).join('、').slice(0, 90) || '需人工确认';
+    return `- ${nombreDe(r)}：${que}`;
+  });
+  if (conProblemas.length > 12) lineas.push(`…还有 ${conProblemas.length - 12} 件，见 CSV`);
   return [
-    '商品只读诊断完成',
-    `导入 ${meta.sourceRows ?? results.length} 行，去重后 ${results.length} 个；重复 ${meta.duplicates ?? 0} 个。`,
-    `正常 ${counts.ok}；建议修复 ${counts.repair}；需人工 ${counts.manual}；读取失败 ${counts.error}。`,
-    top.length ? `主要问题：\n${top.map(([name, count]) => `- ${name}：${count}`).join('\n')}` : '没有发现需要修复的问题。',
-    '',
-    '安全状态：全程只读，没有改字段、Guardar 或生成标签。详细方案见 CSV。'
+    `诊断完成：共 ${results.length} 件，正常 ${results.length - conProblemas.length}，有问题 ${conProblemas.length} 件：`,
+    ...lineas,
+    '明细和建议见 CSV。全程只读。'
   ].join('\n');
 }
 
