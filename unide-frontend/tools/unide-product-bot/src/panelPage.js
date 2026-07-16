@@ -44,7 +44,13 @@ export function renderPanelPage(version) {
      cada paso): vacío = invisible, error en rojo. */
   #vivoEsc { margin-left: 16px; color: #7dd3fc; }
   #vivoEsc:empty { display: none; }
+  #vivoEsc::before {
+    content: ''; display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: #38bdf8; margin-right: 8px;
+    vertical-align: 1px; animation: latido 1.1s ease-in-out infinite;
+  }
   #vivoEsc.err { color: #f87171; }
+  #vivoEsc.err::before { background: #f87171; animation: none; }
   #vivoEsc.cambio { animation: destelloEstado 520ms var(--motion-ease); }
   @keyframes latido { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   main {
@@ -117,9 +123,6 @@ export function renderPanelPage(version) {
   @keyframes cursorEscritura {
     0%, 46% { opacity: .95; }
     47%, 100% { opacity: 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .textoMensaje.escribiendo::after { display: none; }
   }
   .burbuja.esperando { display: inline-flex; align-items: center; gap: 10px; color: #7dd3fc; }
   .esperandoTexto { font-size: 11px; letter-spacing: .2em; color: #7c91a6; }
@@ -278,14 +281,6 @@ export function renderPanelPage(version) {
     0% { opacity: .35; filter: brightness(.8); }
     45% { opacity: 1; filter: brightness(1.45); }
     100% { opacity: 1; filter: brightness(1); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: .01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: .01ms !important;
-      scroll-behavior: auto !important;
-    }
   }
 </style>
 </head>
@@ -478,9 +473,11 @@ function csvLegible(texto) {
   return L.join('\\n');
 }
 function escribirTexto(el, texto) {
+  // OJO: nada de prefers-reduced-motion aquí. El PC de la tienda tiene las
+  // animaciones de Windows desactivadas y ese respeto tan educado dejaba el
+  // panel completamente estático — el dueño QUIERE el movimiento.
   const contenido = String(texto || '');
-  const reducir = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (!contenido || reducir) { el.textContent = contenido; return; }
+  if (!contenido) { el.textContent = contenido; return; }
   el.textContent = '';
   el.classList.add('escribiendo');
   const duracion = Math.min(1050, Math.max(260, contenido.length * 13));
