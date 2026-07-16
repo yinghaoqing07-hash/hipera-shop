@@ -257,13 +257,26 @@ export async function applyOrderWeb(draft, config, logger) {
 
       let sel = { status: 'nomatch' };
       let triedName = false;
-      for (let t = 0; t < attempts.length; t += 1) {
-        if (t > 0) await clearArticleEditor(page);
-        const at = attempts[t];
-        if (at.via === 'name') triedName = true;
-        const r = await searchAndSelect(page, at.term, anchorCode, autocompleteTimeoutMs, autocompleteMs, at.requireAnchor);
-        if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
-        sel = r;
+      // Dos rondas: si TODO acabó en "sin desplegable" (nomatch), se limpia
+      // y se reintenta UNA vez con el doble de espera — el autocompletado
+      // de Blazor a veces no aparece a la primera (render/red lenta) y no
+      // tiene sentido tumbar un pedido de 36 líneas por un parpadeo.
+      for (let ronda = 0; ronda < 2 && sel.status !== 'ok'; ronda += 1) {
+        if (ronda > 0) {
+          if (sel.status !== 'nomatch') break;
+          setLive(`[pedido] 第 ${i + 1}/${draft.items.length} 行没出补全，重试一次…`);
+          await clearArticleEditor(page);
+          await sleep(1500);
+        }
+        const timeoutRonda = ronda > 0 ? autocompleteTimeoutMs * 2 : autocompleteTimeoutMs;
+        for (let t = 0; t < attempts.length; t += 1) {
+          if (t > 0) await clearArticleEditor(page);
+          const at = attempts[t];
+          if (at.via === 'name') triedName = true;
+          const r = await searchAndSelect(page, at.term, anchorCode, timeoutRonda, autocompleteMs, at.requireAnchor);
+          if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
+          sel = r;
+        }
       }
       if (sel.status !== 'ok' && triedName) sel.nameTried = true;
 
