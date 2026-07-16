@@ -107,6 +107,9 @@ function recordChat(from, text, extra = {}) {
   // Señal para el panel: este mensaje CIERRA el cajón de operaciones
   // (cancelaciones — la tarjeta ya no aplica y debe recogerse sola).
   if (extra.cierraCajon) entry.cierraCajon = true;
+  // Señal para el panel: abrir este documento en el lector nada más llegar
+  // (el informe del diagnóstico se enseña solo, sin que haya que pulsar).
+  if (extra.autoAbrir) entry.autoAbrir = true;
   chatLog.push(entry);
   if (chatLog.length > 300) chatLog = chatLog.slice(-300);
   scheduleChatSave();
@@ -176,14 +179,14 @@ const panelToasts = new Map();
   for (const method of ['sendPhoto', 'sendDocument']) {
     const original = telegram[method].bind(telegram);
     telegram[method] = async (chatId, filePath, caption = '', options = {}) => {
-      const { __apiReady, __skipAI, __replyKind, ...rest } = options || {};
+      const { __apiReady, __skipAI, __replyKind, __autoAbrir, ...rest } = options || {};
       const rawCaption = String(caption || '');
       const finalCaption = (!rawCaption || __apiReady || __skipAI)
         ? rawCaption
         : await composeOutgoingReply(chatId, rawCaption, { kind: __replyKind || 'caption', maxChars: 950 });
       const entry = method === 'sendPhoto'
         ? recordChat('bot', finalCaption, { photo: String(filePath), buttons: buttonsFromMarkup(rest) })
-        : recordChat('bot', `📎 ${path.basename(String(filePath))}${finalCaption ? ` — ${finalCaption}` : ''}`, { doc: String(filePath), buttons: buttonsFromMarkup(rest) });
+        : recordChat('bot', `📎 ${path.basename(String(filePath))}${finalCaption ? ` — ${finalCaption}` : ''}`, { doc: String(filePath), buttons: buttonsFromMarkup(rest), autoAbrir: Boolean(__autoAbrir) });
       const result = await original(chatId, filePath, finalCaption, rest);
       if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
       return result;
@@ -701,13 +704,9 @@ async function startProductDiagnostics(chatId) {
   }
   activeConversations.set(chatId, { kind: 'product_diagnostics', status: 'awaiting_file' });
   await telegram.sendMessage(chatId, [
-    '请发送从 Pedido 商品明细导出的 .xlsx 或 .csv 文件。',
-    '手机在 Telegram 里当附件发；电脑在面板点输入行右边的「＋」选文件，或直接把文件拖进窗口。',
-    '我会逐件打开 Artículos，只读检查 Bloq.Venta、价格、Proveedor、Inventariable 和 TIENDA/SDC 状态。',
-    '',
-    '本阶段不会改字段、Guardar、生成标签或发送订单。',
-    '取消等待：/diagnostico_cancelar'
-  ].join('\n'));
+    '把 Pedido 导出的 .xlsx 或 .csv 发我：手机在 Telegram 当附件发；电脑点「＋」或把文件拖进窗口。',
+    '全程只读，逐件检查。取消：/diagnostico_cancelar'
+  ].join('\n'), { __skipAI: true });
 }
 
 async function cancelProductDiagnostics(chatId) {
@@ -823,7 +822,7 @@ async function handleProductDiagnosticsDocument(message) {
     setLive('[diagnostico] listo');
     writeDiagnosticsCsv(reportPath, results);
     await telegram.sendMessage(chatId, formatDiagnosticsSummary(results, parsed.meta), { __skipAI: true });
-    await telegram.sendDocument(chatId, reportPath, '商品逐件诊断明细（CSV）');
+    await telegram.sendDocument(chatId, reportPath, '诊断明细 CSV', { __skipAI: true, __autoAbrir: true });
     activeConversations.clear(chatId);
   } catch (error) {
     setLive('[diagnostico] ERROR: ' + error.message);

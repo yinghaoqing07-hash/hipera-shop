@@ -42,7 +42,11 @@ export function renderPanelPage(version) {
   #punto.rojo { background: #ef4444; animation: none; }
   /* Paso de escritorio EN VIVO (lo escribe unideges-search.ps1 antes de
      cada paso): vacío = invisible, error en rojo. */
-  #vivoEsc { margin-left: 16px; color: #7dd3fc; }
+  #vivoEsc {
+    margin-left: 16px; color: #7dd3fc;
+    max-width: 38vw; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; display: inline-block; vertical-align: bottom;
+  }
   #vivoEsc:empty { display: none; }
   #vivoEsc::before {
     content: ''; display: inline-block; width: 6px; height: 6px;
@@ -240,6 +244,20 @@ export function renderPanelPage(version) {
   #registroBtn:hover { color: #cfe9f7; }
   /* Plegado, la flecha se queda abajo (donde el dueño la espera). */
   #registro.oculto #registroBtn { margin-top: auto; }
+  /* Media pantalla (la dueña pone UnideGes y JARVIS lado a lado): con tres
+     columnas no cabe nada. Dos columnas, el registro cede su sitio y el
+     lector se muda a la izquierda. */
+  @media (max-width: 1280px) {
+    /* Columna lateral SOLO cuando hay algo abierto; si no, el chat centra. */
+    #zona { grid-template-columns: 0 minmax(0, 1fr); gap: 0; }
+    #zona:has(#cajon.abierto), #zona:has(#lector.abierto) {
+      grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); gap: 18px;
+    }
+    #registro { display: none; }
+    #lector { grid-column: 1; }
+    #reloj { font-size: 54px; }
+    #vivoEsc { max-width: 26vw; }
+  }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 8px);
     color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
@@ -517,6 +535,14 @@ function escribirTexto(el, texto) {
   };
   requestAnimationFrame(avanzar);
 }
+async function abrirDocEnLector(m) {
+  try {
+    const r = await fetch('/file/' + m.id);
+    if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
+    const crudo = await r.text();
+    abrirLector(sinEmoji(m.text).slice(0, 40), csvLegible(crudo) || crudo);
+  } catch { aviso('连不上 BOT'); }
+}
 function pintarBurbuja(m, { escribir = false } = {}) {
   const b = document.createElement('div');
   b.className = 'burbuja';
@@ -529,12 +555,13 @@ function pintarBurbuja(m, { escribir = false } = {}) {
   const esTeclado = m.buttons && m.buttons.length;
   const tecladoLargo = esTeclado && (textoBruto.length > 30 || textoBruto.split('\\n').length > 1);
   const completo = sinEmoji(m.resumen ? m.resumen : (tecladoLargo ? '操作面板已在左侧打开，按提示点就行。' : textoBruto));
-  const esLargo = completo.length > 380 || completo.split('\\n').length > 8;
+  // Umbral alto a propósito: el chip 展开阅读 salía en casi todo y no
+  // aportaba nada — solo recortamos lo REALMENTE largo.
+  const esLargo = completo.length > 700 || completo.split('\\n').length > 12;
   let textoVisible = completo;
   if (esLargo) {
-    // Los informes largos no llenan el chat: recorte + "展开" en el lector.
-    const lineas = completo.split('\\n').slice(0, 4).join('\\n');
-    textoVisible = (lineas.length > 380 ? lineas.slice(0, 380) : lineas) + ' …';
+    const lineas = completo.split('\\n').slice(0, 8).join('\\n');
+    textoVisible = (lineas.length > 700 ? lineas.slice(0, 700) : lineas) + ' …';
   }
   if (escribir) escribirTexto(cuerpo, textoVisible);
   else cuerpo.textContent = textoVisible;
@@ -548,36 +575,28 @@ function pintarBurbuja(m, { escribir = false } = {}) {
     chips.appendChild(chip);
   }
   if (m.doc) {
+    // UN solo chip por documento (petición de la dueña): 打开 para lo que el
+    // lector sabe enseñar; 下载 únicamente para lo que no (volcados .html
+    // para mandar a Claude, zips...).
     const nombreDoc = String(m.docName || '');
-    // Los volcados .html/.zip no se pueden leer en el lector: para esos
-    // solo tiene sentido descargarlos (p. ej. para mandarlos a Claude).
     const esLegible = !nombreDoc || /\.(csv|txt|log|json)$/i.test(nombreDoc);
+    const chip = document.createElement('span');
+    chip.className = 'chipLeer';
     if (esLegible) {
-      const chip = document.createElement('span');
-      chip.className = 'chipLeer';
-      chip.textContent = '打开文件';
-      chip.onclick = async () => {
-        try {
-          const r = await fetch('/file/' + m.id);
-          if (!r.ok) { aviso('文件已不在（可能重启后被清理）'); return; }
-          const crudo = await r.text();
-          abrirLector(sinEmoji(m.text).slice(0, 40), csvLegible(crudo) || crudo);
-        } catch { aviso('连不上 BOT'); }
+      chip.textContent = '打开';
+      chip.onclick = () => abrirDocEnLector(m);
+    } else {
+      chip.textContent = '下载';
+      chip.onclick = () => {
+        const a = document.createElement('a');
+        a.href = '/file/' + m.id + '?dl=1&s=' + m.seq;
+        a.download = nombreDoc || 'archivo';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
       };
-      chips.appendChild(chip);
     }
-    const chipD = document.createElement('span');
-    chipD.className = 'chipLeer';
-    chipD.textContent = '下载';
-    chipD.onclick = () => {
-      const a = document.createElement('a');
-      a.href = '/file/' + m.id + '?dl=1&s=' + m.seq;
-      a.download = nombreDoc || 'archivo';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    };
-    chips.appendChild(chipD);
+    chips.appendChild(chip);
   }
   if (m.photo && !(m.buttons && m.buttons.length)) {
     // Las capturas no se incrustan en el chat: se abren en el lector. Las de
@@ -815,6 +834,8 @@ async function pollChat() {
         chatSeq = Math.max(chatSeq, m.seq);
         if (m.from === 'bot') ocultarPensando();
         if (m.cierraCajon) cerrarCajon();
+        // Informe recién terminado: se abre solo en el lector.
+        if (m.autoAbrir && m.doc && !cargaInicial) abrirDocEnLector(m);
         if (m.buttons && m.buttons.length) {
           datos.set(m.id, m);
           if (!cajonCerrados.has(m.id) && (cajonId == null || m.seq >= (datos.get(cajonId)?.seq || 0) || m.id === cajonId)) {
