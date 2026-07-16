@@ -331,6 +331,7 @@ function formatOrderHelp() {
     '/pedido fruta  果蔬叫货流程',
     '/pedido pda    周日 PDA 检查（含扫货后完整流程）',
     '/carne         肉类点货单（代替纸质表，点一点生成订单）',
+    '/fruta         果蔬点货单（60 个商品分页，数量跨页保留）',
     '/llegada       打印今天的到货核对清单',
     '/promociones   读取未过期促销商品明细（导出 CSV）',
     '/precio_fruta melocotón 2,99  自动改水果价格（不带参数=看手动流程）',

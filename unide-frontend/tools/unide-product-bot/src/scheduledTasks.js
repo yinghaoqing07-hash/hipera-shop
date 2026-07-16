@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const SAFE_ACTIONS = new Set([
   'carne',
+  'fruta',
   'pedido',
   'promociones',
   'pedidos_recientes',
@@ -163,7 +164,7 @@ export function parseScheduleCommand(text, now = new Date()) {
   const runAt = parseLocalDateTime(`${create[1]} ${create[2]}`);
   if (!runAt || runAt <= now) return { action: 'invalid', error: '时间格式不正确，或者时间已经过去了' };
   const safe = safeTaskFromCommand(create[3]);
-  if (!safe) return { action: 'invalid', error: '这个命令不能定时执行。可用：/carne、/pedido、/promociones、/pedidos、/llegada、/ahorro' };
+  if (!safe) return { action: 'invalid', error: '这个命令不能定时执行。可用：/carne、/fruta、/pedido、/promociones、/pedidos、/llegada、/ahorro' };
   return { action: 'create', ...safe, runAt, label: taskLabel(safe.taskAction, safe.argument) };
 }
 
@@ -205,6 +206,7 @@ export function formatTaskTime(value, timeZone = 'Europe/Madrid') {
 export function safeTaskFromCommand(command) {
   const source = String(command || '').trim();
   if (/^\/(?:carne|pedido_carne)\s*$/i.test(source)) return taskCommand('carne', '');
+  if (/^\/(?:fruta|verdura|fruta_verdura|pedido_fruta|pedido_verdura)\s*$/i.test(source)) return taskCommand('fruta', '');
   const pedido = source.match(/^\/pedido(?:\s+(carne|fruta|pda))?\s*$/i);
   if (pedido) return taskCommand('pedido', pedido[1] || '');
   if (/^\/(?:promociones|promo)\s*$/i.test(source)) return taskCommand('promociones', '');
@@ -226,6 +228,7 @@ function commandForTask(action, argument = '') {
   const arg = String(argument || '').trim();
   switch (action) {
     case 'carne': return '/carne';
+    case 'fruta': return '/fruta';
     case 'pedido': return `/pedido${arg ? ` ${arg}` : ''}`;
     case 'promociones': return '/promociones';
     case 'pedidos_recientes': return `/pedidos ${arg || 3}`;
@@ -240,6 +243,7 @@ function taskLabel(action, argument = '') {
   const arg = String(argument || '').trim();
   switch (action) {
     case 'carne': return '开始肉类叫货盘点';
+    case 'fruta': return '开始水果蔬菜叫货盘点';
     case 'pedido': return `${arg || '当天'}叫货提醒`;
     case 'promociones': return '刷新未过期促销';
     case 'pedidos_recientes': return `检查最新 ${arg || 3} 张订单`;

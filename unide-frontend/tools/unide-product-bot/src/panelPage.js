@@ -306,6 +306,7 @@ export function renderPanelPage(version) {
         <button class="pill" onclick="run('/ahorro_pedido')">PDA 省钱分析</button>
         <button class="pill" onclick="run('/pedido')">叫货提醒</button>
         <button class="pill" onclick="run('/carne')">肉类盘点</button>
+        <button class="pill" onclick="run('/fruta')">果蔬盘点</button>
         <button class="pill" onclick="run('/ahorro')">总体省钱策略</button>
       </div>
       <div id="tarjetas">

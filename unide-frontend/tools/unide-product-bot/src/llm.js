@@ -68,7 +68,7 @@ const INTENT_SCHEMA = {
   properties: {
     accion: {
       type: 'string',
-      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'price_history', 'bloq_venta', 'pedidos_recientes', 'pedido', 'carne', 'programar', 'tareas', 'articulo', 'ayuda', 'responder'],
+      enum: ['llegada', 'ahorro_pedido', 'ahorro', 'promociones', 'precio_fruta', 'precios_fruta', 'price_history', 'bloq_venta', 'pedidos_recientes', 'pedido', 'carne', 'fruta', 'programar', 'tareas', 'articulo', 'ayuda', 'responder'],
       description: 'Comando del bot al que corresponde el mensaje, o "responder" si no corresponde a ninguno'
     },
     argumento: { type: 'string', description: 'Argumento del comando (números de pedido, "nombre precio", código…); vacío si no aplica' },
@@ -170,7 +170,8 @@ Comandos disponibles:
 - pedidos_recientes — abrir y revisar en solo lectura los N pedidos más recientes. argumento: cantidad ("3"), por defecto 3. Palabras clave: 最新订单, 最近几张单, 看最新三个 pedidos, últimos pedidos.
 - pedido — plantillas/recordatorio de pedido. argumento: "carne", "fruta", "pda" o vacío.
 - carne — empezar el recuento de carne para el pedido.
-- programar — crear una tarea futura segura. Para frases como “明天10点我要下肉类pedido”, “el lunes a las 9 revisa los últimos 3 pedidos”. argumento OBLIGATORIO y exacto: "YYYY-MM-DD HH:mm|/comando|etiqueta breve". Solo se permiten /carne, /pedido [carne|fruta|pda], /promociones, /pedidos N, /llegada [argumento], /ahorro y /ahorro_pedido [número]. Convierte mañana/周一 usando la FECHA Y HORA LOCAL de DATOS DE HOY. Nunca programes Guardar, Enviar Pedido, cambios de precio ni otros comandos de escritura.
+- fruta — empezar el recuento paginado de fruta y verdura para el pedido. Palabras clave: fruta, verdura, frutas, verduras, 果蔬, 水果, 蔬菜, 果蔬盘点。
+- programar — crear una tarea futura segura. Para frases como “明天10点我要下肉类pedido”, “el lunes a las 9 revisa los últimos 3 pedidos”. argumento OBLIGATORIO y exacto: "YYYY-MM-DD HH:mm|/comando|etiqueta breve". Solo se permiten /carne, /fruta, /pedido [carne|fruta|pda], /promociones, /pedidos N, /llegada [argumento], /ahorro y /ahorro_pedido [número]. Convierte mañana/周一 usando la FECHA Y HORA LOCAL de DATOS DE HOY. Nunca programes Guardar, Enviar Pedido, cambios de precio ni otros comandos de escritura.
 - tareas — listar o cancelar tareas futuras. argumento vacío = listar; "cancel 12" = cancelar la tarea 12.
 - articulo — consultar un producto por código o EAN. argumento: el código.
 - ayuda — mostrar la ayuda del bot.

@@ -270,6 +270,7 @@ async function handleUpdate(update) {
   if (/^\/uia_dump\b/i.test(text)) { await handleUiaDump(chatId); return; }
   if (/^\/debug\b/i.test(text)) { await handleDebug(chatId, text); return; }
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
+  if (/^\/(fruta|verdura|fruta_verdura|pedido_fruta|pedido_verdura)\b/i.test(text)) { await startTally(chatId, 'fruta'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
   if (/^\/ahorro_pedido\b/i.test(text)) { await handleAhorroPedido(chatId, text); return; }
   if (/^\/(ahorro|estrategia)\b/i.test(text)) { await handleAhorro(chatId); return; }
@@ -429,6 +430,7 @@ function formatCommandList() {
     '/pedido — 今天的叫货提醒（也可 /pedido carne、/pedido fruta、/pedido pda）',
     '/pedidos 3 — 只读检查最新 3 张订单和明显异常',
     '/carne — 开始肉类盘点',
+    '/fruta — 开始水果蔬菜盘点（60 个商品，分页保留数量）',
     '/pedido_nuevo — 手动建一张单的草稿',
     '/tarea 2026-07-14 10:00 /carne — 新建定时任务',
     '/tareas — 查看待执行任务；/cancelar_tarea 12 — 取消',
@@ -640,6 +642,10 @@ async function handleFreeText(chatId, text) {
     case 'carne':
       await say('/carne');
       await startTally(chatId, 'carne');
+      return;
+    case 'fruta':
+      await say('/fruta');
+      await startTally(chatId, 'fruta');
       return;
     case 'programar': {
       const parsedTask = parseLlmScheduleArgument(arg, new Date());
@@ -864,6 +870,8 @@ async function handleCallback(callback) {
   if (data.startsWith('fpb:')) { await runFruitPriceBatch(chatId, callback.id, data.slice(4)); return; }
   if (data.startsWith('fpstop:')) { await handleFruitBatchStop(chatId, callback.id, data.slice(7)); return; }
   if (data.startsWith('fp:')) { await handleFruitPick(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('tcp:')) { await handleTallyPage(chatId, callback.id, data.slice(4)); return; }
+  if (data.startsWith('tcnoop:')) { await telegram.answerCallbackQuery(callback.id); return; }
   if (data.startsWith('tc:')) { await handleTallyTap(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('tcgo:')) { await handleTallyGo(chatId, callback.id, data.slice(5)); return; }
   if (data.startsWith('tcclr:')) { await handleTallyClear(chatId, callback.id, data.slice(6)); return; }
@@ -1565,18 +1573,21 @@ async function runFruitPriceBatch(chatId, callbackId, id) {
   await telegram.sendMessage(chatId, summary.join('\n'));
 }
 
-// /carne — recuento con el móvil que sustituye a la hoja de papel: la
-// lista fija de carne sale como botones, cada toque suma 1 (0→…→5→0) y
+// /carne y /fruta — recuento con el móvil que sustituye a la hoja de papel:
+// la lista fija sale como botones, cada toque suma 1 (0→…→5→0) y
 // "生成订单" convierte el recuento en el borrador de pedido de siempre
 // (misma confirmación y mismo 确认填入; aquí no se rellena nada aún).
 async function startTally(chatId, name) {
   const template = loadTemplate(config, name);
   if (!template) { await telegram.sendMessage(chatId, `没有「${name}」的模板。`); return; }
-  const id = saveSession({ tally: { name, template, counts: {} } });
+  const pageSize = Number(template.pageSize) || template.items.length || 1;
+  const totalPages = Math.max(1, Math.ceil(template.items.length / pageSize));
+  const pageHint = totalPages > 1 ? `\n共 ${template.items.length} 个商品、${totalPages} 页；翻页不会丢数量。` : '';
+  const id = saveSession({ tally: { name, template, counts: {}, page: 0 } });
   const sent = await telegram.sendMessage(
     chatId,
-    `${template.label} 点货单（代替纸质表）：\n点商品名 = 数量 +1，点到 5 再点回 0。\n全部点完按「✔ 生成订单」。`,
-    { reply_markup: buildTallyKeyboard(id, template, {}) }
+    `${template.label} 点货单（代替纸质表）：\n点商品名 = 数量 +1，点到 5 再点回 0。${pageHint}\n全部点完按「✔ 生成订单」。`,
+    { reply_markup: buildTallyKeyboard(id, template, {}, 0) }
   );
   const session = sessions.get(id);
   if (session && sent?.message_id) { session.tally.messageId = sent.message_id; sessions.set(id, session); }
@@ -1588,12 +1599,28 @@ async function handleTallyTap(chatId, callbackId, payload) {
   const tally = session?.tally;
   const idx = Number(idxStr);
   const item = tally?.template?.items?.[idx];
-  if (!item) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发 /carne'); return; }
+  if (!item) { await telegram.answerCallbackQuery(callbackId, `记录已过期，请重新发 /${tally?.name || 'carne'}`); return; }
   tally.counts[idx] = cycleCount(tally.counts[idx]);
   sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, `${item.nombre}: ${tally.counts[idx]}`);
   if (tally.messageId) {
-    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, tally.counts));
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, tally.counts, tally.page || 0));
+  }
+}
+
+async function handleTallyPage(chatId, callbackId, payload) {
+  const [id, pageStr] = payload.split(':');
+  const session = sessions.get(id);
+  const tally = session?.tally;
+  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期'); return; }
+  const pageSize = Number(tally.template.pageSize) || tally.template.items.length || 1;
+  const totalPages = Math.max(1, Math.ceil(tally.template.items.length / pageSize));
+  const page = Math.min(totalPages - 1, Math.max(0, Number(pageStr) || 0));
+  tally.page = page;
+  sessions.set(id, session);
+  await telegram.answerCallbackQuery(callbackId, `第 ${page + 1}/${totalPages} 页`);
+  if (tally.messageId) {
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, tally.counts, page));
   }
 }
 
@@ -1605,14 +1632,14 @@ async function handleTallyClear(chatId, callbackId, id) {
   sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, '已清零');
   if (tally.messageId) {
-    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, {}));
+    await telegram.editMessageReplyMarkup(chatId, tally.messageId, buildTallyKeyboard(id, tally.template, {}, tally.page || 0));
   }
 }
 
 async function handleTallyGo(chatId, callbackId, id) {
   const session = sessions.get(id);
   const tally = session?.tally;
-  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发 /carne'); return; }
+  if (!tally) { await telegram.answerCallbackQuery(callbackId, '记录已过期，请重新发点货命令'); return; }
   const draft = buildDraftFromTally(tally.template, tally.counts, new Date(), config.ordering?.timezone || 'Europe/Madrid');
   if (!draft.items.length) { await telegram.answerCallbackQuery(callbackId, '还没点任何商品'); return; }
   await telegram.answerCallbackQuery(callbackId, `${draft.items.length} 行`);
@@ -1971,6 +1998,7 @@ async function maybeRunScheduledTasks() {
 async function executeScheduledTask(task) {
   switch (task.action) {
     case 'carne': await startTally(task.chatId, 'carne'); return;
+    case 'fruta': await startTally(task.chatId, 'fruta'); return;
     case 'pedido': {
       const cmd = '/pedido' + (task.argument ? ' ' + task.argument : '');
       await telegram.sendMessage(task.chatId, formatOrderResponse(parseOrderMode(cmd), new Date(), config), makeOrderButtons());
