@@ -1,4 +1,4 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { loadConfig, readArg } from './config.js';
@@ -16,7 +16,8 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
+import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, noteLive } from './liveStatus.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
@@ -234,6 +235,8 @@ async function handleUpdate(update) {
   // natural=true cuando la dueña escribe en lenguaje natural (no un
   // comando /): en ese modo las respuestas se redactan SIN plantillas.
   replyContextByChat.set(String(chatId), { text, at: Date.now(), natural: !String(text || '').trim().startsWith('/') });
+  if (/^\/diagnostico_productos\b/i.test(text)) { await startProductDiagnostics(chatId); return; }
+  if (/^\/diagnostico_cancelar\b/i.test(text)) { await cancelProductDiagnostics(chatId); return; }
   if (await maybeHandleActiveDecision(chatId, text)) return;
   const memoryCommand = parseMemoryCommand(text);
   if (memoryCommand) {
@@ -433,6 +436,8 @@ function formatCommandList() {
     '【查商品】',
     '/articulo 模板 — 查/改一个商品（发 /plantilla 看模板怎么写）',
     '直接发编号或 EAN 也可以',
+    '/diagnostico_productos — 上传 Pedido 导出的 XLSX/CSV，逐件只读检查问题',
+    '/diagnostico_cancelar — 取消等待上传的商品诊断',
     '',
     '【长期记忆】',
     '记住：内容 — 手动保存一条永久记忆',
@@ -669,12 +674,167 @@ async function handleFreeText(chatId, text) {
   }
 }
 
+function safeDiagnosticFileName(name) {
+  return path.basename(String(name || 'diagnostico'))
+    .replace(/[^\p{L}\p{N}._-]+/gu, '_')
+    .slice(0, 120) || 'diagnostico';
+}
+
+async function startProductDiagnostics(chatId) {
+  const active = activeConversations.get(chatId);
+  if (active && active.kind !== 'product_diagnostics') {
+    await telegram.sendMessage(chatId, '现在还有一项待确认的操作。请先完成或取消它，再开始商品诊断。');
+    return;
+  }
+  if (active?.kind === 'product_diagnostics' && active.status === 'running') {
+    await telegram.sendMessage(chatId, '这批商品正在诊断中，请稍等。');
+    return;
+  }
+  activeConversations.set(chatId, { kind: 'product_diagnostics', status: 'awaiting_file' });
+  await telegram.sendMessage(chatId, [
+    '请发送从 Pedido 商品明细导出的 .xlsx 或 .csv 文件。',
+    '我会逐件打开 Artículos，只读检查 Bloq.Venta、价格、Proveedor、Inventariable 和 TIENDA/SDC 状态。',
+    '',
+    '本阶段不会改字段、Guardar、生成标签或发送订单。',
+    '取消等待：/diagnostico_cancelar'
+  ].join('\n'));
+}
+
+async function cancelProductDiagnostics(chatId) {
+  const active = activeConversations.get(chatId);
+  if (!active || active.kind !== 'product_diagnostics') {
+    await telegram.sendMessage(chatId, '现在没有等待上传的商品诊断。');
+    return;
+  }
+  activeConversations.clear(chatId);
+  await telegram.sendMessage(chatId, '已取消这次商品诊断。');
+}
+
+function diagnosticErrorResult(item, error) {
+  return {
+    input: item,
+    current: {},
+    recommendation: {},
+    outcome: 'error',
+    issues: ['读取该商品时失败'],
+    plan: ['已跳过，保留给人工确认'],
+    warnings: [String(error?.message || error || '未知错误')]
+  };
+}
+
+async function handleProductDiagnosticsDocument(message) {
+  const chatId = message.chat.id;
+  const document = message.document;
+  const fileName = document.file_name || 'productos';
+  const ext = path.extname(fileName).toLowerCase();
+
+  if (ext === '.xls') {
+    await telegram.sendMessage(chatId, '旧版 .xls 暂不安全支持。请在 UnideGes 里重新导出为 .xlsx 或 .csv。');
+    return;
+  }
+  if (ext === '.pdf') {
+    await telegram.sendMessage(chatId, 'PDF 不适合逐件诊断。请重新导出为 .xlsx 或 .csv。');
+    return;
+  }
+  if (!['.xlsx', '.csv'].includes(ext)) {
+    await telegram.sendMessage(chatId, '这个会话只接受 .xlsx 或 .csv 商品导出文件。');
+    return;
+  }
+
+  const baseDir = path.resolve(config.logsDir || '.', 'product-diagnostics');
+  const importsDir = path.join(baseDir, 'imports');
+  const reportsDir = path.join(baseDir, 'reports');
+  fs.mkdirSync(importsDir, { recursive: true });
+  fs.mkdirSync(reportsDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const importPath = path.join(importsDir, `${stamp}-${safeDiagnosticFileName(fileName)}`);
+  const reportPath = path.join(reportsDir, `${stamp}-product-diagnostics.csv`);
+
+  activeConversations.update(chatId, { status: 'running', fileName });
+  try {
+    const file = await telegram.getFile(document.file_id);
+    await telegram.downloadFile(file.file_path, importPath);
+    const parsed = await parseProductExport(importPath, fileName);
+    const maxItems = Number(config.productDiagnostics?.maxItems) || 300;
+    if (parsed.items.length > maxItems) {
+      throw new Error(`文件有 ${parsed.items.length} 个商品，超过安全上限 ${maxItems}。请拆成两批。`);
+    }
+
+    await telegram.sendMessage(chatId, [
+      `已读到 ${parsed.meta.sourceRows} 行，去重后 ${parsed.items.length} 个商品。`,
+      '现在开始逐件只读检查；某一件失败会跳过继续。'
+    ].join('\n'));
+
+    const results = [];
+    for (let index = 0; index < parsed.items.length; index += 1) {
+      const item = parsed.items[index];
+      try {
+        const search = await searchDesktop(
+          item,
+          config,
+          logger,
+          item.ean ? { byEan: true } : { byCode: true }
+        );
+        if (search.status !== 'ok') {
+          results.push(diagnosticErrorResult(item, search.error || search.reason || '桌面查询失败'));
+        } else {
+          const read = await diagnoseDesktop(config, logger);
+          if (read.status !== 'ok') {
+            results.push(diagnosticErrorResult(item, read.error || read.reason || '状态读取失败'));
+          } else {
+            const desktop = {
+              ...read,
+              screenshot: read.screenshot || search.screenshot,
+              warnings: [...(search.warnings || []), ...(read.warnings || [])]
+            };
+            const store = lookupStore(storeIndex, item);
+            const supplier = enrichSupplierLookup(supplierIndex, item, store);
+            results.push(buildProductDiagnosis({ input: item, desktop, supplier }));
+          }
+        }
+      } catch (error) {
+        logger.error('product diagnostic item failed', {
+          codigo: item.codigo,
+          ean: item.ean,
+          error: error.message
+        });
+        results.push(diagnosticErrorResult(item, error));
+      }
+
+      const done = index + 1;
+      if (done === parsed.items.length || done % 10 === 0) {
+        await telegram.sendMessage(chatId, `只读诊断进度：${done}/${parsed.items.length}`);
+      }
+    }
+
+    writeDiagnosticsCsv(reportPath, results);
+    await telegram.sendMessage(chatId, formatDiagnosticsSummary(results, parsed.meta));
+    await telegram.sendDocument(chatId, reportPath, '商品逐件诊断明细（CSV）');
+    activeConversations.clear(chatId);
+  } catch (error) {
+    logger.error('product diagnostics failed', { fileName, error: error.message });
+    activeConversations.update(chatId, {
+      status: 'awaiting_file',
+      failure: error.message
+    });
+    await telegram.sendMessage(chatId, [
+      `商品诊断没有开始或被中止：${error.message}`,
+      '没有修改任何商品。修正文件后可直接重新发送，或发 /diagnostico_cancelar。'
+    ].join('\n'));
+  }
+}
+
 async function handleDocument(message) {
   const chatId = message.chat.id;
   const userId = message.from?.id;
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized document', { chatId, userId }); return; }
   const document = message.document;
   const fileName = document.file_name || '';
+  const active = activeConversations.get(chatId);
+  if (active?.kind === 'product_diagnostics') {
+    await handleProductDiagnosticsDocument(message);
+    return;
+  }
   if (fileName !== UPDATE_PACKAGE_NAME) { await telegram.sendMessage(chatId, `收到文件：${fileName}\n不是更新包。更新包文件名必须是 ${UPDATE_PACKAGE_NAME}`); return; }
   const updatesDir = path.join(config.__toolRoot, 'updates');
   fs.mkdirSync(updatesDir, { recursive: true });

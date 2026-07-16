@@ -1,4 +1,4 @@
-﻿# Unide 商品 Telegram 查询助手
+# Unide 商品 Telegram 查询助手
 
 当前目标：**先查询，确认后才允许写入价格/解锁；不会自动确认或打印**。
 
@@ -112,6 +112,17 @@ calibrate-screen.cmd
 如果脚本找错窗口，把 `windowTitleRegex` 改得更精确一点。默认会排除 `chrome`、`msedge`、`firefox`，避免误切到 UnideGes 网页标签页。
 
 ## Telegram 模板
+
+### 商品批量只读诊断
+
+1. 在 Telegram 或店内面板发送 `/diagnostico_productos`。
+2. 上传从 Pedido 商品明细导出的 `.xlsx` 或 `.csv` 文件。旧版 `.xls` 和 PDF 会被拒绝，避免误读。
+3. Bot 会去重并逐个在 Articulos 中读取 TIENDA/SDC、Bloq.Venta、价格、Proveedor、Inventariable 等状态。
+4. 完成后会返回中文汇总和一份 CSV，里面列出每个商品的问题及建议修复方案。
+
+本功能严格只读：不会改字段、不会 Guardar、不会生成 etiqueta，也不会 Enviar Pedido。中途可发送 `/diagnostico_cancelar` 取消。
+
+诊断规则：供应商 PVD 四舍五入到两位（例如 `1,187` 采用 `1,19`）；已有售价只检查 `P.defecto` 是否为非正数或售价是否低于成本，不会拿供应商第二建议价覆盖现价。
 
 ### 长期记忆
 

@@ -1,8 +1,8 @@
-﻿param(
+param(
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "priceApply", "bloqApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -807,9 +807,54 @@ function Get-DefaultBloqApplySteps {
   )
 }
 
+function Get-DefaultDiagnoseReadSteps {
+  # Auditoria integral y estrictamente de solo lectura. No reutiliza los
+  # pasos de cambio de precio para que nunca pueda llegar a Ctrl+S.
+  return @(
+    [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
+    [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila TIENDA o SDC" },
+    [pscustomobject]@{ type = "wait"; ms = 600 },
+    [pscustomobject]@{ type = "uiaRead"; name = "bancoDatos"; nameRegex = "^(SDC|TIENDA)$" },
+    [pscustomobject]@{ type = "uiaRead"; name = "codigoPantalla"; label = "Código" },
+    [pscustomobject]@{ type = "uiaRead"; name = "iva"; label = "IVA" },
+    [pscustomobject]@{ type = "uiaRead"; name = "pcMedio"; label = "PC Medio" },
+    [pscustomobject]@{ type = "uiaRead"; name = "pcUltimo"; label = "PC Ultimo" },
+    [pscustomobject]@{ type = "uiaRead"; name = "pDefectoPrice"; label = "P. defecto"; index = 0 },
+    [pscustomobject]@{ type = "uiaRead"; name = "pDefectoPct"; label = "P. defecto"; index = 1 },
+    [pscustomobject]@{ type = "uiaRead"; name = "pTpvPrice"; label = "P.TPV"; index = 0 },
+    [pscustomobject]@{ type = "uiaRead"; name = "pTpvPct"; label = "P.TPV"; index = 1 },
+    [pscustomobject]@{ type = "uiaRead"; name = "supplierCode"; label = "Proveedor"; index = 0 },
+    [pscustomobject]@{ type = "uiaRead"; name = "supplierName"; label = "Proveedor"; index = 1 },
+    [pscustomobject]@{ type = "uiaRead"; name = "supplierRef"; label = "Ref."; index = 0 },
+    [pscustomobject]@{ type = "uiaRead"; name = "inventariable"; label = "Inventariable"; index = 0 },
+    [pscustomobject]@{ type = "uiaRead"; name = "bloqVentaChecked"; label = "Bloq.Venta"; self = $true; checkbox = $true },
+    [pscustomobject]@{ type = "screenshot"; name = "Diagnostico solo lectura" }
+  )
+}
 function Get-Steps($Config, [string]$ActionMode) {
   if ($ActionMode -eq "clear") { $steps = @($Config.desktop.clearSteps) }
   elseif ($ActionMode -eq "priceRead") { $steps = @($Config.desktop.priceReadSteps) }
+  elseif ($ActionMode -eq "diagnoseRead") {
+    $steps = @()
+    if ($Config.desktop.PSObject.Properties.Name -contains "diagnoseReadSteps") {
+      $steps = @($Config.desktop.diagnoseReadSteps) | Where-Object {
+        $null -ne $_ -and ($_.PSObject.Properties.Name -contains "type") -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.type)
+      }
+    }
+    if (@($steps).Count -eq 0) { $steps = @(Get-DefaultDiagnoseReadSteps) }
+    $allowedReadOnlyTypes = @("focus", "listSelectLast", "wait", "uiaRead", "screenshot")
+    $unsafeSteps = @($steps | Where-Object {
+      $allowedReadOnlyTypes -notcontains ([string]$_.type)
+    })
+    if ($unsafeSteps.Count -gt 0) {
+      $unsafeTypes = ($unsafeSteps | ForEach-Object { [string]$_.type } | Sort-Object -Unique) -join ", "
+      throw "diagnoseRead solo admite pasos de lectura ($($allowedReadOnlyTypes -join ', ')); encontrados: $unsafeTypes"
+    }
+    if (@($steps | Where-Object {
+      ($_.type -eq "hotkey" -or $_.type -eq "key") -and (([string]$_.keys) -match "\^s")
+    }).Count -gt 0) { throw "diagnoseRead no admite Ctrl+S: este modo debe ser de solo lectura" }
+  }
   elseif ($ActionMode -eq "priceApply") { $steps = Assert-SaveIsLast @($Config.desktop.priceApplySteps) "priceApply" }
   elseif ($ActionMode -eq "bloqApply") {
     $steps = @()

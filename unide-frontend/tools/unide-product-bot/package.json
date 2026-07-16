@@ -6,6 +6,7 @@
   "description": "Telegram helper for safe UnideGes product lookup.",
   "scripts": {
     "start": "node src/bot.js",
+    "test": "node --test",
     "test:parse": "node src/test-message.js"
   },
   "engines": {

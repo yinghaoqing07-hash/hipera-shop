@@ -1,4 +1,4 @@
-﻿import { spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -9,7 +9,7 @@ export async function searchDesktop(item, config, logger, options = {}) {
   //   por defecto → el catalejo/EAN de siempre (search).
   const query = options.byName
     ? item.nombre
-    : (item.codigo || item.ean || item.nombre);
+    : (options.byEan ? item.ean : (item.codigo || item.ean || item.nombre));
   const mode = options.byName ? 'searchName' : (options.byCode ? 'searchCode' : 'search');
   return runDesktopAction(mode, query, {}, config, logger);
 }
@@ -20,6 +20,10 @@ export async function clearDesktop(config, logger) {
 
 export async function readPriceDesktop(config, logger) {
   return runDesktopAction('priceRead', 'price', {}, config, logger);
+}
+
+export async function diagnoseDesktop(config, logger) {
+  return runDesktopAction('diagnoseRead', 'diagnose', {}, config, logger);
 }
 
 export async function applyPriceDesktop(plan, config, logger) {
