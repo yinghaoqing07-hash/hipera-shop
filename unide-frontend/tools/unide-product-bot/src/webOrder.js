@@ -189,7 +189,8 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
       total: draft.items.length,
       autoPicked: 0, namePicked: 0, repairedCount: 0,
       unrepairedBlanks: 0, unrepairedCodes: [],
-      diagnosticos: [], motivos: new Map()
+      diagnosticos: [], motivos: new Map(),
+      sinDatosPrevios: leerCodigosSinDatos(config)
     };
 
     setLive('[pedido] 点 Nuevo，等表单渲染…');
@@ -219,9 +220,14 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
     // y solo cuenta lo que de verdad hay: faltantes, cajas mal, filas a
     // medias (C.Central sin código) y filas basura vacías.
     const reparaciones = { cajas: 0, medias: 0, vacias: 0, rellenadas: 0 };
+    // Solo cuentan como "por reparar" los problemas ACCIONABLES: un
+    // faltante ya confirmado inexistente (motivo apuntado) no se puede
+    // arreglar y no debe gastar una ronda entera en re-buscarlo.
+    const accionables = (a) => a.problemas
+      - a.faltantes.filter((it) => ctx.motivos.has(String(it.anchorCode || it.code || '').trim())).length;
     let auditoria = await auditarPedido(page, config, draft, ctx.motivos);
-    for (let ronda = 1; ronda <= 2 && auditoria.problemas > 0; ronda += 1) {
-      setLive(`[pedido] 对账发现 ${auditoria.problemas} 处问题，第 ${ronda} 轮修复…`);
+    for (let ronda = 1; ronda <= 2 && accionables(auditoria) > 0; ronda += 1) {
+      setLive(`[pedido] 对账发现 ${auditoria.problemas} 处问题（可修 ${accionables(auditoria)}），第 ${ronda} 轮修复…`);
       await repararAuditoria(ctx, draft, auditoria, results, reparaciones);
       auditoria = await auditarPedido(page, config, draft, ctx.motivos);
     }
@@ -275,6 +281,19 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
   setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行：${nombre || codeLabel}`);
   if (!searchTerm) return { code, qty, ok: false, reason: 'sin código' };
 
+  const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
+  // Código ya confirmado "sin datos" hace poco (lista persistente): ni se
+  // busca. Borrar logs/codigos-sin-datos.json (o esperar a que caduque la
+  // entrada) reactiva la búsqueda si el artículo vuelve al catálogo.
+  const previo = ctx.sinDatosPrevios?.get(anchorCode) || ctx.sinDatosPrevios?.get(code);
+  if (previo) {
+    const motivoLinea = `${previo.fecha} 已确认目录里没有这个编号，本次自动跳过`;
+    ctx.motivos.set(anchorCode || code, motivoLinea);
+    setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行跳过（${previo.fecha} 已确认不存在）`);
+    try { hooks?.avisar?.(`第 ${etiqueta} 行 ${nombre || codeLabel}：${previo.fecha} 已确认目录里没有，直接跳过没再搜。`); } catch { /* aviso no crítico */ }
+    return { code, qty, ok: false, reason: 'nodata-previo', skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}` };
+  }
+
   const prepared = await prepareItemEditor(page, ctx.autocompleteTimeoutMs);
   if (!prepared) {
     const shot = await screenshot(page, config, 'newrow');
@@ -286,16 +305,19 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
   }
   await sleep(Number(w.nextLineReadyMs) || 120);
 
-  const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
   const attempts = [{ term: searchTerm, requireAnchor: false }];
   if (original && original !== searchTerm) attempts.push({ term: original, requireAnchor: false, via: 'code' });
   if (nombre && nombre !== searchTerm) attempts.push({ term: nombre, requireAnchor: true, via: 'name' });
 
   let sel = { status: 'nomatch' };
   let triedName = false;
+  // "El desplegable dijo EXPLÍCITAMENTE que no hay datos" al buscar por
+  // código ≠ "no salió nada": lo primero es respuesta firme del catálogo y
+  // no merece ni segunda ronda ni rescate con IA (retrospectiva del 17/07).
+  let nodataPorCodigo = false;
   for (let ronda = 0; ronda < 2 && sel.status !== 'ok'; ronda += 1) {
     if (ronda > 0) {
-      if (sel.status !== 'nomatch') break;
+      if (sel.status !== 'nomatch' || nodataPorCodigo) break;
       setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行没出补全，重试一次…`);
       await clearArticleEditor(page);
       await sleep(1500);
@@ -307,9 +329,13 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
       if (at.via === 'name') triedName = true;
       const r = await searchAndSelect(page, at.term, anchorCode, timeoutRonda, ctx.autocompleteMs, at.requireAnchor);
       if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
+      if (r.status === 'nodata' && at.via !== 'name') nodataPorCodigo = true;
       sel = r;
     }
   }
+  // Código con "sin datos" en firme y el nombre tampoco encontró nada: es
+  // un artículo inexistente, no un fallo de la búsqueda.
+  if ((sel.status === 'nomatch' || sel.status === 'nodata') && nodataPorCodigo) sel = { status: 'nodata' };
   if (sel.status !== 'ok' && triedName) sel.nameTried = true;
 
   // Última bala: el modelo MIRA la captura y decide si hay rescate.
@@ -359,11 +385,22 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
   if (sel.status !== 'ok') {
     const motivoLinea = sel.status === 'ambiguous'
       ? `有多个匹配、无法自动选（código ${anchorCode} 对不上任何一行）`
-      : (diagnosticoIA?.problema || '搜索无结果');
-    const saltable = sel.status === 'ambiguous' || diagnosticoIA?.recuperable === false;
+      : sel.status === 'nodata'
+        ? '自动补全下拉明确显示「无数据」，目录里没有这个编号'
+        : (diagnosticoIA?.problema || '搜索无结果');
+    const saltable = sel.status === 'ambiguous' || sel.status === 'nodata' || diagnosticoIA?.recuperable === false;
     if (saltable) {
       const nota = `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}`;
       ctx.motivos.set(anchorCode || code, motivoLinea);
+      // Inexistente en firme (el desplegable lo dijo, o la IA lo confirmó):
+      // a la lista persistente para no repetir la misma búsqueda mañana.
+      if (sel.status === 'nodata' || diagnosticoIA?.recuperable === false) {
+        anotarCodigoSinDatos(config, anchorCode || code, nombre, motivoLinea);
+        ctx.sinDatosPrevios?.set(anchorCode || code, { fecha: new Date().toISOString().slice(0, 10), nombre, motivo: motivoLinea });
+      }
+      if (sel.status === 'nodata') {
+        try { hooks?.avisar?.(`第 ${etiqueta} 行 ${nombre || codeLabel}：下拉明确显示「无数据」，已跳过并记入无效编号清单。`); } catch { /* aviso no crítico */ }
+      }
       setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行跳过（${motivoLinea.slice(0, 40)}），继续下一行…`);
       await clearArticleEditor(page);
       return { code, qty, ok: false, reason: sel.status, skipped: true, nota };
@@ -413,6 +450,45 @@ const centralACodigo = (central) => {
 function codigosDeItem(item) {
   return [item.anchorCode, item.originalCode, item.code]
     .map((c) => String(c || '').trim()).filter(Boolean);
+}
+
+// ---- Lista persistente de códigos "sin datos" --------------------------
+// Códigos que el catálogo ya negó en firme (desplegable "sin datos" o IA
+// confirmándolo): se apuntan en logs/codigos-sin-datos.json y los pedidos
+// siguientes los saltan sin buscar. Caducan a los 30 días (los artículos
+// de temporada vuelven); borrar el archivo también reactiva la búsqueda.
+const SIN_DATOS_DIAS = 30;
+
+function rutaCodigosSinDatos(config) {
+  return path.resolve(config.__toolRoot || '.', 'logs', 'codigos-sin-datos.json');
+}
+
+function leerCodigosSinDatos(config) {
+  const mapa = new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(rutaCodigosSinDatos(config), 'utf8'));
+    const corte = Date.now() - SIN_DATOS_DIAS * 24 * 3600 * 1000;
+    for (const [codigo, entrada] of Object.entries(raw || {})) {
+      const t = Date.parse(entrada?.fecha || '');
+      if (Number.isFinite(t) && t >= corte) mapa.set(codigo, entrada);
+    }
+  } catch { /* sin lista todavía */ }
+  return mapa;
+}
+
+function anotarCodigoSinDatos(config, codigo, nombre, motivo) {
+  try {
+    const ruta = rutaCodigosSinDatos(config);
+    fs.mkdirSync(path.dirname(ruta), { recursive: true });
+    let raw = {};
+    try { raw = JSON.parse(fs.readFileSync(ruta, 'utf8')) || {}; } catch { /* archivo nuevo */ }
+    raw[String(codigo)] = {
+      fecha: new Date().toISOString().slice(0, 10),
+      nombre: String(nombre || '').slice(0, 60),
+      motivo: String(motivo || '').slice(0, 120)
+    };
+    fs.writeFileSync(ruta, JSON.stringify(raw, null, 2), 'utf8');
+  } catch { /* la lista es una mejora, no un requisito */ }
 }
 
 async function auditarPedido(page, config, draft, motivos) {
@@ -600,9 +676,59 @@ async function irAPaginaDeFila(page, config, codigo, central) {
 
 // Corrige la CANTIDAD de una fila existente: lápiz Editar → foco en el
 // editor de artículo → Tab a Cajas → seleccionar todo → cantidad →
-// Enter Enter (el mismo gesto que hace la dueña a mano).
+// Enter Enter (el mismo gesto que hace la dueña a mano). Tras el gesto se
+// RELEE la celda Cajas para confirmar que cuajó; si no, un segundo intento
+// aquí mismo (el 17/07 la primera pasada de 620207 no cuajó y solo la
+// segunda ronda de auditoría lo pescó).
 async function corregirCajasFila(ctx, codigo, central, qty) {
   const { page } = ctx;
+  const esperado = Number(String(qty).replace(',', '.'));
+  for (let intento = 0; intento < 2; intento += 1) {
+    if (intento > 0) {
+      try { await page.keyboard.press('Escape'); } catch { /* sin edición abierta */ }
+      await sleep(500);
+    }
+    const hecho = await gestoCorregirCajas(page, codigo, central, qty);
+    if (!hecho) return false;
+    let cajas = null;
+    for (let espera = 0; espera < 3000; espera += 300) {
+      cajas = await leerCajasDeFila(page, codigo, central);
+      if (cajas !== null) break;
+      await sleep(300);
+    }
+    if (cajas !== null && Number(String(cajas).replace(',', '.')) === esperado) return true;
+  }
+  return false;
+}
+
+// Lee la celda Cajas de la fila (por código o C.Central) tal cual está en
+// el grid, saltando filas en edición. null = fila no localizable aún.
+async function leerCajasDeFila(page, codigo, central) {
+  return page.evaluate((cod, cen) => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+      if (idxCodigo === -1 || idxCajas === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        if (tr.querySelector('input[type="text"]')) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const c = cells[idxCodigo] || '';
+        const ce = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        if ((cod && c === cod) || (cen && ce === cen)) return cells[idxCajas] || '';
+      }
+    }
+    return null;
+  }, codigo || '', central || '');
+}
+
+async function gestoCorregirCajas(page, codigo, central, qty) {
   const handle = await page.evaluateHandle((cod, cen) => {
     const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
@@ -915,9 +1041,9 @@ export async function searchArticleOptions(config, name, logger) {
     if (!prepared) return { ok: false, stage: 'newrow', error: '没找到可输入的 artículo 编辑框。' };
 
     await page.keyboard.type(String(name), { delay: 25 });
-    const count = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
+    const dd = await waitForDropdownOptions(page, autocompleteTimeoutMs, autocompleteMs);
     const shot = await screenshot(page, config, `search-${name}`);
-    if (count === 0) return { ok: true, options: [], screenshot: shot };
+    if (dd.count === 0) return { ok: true, options: [], screenshot: shot };
 
     const options = await captureDropdownOptions(page, Number(w.maxSearchOptions) || 20);
     logger?.info('web search options', { name, count: options.length });
@@ -1677,12 +1803,19 @@ async function openAddNewItemRow(page) {
 async function waitForDropdownOptions(page, timeoutMs, settleMs, floorMs = 300) {
   const start = Date.now();
   let count = 0;
-  while (Date.now() - start < timeoutMs) {
-    count = await dropdownOptionCount(page);
+  while (true) {
+    const est = await dropdownEstado(page);
+    count = est.opciones;
     if (count > 0) break;
+    // "Sin datos" YA pintado y sin carga en curso: respuesta firme del
+    // catálogo, distinta de "aún no salió nada" (que sí merece reintento).
+    if (est.sinDatos && !est.cargando) return { count: 0, sinDatos: true };
+    // Con el panel de carga a la vista se espera un poco MÁS allá del
+    // timeout: "todavía cargando" no es "no hay resultados".
+    const limite = est.cargando ? timeoutMs + 4000 : timeoutMs;
+    if (Date.now() - start >= limite) return { count: 0, sinDatos: false };
     await sleep(120);
   }
-  if (count === 0) return 0;
   // Estabilización ADAPTATIVA con SUELO: se espera un mínimo (floor) para no
   // salir antes de que lleguen opciones que aparecen con un pelín de retraso
   // (si no, se podría contar "1" cuando en realidad hay varias → elección
@@ -1697,10 +1830,29 @@ async function waitForDropdownOptions(page, timeoutMs, settleMs, floorMs = 300) 
   while (Date.now() < settleDeadline) {
     await sleep(120);
     const next = await dropdownOptionCount(page);
-    if (next === prev) return next;
+    if (next === prev) return { count: next, sinDatos: false };
     prev = next;
   }
-  return prev;
+  return { count: prev, sinDatos: false };
+}
+
+// Radiografía del desplegable: opciones visibles + ¿hay panel de carga? +
+// ¿el popup dice explícitamente que no hay datos? Permite distinguir
+// "sin datos" (respuesta firme) de "aún cargando" y de "no salió nada".
+async function dropdownEstado(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const sel = '[role="option"], .dxbl-listbox-item, .dxbl-dropdown-item, .dxbl-grid-dropdown-item';
+    const opciones = Array.from(document.querySelectorAll(sel)).filter(isVisible).length;
+    const cargando = Array.from(document.querySelectorAll(
+      '.dxbl-loading-panel, .dxbl-loading, [class*="load-panel"], [class*="loading-indicator"]'
+    )).some(isVisible);
+    const pops = Array.from(document.querySelectorAll(
+      '.dxbl-dropdown-body, .dxbl-dropdown, .dxbl-popup, .dxbl-listbox, [role="listbox"]'
+    )).filter(isVisible);
+    const sinDatos = opciones === 0 && pops.some((p) => /sin datos|no hay datos|no data|ning[uú]n dato/i.test(p.innerText || ''));
+    return { opciones, cargando, sinDatos };
+  });
 }
 
 // Cuenta las opciones VISIBLES del desplegable de autocompletado abierto.
@@ -1898,10 +2050,13 @@ async function repairBlankLine(page, terms, autocompleteTimeoutMs, autocompleteM
 //   - requireAnchor=true (búsqueda por NOMBRE): NUNCA se acepta a ciegas; se
 //     exige que UNA fila tenga el Código Unide == anchorCode. Así el respaldo
 //     por nombre jamás confirma "el primer nombre parecido".
-// Devuelve { status: 'ok'|'nomatch'|'ambiguous', via }.
+// Devuelve { status: 'ok'|'nomatch'|'nodata'|'ambiguous', via } — 'nodata'
+// significa que el desplegable dijo EXPLÍCITAMENTE que no hay datos.
 async function searchAndSelect(page, term, anchorCode, timeoutMs, settleMs, requireAnchor) {
-  await page.keyboard.type(String(term), { delay: 25 });
-  const count = await waitForDropdownOptions(page, timeoutMs, settleMs);
+  await escribirTerminoVerificado(page, String(term));
+  const dd = await waitForDropdownOptions(page, timeoutMs, settleMs);
+  if (dd.sinDatos) return { status: 'nodata' };
+  const count = dd.count;
   if (count === 0) return { status: 'nomatch' };
   if (count === 1 && !requireAnchor) {
     await page.keyboard.press('Enter');
@@ -1910,6 +2065,29 @@ async function searchAndSelect(page, term, anchorCode, timeoutMs, settleMs, requ
   const picked = anchorCode ? await selectDropdownRowByCode(page, anchorCode) : false;
   if (picked) return { status: 'ok', via: 'anchor' };
   return { status: 'ambiguous' };
+}
+
+// Teclea el término y VERIFICA que llegó al campo (input.value del elemento
+// enfocado). Si el valor no coincide — el tecleo empezó antes de que el
+// combo cogiera el foco, o quedó un resto de la búsqueda anterior —, limpia
+// y reescribe UNA vez. La línea 850873 del 17/07 tecleó al vacío y el
+// desplegable nunca llegó; esto lo corta de raíz en vez de fiarlo al retry.
+async function escribirTerminoVerificado(page, term) {
+  const esperado = String(term).trim();
+  for (let intento = 0; intento < 2; intento += 1) {
+    if (intento > 0) {
+      await clearArticleEditor(page);
+      await sleep(200);
+    }
+    await page.keyboard.type(String(term), { delay: 25 });
+    const valor = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? String(el.value ?? '') : null;
+    }).catch(() => null);
+    if (valor !== null && valor.trim() === esperado) return true;
+    if (valor === null && intento > 0) return false; // el foco no es un campo: reescribir más no ayuda
+  }
+  return false;
 }
 
 // Limpia el editor de artículo (borra el código que no encontró) para poder
