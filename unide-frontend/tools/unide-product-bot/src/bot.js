@@ -8,7 +8,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRouteIntent } from './llm.js';
+import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRetrospectivaPedido, llmRouteIntent } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
@@ -1742,7 +1742,10 @@ async function handleOrderApply(chatId, callbackId, id) {
   if (config.webOrder?.enabled) {
     let result;
     try {
-      result = await applyOrderWeb(session.orderDraft, config, logger);
+      result = await applyOrderWeb(session.orderDraft, config, logger, {
+        // Cada diagnóstico visual de la IA cae al chat al momento, tal cual.
+        avisar: (texto) => telegram.sendMessage(chatId, texto, { __skipAI: true }).catch(() => {})
+      });
     } catch (error) {
       const failure = `unexpected: ${error.message}`;
       logger.error('order apply crashed', { error: error.stack || error.message });
@@ -1785,6 +1788,20 @@ async function handleOrderApply(chatId, callbackId, id) {
     }
     if (result.domDump) {
       try { await telegram.sendDocument(chatId, result.domDump, '编辑中页面结构（发给 Claude）'); } catch { /* noop */ }
+    }
+    // Retrospectiva: si hubo diagnósticos visuales o problemas de auditoría,
+    // el modelo resume QUÉ pasó de verdad y CÓMO mejorar el bot — ese texto
+    // se puede reenviar tal cual a quien mantiene el código.
+    if (llmConfigured(config) && (result.diagnosticos?.length || result.auditoria?.problemas)) {
+      llmRetrospectivaPedido({
+        orden: session.orderDraft.orderName,
+        total: session.orderDraft.items.length,
+        auditoria: result.auditoria || null,
+        reparaciones: result.reparaciones || null,
+        diagnosticos: result.diagnosticos || []
+      }, config, logger)
+        .then((texto) => telegram.sendMessage(chatId, `本次运行复盘：\n${texto}`, { __skipAI: true }))
+        .catch((error) => logger.warn('retrospectiva failed', { error: error.message }));
     }
     return;
   }
@@ -2635,7 +2652,7 @@ if (config.panel?.enabled !== false) {
       if (vivoPs) noteLive(vivoPs.line);
       const vivos = [vivoPs, getLive()].filter(Boolean).sort((a, b) => a.ageSec - b.ageSec);
       const foto = getLiveShot();
-      return { seq: chatSeq, messages, desktopLive: vivos[0] || null, liveLog: getLiveLog(), liveShot: foto ? { at: foto.at, ageSec: foto.ageSec } : null };
+      return { seq: chatSeq, messages, desktopLive: vivos[0] || null, liveLog: getLiveLog(), liveShot: foto ? { at: foto.at, ageSec: foto.ageSec, busy: Boolean(foto.busy) } : null };
     },
     callback: async (data) => {
       const ids = arrivalChatIds();

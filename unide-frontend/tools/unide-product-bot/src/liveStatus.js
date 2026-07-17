@@ -46,17 +46,24 @@ export function clearLive() {
 // registro mientras esté fresca (fundido de entrada y salida).
 let SHOT = '';
 let SHOT_AT = 0;
+let SHOT_BUSY = false;
 
 export function setLiveShot(path) {
   SHOT = String(path || '');
   SHOT_AT = SHOT ? Date.now() : 0;
+  SHOT_BUSY = Boolean(SHOT);
+}
+
+// El análisis terminó: la foto se queda un rato pero deja de "latir".
+export function liveShotDone() {
+  SHOT_BUSY = false;
 }
 
 export function getLiveShot() {
   if (!SHOT) return null;
   const ageSec = Math.floor((Date.now() - SHOT_AT) / 1000);
   if (ageSec > 120) return null;
-  return { path: SHOT, at: SHOT_AT, ageSec };
+  return { path: SHOT, at: SHOT_AT, ageSec, busy: SHOT_BUSY };
 }
 
 export function getLive() {

@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectBrowser, findOrderPage } from './webBrowser.js';
-import { setLive, setLiveShot } from './liveStatus.js';
+import { liveShotDone, setLive, setLiveShot } from './liveStatus.js';
 import { llmConfigured, llmDiagnoseScreenshot } from './llm.js';
 import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
 import { selectLatestOrderRows } from './recentOrders.js';
@@ -173,7 +173,7 @@ export async function inspectFormPage(config, logger) {
 //     (así no puede disparar el botón por defecto del formulario).
 //   - Si un código no da resultados o da VARIOS, se detiene esa línea,
 //     hace captura y lo reporta (no adivina cuál elegir).
-export async function applyOrderWeb(draft, config, logger) {
+export async function applyOrderWeb(draft, config, logger, hooks = {}) {
   let browser;
   try {
     setLive('[pedido] 连接 Edge，打开 Pedidos…');
@@ -181,17 +181,17 @@ export async function applyOrderWeb(draft, config, logger) {
     browser = opened.browser;
     const page = opened.page;
     const w = config.webOrder || {};
-    // autocompleteMs = cuánto se espera TRAS aparecer el desplegable, para
-    // que carguen todas las opciones antes de contarlas (detección de
-    // varios resultados). autocompleteTimeoutMs = espera MÁXIMA a que el
-    // desplegable aparezca (sondeo). Subir ambos si la red va lenta.
-    const autocompleteMs = Number(w.autocompleteMs) || 900;
-    const autocompleteTimeoutMs = Number(w.autocompleteTimeoutMs) || 5000;
-    const betweenLinesMs = Number(w.betweenLinesMs) || 400;
+    const ctx = {
+      page, config, logger, w, hooks,
+      autocompleteMs: Number(w.autocompleteMs) || 900,
+      autocompleteTimeoutMs: Number(w.autocompleteTimeoutMs) || 5000,
+      betweenLinesMs: Number(w.betweenLinesMs) || 400,
+      total: draft.items.length,
+      autoPicked: 0, namePicked: 0, repairedCount: 0,
+      unrepairedBlanks: 0, unrepairedCodes: [],
+      diagnosticos: [], motivos: new Map()
+    };
 
-    // Paso 1: "Nuevo" (abre el DetailView del pedido). Si ya estamos en
-    // un formulario abierto, se continúa ahí. No se pulsa Volver: UnideGes
-    // puede mostrar una confirmación por cambios sin guardar.
     setLive('[pedido] 点 Nuevo，等表单渲染…');
     const openedNewOrder = await openNewOrderForm(page, Number(w.pageNavigationTimeoutMs) || 20000);
     if (!openedNewOrder.ok) {
@@ -200,232 +200,56 @@ export async function applyOrderWeb(draft, config, logger) {
     }
     await sleep(Number(w.formRenderMs) || 2800);
     setLive('[pedido] 填订单名「' + draft.orderName + '」…');
-
-    // Paso 2: Nombre del Pedido (input requerido, maxlength 150).
     if (!(await fillNombre(page, draft.orderName))) {
       return { ok: false, stage: 'nombre', error: '没找到订单名输入框（aria-required maxlength=150）。' };
     }
     await sleep(300);
 
-    // Paso 3: líneas. Se procesan una a una; ante cualquier anomalía se
-    // para y se avisa, sin adivinar.
+    // Fase 1: rellenar todas las líneas.
     const results = [];
-    let autoPicked = 0;
-    let namePicked = 0;
-    let repairedCount = 0;
-    let unrepairedBlanks = 0;
-    const unrepairedCodes = [];
     for (let i = 0; i < draft.items.length; i++) {
-      const item = draft.items[i];
-      const code = String(item.code || '').trim();
-      const qty = String(item.quantity ?? '').trim();
-      const nombre = String(item.nombre || '').trim();
-      // Término de búsqueda: el código/EAN si lo hay; si no (línea por nombre
-      // resuelta cuya opción no traía código), el propio nombre exacto.
-      const searchTerm = code || nombre || String(item.name || '').trim();
-      // Si el código corto se convirtió a EAN, en los mensajes de error se
-      // muestran ambos (original → EAN) para saber qué se buscó de verdad.
-      const original = String(item.originalCode || '').trim();
-      const codeLabel = original && original !== code ? `${original} → EAN ${code}` : (code || searchTerm);
-      setLive(`[pedido] 第 ${i + 1}/${draft.items.length} 行：${nombre || codeLabel}`);
-      if (!searchTerm) { results.push({ code, qty, ok: false, reason: 'sin código' }); continue; }
-
-      const prepared = await prepareItemEditor(page, autocompleteTimeoutMs);
-      if (!prepared) {
-        const shot = await screenshot(page, config, 'newrow');
-        const dom = await captureEditDom(page, config);
-        return {
-          ok: false, stage: 'newrow', screenshot: shot, domDump: dom,
-          error: `第 ${i + 1} 行：没找到可输入的 artículo 编辑框，也没能打开“新增行”。前面已填的不会保存。（已保存页面结构）`,
-          results
-        };
-      }
-      await sleep(Number(w.nextLineReadyMs) || 120);
-
-      // anchorCode = el Código Unide conocido, para elegir la fila exacta si
-      // el autocompletado saca varias. La búsqueda se intenta en cadena hasta
-      // que una funciona:
-      //   1) término principal (EAN si se convirtió, o el código, o el nombre
-      //      de una línea por nombre);
-      //   2) el código corto ORIGINAL (p. ej. 3701) por si su EAN no está
-      //      indexado en la web —el código sí es un identificador válido—;
-      //   3) el nombre de la tabla local (limpio, sin el punto de truncado).
-      // Todos anclados en anchorCode: nunca confirman "el primer parecido".
-      const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
-      const attempts = [{ term: searchTerm, requireAnchor: false }];
-      if (original && original !== searchTerm) attempts.push({ term: original, requireAnchor: false, via: 'code' });
-      if (nombre && nombre !== searchTerm) attempts.push({ term: nombre, requireAnchor: true, via: 'name' });
-
-      let sel = { status: 'nomatch' };
-      let triedName = false;
-      // Dos rondas: si TODO acabó en "sin desplegable" (nomatch), se limpia
-      // y se reintenta UNA vez con el doble de espera — el autocompletado
-      // de Blazor a veces no aparece a la primera (render/red lenta) y no
-      // tiene sentido tumbar un pedido de 36 líneas por un parpadeo.
-      for (let ronda = 0; ronda < 2 && sel.status !== 'ok'; ronda += 1) {
-        if (ronda > 0) {
-          if (sel.status !== 'nomatch') break;
-          setLive(`[pedido] 第 ${i + 1}/${draft.items.length} 行没出补全，重试一次…`);
-          await clearArticleEditor(page);
-          await sleep(1500);
-        }
-        const timeoutRonda = ronda > 0 ? autocompleteTimeoutMs * 2 : autocompleteTimeoutMs;
-        for (let t = 0; t < attempts.length; t += 1) {
-          if (t > 0) await clearArticleEditor(page);
-          const at = attempts[t];
-          if (at.via === 'name') triedName = true;
-          const r = await searchAndSelect(page, at.term, anchorCode, timeoutRonda, autocompleteMs, at.requireAnchor);
-          if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
-          sel = r;
-        }
-      }
-      if (sel.status !== 'ok' && triedName) sel.nameTried = true;
-
-      // Última bala antes de rendirse: el MODELO mira la captura. Si dice
-      // que es un atasco recuperable (desplegable que no salió, foco
-      // perdido, fila fuera de vista...), se hace una ronda de rescate:
-      // Escape, editor re-enfocado y a la vista, doble espera. Si dice que
-      // es un problema real, su diagnóstico viaja en el mensaje de error —
-      // la dueña sabe EXACTAMENTE qué pasó sin mandar capturas a nadie.
-      let diagnosticoIA = null;
-      if (sel.status === 'nomatch' && llmConfigured(config)) {
-        setLive(`[pedido] 第 ${i + 1} 行卡住，AI 看图分析中…`);
-        const fotoDiag = await screenshot(page, config, `line-${i + 1}-diag`);
-        if (fotoDiag) {
-          // El panel enseña ESTA captura mientras la IA la analiza.
-          setLiveShot(fotoDiag);
-          diagnosticoIA = await llmDiagnoseScreenshot(fotoDiag, {
-            tarea: `rellenar la línea ${i + 1}/${draft.items.length} del pedido web`,
-            termino: searchTerm,
-            nombre,
-            fallo: sel.status
-          }, config, logger).catch((error) => {
-            logger?.warn('screenshot diagnosis failed', { error: error.message });
-            return null;
-          });
-        }
-        if (diagnosticoIA?.recuperable) {
-          setLive(`[pedido] AI：${String(diagnosticoIA.problema || '').slice(0, 60)}，自动补救中…`);
-          try { await page.keyboard.press('Escape'); } catch { /* sin popup */ }
-          await sleep(400);
-          const listoDeNuevo = await prepareItemEditor(page, autocompleteTimeoutMs);
-          if (listoDeNuevo) {
-            await page.evaluate(() => {
-              const el = document.activeElement;
-              if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-            }).catch(() => {});
-            await sleep(600);
-            for (let t = 0; t < attempts.length && sel.status !== 'ok'; t += 1) {
-              if (t > 0) await clearArticleEditor(page);
-              const at = attempts[t];
-              const r = await searchAndSelect(page, at.term, anchorCode, autocompleteTimeoutMs * 2, autocompleteMs, at.requireAnchor);
-              sel = r.status === 'ok' ? { ...r, viaName: at.via === 'name' } : r;
-            }
-            if (sel.status === 'ok') logger?.info('line rescued after AI diagnosis', { line: i + 1, problema: diagnosticoIA.problema });
-          }
-        }
-      }
-
-      if (sel.status !== 'ok') {
-        // ¿Saltar o abortar? Si la IA CONFIRMÓ que el artículo no existe
-        // (desplegable "sin datos") o el match es ambiguo, parar el pedido
-        // entero castiga a las demás líneas: se SALTA esta, se sigue, y al
-        // final se listan las pendientes. Solo se aborta cuando no hay
-        // certeza (sin IA, o la IA dijo "recuperable" y aun así falló).
-        const motivoLinea = sel.status === 'ambiguous'
-          ? `有多个匹配、无法自动选（código ${anchorCode} 对不上任何一行）`
-          : (diagnosticoIA?.problema || '搜索无结果');
-        const saltable = sel.status === 'ambiguous' || diagnosticoIA?.recuperable === false;
-        if (saltable) {
-          results.push({ code, qty, ok: false, reason: sel.status, skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}` });
-          setLive(`[pedido] 第 ${i + 1}/${draft.items.length} 行跳过（${motivoLinea.slice(0, 40)}），继续下一行…`);
-          await clearArticleEditor(page);
-          continue;
-        }
-        const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
-        const shot = await screenshot(page, config, `code-${code}-${tag}`);
-        const dom = await captureEditDom(page, config);
-        const nameNote = sel.nameTried ? `（也试了按商品名「${nombre}」搜，仍无法确定）` : '';
-        const diagNote = diagnosticoIA?.problema
-          ? `\nAI 看图诊断：${diagnosticoIA.problema}${diagnosticoIA.pista ? `（${diagnosticoIA.pista}）` : ''}`
-          : '';
-        const detail = `código ${codeLabel} 没有出现自动补全选项${nameNote}。已停止，未保存。${diagNote}`;
-        results.push({ code, qty, ok: false, reason: sel.status });
-        return {
-          ok: false, stage: 'autocomplete',
-          screenshot: shot, domDump: dom, error: detail, results
-        };
-      }
-      if (sel.via === 'anchor') autoPicked += 1;
-      if (sel.viaName) namePicked += 1;
-      // Dejar que Blazor termine de ENLAZAR el artículo elegido antes de
-      // seguir (confirmar demasiado pronto deja la fila "en blanco").
-      await sleep(Number(w.selectSettleMs) || 500);
-      // Tras seleccionar (sobre todo si fue por clic en una fila del
-      // desplegable), el foco puede quedar en la opción, no en el editor.
-      // Se devuelve el foco al editor de la fila para que el Tab siguiente
-      // llegue a "Cajas" de forma fiable.
-      await focusEditRowEditor(page);
-      // Cajas: Tab desde el editor de artículo y escribir la cantidad.
-      await page.keyboard.press('Tab');
-      await sleep(Number(w.nextFieldMs) || 140);
-      if (qty) await page.keyboard.type(qty, { delay: 25 });
-      // Ritmo real de UnideGes (método A): tras la cantidad, DOS Enter
-      // confirman la línea y abren la siguiente fila de alta. Aquí el foco
-      // está en la celda "Cajas" del grid, así que Enter confirma la fila,
-      // no dispara Guardar (Guardar es un botón aparte del formulario).
-      await page.keyboard.press('Enter');
-      await sleep(150);
-      await page.keyboard.press('Enter');
-      await sleep(betweenLinesMs);
-
-      // Autocomprobación de la línea recién confirmada: si quedó "en
-      // blanco" (C.Central sin Código Unide, un fallo de enlace de Blazor
-      // al confirmar demasiado pronto), se repara con el gesto del
-      // usuario: lápiz Editar → reescribir el código → Enter Enter.
-      let repaired = false;
-      if (w.repairBlankLines !== false) {
-        const blanks = await countBlankRows(page);
-        if (blanks > unrepairedBlanks) {
-          repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, autocompleteTimeoutMs, autocompleteMs);
-          if (repaired) repairedCount += 1;
-          else { unrepairedBlanks += 1; unrepairedCodes.push(codeLabel); }
-        }
-      }
-      // Una fila que quedó EN BLANCO y no se pudo reparar NO está rellenada:
-      // contarla como ok inflaba el "35/36" cuando en pantalla había 33.
-      if (!repaired && unrepairedCodes.includes(codeLabel) && unrepairedCodes[unrepairedCodes.length - 1] === codeLabel) {
-        results.push({ code, qty, ok: false, skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：提交后 Código Unide 空白、自动修复失败，请点铅笔重输这行` });
-      } else {
-        results.push({ code, qty, ok: true, repaired });
-      }
+      const r = await rellenarUnaLinea(ctx, draft.items[i], i + 1);
+      if (r.abort) return { ok: false, stage: r.stage, screenshot: r.screenshot, domDump: r.domDump, error: r.error, results, diagnosticos: ctx.diagnosticos };
+      results.push(r);
     }
 
-    setLive('[pedido] 行都填完了，检查数量和截图…');
-    let cerosNota = '';
-    try {
-      const ceros = await scanCajasCero(page);
-      if (ceros.length) cerosNota = `\n数量是 0 的行（可能没敲上，请核对）：${ceros.map((c) => c.codigo + (c.articulo ? '（' + c.articulo.slice(0, 24) + '）' : '')).join('、')}`;
-    } catch { /* verificación opcional */ }
+    // Fase 2: AUDITORÍA contra el grid real + reparación (máx. 2 rondas).
+    // Lección del pedido de 37 líneas: el resumen contaba lo que el bot
+    // CREÍA haber hecho; ahora se lee la tabla entera (todas las páginas)
+    // y solo cuenta lo que de verdad hay: faltantes, cajas mal, filas a
+    // medias (C.Central sin código) y filas basura vacías.
+    const reparaciones = { cajas: 0, medias: 0, vacias: 0, rellenadas: 0 };
+    let auditoria = await auditarPedido(page, config, draft, ctx.motivos);
+    for (let ronda = 1; ronda <= 2 && auditoria.problemas > 0; ronda += 1) {
+      setLive(`[pedido] 对账发现 ${auditoria.problemas} 处问题，第 ${ronda} 轮修复…`);
+      await repararAuditoria(ctx, draft, auditoria, results, reparaciones);
+      auditoria = await auditarPedido(page, config, draft, ctx.motivos);
+    }
+
+    setLive('[pedido] 最终核对和截图…');
     const shot = await screenshot(page, config, 'done');
-    const okCount = results.filter((r) => r.ok).length;
-    logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked, repairedCount, unrepairedBlanks });
     const notes = [];
-    if (autoPicked > 0) notes.push(`${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行`);
-    if (namePicked > 0) notes.push(`${namePicked} 行代码没搜到，已改用商品名搜到并按 Código Unide 选中`);
-    if (repairedCount > 0) notes.push(`${repairedCount} 行提交后 Código Unide 显示空白，已自动重输修复`);
+    if (ctx.autoPicked > 0) notes.push(`${ctx.autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行`);
+    if (ctx.namePicked > 0) notes.push(`${ctx.namePicked} 行代码没搜到，已改用商品名搜到并选中`);
+    const arreglos = [];
+    if (reparaciones.rellenadas) arreglos.push(`补填 ${reparaciones.rellenadas} 行`);
+    if (reparaciones.cajas) arreglos.push(`补数量 ${reparaciones.cajas} 行`);
+    if (reparaciones.medias) arreglos.push(`重输码 ${reparaciones.medias} 行`);
+    if (reparaciones.vacias) arreglos.push(`删空行 ${reparaciones.vacias} 个`);
+    if (ctx.repairedCount) arreglos.push(`就地修复空白行 ${ctx.repairedCount} 次`);
+    if (arreglos.length) notes.push('自动修复：' + arreglos.join('、'));
     const autoNote = notes.length ? `（${notes.join('；')}）` : '';
-    const saltadas = results.filter((r) => r.skipped);
-    const notaSaltadas = saltadas.length
-      ? `\n没填上 ${saltadas.length} 行（需要人工加）：\n${saltadas.map((r) => `- ${r.nota}`).join('\n')}`
-      : '';
-    const notaFinal = notaSaltadas + cerosNota;
+    const pendientes = auditoria.pendientesNota;
+    logger?.info('web order filled+audited', { name: draft.orderName, correctas: auditoria.correctas, total: draft.items.length, problemas: auditoria.problemas });
     setLive('[pedido] listo');
     return {
       ok: true,
       screenshot: shot,
-      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。${notaFinal}\n请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
-      results
+      message: `订单名「${draft.orderName}」：全表对账后 ${auditoria.correctas}/${draft.items.length} 条正确${autoNote}。${pendientes}\n请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
+      results,
+      diagnosticos: ctx.diagnosticos,
+      auditoria: { correctas: auditoria.correctas, total: draft.items.length, problemas: auditoria.problemas, detalle: auditoria.detalle },
+      reparaciones
     };
   } catch (error) {
     setLive('[pedido] ERROR: ' + error.message);
@@ -434,6 +258,445 @@ export async function applyOrderWeb(draft, config, logger) {
   } finally {
     try { browser?.disconnect(); } catch { /* noop */ }
   }
+}
+
+// Rellena UNA línea (misma lógica de siempre): nueva fila, búsqueda en
+// cadena con ancla, rondas de reintento, rescate con diagnóstico visual, y
+// cantidad + doble Enter. La usan el llenado inicial y la reparación de
+// faltantes de la auditoría.
+async function rellenarUnaLinea(ctx, item, etiqueta) {
+  const { page, config, logger, w, hooks } = ctx;
+  const code = String(item.code || '').trim();
+  const qty = String(item.quantity ?? '').trim();
+  const nombre = String(item.nombre || '').trim();
+  const searchTerm = code || nombre || String(item.name || '').trim();
+  const original = String(item.originalCode || '').trim();
+  const codeLabel = original && original !== code ? `${original} → EAN ${code}` : (code || searchTerm);
+  setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行：${nombre || codeLabel}`);
+  if (!searchTerm) return { code, qty, ok: false, reason: 'sin código' };
+
+  const prepared = await prepareItemEditor(page, ctx.autocompleteTimeoutMs);
+  if (!prepared) {
+    const shot = await screenshot(page, config, 'newrow');
+    const dom = await captureEditDom(page, config);
+    return {
+      abort: true, stage: 'newrow', screenshot: shot, domDump: dom,
+      error: `第 ${etiqueta} 行：没找到可输入的 artículo 编辑框，也没能打开“新增行”。前面已填的不会保存。（已保存页面结构）`
+    };
+  }
+  await sleep(Number(w.nextLineReadyMs) || 120);
+
+  const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
+  const attempts = [{ term: searchTerm, requireAnchor: false }];
+  if (original && original !== searchTerm) attempts.push({ term: original, requireAnchor: false, via: 'code' });
+  if (nombre && nombre !== searchTerm) attempts.push({ term: nombre, requireAnchor: true, via: 'name' });
+
+  let sel = { status: 'nomatch' };
+  let triedName = false;
+  for (let ronda = 0; ronda < 2 && sel.status !== 'ok'; ronda += 1) {
+    if (ronda > 0) {
+      if (sel.status !== 'nomatch') break;
+      setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行没出补全，重试一次…`);
+      await clearArticleEditor(page);
+      await sleep(1500);
+    }
+    const timeoutRonda = ronda > 0 ? ctx.autocompleteTimeoutMs * 2 : ctx.autocompleteTimeoutMs;
+    for (let t = 0; t < attempts.length; t += 1) {
+      if (t > 0) await clearArticleEditor(page);
+      const at = attempts[t];
+      if (at.via === 'name') triedName = true;
+      const r = await searchAndSelect(page, at.term, anchorCode, timeoutRonda, ctx.autocompleteMs, at.requireAnchor);
+      if (r.status === 'ok') { sel = { ...r, viaName: at.via === 'name' }; break; }
+      sel = r;
+    }
+  }
+  if (sel.status !== 'ok' && triedName) sel.nameTried = true;
+
+  // Última bala: el modelo MIRA la captura y decide si hay rescate.
+  let diagnosticoIA = null;
+  if (sel.status === 'nomatch' && llmConfigured(config)) {
+    setLive(`[pedido] 第 ${etiqueta} 行卡住，AI 看图分析中…`);
+    const fotoDiag = await screenshot(page, config, `line-${etiqueta}-diag`);
+    if (fotoDiag) {
+      setLiveShot(fotoDiag);
+      diagnosticoIA = await llmDiagnoseScreenshot(fotoDiag, {
+        tarea: `rellenar la línea ${etiqueta}/${ctx.total} del pedido web`,
+        termino: searchTerm, nombre, fallo: sel.status
+      }, config, logger).catch((error) => {
+        logger?.warn('screenshot diagnosis failed', { error: error.message });
+        return null;
+      });
+      liveShotDone();
+    }
+    if (diagnosticoIA?.recuperable) {
+      setLive(`[pedido] AI：${String(diagnosticoIA.problema || '').slice(0, 60)}，自动补救中…`);
+      try { await page.keyboard.press('Escape'); } catch { /* sin popup */ }
+      await sleep(400);
+      const listoDeNuevo = await prepareItemEditor(page, ctx.autocompleteTimeoutMs);
+      if (listoDeNuevo) {
+        await page.evaluate(() => {
+          const el = document.activeElement;
+          if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+        }).catch(() => {});
+        await sleep(600);
+        for (let t = 0; t < attempts.length && sel.status !== 'ok'; t += 1) {
+          if (t > 0) await clearArticleEditor(page);
+          const at = attempts[t];
+          const r = await searchAndSelect(page, at.term, anchorCode, ctx.autocompleteTimeoutMs * 2, ctx.autocompleteMs, at.requireAnchor);
+          sel = r.status === 'ok' ? { ...r, viaName: at.via === 'name' } : r;
+        }
+        if (sel.status === 'ok') logger?.info('line rescued after AI diagnosis', { line: etiqueta, problema: diagnosticoIA.problema });
+      }
+    }
+    if (diagnosticoIA) {
+      const resultado = sel.status === 'ok' ? '已自救成功' : (diagnosticoIA.recuperable ? '补救没成' : '判定商品问题');
+      ctx.diagnosticos.push({ linea: etiqueta, termino: searchTerm, nombre, problema: diagnosticoIA.problema, recuperable: diagnosticoIA.recuperable, pista: diagnosticoIA.pista, resultado });
+      // Directo al chat, corto y sin IA de por medio (petición de la dueña).
+      try { hooks?.avisar?.(`AI 看图（第 ${etiqueta} 行 ${nombre || codeLabel}）：${diagnosticoIA.problema} → ${resultado}`); } catch { /* aviso no crítico */ }
+    }
+  }
+
+  if (sel.status !== 'ok') {
+    const motivoLinea = sel.status === 'ambiguous'
+      ? `有多个匹配、无法自动选（código ${anchorCode} 对不上任何一行）`
+      : (diagnosticoIA?.problema || '搜索无结果');
+    const saltable = sel.status === 'ambiguous' || diagnosticoIA?.recuperable === false;
+    if (saltable) {
+      const nota = `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}`;
+      ctx.motivos.set(anchorCode || code, motivoLinea);
+      setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行跳过（${motivoLinea.slice(0, 40)}），继续下一行…`);
+      await clearArticleEditor(page);
+      return { code, qty, ok: false, reason: sel.status, skipped: true, nota };
+    }
+    const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
+    const shot = await screenshot(page, config, `code-${code}-${tag}`);
+    const dom = await captureEditDom(page, config);
+    const nameNote = sel.nameTried ? `（也试了按商品名「${nombre}」搜，仍无法确定）` : '';
+    const diagNote = diagnosticoIA?.problema
+      ? `\nAI 看图诊断：${diagnosticoIA.problema}${diagnosticoIA.pista ? `（${diagnosticoIA.pista}）` : ''}`
+      : '';
+    return {
+      abort: true, stage: 'autocomplete', screenshot: shot, domDump: dom,
+      error: `código ${codeLabel} 没有出现自动补全选项${nameNote}。已停止，未保存。${diagNote}`
+    };
+  }
+  if (sel.via === 'anchor') ctx.autoPicked += 1;
+  if (sel.viaName) ctx.namePicked += 1;
+  await sleep(Number(w.selectSettleMs) || 500);
+  await focusEditRowEditor(page);
+  await page.keyboard.press('Tab');
+  await sleep(Number(w.nextFieldMs) || 140);
+  if (qty) await page.keyboard.type(qty, { delay: 25 });
+  await page.keyboard.press('Enter');
+  await sleep(150);
+  await page.keyboard.press('Enter');
+  await sleep(ctx.betweenLinesMs);
+
+  let repaired = false;
+  if (w.repairBlankLines !== false) {
+    const blanks = await countBlankRows(page);
+    if (blanks > ctx.unrepairedBlanks) {
+      repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs);
+      if (repaired) ctx.repairedCount += 1;
+      else { ctx.unrepairedBlanks += 1; ctx.unrepairedCodes.push(codeLabel); }
+    }
+  }
+  return { code, qty, ok: true, repaired };
+}
+
+// ---- Auditoría del pedido contra el grid REAL (todas las páginas) ------
+const centralACodigo = (central) => {
+  const m = String(central || '').trim().match(/^9(\d+)0$/);
+  return m ? m[1] : '';
+};
+
+function codigosDeItem(item) {
+  return [item.anchorCode, item.originalCode, item.code]
+    .map((c) => String(c || '').trim()).filter(Boolean);
+}
+
+async function auditarPedido(page, config, draft, motivos) {
+  const filas = await scrapeFilasAuditoria(page, config);
+  const porCodigo = new Map();
+  for (const f of filas) {
+    const clave = f.codigo || centralACodigo(f.central);
+    if (clave) {
+      if (!porCodigo.has(clave)) porCodigo.set(clave, []);
+      porCodigo.get(clave).push(f);
+    }
+  }
+  const faltantes = [];
+  const cajasMal = [];
+  const mediasFilas = [];
+  let correctas = 0;
+  for (const item of draft.items) {
+    const codigos = codigosDeItem(item);
+    let fila = null;
+    for (const c of codigos) {
+      const cand = porCodigo.get(c);
+      if (cand && cand.length) { fila = cand[0]; break; }
+    }
+    const qtyEsperada = Number(String(item.quantity ?? '').replace(',', '.'));
+    if (!fila) { faltantes.push(item); continue; }
+    if (fila.media) { mediasFilas.push({ item, fila }); continue; }
+    const cajas = Number(String(fila.cajas || '').replace(',', '.'));
+    if (Number.isFinite(qtyEsperada) && qtyEsperada > 0 && cajas !== qtyEsperada) {
+      cajasMal.push({ item, fila, cajas, qtyEsperada });
+      continue;
+    }
+    correctas += 1;
+  }
+  const vacias = filas.filter((f) => f.vacia).length;
+  const problemas = faltantes.length + cajasMal.length + mediasFilas.length + vacias;
+  const etiquetaDe = (item) => {
+    const cod = codigosDeItem(item)[0] || item.code || '';
+    return `${cod}${item.nombre ? '（' + String(item.nombre).slice(0, 26) + '）' : ''}`;
+  };
+  const lineasNota = [];
+  for (const item of faltantes) {
+    const motivo = motivos.get(String(item.anchorCode || item.code || '').trim()) || '表里没有这一行';
+    lineasNota.push(`- ${etiquetaDe(item)}：${motivo}`);
+  }
+  for (const x of cajasMal) lineasNota.push(`- ${etiquetaDe(x.item)}：数量是 ${x.cajas}，应为 ${x.qtyEsperada}`);
+  for (const x of mediasFilas) lineasNota.push(`- ${etiquetaDe(x.item)}：这行只有 C.Central、Código Unide 空着`);
+  if (vacias) lineasNota.push(`- 表里还有 ${vacias} 个空行`);
+  const pendientesNota = lineasNota.length
+    ? `\n对账后仍有问题（需要人工）：\n${lineasNota.join('\n')}`
+    : '';
+  return { filas, faltantes, cajasMal, mediasFilas, vacias, correctas, problemas, pendientesNota, detalle: lineasNota };
+}
+
+async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
+  const { page, config } = ctx;
+  // 1) filas basura vacías fuera (bloquean el Guardar y ensucian el pedido)
+  if (auditoria.vacias > 0) {
+    const borradas = await eliminarFilasVacias(page, config);
+    reparaciones.vacias += borradas;
+  }
+  // 2) medias filas: mismo gesto que el usuario, lápiz + reescribir el código
+  for (const x of auditoria.mediasFilas) {
+    const item = x.item;
+    const code = String(item.code || '').trim();
+    const nombre = String(item.nombre || '').trim();
+    const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
+    setLive(`[pedido] 修复半空行 ${anchorCode}…`);
+    if (await irAPaginaDeFila(page, config, '', x.fila.central)) {
+      const ok = await repairBlankLine(page, { searchTerm: code || nombre, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs);
+      if (ok) reparaciones.medias += 1;
+    }
+  }
+  // 3) cantidades mal: lápiz + Tab a Cajas + reescribir
+  for (const x of auditoria.cajasMal) {
+    setLive(`[pedido] 补数量 ${x.fila.codigo || x.fila.central} → ${x.qtyEsperada}…`);
+    if (await irAPaginaDeFila(page, config, x.fila.codigo, x.fila.central)) {
+      const ok = await corregirCajasFila(ctx, x.fila.codigo, x.fila.central, x.qtyEsperada);
+      if (ok) reparaciones.cajas += 1;
+    }
+  }
+  // 4) faltantes: volver a rellenar la línea entera (misma rutina)
+  for (const item of auditoria.faltantes) {
+    const clave = String(item.anchorCode || item.code || '').trim();
+    // Un artículo que la IA confirmó inexistente no se reintenta: sería
+    // repetir el mismo "sin datos" y gastar otra pasada.
+    if (ctx.motivos.has(clave)) continue;
+    setLive(`[pedido] 补填 ${clave}…`);
+    const r = await rellenarUnaLinea(ctx, item, `补${clave}`);
+    if (r.ok) reparaciones.rellenadas += 1;
+    else if (r.nota) ctx.motivos.set(clave, r.nota);
+  }
+}
+
+// Filas del grid de líneas tal cual están, INCLUYENDO medias y vacías
+// (el lector normal las salta). Pagina igual que scrapeAllOrderLines.
+async function scrapeFilasAuditoria(page, config) {
+  const maxPages = 30;
+  const settle = Number(config?.webOrder?.pageNavigationTimeoutMs) ? Math.min(Number(config.webOrder.pageNavigationTimeoutMs), 8000) : 8000;
+  const leer = () => page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      const idxArticulo = headers.findIndex((h) => /^art[ií]culo$/i.test(h));
+      const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+      const out = [];
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        if (tr.querySelector('input[type="text"]')) continue; // fila en edición
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        if (cells.some((c) => /^suma:/i.test(c) || /haga clic/i.test(c))) continue;
+        const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        const codigo = cells[idxCodigo] || '';
+        const articulo = idxArticulo >= 0 ? (cells[idxArticulo] || '') : '';
+        const cajas = idxCajas >= 0 ? (cells[idxCajas] || '') : '';
+        const vacia = !central && !codigo && !articulo;
+        const media = Boolean(central && !codigo);
+        out.push({ central, codigo, articulo, cajas, vacia, media });
+      }
+      return out;
+    }
+    return [];
+  });
+  const sig = (fs) => (fs || []).map((f) => `${f.central}|${f.codigo}|${f.cajas}`).join('||');
+  try {
+    const active = await gridActivePage(page);
+    if (active > 1) {
+      const before = sig(await leer().catch(() => []));
+      if (await gridClickPageDelta(page, { toPage: 1 })) {
+        await gridWaitForPageChange(page, leer, sig, before, Math.min(settle, 4000));
+      }
+    }
+  } catch { /* sin paginador */ }
+  const all = [];
+  let prevSig = '';
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const filas = pageIndex === 0 ? await leer() : await gridWaitForPageChange(page, leer, sig, prevSig, settle);
+    const s2 = sig(filas);
+    if (pageIndex > 0 && (!filas.length || s2 === prevSig)) break;
+    prevSig = s2;
+    all.push(...filas);
+    if (!(await gridClickPageDelta(page, +1))) break;
+  }
+  return all;
+}
+
+// Navega las páginas del grid hasta que la fila (por código o C.Central)
+// esté a la vista. Devuelve false si no aparece en ninguna página.
+async function irAPaginaDeFila(page, config, codigo, central) {
+  const busca = () => page.evaluate((cod, cen) => {
+    const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const c = cells[idxCodigo] || '';
+        const ce = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        if ((cod && c === cod) || (cen && ce === cen)) return true;
+      }
+    }
+    return false;
+  }, codigo || '', central || '');
+  try {
+    if (await gridActivePage(page) > 1) await gridClickPageDelta(page, { toPage: 1 });
+  } catch { /* sin paginador */ }
+  for (let i = 0; i < 30; i += 1) {
+    await sleep(500);
+    if (await busca()) return true;
+    if (!(await gridClickPageDelta(page, +1))) return false;
+  }
+  return false;
+}
+
+// Corrige la CANTIDAD de una fila existente: lápiz Editar → foco en el
+// editor de artículo → Tab a Cajas → seleccionar todo → cantidad →
+// Enter Enter (el mismo gesto que hace la dueña a mano).
+async function corregirCajasFila(ctx, codigo, central, qty) {
+  const { page } = ctx;
+  const handle = await page.evaluateHandle((cod, cen) => {
+    const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const c = cells[idxCodigo] || '';
+        const ce = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        if ((cod && c === cod) || (cen && ce === cen)) {
+          const b = tr.querySelector('button[title="Editar"], button[aria-label="Editar"]');
+          if (b) return b;
+        }
+      }
+    }
+    return null;
+  }, codigo || '', central || '');
+  const el = handle.asElement();
+  if (!el) { await handle.dispose(); return false; }
+  await el.click();
+  await handle.dispose();
+  const listo = await waitForArticleEditor(page, 4000);
+  if (!listo) return false;
+  await focusEditRowEditor(page);
+  await page.keyboard.press('Tab');
+  await sleep(180);
+  if (await focoEnCampo(page)) {
+    await page.keyboard.down('Control');
+    await page.keyboard.press('KeyA');
+    await page.keyboard.up('Control');
+  }
+  await page.keyboard.type(String(qty), { delay: 25 });
+  await page.keyboard.press('Enter');
+  await sleep(250);
+  await page.keyboard.press('Enter');
+  await sleep(400);
+  return true;
+}
+
+// Elimina las filas totalmente vacías (basura de rescates fallidos):
+// marca su checkbox y pulsa Eliminar, aceptando la confirmación. Barre
+// página a página; tras cada borrado vuelve a empezar (el grid refluye).
+async function eliminarFilasVacias(page, config) {
+  let borradas = 0;
+  for (let intento = 0; intento < 5; intento += 1) {
+    try {
+      if (await gridActivePage(page) > 1) await gridClickPageDelta(page, { toPage: 1 });
+    } catch { /* sin paginador */ }
+    let marcada = false;
+    for (let pg = 0; pg < 30 && !marcada; pg += 1) {
+      await sleep(400);
+      marcada = await page.evaluate(() => {
+        const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+        const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+        for (const table of tables) {
+          const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+          const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+          if (idxCodigo === -1) continue;
+          const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+          const idxArticulo = headers.findIndex((h) => /^art[ií]culo$/i.test(h));
+          for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+            if (!isVisible(tr)) continue;
+            if (tr.querySelector('input[type="text"]')) continue;
+            const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+            if (!cells.length) continue;
+            if (cells.some((c) => /^suma:/i.test(c) || /haga clic/i.test(c))) continue;
+            const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+            const codigo = cells[idxCodigo] || '';
+            const articulo = idxArticulo >= 0 ? (cells[idxArticulo] || '') : '';
+            if (central || codigo || articulo) continue;
+            const chk = tr.querySelector('input[type="checkbox"]');
+            if (chk) { chk.click(); return true; }
+          }
+        }
+        return false;
+      });
+      if (!marcada && !(await gridClickPageDelta(page, +1))) break;
+    }
+    if (!marcada) return borradas;
+    const clicado = await clickActionMatching(page, 'eliminar', 3000);
+    if (!clicado.ok) return borradas;
+    await sleep(700);
+    await confirmBlazorPopup(page);
+    await sleep(1000);
+    borradas += 1;
+  }
+  return borradas;
 }
 
 // --- 2b) Guardar y Enviar Pedido (SOLO bajo confirmación explícita) ---
