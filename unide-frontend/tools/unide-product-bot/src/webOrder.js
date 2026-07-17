@@ -392,10 +392,21 @@ export async function applyOrderWeb(draft, config, logger) {
           else { unrepairedBlanks += 1; unrepairedCodes.push(codeLabel); }
         }
       }
-      results.push({ code, qty, ok: true, repaired });
+      // Una fila que quedó EN BLANCO y no se pudo reparar NO está rellenada:
+      // contarla como ok inflaba el "35/36" cuando en pantalla había 33.
+      if (!repaired && unrepairedCodes.includes(codeLabel) && unrepairedCodes[unrepairedCodes.length - 1] === codeLabel) {
+        results.push({ code, qty, ok: false, skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：提交后 Código Unide 空白、自动修复失败，请点铅笔重输这行` });
+      } else {
+        results.push({ code, qty, ok: true, repaired });
+      }
     }
 
-    setLive('[pedido] 行都填完了，截图核对…');
+    setLive('[pedido] 行都填完了，检查数量和截图…');
+    let cerosNota = '';
+    try {
+      const ceros = await scanCajasCero(page);
+      if (ceros.length) cerosNota = `\n数量是 0 的行（可能没敲上，请核对）：${ceros.map((c) => c.codigo + (c.articulo ? '（' + c.articulo.slice(0, 24) + '）' : '')).join('、')}`;
+    } catch { /* verificación opcional */ }
     const shot = await screenshot(page, config, 'done');
     const okCount = results.filter((r) => r.ok).length;
     logger?.info('web order filled', { name: draft.orderName, ok: okCount, total: draft.items.length, autoPicked, namePicked, repairedCount, unrepairedBlanks });
@@ -403,17 +414,17 @@ export async function applyOrderWeb(draft, config, logger) {
     if (autoPicked > 0) notes.push(`${autoPicked} 行有多个匹配，已自动选 Código Unide 相符的那行`);
     if (namePicked > 0) notes.push(`${namePicked} 行代码没搜到，已改用商品名搜到并按 Código Unide 选中`);
     if (repairedCount > 0) notes.push(`${repairedCount} 行提交后 Código Unide 显示空白，已自动重输修复`);
-    if (unrepairedCodes.length > 0) notes.push(`⚠️ ${unrepairedCodes.join('、')} 提交后显示空白且自动修复失败，请人工点铅笔重输一遍这个代码`);
     const autoNote = notes.length ? `（${notes.join('；')}）` : '';
     const saltadas = results.filter((r) => r.skipped);
     const notaSaltadas = saltadas.length
       ? `\n没填上 ${saltadas.length} 行（需要人工加）：\n${saltadas.map((r) => `- ${r.nota}`).join('\n')}`
       : '';
+    const notaFinal = notaSaltadas + cerosNota;
     setLive('[pedido] listo');
     return {
       ok: true,
       screenshot: shot,
-      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。${notaSaltadas}\n请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
+      message: `订单名「${draft.orderName}」+ ${okCount}/${draft.items.length} 行已填入${autoNote}。${notaFinal}\n请看截图核对。这一步还没有点 Guardar，也没有点 Enviar Pedido。`,
       results
     };
   } catch (error) {
@@ -1499,6 +1510,36 @@ async function selectDropdownRowByCode(page, code) {
 // usuario (lápiz "Editar" → reescribir el código → Enter Enter) funciona
 // siempre, así que el bot lo replica solo, línea a línea, justo después
 // de confirmar cada una (así sabe QUÉ código va en la fila en blanco).
+
+// Tras rellenar: filas del grid VISIBLE con Cajas a 0 — pasa cuando el
+// tecleo de la cantidad no llegó (la fila queda creada pero sin cajas) y a
+// simple vista se escapa. Solo revisa la página del grid a la vista.
+async function scanCajasCero(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+      const idxArt = headers.findIndex((h) => /art[ií]culo/i.test(h));
+      if (idxCodigo === -1 || idxCajas === -1) continue;
+      const ceros = [];
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const codigo = cells[idxCodigo] || '';
+        if (!codigo) continue;
+        const n = Number((cells[idxCajas] || '').replace(',', '.'));
+        if (Number.isFinite(n) && n === 0) ceros.push({ codigo, articulo: idxArt >= 0 ? (cells[idxArt] || '') : '' });
+      }
+      return ceros;
+    }
+    return [];
+  });
+}
 
 // Cuenta las filas confirmadas visibles con C.Central pero sin Código
 // Unide (las "en blanco").

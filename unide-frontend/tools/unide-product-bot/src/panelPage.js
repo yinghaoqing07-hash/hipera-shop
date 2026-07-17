@@ -27,7 +27,7 @@ export function renderPanelPage(version) {
   }
   header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 18px 26px; font-size: 12px; letter-spacing: .18em; color: #76879a;
+    padding: 18px 26px; font-size: 13px; letter-spacing: .18em; color: #76879a;
     animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
   }
   #logo { color: #7dd3fc; font-weight: 600; }
@@ -64,13 +64,13 @@ export function renderPanelPage(version) {
   }
   #zona {
     flex: 1; min-height: 0; width: 100%;
-    display: grid; grid-template-columns: minmax(320px, 470px) minmax(0, 1fr) minmax(300px, 400px);
+    display: grid; grid-template-columns: minmax(340px, 520px) minmax(0, 1fr) minmax(320px, 460px);
     gap: 18px;
   }
   #centro { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
   #saludo { font-size: 13px; letter-spacing: .3em; color: #5f7184; margin-bottom: 26px; text-transform: uppercase; }
   #linea {
-    width: min(800px, 100%); display: flex; align-items: center; gap: 14px;
+    width: min(980px, 100%); display: flex; align-items: center; gap: 14px;
     border-bottom: 1px solid rgba(125,211,252,.25); padding: 6px 4px 12px;
     transition: border-color .25s;
   }
@@ -90,7 +90,7 @@ export function renderPanelPage(version) {
   #pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
   .pill {
     background: none; border: 1px solid rgba(200,211,220,.22); color: #b6c4d1;
-    border-radius: 999px; padding: 9px 18px; font-size: 14px; cursor: pointer;
+    border-radius: 999px; padding: 10px 20px; font-size: 15px; cursor: pointer;
     transition: all .2s;
   }
   .pill:hover { border-color: rgba(125,211,252,.6); color: #cfe9f7; }
@@ -103,12 +103,12 @@ export function renderPanelPage(version) {
   #cajonTeclado { display: none; }
   .tarjeta { border: 1px solid rgba(200,211,220,.16); background: rgba(148,180,205,.05); border-radius: 12px; padding: 14px 16px; min-height: 88px; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .25em; color: #5f7184; margin-bottom: 9px; }
-  .tarjeta .dato { font-size: 14px; color: #aebdcb; line-height: 1.65; }
+  .tarjeta .dato { font-size: 15px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
   #charla {
     /* flex 1: el chat se estira hasta la línea de comando, pegada abajo */
-    flex: 1 1 0; min-height: 0; width: min(800px, 100%); overflow-y: auto;
+    flex: 1 1 0; min-height: 0; width: min(980px, 100%); overflow-y: auto;
     margin: 8px 0 20px; scrollbar-width: thin;
     scrollbar-color: rgba(125,211,252,.2) transparent;
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
@@ -120,7 +120,7 @@ export function renderPanelPage(version) {
   .msg.saliendo { animation: mensajeSale var(--motion-fast) ease-in both; pointer-events: none; }
   .burbuja {
     max-width: 84%;
-    font-size: 15.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    font-size: 17px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
     color: #b4c2cf;
   }
   .mia .burbuja { color: #cfe9f7; text-align: right; }
@@ -178,12 +178,12 @@ export function renderPanelPage(version) {
   }
   #cajon .cab button:hover { color: #cfe9f7; }
   #cajon .cuerpo { flex: 1; overflow-y: auto; padding: 4px 6px 24px; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent; }
-  #cajon .texto { font-size: 13.5px; color: #aebdcb; line-height: 1.6; white-space: pre-wrap; margin-bottom: 14px; }
+  #cajon .texto { font-size: 16.5px; color: #b9c8d6; line-height: 1.7; white-space: pre-wrap; margin-bottom: 16px; }
   #cajon img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); margin-bottom: 14px; display: block; }
   #cajon .filaB { display: flex; gap: 8px; margin-bottom: 8px; }
   #cajon .filaB button {
     flex: 1; min-width: 0; background: rgba(56,189,248,.06); border: 1px solid rgba(56,189,248,.35); color: #b9e2f6;
-    border-radius: 10px; padding: 11px 8px; font-size: 14px; cursor: pointer; transition: all .15s;
+    border-radius: 10px; padding: 13px 10px; font-size: 15.5px; cursor: pointer; transition: all .15s;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #cajon .filaB button:hover { background: rgba(56,189,248,.16); color: #e2f3fc; }
@@ -228,15 +228,17 @@ export function renderPanelPage(version) {
   #lector.abierto ~ #registro { display: none; }
   #registroLineas {
     margin-top: auto; overflow: auto; padding: 6px 6px 4px; min-height: 0;
-    font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.7;
+    font-family: Consolas, "Courier New", monospace; font-size: 13.5px; line-height: 1.75;
     color: #8fa2b5; white-space: pre-wrap; word-break: break-word;
     user-select: text; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
+    max-height: 100%; opacity: 1;
+    transition: max-height var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease, padding var(--motion-base) ease;
   }
   #registroLineas > div { transform-origin: right bottom; }
   #registroLineas > div.lineaNueva { animation: lineaRegistroEntra var(--motion-base) var(--motion-ease) both; }
   #registroLineas .err { color: #f87171; }
   #registroLineas .hora { color: #566b80; margin-right: 8px; }
-  #registro.oculto #registroLineas { display: none; }
+  #registro.oculto #registroLineas { max-height: 0; opacity: 0; overflow: hidden; padding-top: 0; padding-bottom: 0; }
   #registroBtn {
     background: none; border: none; color: rgba(125,211,252,.4); cursor: pointer;
     font-size: 13px; padding: 2px 0 4px; align-self: center; letter-spacing: .2em;
@@ -248,22 +250,22 @@ export function renderPanelPage(version) {
      registro de la derecha y se va sola al dejar de estar fresca. */
   #fotoVivo {
     grid-column: 3; grid-row: 1; min-height: 0; z-index: 2;
-    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-    gap: 8px; padding-bottom: 26px;
-    opacity: 0; visibility: hidden; transform: translateY(8px);
+    display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
+    gap: 10px; padding-top: 4px;
+    opacity: 0; visibility: hidden; transform: translateY(-8px);
     transition: opacity var(--motion-slow) var(--motion-ease), transform var(--motion-slow) var(--motion-ease), visibility 0s linear var(--motion-slow);
     pointer-events: none;
   }
   #fotoVivo.visible { opacity: 1; visibility: visible; transform: translateY(0); transition-delay: 0s; }
   #fotoVivo img {
-    max-width: 100%; max-height: 72%; border-radius: 10px;
+    width: 100%; max-height: 56vh; object-fit: contain; border-radius: 10px;
     border: 1px solid rgba(125,211,252,.28); box-shadow: 0 10px 42px rgba(0,0,0,.55);
     background: #0b1220;
   }
-  #fotoVivo .pie { font-size: 11px; letter-spacing: .18em; color: #7dd3fc; }
-  /* Mientras la foto está a la vista, el registro se esconde con fundido. */
-  #registro { transition: opacity var(--motion-base) ease; }
-  #registro.tapado { opacity: 0; }
+  #fotoVivo .pie { font-size: 12px; letter-spacing: .18em; color: #7dd3fc; text-align: center; }
+  /* Mientras la foto está arriba, el registro cede SOLO su parte alta:
+     sus últimas líneas (las de abajo) siguen a la vista. */
+  #registro.tapado #registroLineas { max-height: 34%; }
   /* Media pantalla (la dueña pone UnideGes y JARVIS lado a lado): con tres
      columnas no cabe nada. Dos columnas, el registro cede su sitio y el
      lector se muda a la izquierda. */
