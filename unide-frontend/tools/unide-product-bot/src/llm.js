@@ -198,6 +198,47 @@ const DIAG_SCHEMA = {
   additionalProperties: false
 };
 
+// Retrospectiva de una ejecución con incidencias: recibe los diagnósticos
+// visuales y el resultado de la auditoría y devuelve un texto corto en
+// chino con dos partes — qué pasó de verdad y cómo mejorar el bot. La
+// dueña lo reenvía tal cual a quien mantiene el código: bucle de mejora.
+export async function llmRetrospectivaPedido(datos, config, logger) {
+  const apiKey = llmApiKey(config);
+  if (!apiKey) throw new Error('LLM sin apiKey');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
+  let response;
+  try {
+    response = await fetch(API_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': API_VERSION
+      },
+      body: JSON.stringify({
+        model: config?.llm?.model || DEFAULT_MODEL,
+        max_tokens: 900,
+        system: 'Eres el analista post-mortem de un bot que rellena pedidos web (DevExpress Blazor). Te llegan los diagnósticos visuales de la ejecución y el resultado de la auditoría final. Responde EN CHINO, conciso, con exactamente dos bloques: 【这次发生了什么】 (2-4 líneas, causas concretas, no síntomas) y 【改进 bot 的建议】 (2-4 puntos accionables de código/flujo, específicos). Sin florituras.',
+        messages: [{ role: 'user', content: JSON.stringify(datos).slice(0, 12000) }]
+      })
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  if (data.stop_reason === 'refusal') throw new Error('refusal');
+  const textOut = (data.content || []).find((b) => b.type === 'text')?.text;
+  if (!textOut) throw new Error('respuesta sin texto');
+  logger?.info('llm retrospectiva', { inputTokens: data.usage?.input_tokens });
+  return textOut.trim();
+}
+
 export async function llmDiagnoseScreenshot(imagePath, contexto, config, logger) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');

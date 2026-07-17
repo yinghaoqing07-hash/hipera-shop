@@ -262,7 +262,24 @@ export function renderPanelPage(version) {
     border: 1px solid rgba(125,211,252,.28); box-shadow: 0 10px 42px rgba(0,0,0,.55);
     background: #0b1220;
   }
-  #fotoVivo .pie { font-size: 12px; letter-spacing: .18em; color: #7dd3fc; text-align: center; }
+  #fotoVivo img { cursor: zoom-in; pointer-events: auto; }
+  /* Mientras el modelo analiza, la imagen "late" con un halo — sustituye
+     al texto explicativo. Al terminar el halo se apaga y la foto se queda
+     un rato antes de fundirse. */
+  #fotoVivo img.analizando { animation: brilloAnalisis 1.5s ease-in-out infinite; }
+  @keyframes brilloAnalisis {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(56,189,248,.25), 0 10px 42px rgba(0,0,0,.55); }
+    50% { box-shadow: 0 0 0 3px rgba(56,189,248,.85), 0 0 36px rgba(56,189,248,.5), 0 10px 42px rgba(0,0,0,.55); }
+  }
+  /* Lupa: cualquier imagen del panel ampliada a pantalla completa. */
+  #lupa {
+    position: fixed; inset: 0; z-index: 60; background: rgba(4,9,16,.9);
+    display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+    opacity: 0; visibility: hidden;
+    transition: opacity var(--motion-base) ease, visibility 0s linear var(--motion-base);
+  }
+  #lupa.visible { opacity: 1; visibility: visible; transition-delay: 0s; }
+  #lupa img { max-width: 95vw; max-height: 95vh; border-radius: 8px; box-shadow: 0 24px 90px rgba(0,0,0,.75); }
   /* Mientras la foto está arriba, el registro cede SOLO su parte alta:
      sus últimas líneas (las de abajo) siguen a la vista. */
   #registro.tapado #registroLineas { max-height: 34%; }
@@ -401,11 +418,11 @@ export function renderPanelPage(version) {
       <button id="registroBtn" onclick="plegarRegistro()" title="收起/展开">︿</button>
     </div>
     <div id="fotoVivo">
-      <div class="pie">AI 正在分析这张屏幕截图</div>
-      <img id="fotoVivoImg" alt="">
+      <img id="fotoVivoImg" alt="" title="点击放大">
     </div>
   </div>
 </main>
+<div id="lupa" onclick="cerrarLupa()"><img id="lupaImg" alt=""></div>
 <div id="aviso"></div>
 <div id="ver">${version}</div>
 <script>
@@ -659,6 +676,8 @@ function abrirLector(titulo, texto, fotoUrl) {
   if (fotoUrl) {
     const img = document.createElement('img');
     img.src = fotoUrl;
+    img.style.cursor = 'zoom-in';
+    img.onclick = () => ampliar(fotoUrl);
     foto.appendChild(img);
   }
   document.getElementById('lector').classList.add('abierto');
@@ -768,6 +787,16 @@ async function pulsar(data) {
     setTimeout(pollChat, 300);
   } catch { ocultarPensando(); aviso('连不上 BOT'); }
 }
+function ampliar(src) {
+  if (!src) return;
+  document.getElementById('lupaImg').src = src;
+  document.getElementById('lupa').classList.add('visible');
+}
+function cerrarLupa() {
+  document.getElementById('lupa').classList.remove('visible');
+}
+addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarLupa(); });
+document.getElementById('fotoVivoImg').onclick = () => ampliar(document.getElementById('fotoVivoImg').src);
 function plegarRegistro() {
   const reg = document.getElementById('registro');
   const btn = document.getElementById('registroBtn');
@@ -829,11 +858,13 @@ async function pollChat() {
     if (fv) {
       const ls = r.liveShot;
       const mostrarFoto = Boolean(ls && ls.ageSec < 90);
+      const imgVivo = document.getElementById('fotoVivoImg');
       if (mostrarFoto && fv.dataset.at !== String(ls.at)) {
         fv.dataset.at = String(ls.at);
-        document.getElementById('fotoVivoImg').src = '/vivo-foto?t=' + ls.at;
+        imgVivo.src = '/vivo-foto?t=' + ls.at;
       }
       fv.classList.toggle('visible', mostrarFoto);
+      imgVivo.classList.toggle('analizando', Boolean(mostrarFoto && ls.busy));
       const regTap = document.getElementById('registro');
       if (regTap) regTap.classList.toggle('tapado', mostrarFoto);
     }
