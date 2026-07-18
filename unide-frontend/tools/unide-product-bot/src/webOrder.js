@@ -296,6 +296,11 @@ async function rellenarUnaLinea(ctx, item, etiqueta, reintento = false) {
     return { code, qty, ok: false, reason: 'nodata-previo', skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}` };
   }
 
+  // Foto de las filas en blanco que YA existían antes de esta línea: solo
+  // la fila en blanco NUEVA que aparezca tras confirmar es de esta línea y
+  // puede repararse con SUS términos (las viejas son de otros artículos).
+  const blancasAntes = await centralesFilasBlancas(page);
+
   const prepared = await prepareItemEditor(page, ctx.autocompleteTimeoutMs);
   if (!prepared) {
     const shot = await screenshot(page, config, 'newrow');
@@ -437,9 +442,20 @@ async function rellenarUnaLinea(ctx, item, etiqueta, reintento = false) {
 
   let repaired = false;
   if (w.repairBlankLines !== false) {
-    const blanks = await countBlankRows(page);
-    if (blanks > ctx.unrepairedBlanks) {
-      repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs);
+    // Solo se repara la fila en blanco NUEVA (la que no estaba en la foto
+    // de antes): es la de ESTA línea. Reparar "cualquier blanca" con los
+    // términos de la línea actual escribió un MANZANA donde iba un PERA
+    // (18/07, v188). Las viejas las arregla la auditoría final con los
+    // términos de SU artículo.
+    const restantes = new Map();
+    for (const c of blancasAntes) restantes.set(c, (restantes.get(c) || 0) + 1);
+    const nuevas = (await centralesFilasBlancas(page)).filter((c) => {
+      const n = restantes.get(c) || 0;
+      if (n > 0) { restantes.set(c, n - 1); return false; }
+      return true;
+    });
+    if (nuevas.length) {
+      repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs, nuevas[0]);
       if (repaired) ctx.repairedCount += 1;
       else { ctx.unrepairedBlanks += 1; ctx.unrepairedCodes.push(codeLabel); }
     }
@@ -632,7 +648,7 @@ async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
     const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
     setLive(`[pedido] 修复半空行 ${anchorCode}…`);
     if (await irAPaginaDeFila(page, config, '', x.fila.central)) {
-      const ok = await repairBlankLine(page, { searchTerm: code || nombre, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs);
+      const ok = await repairBlankLine(page, { searchTerm: code || nombre, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs, x.fila.central);
       if (ok) reparaciones.medias += 1;
     }
   }
@@ -2177,9 +2193,37 @@ async function countBlankRows(page) {
   });
 }
 
-// Botón "Editar" (lápiz) de la primera fila en blanco visible.
-async function blankRowEditButton(page) {
-  const handle = await page.evaluateHandle(() => {
+// C.Central de cada fila en blanco visible (para saber cuáles son NUEVAS
+// tras confirmar una línea y cuáles vienen de líneas anteriores).
+async function centralesFilasBlancas(page) {
+  return page.evaluate(() => {
+    const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+    for (const table of tables) {
+      const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+      const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+      if (idxCodigo === -1) continue;
+      const idxCentral = headers.findIndex((h) => /c\.?\s*central/i.test(h));
+      const out = [];
+      for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+        if (!isVisible(tr)) continue;
+        const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+        if (!cells.length) continue;
+        const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
+        const codigo = cells[idxCodigo] || '';
+        if (central && !codigo && tr.querySelector('button[title="Editar"], button[aria-label="Editar"]')) out.push(central);
+      }
+      return out;
+    }
+    return [];
+  }).catch(() => []);
+}
+
+// Botón "Editar" (lápiz) de una fila en blanco visible. Con `central` se
+// exige ESA fila concreta; sin él, la primera que haya.
+async function blankRowEditButton(page, central = '') {
+  const handle = await page.evaluateHandle((cen) => {
     const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
     const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
@@ -2194,26 +2238,28 @@ async function blankRowEditButton(page) {
         if (!cells.length) continue;
         const central = idxCentral >= 0 ? (cells[idxCentral] || '') : '';
         const codigo = cells[idxCodigo] || '';
-        if (central && !codigo) {
+        if (central && !codigo && (!cen || central === cen)) {
           const btn = tr.querySelector('button[title="Editar"], button[aria-label="Editar"]');
           if (btn) return btn;
         }
       }
     }
     return null;
-  });
+  }, central || '');
   const el = handle.asElement();
   if (!el) { await handle.dispose(); return null; }
   return { el, handle };
 }
 
-// Repara la primera fila en blanco reescribiendo su artículo (el mismo
-// gesto que el usuario hace a mano). Devuelve true si tras el reintento
-// hay una fila en blanco menos.
-async function repairBlankLine(page, terms, autocompleteTimeoutMs, autocompleteMs) {
+// Repara UNA fila en blanco reescribiendo su artículo (el mismo gesto que
+// el usuario hace a mano). Con `central` solo toca esa fila concreta —
+// reparar "la primera que haya" con los términos de la línea actual
+// escribió un MANZANA donde iba un PERA (18/07). Devuelve true si tras el
+// reintento hay una fila en blanco menos.
+async function repairBlankLine(page, terms, autocompleteTimeoutMs, autocompleteMs, central = '') {
   const before = await countBlankRows(page);
   if (before === 0) return true;
-  const btn = await blankRowEditButton(page);
+  const btn = await blankRowEditButton(page, central);
   if (!btn) return false;
   await btn.el.click();
   await btn.handle.dispose();
