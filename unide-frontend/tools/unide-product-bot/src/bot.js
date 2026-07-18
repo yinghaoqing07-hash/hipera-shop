@@ -284,6 +284,15 @@ async function handleUpdate(update) {
   if (/^\/(pedido_editar|editar_pedido)\b/i.test(text)) { await handleOrderEdit(chatId, text); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
+  // Retoques del pedido dichos en claro ("把851040改成一箱", "加一个851220",
+  // "删掉850574"): se reconocen AQUÍ por regla, ANTES del lector de códigos
+  // de producto y del router LLM — son órdenes inequívocas y se ejecutan
+  // directamente, sin confirmación ni vuelta a preguntar (18/07: "改成一箱"
+  // acababa en la ficha del artículo pidiendo confirmar).
+  if (config.webOrder?.enabled) {
+    const editNatural = parseOrderEditNatural(text);
+    if (editNatural) { await handleOrderEditCambios(chatId, editNatural.cambios); return; }
+  }
   const parsed = parseProductMessage(text);
   if (!parsed.ok) {
     // Texto libre ("帮我打一下152的清单"): si hay LLM configurado, que él
@@ -1765,7 +1774,17 @@ async function handleOrderEdit(chatId, text) {
   if (errores.length) {
     await telegram.sendMessage(chatId, `这几行没看懂，先跳过：\n${errores.join('\n')}`, { __skipAI: true });
   }
-  await telegram.sendMessage(chatId, `收到，对打开的订单做 ${cambios.length} 处改动。做完发截图；不会点 Guardar，也不会点 Enviar Pedido。`, { __skipAI: true });
+  await handleOrderEditCambios(chatId, cambios);
+}
+
+// Ejecuta los retoques directamente — sin confirmación: son órdenes
+// inequívocas del dueño y la red de seguridad ya está en editOrderWeb
+// (verificación por operación, captura, y NUNCA Guardar/Enviar).
+async function handleOrderEditCambios(chatId, cambios) {
+  const resumen = cambios.map((c) => c.tipo === 'cantidad' ? `${c.codigo}→${c.qty}箱`
+    : c.tipo === 'quitar' ? `删${c.codigo}`
+    : `加${c.item.code || c.item.nombre}×${c.item.quantity || 1}`).join('、');
+  await telegram.sendMessage(chatId, `收到：${resumen}。这就去改，改完发截图；不会点 Guardar。`, { __skipAI: true });
   const result = await editOrderWeb(config, logger, lastWebOrderName, cambios, {
     avisar: (t) => telegram.sendMessage(chatId, t, { __skipAI: true }).catch(() => {})
   });
@@ -1785,6 +1804,32 @@ async function handleOrderEdit(chatId, text) {
   } else {
     await telegram.sendMessage(chatId, result.message, options);
   }
+}
+
+// Frases claras de retoque del pedido → cambios, por REGLA (sin LLM):
+// "把851040改成一箱/2箱/1", "加一个851220（两箱）", "删掉850574"…
+// Números chinos 一两三… se convierten; 箱/个/件 es la unidad Cajas.
+function parseOrderEditNatural(text) {
+  const t = String(text || '').trim();
+  if (!t || t.startsWith('/')) return null;
+  const num = (s) => {
+    if (!s) return '1';
+    if (/^\d+$/.test(s)) return s;
+    const mapa = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+    return String(mapa[s] ?? 1);
+  };
+  let m;
+  if ((m = t.match(/^把?\s*(\d{5,13})\s*(?:的)?(?:数量)?\s*改成\s*(\d+|[一两二三四五六七八九十])\s*[箱个件]?$/))) {
+    return { cambios: [{ tipo: 'cantidad', codigo: m[1], qty: num(m[2]) }] };
+  }
+  if ((m = t.match(/^(?:再)?(?:加|补)(?:一个|一行|个)?\s*(\d{5,13})\s*(?:数量)?\s*(\d+|[一两二三四五六七八九十])?\s*[箱个件]?$/))) {
+    return { cambios: [{ tipo: 'agregar', item: { code: m[1], quantity: num(m[2]) } }] };
+  }
+  if ((m = t.match(/^(?:把)?\s*(\d{5,13})\s*(?:的行|这行|那行)?\s*(?:删掉|删了|去掉|不要了?)$/))
+    || (m = t.match(/^(?:删掉|删了|去掉|不要)\s*(\d{5,13})\s*(?:的行|这行|那行)?$/))) {
+    return { cambios: [{ tipo: 'quitar', codigo: m[1] }] };
+  }
+  return null;
 }
 
 async function handleOrderApply(chatId, callbackId, id) {
