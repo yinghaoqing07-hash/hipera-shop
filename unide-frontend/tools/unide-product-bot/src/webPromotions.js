@@ -828,7 +828,38 @@ async function clickNextPromotionDetailPage(page) {
 // botones (nunca sobre flechas de la barra de XAF, que saltarian a otro
 // registro). d = +1 (siguiente) o { toPage: N } para ir a una pagina
 // concreta. Devuelve true si pulso una pagina que existe.
+// El grid de DevExpress pinta un panel "Loading..." mientras trae la
+// página; pulsar el paginador con esa carga aún en vuelo puede dejarlo
+// colgado con el spinner para siempre (le pasó al dueño el 18/07 tras las
+// pasadas de auditoría). Antes y después de cada click se espera a que el
+// panel desaparezca. No lanza: si a los N ms sigue, se continúa igual.
+async function waitForGridIdle(page, timeoutMs = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const cargando = await page.evaluate(() => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      return Array.from(document.querySelectorAll('[class*="load" i], [class*="cargando" i]'))
+        .some((el) => isVisible(el) && /loading|cargando/i.test(el.textContent || ''));
+    }).catch(() => false);
+    if (!cargando) return true;
+    await sleep(180);
+  }
+  return false;
+}
+
 async function clickGridPageDelta(page, d) {
+  await waitForGridIdle(page);
+  const clicked = await clickGridPageDeltaRaw(page, d);
+  if (clicked) {
+    // la carga arranca un pelín después del click: darle margen antes de
+    // preguntar si terminó.
+    await sleep(250);
+    await waitForGridIdle(page);
+  }
+  return clicked;
+}
+
+async function clickGridPageDeltaRaw(page, d) {
   return page.evaluate((delta) => {
     const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
     const pageNum = (el) => {
