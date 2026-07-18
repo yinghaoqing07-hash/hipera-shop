@@ -288,9 +288,11 @@ export function renderPanelPage(version) {
   }
   #lupa.visible { opacity: 1; visibility: visible; transition-delay: 0s; }
   #lupa img { max-width: 95vw; max-height: 95vh; border-radius: 8px; box-shadow: 0 24px 90px rgba(0,0,0,.75); }
-  /* Mientras la foto está arriba, el registro cede SOLO su parte alta:
-     sus últimas líneas (las de abajo) siguen a la vista. */
-  #registro.tapado #registroLineas { max-height: 34%; }
+  /* Mientras la foto está arriba, el registro cede SOLO lo que la foto
+     ocupa de verdad: el resto de la columna es todo suyo. El alto exacto
+     lo pone ajustarRegistroBajoFoto() en línea; este 60% es el arranque
+     antes de la primera medición. */
+  #registro.tapado #registroLineas { max-height: 60%; }
   /* Media pantalla (la dueña pone UnideGes y JARVIS lado a lado): con tres
      columnas no cabe nada. Dos columnas, el registro cede su sitio y el
      lector se muda a la izquierda. */
@@ -810,6 +812,26 @@ function cerrarLupa() {
 }
 addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarLupa(); });
 document.getElementById('fotoVivoImg').onclick = () => ampliar(document.getElementById('fotoVivoImg').src);
+// El registro ocupa TODO lo que la foto en vivo deja libre: se mide el alto
+// real de la imagen (varía con cada captura) y el resto de la columna es
+// del registro — antes un tope fijo del 34% dejaba media columna vacía.
+function ajustarRegistroBajoFoto() {
+  const reg = document.getElementById('registro');
+  const lineas = document.getElementById('registroLineas');
+  const fv = document.getElementById('fotoVivo');
+  if (!reg || !lineas) return;
+  if (!reg.classList.contains('tapado') || !fv || !fv.classList.contains('visible')) {
+    lineas.style.maxHeight = '';
+    return;
+  }
+  const img = document.getElementById('fotoVivoImg');
+  const alto = reg.clientHeight;
+  if (!alto) return;
+  const foto = (img && img.clientHeight ? img.clientHeight : Math.round(alto * 0.35)) + 22;
+  lineas.style.maxHeight = Math.max(90, alto - foto) + 'px';
+}
+document.getElementById('fotoVivoImg').addEventListener('load', ajustarRegistroBajoFoto);
+window.addEventListener('resize', ajustarRegistroBajoFoto);
 function plegarRegistro() {
   const reg = document.getElementById('registro');
   const btn = document.getElementById('registroBtn');
@@ -880,6 +902,7 @@ async function pollChat() {
       imgVivo.classList.toggle('analizando', Boolean(mostrarFoto && ls.busy));
       const regTap = document.getElementById('registro');
       if (regTap) regTap.classList.toggle('tapado', mostrarFoto);
+      ajustarRegistroBajoFoto();
     }
     const reg = document.getElementById('registro');
     if (reg && Array.isArray(r.liveLog) && r.liveLog.length) {
