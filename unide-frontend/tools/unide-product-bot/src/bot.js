@@ -1819,14 +1819,15 @@ function parseOrderEditNatural(text) {
     return String(mapa[s] ?? 1);
   };
   let m;
-  if ((m = t.match(/^把?\s*(\d{5,13})\s*(?:的)?(?:数量)?\s*改成\s*(\d+|[一两二三四五六七八九十])\s*[箱个件]?$/))) {
+  // Relleno tolerado: 给 antes del verbo, 吧/呗 al final ("把X给删了吧").
+  if ((m = t.match(/^把?\s*(\d{5,13})\s*(?:的)?(?:数量)?\s*(?:给)?\s*改成\s*(\d+|[一两二三四五六七八九十])\s*[箱个件]?\s*(?:吧|呗)?$/))) {
     return { cambios: [{ tipo: 'cantidad', codigo: m[1], qty: num(m[2]) }] };
   }
-  if ((m = t.match(/^(?:再)?(?:加|补)(?:一个|一行|个)?\s*(\d{5,13})\s*(?:数量)?\s*(\d+|[一两二三四五六七八九十])?\s*[箱个件]?$/))) {
+  if ((m = t.match(/^(?:再)?(?:加|补)(?:一个|一行|个)?\s*(\d{5,13})\s*(?:数量)?\s*(\d+|[一两二三四五六七八九十])?\s*[箱个件]?\s*(?:吧|呗)?$/))) {
     return { cambios: [{ tipo: 'agregar', item: { code: m[1], quantity: num(m[2]) } }] };
   }
-  if ((m = t.match(/^(?:把)?\s*(\d{5,13})\s*(?:的行|这行|那行)?\s*(?:删掉|删了|去掉|不要了?)$/))
-    || (m = t.match(/^(?:删掉|删了|去掉|不要)\s*(\d{5,13})\s*(?:的行|这行|那行)?$/))) {
+  if ((m = t.match(/^(?:把)?\s*(\d{5,13})\s*(?:的行|这行|那行|的)?\s*(?:给)?\s*(?:删掉|删了|删除|去掉|去了|移除|不要了?)\s*(?:吧|呗)?$/))
+    || (m = t.match(/^(?:把)?(?:删掉|删了|删除|去掉|移除|不要)\s*(\d{5,13})\s*(?:的行|这行|那行)?\s*(?:吧|呗)?$/))) {
     return { cambios: [{ tipo: 'quitar', codigo: m[1] }] };
   }
   return null;
