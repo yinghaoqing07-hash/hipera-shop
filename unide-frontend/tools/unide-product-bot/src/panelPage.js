@@ -931,6 +931,10 @@ async function pollChat() {
         filas.set(m.id, fila);
         nuevos = true;
       }
+      // Los puntos de "pensando" SIEMPRE al final: el eco del propio mensaje
+      // del usuario llega por el poll DESPUÉS de crearse los puntos y los
+      // dejaba por encima; appendChild los recoloca debajo.
+      if (nuevos && pensandoFila && pensandoFila.parentNode === caja) caja.appendChild(pensandoFila);
       while (caja.children.length > 120) {
         const primero = caja.firstChild;
         for (const [id, el] of filas) if (el === primero) filas.delete(id);
