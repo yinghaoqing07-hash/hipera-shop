@@ -124,6 +124,14 @@ export function renderPanelPage(version) {
     color: #b4c2cf;
   }
   .mia .burbuja { color: #cfe9f7; text-align: right; }
+  /* Notas técnicas (AI 看图, 复盘…): pequeñas y apagadas para que la
+     conversación de verdad respire; el texto completo se abre en el lector. */
+  .msg.nota { margin: 6px 0; }
+  .msg.nota .burbuja {
+    font-size: 13px; line-height: 1.55; color: #6e8093;
+    border-left: 2px solid rgba(125,211,252,.26); padding-left: 12px;
+  }
+  .msg.nota .chipLeer { font-size: 11px; padding: 2px 9px; }
   .burbuja.actualizada { animation: burbujaActualizada 460ms var(--motion-ease); }
   .textoMensaje.escribiendo::after {
     content: ''; display: inline-block; width: 1px; height: 1.05em;
@@ -600,12 +608,17 @@ function pintarBurbuja(m, { escribir = false } = {}) {
   const tecladoLargo = esTeclado && (textoBruto.length > 30 || textoBruto.split('\\n').length > 1);
   const completo = sinEmoji(m.resumen ? m.resumen : (tecladoLargo ? '操作面板已在左侧打开，按提示点就行。' : textoBruto));
   // Umbral alto a propósito: el chip 展开阅读 salía en casi todo y no
-  // aportaba nada — solo recortamos lo REALMENTE largo.
-  const esLargo = completo.length > 700 || completo.split('\\n').length > 12;
+  // aportaba nada — solo recortamos lo REALMENTE largo. Las NOTAS técnicas
+  // (AI 看图, 复盘) se pliegan mucho antes: una línea y al lector.
+  const esNota = Boolean(m.nota);
+  const esLargo = esNota
+    ? (completo.length > 180 || completo.split('\\n').length > 3)
+    : (completo.length > 700 || completo.split('\\n').length > 12);
   let textoVisible = completo;
   if (esLargo) {
-    const lineas = completo.split('\\n').slice(0, 8).join('\\n');
-    textoVisible = (lineas.length > 700 ? lineas.slice(0, 700) : lineas) + ' …';
+    const lineas = completo.split('\\n').slice(0, esNota ? 1 : 8).join('\\n');
+    const tope = esNota ? 90 : 700;
+    textoVisible = (lineas.length > tope ? lineas.slice(0, tope) : lineas) + ' …';
   }
   if (escribir) escribirTexto(cuerpo, textoVisible);
   else cuerpo.textContent = textoVisible;
@@ -925,8 +938,9 @@ async function pollChat() {
           continue;
         }
         const fila = document.createElement('div');
-        fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia') + (!cargaInicial ? ' entrando' : '');
-        fila.appendChild(pintarBurbuja(m, { escribir: !cargaInicial && m.from === 'bot' }));
+        fila.className = 'msg' + (m.from === 'bot' ? '' : ' mia') + (m.nota ? ' nota' : '') + (!cargaInicial ? ' entrando' : '');
+        // Las notas técnicas no se teclean con efecto máquina: entran quietas.
+        fila.appendChild(pintarBurbuja(m, { escribir: !cargaInicial && m.from === 'bot' && !m.nota }));
         caja.appendChild(fila);
         filas.set(m.id, fila);
         nuevos = true;

@@ -110,6 +110,9 @@ function recordChat(from, text, extra = {}) {
   // Señal para el panel: abrir este documento en el lector nada más llegar
   // (el informe del diagnóstico se enseña solo, sin que haya que pulsar).
   if (extra.autoAbrir) entry.autoAbrir = true;
+  // Señal para el panel: NOTA técnica (AI 看图, 复盘…) — se pinta pequeña y
+  // apagada para no ahogar la conversación. En Telegram va como siempre.
+  if (extra.nota) entry.nota = true;
   chatLog.push(entry);
   if (chatLog.length > 300) chatLog = chatLog.slice(-300);
   scheduleChatSave();
@@ -146,12 +149,12 @@ const panelToasts = new Map();
   };
   const origSendMessage = telegram.sendMessage.bind(telegram);
   telegram.sendMessage = async (chatId, text, options = {}) => {
-    const { __noLog, __apiReady, __skipAI, __replyKind, __cierraCajon, ...rest } = options || {};
+    const { __noLog, __apiReady, __skipAI, __replyKind, __cierraCajon, __nota, ...rest } = options || {};
     const original = String(text ?? '');
     const finalText = (__noLog || __apiReady || __skipAI)
       ? original
       : await composeOutgoingReply(chatId, original, { kind: __replyKind, maxChars: 3900 });
-    const entry = __noLog ? null : recordChat('bot', finalText, { buttons: buttonsFromMarkup(rest), cierraCajon: Boolean(__cierraCajon) });
+    const entry = __noLog ? null : recordChat('bot', finalText, { buttons: buttonsFromMarkup(rest), cierraCajon: Boolean(__cierraCajon), nota: Boolean(__nota) });
     const result = await origSendMessage(chatId, finalText, rest);
     if (entry && result?.message_id) { entry.tgMessageId = result.message_id; scheduleChatSave(); }
     // Mensajes con teclado: el panel ya enseña las instrucciones junto a los
@@ -1786,7 +1789,7 @@ async function handleOrderEditCambios(chatId, cambios) {
     : `加${c.item.code || c.item.nombre}×${c.item.quantity || 1}`).join('、');
   await telegram.sendMessage(chatId, `收到：${resumen}。这就去改，改完发截图；不会点 Guardar。`, { __skipAI: true });
   const result = await editOrderWeb(config, logger, lastWebOrderName, cambios, {
-    avisar: (t) => telegram.sendMessage(chatId, t, { __skipAI: true }).catch(() => {})
+    avisar: (t) => telegram.sendMessage(chatId, t, { __skipAI: true, __nota: true }).catch(() => {})
   });
   if (!result.ok) {
     await telegram.sendMessage(chatId, `订单改动失败（${result.stage || '?'}）：${result.error || '未知错误'}`, { __skipAI: true });
@@ -1864,7 +1867,7 @@ async function handleOrderApply(chatId, callbackId, id) {
     try {
       result = await applyOrderWeb(session.orderDraft, config, logger, {
         // Cada diagnóstico visual de la IA cae al chat al momento, tal cual.
-        avisar: (texto) => telegram.sendMessage(chatId, texto, { __skipAI: true }).catch(() => {})
+        avisar: (texto) => telegram.sendMessage(chatId, texto, { __skipAI: true, __nota: true }).catch(() => {})
       });
     } catch (error) {
       const failure = `unexpected: ${error.message}`;
@@ -1921,7 +1924,7 @@ async function handleOrderApply(chatId, callbackId, id) {
         reparaciones: result.reparaciones || null,
         diagnosticos: result.diagnosticos || []
       }, config, logger)
-        .then((texto) => telegram.sendMessage(chatId, `本次运行复盘：\n${texto}`, { __skipAI: true }))
+        .then((texto) => telegram.sendMessage(chatId, `本次运行复盘：\n${texto}`, { __skipAI: true, __nota: true }))
         .catch((error) => logger.warn('retrospectiva failed', { error: error.message }));
     }
     return;
