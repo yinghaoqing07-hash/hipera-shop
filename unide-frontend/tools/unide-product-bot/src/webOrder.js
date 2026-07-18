@@ -219,7 +219,7 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
     // CREÍA haber hecho; ahora se lee la tabla entera (todas las páginas)
     // y solo cuenta lo que de verdad hay: faltantes, cajas mal, filas a
     // medias (C.Central sin código) y filas basura vacías.
-    const reparaciones = { cajas: 0, medias: 0, vacias: 0, rellenadas: 0 };
+    const reparaciones = { cajas: 0, medias: 0, vacias: 0, rellenadas: 0, duplicadas: 0 };
     // Solo cuentan como "por reparar" los problemas ACCIONABLES: un
     // faltante ya confirmado inexistente (motivo apuntado) no se puede
     // arreglar y no debe gastar una ronda entera en re-buscarlo.
@@ -242,6 +242,7 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
     if (reparaciones.cajas) arreglos.push(`补数量 ${reparaciones.cajas} 行`);
     if (reparaciones.medias) arreglos.push(`重输码 ${reparaciones.medias} 行`);
     if (reparaciones.vacias) arreglos.push(`删空行 ${reparaciones.vacias} 个`);
+    if (reparaciones.duplicadas) arreglos.push(`删重复行 ${reparaciones.duplicadas} 行`);
     if (ctx.repairedCount) arreglos.push(`就地修复空白行 ${ctx.repairedCount} 次`);
     if (ctx.qtyCorregidas) arreglos.push(`数量当场改正 ${ctx.qtyCorregidas} 行`);
     if (arreglos.length) notes.push('自动修复：' + arreglos.join('、'));
@@ -456,13 +457,25 @@ async function rellenarUnaLinea(ctx, item, etiqueta, reintento = false) {
     if (v !== null) { codigoEnGrid = c; cajasLeidas = v; break; }
   }
   if (cajasLeidas === null && !reintento && (await filaEdicionSucia(page))) {
-    // La fila NO llegó al grid y el editor sigue abierto con el texto
-    // dentro: el commit no cuajó. Cancelar el editor residual (para no
-    // contaminar la línea siguiente) y reintentar la línea UNA vez.
-    setLive(`[pedido] 第 ${etiqueta} 行提交没生效，清掉残留编辑行重来一次…`);
+    // Pinta de commit que no cuajó (fila no visible + editor con texto).
+    // PERO antes de reintentar hay que mirar TODAS las páginas: el 18/07
+    // (v187) la fila 620201 SÍ se había confirmado — quedó en la página
+    // anterior al saltar el paginador — y el reintento la duplicó.
     await page.keyboard.press('Escape');
     await sleep(800);
-    return rellenarUnaLinea(ctx, item, etiqueta, true);
+    let confirmadaEnOtraPagina = false;
+    for (const c of codigosDeItem(item)) {
+      if (await irAPaginaDeFila(page, config, c, '')) { confirmadaEnOtraPagina = true; break; }
+    }
+    // La fila de alta ("haga clic…") vive en la última página: volver ahí
+    // para que la línea siguiente pueda abrir su editor.
+    await irAUltimaPagina(page);
+    if (confirmadaEnOtraPagina) {
+      setLive(`[pedido] 第 ${etiqueta} 行其实已提交（在前面的页里找到了），继续…`);
+    } else {
+      setLive(`[pedido] 第 ${etiqueta} 行提交没生效（全表都没有），清掉残留重来一次…`);
+      return rellenarUnaLinea(ctx, item, etiqueta, true);
+    }
   }
   if (cajasLeidas !== null && qty) {
     const leidoN = Number(String(cajasLeidas).replace(',', '.'));
@@ -551,16 +564,22 @@ async function auditarPedido(page, config, draft, motivos) {
   const faltantes = [];
   const cajasMal = [];
   const mediasFilas = [];
+  const duplicadas = [];
   let correctas = 0;
   for (const item of draft.items) {
     const codigos = codigosDeItem(item);
-    let fila = null;
+    let cand = null;
+    let codigoEnGrid = '';
     for (const c of codigos) {
-      const cand = porCodigo.get(c);
-      if (cand && cand.length) { fila = cand[0]; break; }
+      const x = porCodigo.get(c);
+      if (x && x.length) { cand = x; codigoEnGrid = c; break; }
     }
     const qtyEsperada = Number(String(item.quantity ?? '').replace(',', '.'));
-    if (!fila) { faltantes.push(item); continue; }
+    if (!cand) { faltantes.push(item); continue; }
+    // La MISMA línea repetida (la duplicó un reintento, como el 620201 del
+    // 18/07): es un problema aunque cada copia esté "bien" por separado.
+    if (cand.length > 1) { duplicadas.push({ item, codigo: codigoEnGrid, veces: cand.length, qtyEsperada }); continue; }
+    const fila = cand[0];
     if (fila.media) { mediasFilas.push({ item, fila }); continue; }
     const cajas = Number(String(fila.cajas || '').replace(',', '.'));
     if (Number.isFinite(qtyEsperada) && qtyEsperada > 0 && cajas !== qtyEsperada) {
@@ -570,7 +589,7 @@ async function auditarPedido(page, config, draft, motivos) {
     correctas += 1;
   }
   const vacias = filas.filter((f) => f.vacia).length;
-  const problemas = faltantes.length + cajasMal.length + mediasFilas.length + vacias;
+  const problemas = faltantes.length + cajasMal.length + mediasFilas.length + duplicadas.length + vacias;
   const etiquetaDe = (item) => {
     const cod = codigosDeItem(item)[0] || item.code || '';
     return `${cod}${item.nombre ? '（' + String(item.nombre).slice(0, 26) + '）' : ''}`;
@@ -582,11 +601,12 @@ async function auditarPedido(page, config, draft, motivos) {
   }
   for (const x of cajasMal) lineasNota.push(`- ${etiquetaDe(x.item)}：数量是 ${x.cajas}，应为 ${x.qtyEsperada}`);
   for (const x of mediasFilas) lineasNota.push(`- ${etiquetaDe(x.item)}：这行只有 C.Central、Código Unide 空着`);
+  for (const x of duplicadas) lineasNota.push(`- ${etiquetaDe(x.item)}：表里重复出现 ${x.veces} 次`);
   if (vacias) lineasNota.push(`- 表里还有 ${vacias} 个空行`);
   const pendientesNota = lineasNota.length
     ? `\n对账后仍有问题（需要人工）：\n${lineasNota.join('\n')}`
     : '';
-  return { filas, faltantes, cajasMal, mediasFilas, vacias, correctas, problemas, pendientesNota, detalle: lineasNota };
+  return { filas, faltantes, cajasMal, mediasFilas, duplicadas, vacias, correctas, problemas, pendientesNota, detalle: lineasNota };
 }
 
 async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
@@ -595,6 +615,14 @@ async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
   if (auditoria.vacias > 0) {
     const borradas = await eliminarFilasVacias(page, config);
     reparaciones.vacias += borradas;
+  }
+  // 1b) líneas duplicadas: borrar las copias que sobran (checkbox +
+  // Eliminar). Si las copias tienen cantidades distintas se intenta borrar
+  // la que NO coincide con la esperada; la que quede, si está mal, la
+  // arregla el paso de cantidades en la siguiente ronda.
+  for (const x of auditoria.duplicadas || []) {
+    setLive(`[pedido] 删除重复行 ${x.codigo}（多了 ${x.veces - 1} 行）…`);
+    reparaciones.duplicadas += await eliminarFilaDuplicada(page, config, x.codigo, x.qtyEsperada, x.veces - 1);
   }
   // 2) medias filas: mismo gesto que el usuario, lápiz + reescribir el código
   for (const x of auditoria.mediasFilas) {
@@ -616,7 +644,10 @@ async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
       if (ok) reparaciones.cajas += 1;
     }
   }
-  // 4) faltantes: volver a rellenar la línea entera (misma rutina)
+  // 4) faltantes: volver a rellenar la línea entera (misma rutina). Los
+  // pasos anteriores dejan el grid en cualquier página; la fila de alta
+  // vive en la última.
+  if (auditoria.faltantes.length) await irAUltimaPagina(page);
   for (const item of auditoria.faltantes) {
     const clave = String(item.anchorCode || item.code || '').trim();
     // Un artículo que la IA confirmó inexistente no se reintenta: sería
@@ -721,6 +752,15 @@ async function irAPaginaDeFila(page, config, codigo, central) {
   return false;
 }
 
+// Avanza el paginador hasta la última página (donde vive la fila de alta
+// "Haga clic aquí para agregar…"). En un grid de una sola página no hace nada.
+async function irAUltimaPagina(page) {
+  for (let i = 0; i < 30; i += 1) {
+    if (!(await gridClickPageDelta(page, +1))) return;
+    await sleep(400);
+  }
+}
+
 // Corrige la CANTIDAD de una fila existente: lápiz Editar → foco en el
 // editor de artículo → Tab a Cajas → seleccionar todo → cantidad →
 // Enter Enter (el mismo gesto que hace la dueña a mano). Tras el gesto se
@@ -811,6 +851,52 @@ async function gestoCorregirCajas(page, codigo, central, qty) {
   await page.keyboard.press('Enter');
   await sleep(400);
   return true;
+}
+
+// Borra `sobran` copias de una línea duplicada: navega hasta una página
+// con la fila, marca su checkbox y pulsa Eliminar (con confirmación).
+// Prefiere borrar una copia cuya cantidad NO coincide con la esperada.
+async function eliminarFilaDuplicada(page, config, codigo, qtyEsperada, sobran) {
+  let borradas = 0;
+  for (let i = 0; i < sobran; i += 1) {
+    if (!(await irAPaginaDeFila(page, config, codigo, ''))) break;
+    const marcada = await page.evaluate((cod, qe) => {
+      const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+      for (const table of tables) {
+        const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+        const idxCodigo = headers.findIndex((h) => /c[oó]digo unide/i.test(h));
+        if (idxCodigo === -1) continue;
+        const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+        const candidatas = [];
+        for (const tr of Array.from(table.querySelectorAll('tr[role="row"]'))) {
+          if (!isVisible(tr)) continue;
+          if (tr.querySelector('input[type="text"]')) continue;
+          const cells = Array.from(tr.querySelectorAll('td')).map((td) => clean(td.innerText));
+          if (!cells.length) continue;
+          if ((cells[idxCodigo] || '') !== cod) continue;
+          const chk = tr.querySelector('input[type="checkbox"]');
+          if (!chk) continue;
+          const cajas = idxCajas >= 0 ? (cells[idxCajas] || '') : '';
+          candidatas.push({ chk, cajasMal: qe !== '' && cajas !== qe });
+        }
+        if (!candidatas.length) continue;
+        const elegida = candidatas.find((c) => c.cajasMal) || candidatas[0];
+        elegida.chk.click();
+        return true;
+      }
+      return false;
+    }, codigo, qtyEsperada > 0 ? String(qtyEsperada) : '');
+    if (!marcada) break;
+    const clicado = await clickActionMatching(page, 'eliminar', 3000);
+    if (!clicado.ok) break;
+    await sleep(700);
+    await confirmBlazorPopup(page);
+    await sleep(1000);
+    borradas += 1;
+  }
+  return borradas;
 }
 
 // Elimina las filas totalmente vacías (basura de rescates fallidos):
