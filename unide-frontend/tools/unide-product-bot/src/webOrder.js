@@ -187,7 +187,7 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
       autocompleteTimeoutMs: Number(w.autocompleteTimeoutMs) || 5000,
       betweenLinesMs: Number(w.betweenLinesMs) || 400,
       total: draft.items.length,
-      autoPicked: 0, namePicked: 0, repairedCount: 0,
+      autoPicked: 0, namePicked: 0, repairedCount: 0, qtyCorregidas: 0,
       unrepairedBlanks: 0, unrepairedCodes: [],
       diagnosticos: [], motivos: new Map(),
       sinDatosPrevios: leerCodigosSinDatos(config)
@@ -243,6 +243,7 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
     if (reparaciones.medias) arreglos.push(`重输码 ${reparaciones.medias} 行`);
     if (reparaciones.vacias) arreglos.push(`删空行 ${reparaciones.vacias} 个`);
     if (ctx.repairedCount) arreglos.push(`就地修复空白行 ${ctx.repairedCount} 次`);
+    if (ctx.qtyCorregidas) arreglos.push(`数量当场改正 ${ctx.qtyCorregidas} 行`);
     if (arreglos.length) notes.push('自动修复：' + arreglos.join('、'));
     const autoNote = notes.length ? `（${notes.join('；')}）` : '';
     const pendientes = auditoria.pendientesNota;
@@ -270,7 +271,7 @@ export async function applyOrderWeb(draft, config, logger, hooks = {}) {
 // cadena con ancla, rondas de reintento, rescate con diagnóstico visual, y
 // cantidad + doble Enter. La usan el llenado inicial y la reparación de
 // faltantes de la auditoría.
-async function rellenarUnaLinea(ctx, item, etiqueta) {
+async function rellenarUnaLinea(ctx, item, etiqueta, reintento = false) {
   const { page, config, logger, w, hooks } = ctx;
   const code = String(item.code || '').trim();
   const qty = String(item.quantity ?? '').trim();
@@ -392,13 +393,14 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
     if (saltable) {
       const nota = `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoLinea}`;
       ctx.motivos.set(anchorCode || code, motivoLinea);
-      // Inexistente en firme (el desplegable lo dijo, o la IA lo confirmó):
-      // a la lista persistente para no repetir la misma búsqueda mañana.
-      if (sel.status === 'nodata' || diagnosticoIA?.recuperable === false) {
-        anotarCodigoSinDatos(config, anchorCode || code, nombre, motivoLinea);
-        ctx.sinDatosPrevios?.set(anchorCode || code, { fecha: new Date().toISOString().slice(0, 10), nombre, motivo: motivoLinea });
-      }
+      // SOLO el "sin datos" explícito del desplegable entra en la lista
+      // persistente. El veredicto visual de la IA vale para ESTA ejecución
+      // (ctx.motivos) pero NO se guarda: el 18/07 la IA marcó como
+      // inexistentes productos reales (850799, 851657, 852539) cuando lo
+      // roto era la interacción, y la lista los habría saltado un mes.
       if (sel.status === 'nodata') {
+        anotarCodigoSinDatos(config, anchorCode || code, nombre, motivoLinea);
+        ctx.sinDatosPrevios?.set(anchorCode || code, { fecha: new Date().toISOString().slice(0, 10), nombre, motivo: motivoLinea, firme: true });
         try { hooks?.avisar?.(`第 ${etiqueta} 行 ${nombre || codeLabel}：下拉明确显示「无数据」，已跳过并记入无效编号清单。`); } catch { /* aviso no crítico */ }
       }
       setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行跳过（${motivoLinea.slice(0, 40)}），继续下一行…`);
@@ -420,10 +422,13 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
   if (sel.via === 'anchor') ctx.autoPicked += 1;
   if (sel.viaName) ctx.namePicked += 1;
   await sleep(Number(w.selectSettleMs) || 500);
-  await focusEditRowEditor(page);
-  await page.keyboard.press('Tab');
-  await sleep(Number(w.nextFieldMs) || 140);
-  if (qty) await page.keyboard.type(qty, { delay: 25 });
+  if (qty) {
+    await escribirCajasEnEdicion(page, qty, Number(w.nextFieldMs) || 140);
+  } else {
+    await focusEditRowEditor(page);
+    await page.keyboard.press('Tab');
+    await sleep(Number(w.nextFieldMs) || 140);
+  }
   await page.keyboard.press('Enter');
   await sleep(150);
   await page.keyboard.press('Enter');
@@ -436,6 +441,38 @@ async function rellenarUnaLinea(ctx, item, etiqueta) {
       repaired = await repairBlankLine(page, { searchTerm, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs);
       if (repaired) ctx.repairedCount += 1;
       else { ctx.unrepairedBlanks += 1; ctx.unrepairedCodes.push(codeLabel); }
+    }
+  }
+
+  // --- Eco INMEDIATO de la línea (retro del 18/07): releer la fila recién
+  // confirmada ANTES de pasar a la siguiente. La cascada de aquel pedido
+  // (851040 se atascó → su editor quedó abierto con texto → 850574 y las
+  // siguientes tecleaban en un sitio roto) se corta aquí, no en la
+  // auditoría final.
+  let codigoEnGrid = '';
+  let cajasLeidas = null;
+  for (const c of codigosDeItem(item)) {
+    const v = await leerCajasDeFila(page, c, '');
+    if (v !== null) { codigoEnGrid = c; cajasLeidas = v; break; }
+  }
+  if (cajasLeidas === null && !reintento && (await filaEdicionSucia(page))) {
+    // La fila NO llegó al grid y el editor sigue abierto con el texto
+    // dentro: el commit no cuajó. Cancelar el editor residual (para no
+    // contaminar la línea siguiente) y reintentar la línea UNA vez.
+    setLive(`[pedido] 第 ${etiqueta} 行提交没生效，清掉残留编辑行重来一次…`);
+    await page.keyboard.press('Escape');
+    await sleep(800);
+    return rellenarUnaLinea(ctx, item, etiqueta, true);
+  }
+  if (cajasLeidas !== null && qty) {
+    const leidoN = Number(String(cajasLeidas).replace(',', '.'));
+    const esperadoN = Number(String(qty).replace(',', '.'));
+    if (Number.isFinite(esperadoN) && esperadoN > 0 && leidoN !== esperadoN) {
+      // Cantidad mal NADA más confirmarse (el "11" de 620201, el "0" de
+      // 850881): arreglarla ahora que se sabe qué fila es.
+      setLive(`[pedido] 第 ${etiqueta} 行数量回读是 ${cajasLeidas}，当场改回 ${qty}…`);
+      if (await filaEnEdicion(page)) { await page.keyboard.press('Escape'); await sleep(500); }
+      if (await corregirCajasFila(ctx, codigoEnGrid, '', qty)) ctx.qtyCorregidas += 1;
     }
   }
   return { code, qty, ok: true, repaired };
@@ -466,12 +503,21 @@ function rutaCodigosSinDatos(config) {
 function leerCodigosSinDatos(config) {
   const mapa = new Map();
   try {
-    const raw = JSON.parse(fs.readFileSync(rutaCodigosSinDatos(config), 'utf8'));
+    const ruta = rutaCodigosSinDatos(config);
+    const raw = JSON.parse(fs.readFileSync(ruta, 'utf8'));
     const corte = Date.now() - SIN_DATOS_DIAS * 24 * 3600 * 1000;
+    let habiaSucias = false;
+    const limpio = {};
     for (const [codigo, entrada] of Object.entries(raw || {})) {
+      // Solo valen las entradas FIRMES (el desplegable dijo "sin datos").
+      // Las que apuntó v186 por veredicto de la IA (sin `firme`) se PURGAN
+      // del archivo: el 18/07 marcaron productos reales como inexistentes.
+      if (entrada?.firme !== true) { habiaSucias = true; continue; }
+      limpio[codigo] = entrada;
       const t = Date.parse(entrada?.fecha || '');
       if (Number.isFinite(t) && t >= corte) mapa.set(codigo, entrada);
     }
+    if (habiaSucias) fs.writeFileSync(ruta, JSON.stringify(limpio, null, 2), 'utf8');
   } catch { /* sin lista todavía */ }
   return mapa;
 }
@@ -485,7 +531,8 @@ function anotarCodigoSinDatos(config, codigo, nombre, motivo) {
     raw[String(codigo)] = {
       fecha: new Date().toISOString().slice(0, 10),
       nombre: String(nombre || '').slice(0, 60),
-      motivo: String(motivo || '').slice(0, 120)
+      motivo: String(motivo || '').slice(0, 120),
+      firme: true
     };
     fs.writeFileSync(ruta, JSON.stringify(raw, null, 2), 'utf8');
   } catch { /* la lista es una mejora, no un requisito */ }
@@ -758,15 +805,7 @@ async function gestoCorregirCajas(page, codigo, central, qty) {
   await handle.dispose();
   const listo = await waitForArticleEditor(page, 4000);
   if (!listo) return false;
-  await focusEditRowEditor(page);
-  await page.keyboard.press('Tab');
-  await sleep(180);
-  if (await focoEnCampo(page)) {
-    await page.keyboard.down('Control');
-    await page.keyboard.press('KeyA');
-    await page.keyboard.up('Control');
-  }
-  await page.keyboard.type(String(qty), { delay: 25 });
+  await escribirCajasEnEdicion(page, qty, 180);
   await page.keyboard.press('Enter');
   await sleep(250);
   await page.keyboard.press('Enter');
@@ -1878,6 +1917,75 @@ async function focusEditRowEditor(page) {
     inp.focus();
     return true;
   });
+}
+
+// Escribe la CANTIDAD en la fila en edición apuntando al input de la
+// columna Cajas por su cabecera, en vez de fiarlo todo a un Tab a ciegas.
+// Limpia el valor entero antes de teclear y VERIFICA el input.value al
+// terminar (con una reescritura si no coincide): el 18/07 un Tab desviado
+// dejó 620201 en "11" (1 añadido al 1 por defecto) y 850881 en 0 (tecleo
+// perdido). Si no localiza el input por columna, cae al gesto clásico.
+async function escribirCajasEnEdicion(page, qty, nextFieldMs = 140) {
+  const objetivo = String(qty).trim();
+  for (let intento = 0; intento < 2; intento += 1) {
+    const enfocado = await page.evaluate(() => {
+      const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
+      for (const table of tables) {
+        const headers = Array.from(table.querySelectorAll('th')).map((th) => clean(th.innerText));
+        const idxCajas = headers.findIndex((h) => /^cajas$/i.test(h));
+        if (idxCajas === -1) continue;
+        const row = Array.from(table.querySelectorAll('.dxbl-grid-edit-row, .dxbl-grid-edit-new-item-row')).find(isVisible);
+        if (!row) continue;
+        const celda = Array.from(row.querySelectorAll('td'))[idxCajas];
+        const inp = celda && Array.from(celda.querySelectorAll('input')).find(isVisible);
+        if (inp) { inp.focus(); return true; }
+      }
+      return false;
+    }).catch(() => false);
+    if (!enfocado) {
+      await focusEditRowEditor(page);
+      await page.keyboard.press('Tab');
+      await sleep(nextFieldMs);
+    }
+    if (!(await focoEnCampo(page))) continue;
+    await page.keyboard.down('Control');
+    await page.keyboard.press('KeyA');
+    await page.keyboard.up('Control');
+    await page.keyboard.press('Delete');
+    await page.keyboard.type(objetivo, { delay: 25 });
+    const valor = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el && el.tagName === 'INPUT' ? String(el.value ?? '') : null;
+    }).catch(() => null);
+    if (valor === null || valor.trim() === objetivo) return true;
+  }
+  return false;
+}
+
+// ¿Hay alguna fila del grid en modo edición (con inputs a la vista)?
+async function filaEnEdicion(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    return Array.from(document.querySelectorAll('.dxbl-grid-edit-row, .dxbl-grid-edit-new-item-row'))
+      .filter(isVisible)
+      .some((row) => Array.from(row.querySelectorAll('input[type="text"], input[role="combobox"]')).some(isVisible));
+  }).catch(() => false);
+}
+
+// ¿Quedó una fila en edición con TEXTO en el editor de ARTÍCULO? Es la
+// firma del commit que no cuajó. Se mira SOLO el combobox del artículo: un
+// editor recién abierto para la línea siguiente lo tiene vacío, pero su
+// Cajas puede traer un "1" por defecto y no debe contar como suciedad
+// (contarlo dispararía un reintento y la línea saldría duplicada).
+async function filaEdicionSucia(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const rows = Array.from(document.querySelectorAll('.dxbl-grid-edit-row, .dxbl-grid-edit-new-item-row')).filter(isVisible);
+    return rows.some((row) => Array.from(row.querySelectorAll('input[role="combobox"]'))
+      .some((inp) => isVisible(inp) && String(inp.value || '').trim() !== ''));
+  }).catch(() => false);
 }
 
 // Ante VARIOS resultados en el autocompletado, selecciona la fila cuya
