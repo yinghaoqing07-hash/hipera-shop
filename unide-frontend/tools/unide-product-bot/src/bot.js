@@ -19,7 +19,7 @@ import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, s
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatus.js';
-import { inspectOrderPage, inspectFormPage, applyOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
+import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -281,6 +281,7 @@ async function handleUpdate(update) {
   if (/^\/ahorro_pedido\b/i.test(text)) { await handleAhorroPedido(chatId, text); return; }
   if (/^\/(ahorro|estrategia)\b/i.test(text)) { await handleAhorro(chatId); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
+  if (/^\/(pedido_editar|editar_pedido)\b/i.test(text)) { await handleOrderEdit(chatId, text); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
   const parsed = parseProductMessage(text);
@@ -438,6 +439,7 @@ function formatCommandList() {
     '/carne — 开始肉类盘点',
     '/fruta — 开始水果蔬菜盘点（60 个商品，分页保留数量）',
     '/pedido_nuevo — 手动建一张单的草稿',
+    '/pedido_editar — 改当前打开的订单：每行「编号 数量」改数量、「+编号 数量」加一行、「-编号」删行（也可直接说「把620201改成2箱」）',
     '/tarea 2026-07-14 10:00 /carne — 新建定时任务',
     '/tareas — 查看待执行任务；/cancelar_tarea 12 — 取消',
     '',
@@ -643,6 +645,12 @@ async function handleFreeText(chatId, text) {
       const cmd = `/pedido${arg ? ` ${arg}` : ''}`;
       await say(cmd);
       await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(cmd), new Date(), config), makeOrderButtons());
+      return;
+    }
+    case 'pedido_editar': {
+      if (!arg) { await telegram.sendMessage(chatId, '要改订单里的什么？比如：把620201改成2箱 / 加一个851220 / 删掉850574'); return; }
+      await say(`/pedido_editar ${arg.includes('\n') ? '（多处改动）' : arg}`);
+      await handleOrderEdit(chatId, `/pedido_editar ${arg}`);
       return;
     }
     case 'carne':
@@ -1713,6 +1721,72 @@ async function handleFruitAdd(chatId, text) {
     : '没存上（写文件失败），再试一次。');
 }
 
+// Nombre del último pedido web rellenado en esta sesión del bot: los
+// retoques (/pedido_editar) lo usan para verificar que la pantalla abierta
+// es ESE pedido. Si el bot se reinició y está vacío, se edita el pedido
+// que esté abierto (es el que el dueño tiene delante) y se ecoa su nombre.
+let lastWebOrderName = '';
+
+// "/pedido_editar" — retoques sobre el pedido abierto, una operación por
+// línea: "CODIGO CANTIDAD" cambia la cantidad, "+CODIGO [CANTIDAD]" añade
+// una línea (también "+nombre [CANTIDAD]"), "-CODIGO" la quita.
+function parseOrderEditCommand(text) {
+  const body = String(text || '').replace(/^\/(pedido_editar|editar_pedido)\s*/i, '').trim();
+  const cambios = [];
+  const errores = [];
+  for (const l of body.split('\n').map((s) => s.trim()).filter(Boolean)) {
+    let m;
+    if ((m = l.match(/^[-−]\s*(\d{5,13})$/))) { cambios.push({ tipo: 'quitar', codigo: m[1] }); continue; }
+    if ((m = l.match(/^[+＋]\s*(\d{5,13})(?:\s+(\d{1,3}))?$/))) { cambios.push({ tipo: 'agregar', item: { code: m[1], quantity: m[2] || '1' } }); continue; }
+    if ((m = l.match(/^[+＋]\s*(.+?)(?:\s+(\d{1,3}))?$/)) && m[1].trim()) { cambios.push({ tipo: 'agregar', item: { code: '', nombre: m[1].trim(), quantity: m[2] || '1' } }); continue; }
+    if ((m = l.match(/^(\d{5,13})\s+(\d{1,3})$/))) { cambios.push({ tipo: 'cantidad', codigo: m[1], qty: m[2] }); continue; }
+    errores.push(l);
+  }
+  return { cambios, errores };
+}
+
+async function handleOrderEdit(chatId, text) {
+  if (!config.webOrder?.enabled) {
+    await telegram.sendMessage(chatId, '改订单需要 webOrder 模式（config 里 webOrder.enabled）。', { __skipAI: true });
+    return;
+  }
+  const { cambios, errores } = parseOrderEditCommand(text);
+  if (!cambios.length) {
+    await telegram.sendMessage(chatId, [
+      '改当前打开的订单，一行一个改动：',
+      '620201 2 — 把 620201 的数量改成 2',
+      '+851220 1 — 加一行 851220，数量 1',
+      '-850574 — 删掉 850574 那行',
+      '例如：/pedido_editar 620201 2',
+      '（也可以直接说「把620201改成2箱」）'
+    ].join('\n'), { __skipAI: true });
+    return;
+  }
+  if (errores.length) {
+    await telegram.sendMessage(chatId, `这几行没看懂，先跳过：\n${errores.join('\n')}`, { __skipAI: true });
+  }
+  await telegram.sendMessage(chatId, `收到，对打开的订单做 ${cambios.length} 处改动。做完发截图；不会点 Guardar，也不会点 Enviar Pedido。`, { __skipAI: true });
+  const result = await editOrderWeb(config, logger, lastWebOrderName, cambios, {
+    avisar: (t) => telegram.sendMessage(chatId, t, { __skipAI: true }).catch(() => {})
+  });
+  if (!result.ok) {
+    await telegram.sendMessage(chatId, `订单改动失败（${result.stage || '?'}）：${result.error || '未知错误'}`, { __skipAI: true });
+    return;
+  }
+  if (result.orderName) lastWebOrderName = result.orderName;
+  const sendId = saveSession({ orderSend: { orderName: result.orderName || lastWebOrderName } });
+  const options = { __skipAI: true, reply_markup: { inline_keyboard: [[
+    { text: '点 Guardar 保存', callback_data: `osave:${sendId}` },
+    { text: '先不动', callback_data: `cancel:${sendId}` }
+  ]] } };
+  if (result.screenshot) {
+    try { await telegram.sendPhoto(chatId, result.screenshot, result.message, options); }
+    catch { await telegram.sendMessage(chatId, result.message, options); }
+  } else {
+    await telegram.sendMessage(chatId, result.message, options);
+  }
+}
+
 async function handleOrderApply(chatId, callbackId, id) {
   let session = sessions.get(id);
   const persisted = activeConversations.get(chatId);
@@ -1760,6 +1834,7 @@ async function handleOrderApply(chatId, callbackId, id) {
     // Registrar el pedido rellenado para la lista de comprobación del día
     // de llegada (solo si todas las líneas entraron bien).
     if (result.ok) recordFilledOrder(config, session.orderDraft, logger);
+    if (result.ok) lastWebOrderName = session.orderDraft.orderName;
     if (result.ok) activeConversations.clearMatchingSession(chatId, id);
     else activeConversations.update(chatId, {
       status: 'awaiting_retry', failure: `${result.stage || '?'}: ${result.error || '未知错误'}`

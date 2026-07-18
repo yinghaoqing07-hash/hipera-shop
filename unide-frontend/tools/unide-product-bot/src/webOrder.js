@@ -1064,6 +1064,83 @@ export async function saveOrderWeb(config, logger, expectName) {
   }
 }
 
+// --- 2c) EDITAR el pedido abierto: retoques tras el repaso a ojo --------
+// El dueño revisa la tabla rellenada y pide cambios sueltos ("把620201改成
+// 2", "加一个851220", "删掉850574") sin rehacer la orden entera. Opera
+// sobre el DetailView ABIERTO (sin navegar) y NUNCA pulsa Guardar/Enviar.
+// cambios: [{ tipo:'cantidad', codigo, qty } | { tipo:'quitar', codigo }
+//          | { tipo:'agregar', item:{ code|nombre, quantity } }]
+export async function editOrderWeb(config, logger, expectName, cambios, hooks = {}) {
+  let browser;
+  try {
+    setLive('[pedido] 找到打开的订单，准备改动…');
+    const opened = await openPedidoDetail(config, expectName || '');
+    browser = opened.browser;
+    const page = opened.page;
+    const w = config.webOrder || {};
+    const ctx = {
+      page, config, logger, w, hooks,
+      autocompleteMs: Number(w.autocompleteMs) || 900,
+      autocompleteTimeoutMs: Number(w.autocompleteTimeoutMs) || 5000,
+      betweenLinesMs: Number(w.betweenLinesMs) || 400,
+      total: cambios.length,
+      autoPicked: 0, namePicked: 0, repairedCount: 0, qtyCorregidas: 0,
+      unrepairedBlanks: 0, unrepairedCodes: [],
+      diagnosticos: [], motivos: new Map(),
+      sinDatosPrevios: leerCodigosSinDatos(config)
+    };
+    const hechos = [];
+    let n = 0;
+    for (const c of cambios) {
+      n += 1;
+      if (c.tipo === 'cantidad') {
+        setLive(`[pedido] 改数量 ${c.codigo} → ${c.qty}…`);
+        let ok = false;
+        if (await irAPaginaDeFila(page, config, c.codigo, '')) {
+          ok = await corregirCajasFila(ctx, c.codigo, '', c.qty);
+        }
+        hechos.push(ok ? `✔ ${c.codigo} 数量改成 ${c.qty}` : `✘ ${c.codigo} 数量没改成（表里没找到这行，或改写没生效）`);
+      } else if (c.tipo === 'quitar') {
+        setLive(`[pedido] 删掉 ${c.codigo} 这行…`);
+        let borradas = 0;
+        // borra TODAS las filas con ese código (si estaba duplicada, fuera
+        // todas: quitar es quitar).
+        for (let i = 0; i < 6; i += 1) {
+          const b = await eliminarFilaDuplicada(page, config, c.codigo, 0, 1);
+          if (!b) break;
+          borradas += b;
+        }
+        hechos.push(borradas ? `✔ ${c.codigo} 已删除（${borradas} 行）` : `✘ ${c.codigo} 表里没找到，没删任何行`);
+      } else if (c.tipo === 'agregar') {
+        const label = c.item.code || c.item.nombre || '';
+        setLive(`[pedido] 新增 ${label}…`);
+        await irAUltimaPagina(page);
+        const r = await rellenarUnaLinea(ctx, c.item, `改${n}`);
+        if (r.ok) hechos.push(`✔ 已新增 ${label} ×${c.item.quantity || 1}`);
+        else hechos.push(`✘ 新增 ${label} 没成功：${r.nota || r.error || r.reason || '未知原因'}`);
+      }
+    }
+    setLive('[pedido] 改动完成，截图…');
+    const shot = await screenshot(page, config, 'edit');
+    setLive('[pedido] listo');
+    const nombre = opened.nameOnScreen || expectName || '';
+    logger?.info('web order edited', { name: nombre, cambios: cambios.length });
+    return {
+      ok: true,
+      screenshot: shot,
+      orderName: nombre,
+      message: `订单「${nombre}」的改动：\n${hechos.join('\n')}\n请看截图核对。这一步没有点 Guardar，也没有点 Enviar Pedido。`,
+      detalles: hechos
+    };
+  } catch (error) {
+    setLive('[pedido] ERROR: ' + error.message);
+    logger?.error('web order edit failed', { stage: error.stage, error: error.message });
+    return { ok: false, stage: error.stage || 'edit', error: error.message };
+  } finally {
+    try { browser?.disconnect(); } catch { /* noop */ }
+  }
+}
+
 export async function sendOrderWeb(config, logger, expectName) {
   let browser;
   try {
