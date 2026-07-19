@@ -72,8 +72,21 @@ export function renderPanelPage(version) {
   #linea {
     width: min(980px, 100%); display: flex; align-items: center; gap: 14px;
     border-bottom: 1px solid rgba(168,195,214,.25); padding: 6px 4px 12px;
-    transition: border-color .25s;
+    transition: border-color .25s; position: relative;
   }
+  /* Sugerencias de comandos: al teclear "/" se despliega sobre la línea la
+     lista completa de comandos (de GET /comandos) filtrada por lo escrito. */
+  #sugerencias {
+    display: none; position: absolute; left: 0; right: 0; bottom: calc(100% + 10px);
+    max-height: 46vh; overflow-y: auto; z-index: 6;
+    background: #10161f; border: 1px solid rgba(168,195,214,.28); border-radius: 2px;
+    padding: 6px 0; font-size: 13.5px; line-height: 1.5;
+  }
+  #sugerencias.abierto { display: block; }
+  #sugerencias .cat { padding: 8px 14px 3px; color: #5f7184; font-size: 11px; letter-spacing: .08em; }
+  #sugerencias .cmd { padding: 5px 14px; cursor: pointer; color: #aebdcb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sugerencias .cmd b { color: #cfe9f7; font-weight: 500; }
+  #sugerencias .cmd:hover, #sugerencias .cmd.activo { background: rgba(255,255,255,.05); color: #e6eef4; }
   #linea:focus-within { border-color: rgba(168,195,214,.75); }
   #linea::before { content: "›"; color: #6f9cbd; font-size: 26px; line-height: 1; }
   #libre {
@@ -445,6 +458,7 @@ export function renderPanelPage(version) {
       <div id="saludo"></div>
       <div id="charla"></div>
       <div id="linea">
+        <div id="sugerencias"></div>
         <input id="libre" autofocus>
         <button id="btnSubir" title="上传文件（也可以直接拖进窗口）">＋</button>
         <input type="file" id="ficheroSubir" accept=".xlsx,.csv" style="display:none">
@@ -474,8 +488,101 @@ export function renderPanelPage(version) {
 <div id="ver">${version}</div>
 <script>
 const libre = document.getElementById('libre');
+
+// --- sugerencias de comandos al teclear "/" ----------------------------
+// La lista sale de GET /comandos (la misma ayuda que /help), parseada una
+// vez: líneas 【…】 = categoría, líneas que empiezan por "/" = comando con
+// su explicación. Escribir filtra; clic / flechas+Enter / Tab completan.
+let comandosLista = null;
+let comandosPidiendo = false;
+let sugActiva = -1;
+const cajaSug = document.getElementById('sugerencias');
+async function cargarComandos() {
+  if (comandosLista || comandosPidiendo) return;
+  comandosPidiendo = true;
+  try {
+    const texto = await (await fetch('/comandos')).text();
+    const lista = [];
+    texto.split('\\n').forEach((cruda) => {
+      const linea = cruda.trim();
+      const cat = linea.match(/^【(.+)】$/);
+      if (cat) { lista.push({ cat: cat[1] }); return; }
+      if (linea.charAt(0) === '/') lista.push({ cmd: linea.split(/[\\s—]/)[0], linea: linea });
+    });
+    comandosLista = lista;
+    pintarSugerencias();
+  } catch { comandosPidiendo = false; }
+}
+function cerrarSugerencias() { cajaSug.classList.remove('abierto'); sugActiva = -1; }
+function pintarSugerencias() {
+  const v = libre.value;
+  if (v.charAt(0) !== '/') { cerrarSugerencias(); return; }
+  if (!comandosLista) { cargarComandos(); return; }
+  const buscar = v.slice(1).trim().toLowerCase();
+  cajaSug.innerHTML = '';
+  let visibles = 0;
+  let catPendiente = null;
+  // Si algo empieza por lo escrito, solo eso (Tab completa lo esperado);
+  // si nada empieza así, búsqueda en el texto (p. ej. "/打印").
+  const esPrefijo = (item) => item.cmd.slice(1).toLowerCase().indexOf(buscar) === 0;
+  const hayPrefijo = Boolean(buscar) && comandosLista.some((i) => i.cmd && esPrefijo(i));
+  comandosLista.forEach((item) => {
+    if (item.cat) { catPendiente = item.cat; return; }
+    if (buscar && !(hayPrefijo ? esPrefijo(item) : item.linea.toLowerCase().indexOf(buscar) >= 0)) return;
+    if (catPendiente) {
+      const c = document.createElement('div');
+      c.className = 'cat';
+      c.textContent = catPendiente;
+      cajaSug.appendChild(c);
+      catPendiente = null;
+    }
+    const fila = document.createElement('div');
+    fila.className = 'cmd';
+    fila.dataset.cmd = item.cmd;
+    const b = document.createElement('b');
+    b.textContent = item.cmd;
+    fila.appendChild(b);
+    fila.appendChild(document.createTextNode(item.linea.slice(item.cmd.length)));
+    // mousedown y no click: así el input no pierde el foco antes de elegir.
+    fila.onmousedown = (e) => { e.preventDefault(); elegirSugerencia(item.cmd); };
+    cajaSug.appendChild(fila);
+    visibles++;
+  });
+  sugActiva = -1;
+  cajaSug.classList.toggle('abierto', visibles > 0);
+  cajaSug.scrollTop = 0;
+}
+function elegirSugerencia(cmd) {
+  libre.value = cmd + ' ';
+  libre.focus();
+  cerrarSugerencias();
+}
+libre.addEventListener('input', pintarSugerencias);
+libre.addEventListener('focus', pintarSugerencias);
+libre.addEventListener('blur', () => setTimeout(cerrarSugerencias, 150));
 libre.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && libre.value.trim()) { run(libre.value.trim()); libre.value = ''; }
+  if (cajaSug.classList.contains('abierto')) {
+    const filas = cajaSug.querySelectorAll('.cmd');
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && filas.length) {
+      e.preventDefault();
+      sugActiva = (sugActiva + (e.key === 'ArrowDown' ? 1 : -1) + filas.length) % filas.length;
+      filas.forEach((f, i) => f.classList.toggle('activo', i === sugActiva));
+      filas[sugActiva].scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'Tab' && filas.length) {
+      e.preventDefault();
+      elegirSugerencia(filas[sugActiva >= 0 ? sugActiva : 0].dataset.cmd);
+      return;
+    }
+    if (e.key === 'Enter' && sugActiva >= 0 && filas[sugActiva]) {
+      e.preventDefault();
+      elegirSugerencia(filas[sugActiva].dataset.cmd);
+      return;
+    }
+    if (e.key === 'Escape') { cerrarSugerencias(); return; }
+  }
+  if (e.key === 'Enter' && libre.value.trim()) { run(libre.value.trim()); libre.value = ''; cerrarSugerencias(); }
 });
 
 // --- chat sincronizado con Telegram: el bot guarda la transcripción y el
