@@ -33,8 +33,8 @@ export function renderPanelPage(version) {
   #logo { color: #a8c3d6; font-weight: 600; }
   #estado { display: flex; gap: 18px; align-items: center; }
   #btnCajon {
-    background: none; border: 1px solid rgba(168,195,214,.3); color: #97c9e3;
-    border-radius: 999px; padding: 5px 16px; font-size: 11px; letter-spacing: .08em;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(168,195,214,.3); color: #97c9e3;
+    border-radius: 7px; padding: 5px 16px; font-size: 11px; letter-spacing: .08em;
     cursor: pointer; font-family: inherit;
   }
   #btnCajon:hover { border-color: rgba(168,195,214,.65); color: #d5ecf8; }
@@ -89,11 +89,11 @@ export function renderPanelPage(version) {
   #btnSubir:hover { color: #cfe9f7; }
   #pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
   .pill {
-    background: none; border: 1px solid rgba(200,211,220,.22); color: #b6c4d1;
-    border-radius: 999px; padding: 10px 20px; font-size: 15px; cursor: pointer;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(200,211,220,.13); color: #c3ced9;
+    border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer;
     transition: all .2s;
   }
-  .pill:hover { border-color: rgba(168,195,214,.6); color: #cfe9f7; }
+  .pill:hover { background: rgba(255,255,255,.1); border-color: rgba(200,211,220,.26); color: #e8f0f6; }
   .pill:active { transform: scale(.97); }
   #reloj { margin-top: 2vh; font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
   #reloj span.seg { font-size: 26px; color: #6f9cbd; font-weight: 300; margin-left: 6px; }
@@ -155,7 +155,7 @@ export function renderPanelPage(version) {
   .chipTeclado, .chipLeer {
     display: inline-flex; align-items: center; margin: 8px 8px 0 0;
     background: none; border: 1px solid rgba(111,156,189,.4); color: #97c9e3;
-    border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer; letter-spacing: .06em;
+    border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer; letter-spacing: .04em;
     transition: transform var(--motion-fast) var(--motion-ease), border-color var(--motion-fast), color var(--motion-fast), background var(--motion-fast);
   }
   .chipTeclado:hover, .chipLeer:hover { border-color: rgba(168,195,214,.6); color: #d5ecf8; background: rgba(111,156,189,.06); transform: translateY(-1px); }
