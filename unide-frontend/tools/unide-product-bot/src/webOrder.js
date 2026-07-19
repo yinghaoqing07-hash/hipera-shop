@@ -1734,6 +1734,7 @@ async function scrapeAllOrderLines(page, config) {
   const seen = new Set();
   let prevSig = '';
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    setLive(`[pedido] 读明细第 ${pageIndex + 1} 页…`);
     const rows = pageIndex === 0
       ? await scrapeOrderLines(page)
       : await gridWaitForPageChange(page, () => scrapeOrderLines(page), sig, prevSig, settle);
@@ -1798,13 +1799,16 @@ async function scrapeOrderLines(page) {
 export async function fetchOrderLinesByName(config, nameQuery, logger) {
   let browser;
   try {
+    setLive('[pedido] 连接 Edge，打开 Pedidos 列表…');
     const opened = await openOrderPage(config);
     browser = opened.browser;
     const page = opened.page;
     const w = config.webOrder || {};
     const timeout = Number(w.pageNavigationTimeoutMs) || 20000;
+    setLive('[pedido] 等列表出行…');
     const rows = await waitForListRows(page, timeout);
     if (!rows.length) return { ok: false, error: 'Pedidos 列表是空的' };
+    setLive(`[pedido] 列表 ${rows.length} 行，找目标单子…`);
     const q = String(nameQuery || '').trim().toLowerCase();
     // Un número a secas se interpreta como el "Nro." del pedido PDA
     // (p. ej. /ahorro_pedido 153 → "Pedido importado desde PDA Nro. 153"),
@@ -1829,13 +1833,16 @@ export async function fetchOrderLinesByName(config, nameQuery, logger) {
       .filter((r) => /pda/i.test(r.nombre) && r !== target)
       .map((r) => ({ nombre: r.nombre, fecha: r.fechaIso, estado: r.estado }))
       .slice(0, 6);
+    setLive(`[pedido] 打开「${String(target.nombre).slice(0, 30)}」明细…`);
     const openedDetail = await openOrderDetailByRow(page, target, timeout);
     if (!openedDetail) return { ok: false, error: `打不开单子「${target.nombre}」` };
     await sleep(Number(w.formRenderMs) || 2800);
     const items = await scrapeAllOrderLines(page, config);
     logger?.info('order lines fetched', { nombre: target.nombre, lines: items.length });
+    setLive(`[pedido] 读到 ${items.length} 行，listo`);
     return { ok: true, orderName: target.nombre, orderDate: target.fechaIso, estado: target.estado, items, otherPda };
   } catch (error) {
+    setLive('[pedido] ERROR: ' + error.message);
     logger?.error('fetch order lines failed', { error: error.message });
     return { ok: false, error: error.message };
   } finally {

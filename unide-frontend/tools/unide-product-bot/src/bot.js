@@ -1389,8 +1389,22 @@ async function handleAhorroPedido(chatId, text) {
   const latest = findLatestPromotionsCsv(config);
   if (!latest) { await telegram.sendMessage(chatId, '还没有促销数据。先跑一次 /promociones，再来对单子。'); return; }
 
-  await telegram.sendMessage(chatId, `正在打开 Pedidos 读取${arg ? `「${arg}」` : '最新的 PDA'}单子…`);
-  const fetched = await fetchOrderLinesByName(config, arg, logger);
+  await telegram.sendMessage(chatId, `正在打开 Pedidos 读取${arg ? `「${arg}」` : '最新的 PDA'}单子…（进度看右侧日志）`, { __skipAI: true });
+  // Perro guardián: si la lectura se queda colgada, a los 3 min se avisa
+  // CON el último paso del registro (el 19/07 /ahorro_pedido 157 murió en
+  // silencio y el dueño se quedó mirando la nada).
+  let fetched;
+  try {
+    fetched = await Promise.race([
+      fetchOrderLinesByName(config, arg, logger),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('读单子超过 3 分钟没结束')), 180000))
+    ]);
+  } catch (error) {
+    const paso = getLive()?.line || '（没有日志）';
+    await telegram.sendMessage(chatId, `读取单子中断：${error.message}
+最后一步：${paso}`, { __skipAI: true });
+    return;
+  }
   if (!fetched.ok) {
     let msg = `读取单子失败：${fetched.error}`;
     if (fetched.names?.length) msg += `\n列表里最近的单子：\n${fetched.names.map((n) => `· ${n}`).join('\n')}\n可以用 /ahorro_pedido 名字片段 指定。`;
@@ -1399,8 +1413,10 @@ async function handleAhorroPedido(chatId, text) {
   }
   if (!fetched.items?.length) { await telegram.sendMessage(chatId, `单子「${fetched.orderName}」里没读到商品行。`); return; }
 
+  try {
   const promoItems = parsePromotionsCsv(fs.readFileSync(latest.file, 'utf8'));
   const csvDate = path.basename(latest.file).replace(/^promociones-productos-activos-|\.csv$/g, '');
+  setLive('[ahorro] 对照促销分析中…');
   const orderAdvice = buildOrderAdvice(fetched.items, promoItems, new Date());
 
   // Sustitutos con IA: las reglas por palabras confunden "pizza" con "patatas
@@ -1450,6 +1466,12 @@ async function handleAhorroPedido(chatId, text) {
     await telegram.sendDocument(chatId, detailFile, '单子逐行对照促销的完整明细');
   } catch (error) {
     logger.warn('ahorro_pedido detail send failed', { error: error.message });
+  }
+  setLive('[ahorro] listo');
+  } catch (error) {
+    setLive('[ahorro] ERROR: ' + error.message);
+    logger.error('ahorro_pedido failed', { error: error.stack || error.message });
+    await telegram.sendMessage(chatId, `省钱分析中途出错：${error.message}`, { __skipAI: true });
   }
 }
 
