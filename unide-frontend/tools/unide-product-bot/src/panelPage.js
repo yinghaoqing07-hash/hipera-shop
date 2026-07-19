@@ -25,11 +25,10 @@ export function renderPanelPage(version) {
     display: flex; flex-direction: column;
   }
   header {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 18px 26px; font-size: 13px; letter-spacing: .08em; color: #76879a;
+    display: flex; justify-content: flex-end; align-items: center;
+    padding: 14px 26px; font-size: 13px; letter-spacing: .08em; color: #76879a;
     animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
   }
-  #logo { color: #a8c3d6; font-weight: 600; }
   #estado { display: flex; gap: 18px; align-items: center; }
   #btnCajon {
     background: none; border: none; color: #8fa2b5;
@@ -100,8 +99,20 @@ export function renderPanelPage(version) {
   #reloj { margin-top: 12px; font-size: 34px; font-weight: 400; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
   #reloj span.seg { font-size: 14px; color: #6f9cbd; font-weight: 400; margin-left: 6px; }
   #fecha { margin: 6px 0 22px; font-size: 13px; letter-spacing: .1em; color: #76879a; }
-  #tarjetas { display: grid; gap: 2px; grid-template-columns: 1fr; }
-  #mantenimiento { margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
+  #tarjetas { display: grid; gap: 2px 18px; grid-template-columns: 1fr 1fr; }
+  #tarjetas .tarjeta.ancha { grid-column: 1 / -1; }
+  #tarjetas .tarjeta:nth-child(-n+2) { border-top: none; }
+  /* 最近动态 al estilo del registro: líneas con hora, pegadas abajo,
+     ocupando el hueco libre de la columna (petición del dueño). */
+  #actividadLog { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 14px; }
+  #tActividad {
+    margin-top: auto; overflow: auto; min-height: 0;
+    font-size: 13.5px; line-height: 1.75; color: #8fa2b5;
+    white-space: pre-wrap; word-break: break-word; user-select: text;
+    scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
+  }
+  #tActividad .hora { color: #566b80; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  #mantenimiento { margin-top: 12px; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
   /* Columna lateral FIJA (petición del dueño): las tarjetas de estado y el
      botón de actualizar viven aquí SIEMPRE, no dentro del 操作台. El cajón,
      al abrirse en la misma columna, la tapa temporalmente. */
@@ -112,7 +123,6 @@ export function renderPanelPage(version) {
     animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
   }
   #cajon.abierto ~ #lateral { display: none; }
-  #lateral .tarjeta:first-child { border-top: none; }
   #cajonTeclado { display: none; }
   .tarjeta { border-top: 1px solid rgba(200,211,220,.1); padding: 12px 2px 6px; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .08em; color: #5f7184; margin-bottom: 9px; }
@@ -373,7 +383,6 @@ export function renderPanelPage(version) {
 </head>
 <body>
 <header>
-  <span id="logo">J A R V I S</span>
   <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
 </header>
 <main>
@@ -405,10 +414,9 @@ export function renderPanelPage(version) {
           <div class="titulo">定时任务</div>
           <div class="dato" id="tTareas">—</div>
         </div>
-        <div class="tarjeta ancha">
-          <div class="titulo">最近动态</div>
-          <div class="dato" id="tActividad">—</div>
-        </div>
+      </div>
+      <div id="actividadLog">
+        <div id="tActividad"></div>
       </div>
       <div id="mantenimiento">
         <button class="pill" onclick="admin('update')">更新 BOT</button>
@@ -1126,12 +1134,14 @@ function pintarTarjetas(s) {
     fila.append(hora, nombre, quitar);
     contTareas.appendChild(fila);
   });
-  const act = (s.activity || []).slice(0, 4).map((a) => {
+  const act = (s.activity || []).slice(0, 14).map((a) => {
     const t = new Date(a.at);
     const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
     return '<span class="hora">' + hh + '</span>' + escapar(a.text);
-  });
-  document.getElementById('tActividad').innerHTML = act.length ? act.join('<br>') : '还没有动静';
+  }).reverse();
+  const elAct = document.getElementById('tActividad');
+  const htmlAct = act.length ? act.join('<br>') : '还没有动静';
+  if (elAct.innerHTML !== htmlAct) { elAct.innerHTML = htmlAct; elAct.scrollTop = elAct.scrollHeight; }
 }
 function escapar(x) { const d = document.createElement('div'); d.textContent = x; return d.innerHTML; }
 refrescar();
