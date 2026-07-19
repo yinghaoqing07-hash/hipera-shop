@@ -64,7 +64,7 @@ export function renderPanelPage(version) {
   }
   #zona {
     flex: 1; min-height: 0; width: 100%;
-    display: grid; grid-template-columns: minmax(340px, 520px) minmax(0, 1fr) minmax(320px, 460px);
+    display: grid; grid-template-columns: minmax(300px, 460px) minmax(0, 1fr) minmax(230px, 330px) minmax(320px, 460px);
     gap: 18px;
   }
   #centro { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
@@ -104,7 +104,10 @@ export function renderPanelPage(version) {
   #tarjetas .tarjeta:nth-child(-n+2) { border-top: none; }
   /* 最近动态 al estilo del registro: líneas con hora, pegadas abajo,
      ocupando el hueco libre de la columna (petición del dueño). */
-  #actividadLog { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 14px; }
+  #actividadLog {
+    grid-column: 3; grid-row: 1; min-height: 0;
+    display: flex; flex-direction: column; padding: 6px 6px 4px;
+  }
   #tActividad {
     margin-top: auto; overflow: auto; min-height: 0;
     font-size: 13.5px; line-height: 1.75; color: #8fa2b5;
@@ -112,7 +115,7 @@ export function renderPanelPage(version) {
     scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
   }
   #tActividad .hora { color: #566b80; margin-right: 8px; font-variant-numeric: tabular-nums; }
-  #mantenimiento { margin-top: 12px; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
+  #mantenimiento { margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
   /* Columna lateral FIJA (petición del dueño): las tarjetas de estado y el
      botón de actualizar viven aquí SIEMPRE, no dentro del 操作台. El cajón,
      al abrirse en la misma columna, la tapa temporalmente. */
@@ -220,7 +223,7 @@ export function renderPanelPage(version) {
   #cajon .filaB button:hover { background: rgba(111,156,189,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
   #lector {
-    grid-column: 3; grid-row: 1;
+    grid-column: 4; grid-row: 1;
     min-height: 0; display: flex; flex-direction: column;
     opacity: 0; visibility: hidden; pointer-events: none;
     transform: translateX(14px);
@@ -252,7 +255,7 @@ export function renderPanelPage(version) {
      flecha de abajo lo pliega. Invisible hasta que exista la primera
      línea; si el lector se abre en esa columna, el registro se aparta. */
   #registro {
-    grid-column: 3; grid-row: 1; min-height: 0;
+    grid-column: 4; grid-row: 1; min-height: 0;
     display: flex; flex-direction: column;
   }
   #registro:not(.con) { display: none; }
@@ -280,7 +283,7 @@ export function renderPanelPage(version) {
   /* Captura que la IA está analizando: aparece con fundido sobre el
      registro de la derecha y se va sola al dejar de estar fresca. */
   #fotoVivo {
-    grid-column: 3; grid-row: 1; min-height: 0; z-index: 2;
+    grid-column: 4; grid-row: 1; min-height: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
     gap: 10px; padding-top: 4px;
     opacity: 0; visibility: hidden; transform: translateY(-8px);
@@ -321,11 +324,12 @@ export function renderPanelPage(version) {
      lector se muda a la izquierda. */
   @media (max-width: 1280px) {
     /* Columna lateral SOLO cuando hay algo abierto; si no, el chat centra. */
-    #zona { grid-template-columns: 0 minmax(0, 1fr); gap: 0; }
+    #zona { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; }
     #zona:has(#cajon.abierto), #zona:has(#lector.abierto) {
-      grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); gap: 18px;
+      grid-template-columns: minmax(280px, 420px) minmax(0, 1fr) 0 0; gap: 18px;
     }
     #registro { display: none; }
+    #actividadLog { display: none; }
     #fotoVivo { grid-column: 1; }
     #lector { grid-column: 1; }
     #reloj { font-size: 54px; }
@@ -415,12 +419,12 @@ export function renderPanelPage(version) {
           <div class="dato" id="tTareas">—</div>
         </div>
       </div>
-      <div id="actividadLog">
-        <div id="tActividad"></div>
-      </div>
       <div id="mantenimiento">
         <button class="pill" onclick="admin('update')">更新 BOT</button>
       </div>
+    </div>
+    <div id="actividadLog">
+      <div id="tActividad"></div>
     </div>
     <div id="centro">
       <div id="reloj">--:--</div>
