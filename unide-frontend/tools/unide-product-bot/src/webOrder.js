@@ -414,17 +414,18 @@ async function rellenarUnaLinea(ctx, item, etiqueta, reintento = false) {
       await clearArticleEditor(page);
       return { code, qty, ok: false, reason: sel.status, skipped: true, nota };
     }
-    const tag = sel.status === 'nomatch' ? 'nomatch' : 'multi';
-    const shot = await screenshot(page, config, `code-${code}-${tag}`);
-    const dom = await captureEditDom(page, config);
-    const nameNote = sel.nameTried ? `（也试了按商品名「${nombre}」搜，仍无法确定）` : '';
-    const diagNote = diagnosticoIA?.problema
-      ? `\nAI 看图诊断：${diagnosticoIA.problema}${diagnosticoIA.pista ? `（${diagnosticoIA.pista}）` : ''}`
-      : '';
-    return {
-      abort: true, stage: 'autocomplete', screenshot: shot, domDump: dom,
-      error: `código ${codeLabel} 没有出现自动补全选项${nameNote}。已停止，未保存。${diagNote}`
-    };
+    // Sin veredicto FIRME (la IA caída, o simplemente nada tras agotar 2
+    // rondas + nombre): también se SALTA, pero sin apuntar motivo — así la
+    // auditoría final la reintenta una vez más. Antes esto abortaba el
+    // pedido ENTERO: el 19/07 la línea 22/55 (con la API de visión caída)
+    // tumbó las 33 líneas restantes.
+    const aiCaida = llmConfigured(config) && !diagnosticoIA;
+    const motivoSuave = diagnosticoIA?.problema
+      || (aiCaida ? '代码和名字都搜不出补全（AI 看图这会儿也不可用，无法进一步判断）' : '代码和名字都搜不出补全');
+    setLive(`[pedido] 第 ${etiqueta}/${ctx.total} 行搜不到，先跳过（最后对账会再试）…`);
+    try { hooks?.avisar?.(`第 ${etiqueta} 行 ${nombre || codeLabel}：${motivoSuave}。先跳过继续，最后对账时会再试一次。`); } catch { /* aviso no crítico */ }
+    await clearArticleEditor(page);
+    return { code, qty, ok: false, reason: sel.status, skipped: true, nota: `${codeLabel}${nombre ? '（' + nombre + '）' : ''}：${motivoSuave}` };
   }
   if (sel.via === 'anchor') ctx.autoPicked += 1;
   if (sel.viaName) ctx.namePicked += 1;
