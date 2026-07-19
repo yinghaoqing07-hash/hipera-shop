@@ -64,7 +64,7 @@ export function renderPanelPage(version) {
   }
   #zona {
     flex: 1; min-height: 0; width: 100%;
-    display: grid; grid-template-columns: minmax(300px, 460px) minmax(0, 1fr) minmax(230px, 330px) minmax(320px, 460px);
+    display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 980px) minmax(280px, 1fr);
     gap: 18px;
   }
   #centro { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
@@ -104,10 +104,16 @@ export function renderPanelPage(version) {
   #tarjetas .tarjeta:nth-child(-n+2) { border-top: none; }
   /* 最近动态 al estilo del registro: líneas con hora, pegadas abajo,
      ocupando el hueco libre de la columna (petición del dueño). */
-  #actividadLog {
+  #ladoDerecho {
     grid-column: 3; grid-row: 1; min-height: 0;
-    display: flex; flex-direction: column; padding: 6px 6px 4px;
+    display: flex; gap: 16px; padding: 0 6px;
   }
+  #lector.abierto ~ #ladoDerecho { display: none; }
+  #actividadLog {
+    flex: 1; min-width: 0; min-height: 0;
+    display: flex; flex-direction: column; padding: 6px 0 4px;
+  }
+  #actividadLog::after { content: ''; flex: none; height: 25px; }
   #tActividad {
     margin-top: auto; overflow: auto; min-height: 0;
     font-size: 13.5px; line-height: 1.75; color: #8fa2b5;
@@ -120,7 +126,7 @@ export function renderPanelPage(version) {
      botón de actualizar viven aquí SIEMPRE, no dentro del 操作台. El cajón,
      al abrirse en la misma columna, la tapa temporalmente. */
   #lateral {
-    grid-column: 1; grid-row: 1; min-height: 0;
+    grid-column: 1; grid-row: 1; min-height: 0; max-width: 520px;
     display: flex; flex-direction: column; overflow-y: auto;
     padding: 4px 6px; scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
     animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
@@ -223,7 +229,7 @@ export function renderPanelPage(version) {
   #cajon .filaB button:hover { background: rgba(111,156,189,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
   #lector {
-    grid-column: 4; grid-row: 1;
+    grid-column: 3; grid-row: 1; z-index: 5; background: #0d1117;
     min-height: 0; display: flex; flex-direction: column;
     opacity: 0; visibility: hidden; pointer-events: none;
     transform: translateX(14px);
@@ -255,11 +261,10 @@ export function renderPanelPage(version) {
      flecha de abajo lo pliega. Invisible hasta que exista la primera
      línea; si el lector se abre en esa columna, el registro se aparta. */
   #registro {
-    grid-column: 4; grid-row: 1; min-height: 0;
+    flex: 1.4; min-width: 0; min-height: 0;
     display: flex; flex-direction: column;
   }
   #registro:not(.con) { display: none; }
-  #lector.abierto ~ #registro { display: none; }
   #registroLineas {
     margin-top: auto; overflow: auto; padding: 6px 6px 4px; min-height: 0;
     font-family: Consolas, "Courier New", monospace; font-size: 13.5px; line-height: 1.75;
@@ -283,7 +288,7 @@ export function renderPanelPage(version) {
   /* Captura que la IA está analizando: aparece con fundido sobre el
      registro de la derecha y se va sola al dejar de estar fresca. */
   #fotoVivo {
-    grid-column: 4; grid-row: 1; min-height: 0; z-index: 2;
+    grid-column: 3; grid-row: 1; justify-self: end; width: 58%; min-height: 0; z-index: 2;
     display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
     gap: 10px; padding-top: 4px;
     opacity: 0; visibility: hidden; transform: translateY(-8px);
@@ -324,13 +329,12 @@ export function renderPanelPage(version) {
      lector se muda a la izquierda. */
   @media (max-width: 1280px) {
     /* Columna lateral SOLO cuando hay algo abierto; si no, el chat centra. */
-    #zona { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; }
+    #zona { grid-template-columns: 0 minmax(0, 1fr) 0; gap: 0; }
     #zona:has(#cajon.abierto), #zona:has(#lector.abierto) {
-      grid-template-columns: minmax(280px, 420px) minmax(0, 1fr) 0 0; gap: 18px;
+      grid-template-columns: minmax(280px, 420px) minmax(0, 1fr) 0; gap: 18px;
     }
-    #registro { display: none; }
-    #actividadLog { display: none; }
-    #fotoVivo { grid-column: 1; }
+    #ladoDerecho { display: none; }
+    #fotoVivo { grid-column: 1; justify-self: stretch; width: auto; }
     #lector { grid-column: 1; }
     #reloj { font-size: 54px; }
     #vivoEsc { max-width: 26vw; }
@@ -423,9 +427,6 @@ export function renderPanelPage(version) {
         <button class="pill" onclick="admin('update')">更新 BOT</button>
       </div>
     </div>
-    <div id="actividadLog">
-      <div id="tActividad"></div>
-    </div>
     <div id="centro">
       <div id="reloj">--:--</div>
       <div id="fecha">&nbsp;</div>
@@ -442,9 +443,14 @@ export function renderPanelPage(version) {
       <div id="lectorFoto"></div>
       <pre id="lectorTexto"></pre>
     </div>
-    <div id="registro">
-      <div id="registroLineas"></div>
-      <button id="registroBtn" onclick="plegarRegistro()" title="收起/展开">︿</button>
+    <div id="ladoDerecho">
+      <div id="actividadLog">
+        <div id="tActividad"></div>
+      </div>
+      <div id="registro">
+        <div id="registroLineas"></div>
+        <button id="registroBtn" onclick="plegarRegistro()" title="收起/展开">︿</button>
+      </div>
     </div>
     <div id="fotoVivo">
       <img id="fotoVivoImg" alt="" title="点击放大">
@@ -1144,7 +1150,7 @@ function pintarTarjetas(s) {
     return '<span class="hora">' + hh + '</span>' + escapar(a.text);
   }).reverse();
   const elAct = document.getElementById('tActividad');
-  const htmlAct = act.length ? act.join('<br>') : '还没有动静';
+  const htmlAct = act.join('<br>');
   if (elAct.innerHTML !== htmlAct) { elAct.innerHTML = htmlAct; elAct.scrollTop = elAct.scrollHeight; }
 }
 function escapar(x) { const d = document.createElement('div'); d.textContent = x; return d.innerHTML; }

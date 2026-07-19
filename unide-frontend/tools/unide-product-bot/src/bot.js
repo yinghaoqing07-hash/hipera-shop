@@ -239,7 +239,7 @@ async function handleUpdate(update) {
   const text = message.text.trim();
   if (text === '/whoami') { await telegram.sendMessage(chatId, `chat id: ${chatId}\nuser id: ${userId || '-'}`); return; }
   if (!isAllowed(chatId, userId)) { logger.warn('blocked unauthorized message', { chatId, userId }); return; }
-  notePanelActivity(text);
+  if (text.startsWith('/')) notePanelActivity(text);
   recordChat(update.__panel ? 'panel' : 'user', text);
   // natural=true cuando la dueña escribe en lenguaje natural (no un
   // comando /): en ese modo las respuestas se redactan SIN plantillas.
@@ -287,6 +287,11 @@ async function handleUpdate(update) {
   if (/^\/(pedido_editar|editar_pedido)\b/i.test(text)) { await handleOrderEdit(chatId, text); return; }
   if (isOrderDraftCommand(text)) { await handleOrderDraft(chatId, text); return; }
   if (isOrderCommand(text)) { await telegram.sendMessage(chatId, formatOrderResponse(parseOrderMode(text), new Date(), config), makeOrderButtons()); return; }
+  // Recuentos pedidos en claro: "叫肉/我要叫肉" es /carne y "叫水果/叫果蔬"
+  // es /fruta, por regla — el 19/07 la ruta LLM falló y estas frases obvias
+  // acababan en la ayuda de plantillas.
+  if (/^(?:我要)?叫(?:肉|肉类)(?:吧|了)?$/.test(text)) { notePanelActivity('/carne'); await startTally(chatId, 'carne'); return; }
+  if (/^(?:我要)?叫(?:水果|果蔬|蔬菜|菜|水果蔬菜)(?:吧|了)?$/.test(text)) { notePanelActivity('/fruta'); await startTally(chatId, 'fruta'); return; }
   // Retoques del pedido dichos en claro ("把851040改成一箱", "加一个851220",
   // "删掉850574"): se reconocen AQUÍ por regla, ANTES del lector de códigos
   // de producto y del router LLM — son órdenes inequívocas y se ejecutan
@@ -608,11 +613,11 @@ async function handleFreeText(chatId, text) {
     intent = await llmRouteIntent(text, config, logger, { history: assistHistory(text), datos: buildAssistDatos(text, chatId) });
   } catch (error) {
     logger.warn('llm intent failed', { error: error.message });
-    await telegram.sendMessage(chatId, formatTemplateHelp());
+    await telegram.sendMessage(chatId, `AI 理解通道这会儿出错了（${String(error.message || '').slice(0, 80)}）。可以先用命令：/carne 叫肉、/fruta 叫果蔬、/help 看全部。`, { __skipAI: true });
     return;
   }
   const arg = intent.argumento;
-  const say = async (cmd) => telegram.sendMessage(chatId, `我理解为 ${cmd}，这就去办。`);
+  const say = async (cmd) => { notePanelActivity(cmd); return telegram.sendMessage(chatId, `我理解为 ${cmd}，这就去办。`); };
   switch (intent.accion) {
     case 'llegada':
       await say(`/llegada${arg ? ` ${arg}` : ''}`);
@@ -1787,6 +1792,7 @@ async function handleOrderEditCambios(chatId, cambios) {
   const resumen = cambios.map((c) => c.tipo === 'cantidad' ? `${c.codigo}→${c.qty}箱`
     : c.tipo === 'quitar' ? `删${c.codigo}`
     : `加${c.item.code || c.item.nombre}×${c.item.quantity || 1}`).join('、');
+  notePanelActivity(`改单 ${resumen}`);
   await telegram.sendMessage(chatId, `收到：${resumen}。这就去改，改完发截图；不会点 Guardar。`, { __skipAI: true });
   const result = await editOrderWeb(config, logger, lastWebOrderName, cambios, {
     avisar: (t) => telegram.sendMessage(chatId, t, { __skipAI: true, __nota: true }).catch(() => {})
