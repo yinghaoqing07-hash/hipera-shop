@@ -107,6 +107,17 @@ export function startPanel(config, logger, hooks) {
         fs.createReadStream(foto.path).pipe(res);
         return;
       }
+      if (req.method === 'GET' && req.url.startsWith('/detalle')) {
+        // Detalle bajo demanda de las tarjetas 今日/促销: el panel lo abre
+        // en el lector directamente, sin pasar por el chat.
+        let que = '';
+        try { que = String(new URL(req.url, 'http://x').searchParams.get('que') || ''); } catch { /* sin query */ }
+        const detalle = hooks.panelDetalle ? hooks.panelDetalle(que) : null;
+        if (!detalle) { res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(detalle));
+        return;
+      }
       if (req.method === 'GET' && req.url === '/comandos') {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         res.end(hooks.commandList());

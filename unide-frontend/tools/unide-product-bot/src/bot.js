@@ -2852,6 +2852,28 @@ if (config.panel?.enabled !== false) {
       };
     },
     commandList: () => formatCommandList(),
+    // Detalle de las tarjetas del panel: 今日 = lista de llegada de hoy
+    // (mismo formato imprimible), 促销 = el CSV completo de promociones
+    // (el panel lo vuelve legible con csvLegible).
+    panelDetalle: (que) => {
+      try {
+        if (que === 'promos') {
+          const latest = findLatestPromotionsCsv(config);
+          if (!latest) return { titulo: '促销', texto: '还没有促销数据。在下面输入 /promociones 抓取一次。' };
+          const fecha = path.basename(latest.file).replace(/^promociones-productos-activos-|\.csv$/g, '');
+          return { titulo: '促销 · ' + fecha, texto: fs.readFileSync(latest.file, 'utf8'), csv: true };
+        }
+        if (que === 'hoy') {
+          const hoy = todayString(config);
+          const orders = ordersArrivingOn(config, hoy);
+          if (!orders.length) return { titulo: '今日 · ' + hoy, texto: '今天没有预计到货的订单。\n（到货日按下单日 + ' + (config.arrival?.offsetDays ?? 2) + ' 天算）' };
+          return { titulo: '今日 · ' + hoy + ' · ' + orders.length + ' 单', texto: formatChecklist(orders, hoy) };
+        }
+      } catch (error) {
+        return { titulo: '出错了', texto: String(error.message || error) };
+      }
+      return null;
+    },
     liveShot: () => getLiveShot(),
     // Archivo subido desde el panel: se guarda en local y se enruta como si
     // hubiera llegado por Telegram. Hoy lo usa /diagnostico_productos.
