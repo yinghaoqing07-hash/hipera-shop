@@ -23,34 +23,34 @@ export function renderPanelPage(version) {
     margin: 0; background: #111927; color: #d7e1ea;
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
     display: flex; flex-direction: column;
-    background-image: radial-gradient(ellipse 70% 45% at 50% 38%, rgba(56,189,248,.12), transparent 70%);
+    background-image: radial-gradient(ellipse 70% 45% at 50% 38%, rgba(111,156,189,.12), transparent 70%);
   }
   header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 18px 26px; font-size: 13px; letter-spacing: .18em; color: #76879a;
+    padding: 18px 26px; font-size: 13px; letter-spacing: .08em; color: #76879a;
     animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
   }
-  #logo { color: #7dd3fc; font-weight: 600; }
+  #logo { color: #a8c3d6; font-weight: 600; }
   #estado { display: flex; gap: 18px; align-items: center; }
   #btnCajon {
-    background: none; border: 1px solid rgba(125,211,252,.3); color: #97c9e3;
-    border-radius: 999px; padding: 5px 16px; font-size: 11px; letter-spacing: .25em;
+    background: none; border: 1px solid rgba(168,195,214,.3); color: #97c9e3;
+    border-radius: 999px; padding: 5px 16px; font-size: 11px; letter-spacing: .08em;
     cursor: pointer; font-family: inherit;
   }
-  #btnCajon:hover { border-color: rgba(125,211,252,.65); color: #d5ecf8; }
+  #btnCajon:hover { border-color: rgba(168,195,214,.65); color: #d5ecf8; }
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
   /* Paso de escritorio EN VIVO (lo escribe unideges-search.ps1 antes de
      cada paso): vacío = invisible, error en rojo. */
   #vivoEsc {
-    margin-left: 16px; color: #7dd3fc;
+    margin-left: 16px; color: #a8c3d6;
     max-width: 38vw; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; display: inline-block; vertical-align: bottom;
   }
   #vivoEsc:empty { display: none; }
   #vivoEsc::before {
     content: ''; display: inline-block; width: 6px; height: 6px;
-    border-radius: 50%; background: #38bdf8; margin-right: 8px;
+    border-radius: 50%; background: #6f9cbd; margin-right: 8px;
     vertical-align: 1px; animation: latido 1.1s ease-in-out infinite;
   }
   #vivoEsc.err { color: #f87171; }
@@ -68,22 +68,22 @@ export function renderPanelPage(version) {
     gap: 18px;
   }
   #centro { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; }
-  #saludo { font-size: 13px; letter-spacing: .3em; color: #5f7184; margin-bottom: 26px; text-transform: uppercase; }
+  #saludo { font-size: 13px; letter-spacing: .08em; color: #5f7184; margin-bottom: 26px; }
   #linea {
     width: min(980px, 100%); display: flex; align-items: center; gap: 14px;
-    border-bottom: 1px solid rgba(125,211,252,.25); padding: 6px 4px 12px;
+    border-bottom: 1px solid rgba(168,195,214,.25); padding: 6px 4px 12px;
     transition: border-color .25s;
   }
-  #linea:focus-within { border-color: rgba(125,211,252,.75); }
-  #linea::before { content: "›"; color: #38bdf8; font-size: 26px; line-height: 1; }
+  #linea:focus-within { border-color: rgba(168,195,214,.75); }
+  #linea::before { content: "›"; color: #6f9cbd; font-size: 26px; line-height: 1; }
   #libre {
     flex: 1; background: none; border: none; outline: none; color: #e6eef4;
-    font-size: 20px; font-weight: 300; letter-spacing: .02em; caret-color: #38bdf8;
+    font-size: 20px; font-weight: 300; letter-spacing: .02em; caret-color: #6f9cbd;
   }
   #libre::placeholder { color: #53657a; }
   /* Subir archivo: discreto al final de la línea de comandos. */
   #btnSubir {
-    background: none; border: none; color: rgba(125,211,252,.4); cursor: pointer;
+    background: none; border: none; color: rgba(168,195,214,.4); cursor: pointer;
     font-size: 22px; line-height: 1; padding: 0 2px; font-family: inherit;
   }
   #btnSubir:hover { color: #cfe9f7; }
@@ -93,16 +93,16 @@ export function renderPanelPage(version) {
     border-radius: 999px; padding: 10px 20px; font-size: 15px; cursor: pointer;
     transition: all .2s;
   }
-  .pill:hover { border-color: rgba(125,211,252,.6); color: #cfe9f7; }
+  .pill:hover { border-color: rgba(168,195,214,.6); color: #cfe9f7; }
   .pill:active { transform: scale(.97); }
   #reloj { margin-top: 2vh; font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
-  #reloj span.seg { font-size: 26px; color: #38bdf8; font-weight: 300; margin-left: 6px; }
-  #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .28em; color: #76879a; text-transform: uppercase; }
+  #reloj span.seg { font-size: 26px; color: #6f9cbd; font-weight: 300; margin-left: 6px; }
+  #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .1em; color: #76879a; }
   #tarjetas { margin-top: 22px; display: grid; gap: 10px; grid-template-columns: 1fr; }
   #mantenimiento { margin-top: 26px; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
   #cajonTeclado { display: none; }
   .tarjeta { border: 1px solid rgba(200,211,220,.16); background: rgba(148,180,205,.05); border-radius: 12px; padding: 14px 16px; min-height: 88px; }
-  .tarjeta .titulo { font-size: 11px; letter-spacing: .25em; color: #5f7184; margin-bottom: 9px; }
+  .tarjeta .titulo { font-size: 11px; letter-spacing: .08em; color: #5f7184; margin-bottom: 9px; }
   .tarjeta .dato { font-size: 15px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
@@ -110,7 +110,7 @@ export function renderPanelPage(version) {
     /* flex 1: el chat se estira hasta la línea de comando, pegada abajo */
     flex: 1 1 0; min-height: 0; width: min(980px, 100%); overflow-y: auto;
     margin: 8px 0 20px; scrollbar-width: thin;
-    scrollbar-color: rgba(125,211,252,.2) transparent;
+    scrollbar-color: rgba(168,195,214,.2) transparent;
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 24px);
   }
   .msg { display: flex; margin: 13px 0; transform-origin: left center; }
@@ -129,36 +129,36 @@ export function renderPanelPage(version) {
   .msg.nota { margin: 6px 0; }
   .msg.nota .burbuja {
     font-size: 13px; line-height: 1.55; color: #6e8093;
-    border-left: 2px solid rgba(125,211,252,.26); padding-left: 12px;
+    border-left: 2px solid rgba(168,195,214,.26); padding-left: 12px;
   }
   .msg.nota .chipLeer { font-size: 11px; padding: 2px 9px; }
   .burbuja.actualizada { animation: burbujaActualizada 460ms var(--motion-ease); }
   .textoMensaje.escribiendo::after {
     content: ''; display: inline-block; width: 1px; height: 1.05em;
-    margin-left: 4px; vertical-align: -.12em; background: #38bdf8;
+    margin-left: 4px; vertical-align: -.12em; background: #6f9cbd;
     animation: cursorEscritura 620ms steps(1, end) infinite;
   }
   @keyframes cursorEscritura {
     0%, 46% { opacity: .95; }
     47%, 100% { opacity: 0; }
   }
-  .burbuja.esperando { display: inline-flex; align-items: center; gap: 10px; color: #7dd3fc; }
-  .esperandoTexto { font-size: 11px; letter-spacing: .2em; color: #7c91a6; }
+  .burbuja.esperando { display: inline-flex; align-items: center; gap: 10px; color: #a8c3d6; }
+  .esperandoTexto { font-size: 11px; letter-spacing: .08em; color: #7c91a6; }
   .esperandoPuntos { display: inline-flex; gap: 5px; }
   .esperandoPuntos i {
-    width: 5px; height: 5px; border-radius: 50%; background: #38bdf8;
+    width: 5px; height: 5px; border-radius: 50%; background: #6f9cbd;
     animation: puntoPensando 1.05s ease-in-out infinite;
   }
   .esperandoPuntos i:nth-child(2) { animation-delay: 120ms; }
   .esperandoPuntos i:nth-child(3) { animation-delay: 240ms; }
-  .burbuja .meta { display: block; font-size: 10.5px; color: #53657a; letter-spacing: .14em; margin-top: 4px; }
+  .burbuja .meta { display: block; font-size: 10.5px; color: #53657a; letter-spacing: .04em; margin-top: 4px; }
   .chipTeclado, .chipLeer {
     display: inline-flex; align-items: center; margin: 8px 8px 0 0;
-    background: none; border: 1px solid rgba(56,189,248,.4); color: #97c9e3;
-    border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer; letter-spacing: .12em;
+    background: none; border: 1px solid rgba(111,156,189,.4); color: #97c9e3;
+    border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer; letter-spacing: .06em;
     transition: transform var(--motion-fast) var(--motion-ease), border-color var(--motion-fast), color var(--motion-fast), background var(--motion-fast);
   }
-  .chipTeclado:hover, .chipLeer:hover { border-color: rgba(125,211,252,.6); color: #d5ecf8; background: rgba(56,189,248,.06); transform: translateY(-1px); }
+  .chipTeclado:hover, .chipLeer:hover { border-color: rgba(168,195,214,.6); color: #d5ecf8; background: rgba(111,156,189,.06); transform: translateY(-1px); }
   .chipTeclado:active, .chipLeer:active { transform: translateY(0) scale(.97); }
   /* --- cajón lateral: donde viven los teclados interactivos --- */
   /* Nada de paneles que se deslizan por encima: el cajón y el lector viven
@@ -180,21 +180,21 @@ export function renderPanelPage(version) {
     display: flex; justify-content: flex-end; align-items: center;
     padding: 0 6px 2px; font-size: 11px; color: #76879a;
   }
-  #cajon .cab b { color: #7dd3fc; font-weight: 600; }
+  #cajon .cab b { color: #a8c3d6; font-weight: 600; }
   #cajon .cab button {
     background: none; border: none; color: #76879a; font-size: 18px; cursor: pointer; padding: 2px 6px;
   }
   #cajon .cab button:hover { color: #cfe9f7; }
-  #cajon .cuerpo { flex: 1; overflow-y: auto; padding: 4px 6px 24px; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent; }
+  #cajon .cuerpo { flex: 1; overflow-y: auto; padding: 4px 6px 24px; scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent; }
   #cajon .texto { font-size: 16.5px; color: #b9c8d6; line-height: 1.7; white-space: pre-wrap; margin-bottom: 16px; }
   #cajon img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); margin-bottom: 14px; display: block; }
   #cajon .filaB { display: flex; gap: 8px; margin-bottom: 8px; }
   #cajon .filaB button {
-    flex: 1; min-width: 0; background: rgba(56,189,248,.06); border: 1px solid rgba(56,189,248,.35); color: #b9e2f6;
+    flex: 1; min-width: 0; background: rgba(111,156,189,.06); border: 1px solid rgba(111,156,189,.35); color: #b9e2f6;
     border-radius: 10px; padding: 13px 10px; font-size: 15.5px; cursor: pointer; transition: all .15s;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #cajon .filaB button:hover { background: rgba(56,189,248,.16); color: #e2f3fc; }
+  #cajon .filaB button:hover { background: rgba(111,156,189,.16); color: #e2f3fc; }
   #cajon .filaB button:active { transform: scale(.97); }
   #lector {
     grid-column: 3; grid-row: 1;
@@ -212,7 +212,7 @@ export function renderPanelPage(version) {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 0 6px 2px; font-size: 11px; color: #76879a;
   }
-  #lector .cab b { color: #7dd3fc; font-weight: 600; white-space: nowrap; }
+  #lector .cab b { color: #a8c3d6; font-weight: 600; white-space: nowrap; }
   #lectorFoto { padding: 0 6px; }
   #lectorFoto img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); }
   #lector .cab span.titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; letter-spacing: .1em; }
@@ -222,7 +222,7 @@ export function renderPanelPage(version) {
     flex: 1; overflow: auto; margin: 0; padding: 6px 6px 24px;
     font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.6;
     color: #bdcad7; white-space: pre-wrap; word-break: break-word;
-    scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
+    scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
   }
   /* Registro en vivo (columna derecha): TODO lo que la automatización va
      haciendo, con hora, sin caja. Texto seleccionable para copiar; la
@@ -238,7 +238,7 @@ export function renderPanelPage(version) {
     margin-top: auto; overflow: auto; padding: 6px 6px 4px; min-height: 0;
     font-family: Consolas, "Courier New", monospace; font-size: 13.5px; line-height: 1.75;
     color: #8fa2b5; white-space: pre-wrap; word-break: break-word;
-    user-select: text; scrollbar-width: thin; scrollbar-color: rgba(125,211,252,.2) transparent;
+    user-select: text; scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
     max-height: 100%; opacity: 1;
     transition: max-height var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease, padding var(--motion-base) ease;
   }
@@ -248,8 +248,8 @@ export function renderPanelPage(version) {
   #registroLineas .hora { color: #566b80; margin-right: 8px; }
   #registro.oculto #registroLineas { max-height: 0; opacity: 0; overflow: hidden; padding-top: 0; padding-bottom: 0; }
   #registroBtn {
-    background: none; border: none; color: rgba(125,211,252,.4); cursor: pointer;
-    font-size: 13px; padding: 2px 0 4px; align-self: center; letter-spacing: .2em;
+    background: none; border: none; color: rgba(168,195,214,.4); cursor: pointer;
+    font-size: 13px; padding: 2px 0 4px; align-self: center; letter-spacing: .08em;
   }
   #registroBtn:hover { color: #cfe9f7; }
   /* Plegado, la flecha se queda abajo (donde el dueño la espera). */
@@ -267,7 +267,7 @@ export function renderPanelPage(version) {
   #fotoVivo.visible { opacity: 1; visibility: visible; transform: translateY(0); transition-delay: 0s; }
   #fotoVivo img {
     width: 100%; max-height: 56vh; object-fit: contain; border-radius: 10px;
-    border: 1px solid rgba(125,211,252,.28); box-shadow: 0 10px 42px rgba(0,0,0,.55);
+    border: 1px solid rgba(168,195,214,.28); box-shadow: 0 10px 42px rgba(0,0,0,.55);
     background: #0b1220;
   }
   #fotoVivo img { cursor: zoom-in; pointer-events: auto; }
@@ -276,8 +276,8 @@ export function renderPanelPage(version) {
      un rato antes de fundirse. */
   #fotoVivo img.analizando { animation: brilloAnalisis 1.5s ease-in-out infinite; }
   @keyframes brilloAnalisis {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(56,189,248,.25), 0 10px 42px rgba(0,0,0,.55); }
-    50% { box-shadow: 0 0 0 3px rgba(56,189,248,.85), 0 0 36px rgba(56,189,248,.5), 0 10px 42px rgba(0,0,0,.55); }
+    0%, 100% { box-shadow: 0 0 0 1px rgba(111,156,189,.25), 0 10px 42px rgba(0,0,0,.55); }
+    50% { box-shadow: 0 0 0 2px rgba(111,156,189,.6), 0 0 22px rgba(111,156,189,.35), 0 10px 42px rgba(0,0,0,.55); }
   }
   /* Lupa: cualquier imagen del panel ampliada a pantalla completa. */
   #lupa {
@@ -310,11 +310,11 @@ export function renderPanelPage(version) {
   }
   #aviso {
     position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 8px);
-    color: #7dd3fc; font-size: 13px; letter-spacing: .12em;
+    color: #a8c3d6; font-size: 13px; letter-spacing: .06em;
     opacity: 0; transition: opacity var(--motion-base) ease, transform var(--motion-base) var(--motion-ease); pointer-events: none;
   }
   #aviso.visible { opacity: .9; transform: translate(-50%, 0); }
-  #ver { position: fixed; right: 16px; bottom: 10px; font-size: 10px; letter-spacing: .12em; color: rgba(125,211,252,.45); pointer-events: none; }
+  #ver { position: fixed; right: 16px; bottom: 10px; font-size: 10px; letter-spacing: .06em; color: rgba(168,195,214,.45); pointer-events: none; }
   @keyframes aparecerSuave {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -410,7 +410,7 @@ export function renderPanelPage(version) {
     <div id="centro">
       <div id="reloj">--:--</div>
       <div id="fecha">&nbsp;</div>
-      <div id="saludo">需要我做什么</div>
+      <div id="saludo"></div>
       <div id="charla"></div>
       <div id="linea">
         <input id="libre" autofocus>
@@ -1079,7 +1079,7 @@ function tic() {
   const dias = ['周日','周一','周二','周三','周四','周五','周六'];
   document.getElementById('fecha').textContent = d.getFullYear() + ' / ' + String(d.getMonth() + 1).padStart(2, '0') + ' / ' + String(d.getDate()).padStart(2, '0') + '　' + dias[d.getDay()];
   const h = d.getHours();
-  document.getElementById('saludo').textContent = (h < 6 ? '夜深了' : h < 12 ? '早上好' : h < 20 ? '下午好' : '晚上好') + '，需要我做什么';
+  document.getElementById('saludo').textContent = h < 6 ? '深夜' : h < 12 ? '早上好' : h < 20 ? '下午好' : '晚上好';
 }
 tic();
 setInterval(tic, 1000);
