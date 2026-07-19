@@ -301,6 +301,7 @@ async function rellenarUnaLinea(ctx, item, etiqueta, reintento = false) {
   // puede repararse con SUS términos (las viejas son de otros artículos).
   const blancasAntes = await centralesFilasBlancas(page);
 
+  await esperarGridLibre(page, config, `第${etiqueta}行开编辑`);
   const prepared = await prepareItemEditor(page, ctx.autocompleteTimeoutMs);
   if (!prepared) {
     const shot = await screenshot(page, config, 'newrow');
@@ -647,6 +648,7 @@ async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
     const nombre = String(item.nombre || '').trim();
     const anchorCode = String(item.anchorCode || item.originalCode || code).trim();
     setLive(`[pedido] 修复半空行 ${anchorCode}…`);
+    await esperarGridLibre(page, config, `修半空行${anchorCode}`);
     if (await irAPaginaDeFila(page, config, '', x.fila.central)) {
       const ok = await repairBlankLine(page, { searchTerm: code || nombre, nombre, anchorCode }, ctx.autocompleteTimeoutMs, ctx.autocompleteMs, x.fila.central);
       if (ok) reparaciones.medias += 1;
@@ -679,6 +681,7 @@ async function repararAuditoria(ctx, draft, auditoria, results, reparaciones) {
 // Filas del grid de líneas tal cual están, INCLUYENDO medias y vacías
 // (el lector normal las salta). Pagina igual que scrapeAllOrderLines.
 async function scrapeFilasAuditoria(page, config) {
+  await esperarGridLibre(page, config, '对账读表');
   const maxPages = 30;
   const settle = Number(config?.webOrder?.pageNavigationTimeoutMs) ? Math.min(Number(config.webOrder.pageNavigationTimeoutMs), 8000) : 8000;
   const leer = () => page.evaluate(() => {
@@ -768,6 +771,37 @@ async function irAPaginaDeFila(page, config, codigo, central) {
   return false;
 }
 
+// Guardia + CHIVATO de grid colgado: antes de cada gesto sobre el grid
+// (abrir editor, lápiz, checkbox, scrape) espera a que el panel
+// "Loading..." desaparezca. Si a los 8 s sigue, deja en el registro EN QUÉ
+// operación pasó, guarda captura (sale en la columna derecha del panel) y
+// distingue el caso "Blazor perdió la conexión y está reconectando" — ese
+// no se cura esperando y es la pista clave para el diagnóstico.
+async function esperarGridLibre(page, config, etiqueta) {
+  const start = Date.now();
+  let avisadoReconexion = false;
+  while (Date.now() - start < 8000) {
+    const est = await page.evaluate(() => {
+      const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const cargando = Array.from(document.querySelectorAll('[class*="load" i]'))
+        .some((el) => isVisible(el) && /loading|cargando/i.test(el.textContent || ''));
+      const rec = document.querySelector('#components-reconnect-modal, [id*="reconnect" i], [class*="reconnect" i]');
+      return { cargando, reconectando: Boolean(rec && isVisible(rec)) };
+    }).catch(() => ({ cargando: false, reconectando: false }));
+    if (est.reconectando) {
+      if (!avisadoReconexion) { avisadoReconexion = true; setLive(`[pedido] ⚠ 页面掉线正在重连（${etiqueta}）…`); }
+      await sleep(1000);
+      continue;
+    }
+    if (!est.cargando) return true;
+    await sleep(200);
+  }
+  setLive(`[pedido] ⚠ 表格卡在 Loading 超 8 秒（卡点：${etiqueta}），已拍照，继续尝试…`);
+  const foto = await screenshot(page, config, `grid-colgado-${etiqueta}`);
+  if (foto) { setLiveShot(foto); liveShotDone(); }
+  return false;
+}
+
 // Avanza el paginador hasta la última página (donde vive la fila de alta
 // "Haga clic aquí para agregar…"). En un grid de una sola página no hace nada.
 async function irAUltimaPagina(page) {
@@ -791,6 +825,7 @@ async function corregirCajasFila(ctx, codigo, central, qty) {
       try { await page.keyboard.press('Escape'); } catch { /* sin edición abierta */ }
       await sleep(500);
     }
+    await esperarGridLibre(page, ctx.config, `改数量${codigo || central}`);
     const hecho = await gestoCorregirCajas(page, codigo, central, qty);
     if (!hecho) return false;
     let cajas = null;
@@ -875,6 +910,7 @@ async function gestoCorregirCajas(page, codigo, central, qty) {
 async function eliminarFilaDuplicada(page, config, codigo, qtyEsperada, sobran) {
   let borradas = 0;
   for (let i = 0; i < sobran; i += 1) {
+    await esperarGridLibre(page, config, `删行${codigo}`);
     if (!(await irAPaginaDeFila(page, config, codigo, ''))) break;
     const marcada = await page.evaluate((cod, qe) => {
       const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
@@ -921,6 +957,7 @@ async function eliminarFilaDuplicada(page, config, codigo, qtyEsperada, sobran) 
 async function eliminarFilasVacias(page, config) {
   let borradas = 0;
   for (let intento = 0; intento < 5; intento += 1) {
+    await esperarGridLibre(page, config, '删空行');
     try {
       if (await gridActivePage(page) > 1) await gridClickPageDelta(page, { toPage: 1 });
     } catch { /* sin paginador */ }
