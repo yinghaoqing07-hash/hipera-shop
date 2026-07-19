@@ -927,6 +927,24 @@ async function gestoCorregirCajas(page, codigo, central, qty) {
   return true;
 }
 
+// Click REAL de ratón sobre el checkbox de una fila + verificación de que
+// quedó marcado (.checked). El .click() de DOM desde evaluate no le
+// llegaba a Blazor: la selección no existía y Eliminar ni abría su
+// confirmación (19/07). Si el input está tapado, se prueba con su celda.
+async function clickRealYVerificarCheckbox(page, chk) {
+  try { await chk.click(); } catch { /* tapado por overlay */ }
+  await sleep(350);
+  if (await page.evaluate((el) => Boolean(el && el.checked), chk).catch(() => false)) return true;
+  try {
+    const celda = await page.evaluateHandle((el) => el.closest('td') || el.parentElement, chk);
+    const c = celda.asElement();
+    if (c) await c.click();
+    await celda.dispose();
+  } catch { /* sin celda */ }
+  await sleep(350);
+  return page.evaluate((el) => Boolean(el && el.checked), chk).catch(() => false);
+}
+
 // Borra `sobran` copias de una línea duplicada: navega hasta una página
 // con la fila, marca su checkbox y pulsa Eliminar (con confirmación).
 // Prefiere borrar una copia cuya cantidad NO coincide con la esperada.
@@ -935,7 +953,7 @@ async function eliminarFilaDuplicada(page, config, codigo, qtyEsperada, sobran) 
   for (let i = 0; i < sobran; i += 1) {
     await esperarGridLibre(page, config, `删行${codigo}`);
     if (!(await irAPaginaDeFila(page, config, codigo, ''))) break;
-    const marcada = await page.evaluate((cod, qe) => {
+    const handle = await page.evaluateHandle((cod, qe) => {
       const clean = (s) => (s || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
       const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
       const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
@@ -957,18 +975,32 @@ async function eliminarFilaDuplicada(page, config, codigo, qtyEsperada, sobran) 
           candidatas.push({ chk, cajasMal: qe !== '' && cajas !== qe });
         }
         if (!candidatas.length) continue;
-        const elegida = candidatas.find((c) => c.cajasMal) || candidatas[0];
-        elegida.chk.click();
-        return true;
+        return (candidatas.find((c) => c.cajasMal) || candidatas[0]).chk;
       }
-      return false;
+      return null;
     }, codigo, qtyEsperada > 0 ? String(qtyEsperada) : '');
-    if (!marcada) break;
+    const chk = handle.asElement();
+    if (!chk) { await handle.dispose(); break; }
+    const marcada = await clickRealYVerificarCheckbox(page, chk);
+    await handle.dispose();
+    if (!marcada) {
+      setLive(`[pedido] ⚠ 勾不上 ${codigo} 的选择框（点了但没选中）`);
+      break;
+    }
     const clicado = await clickActionMatching(page, 'eliminar', 3000);
     if (!clicado.ok) break;
+    // La confirmación tarda en pintarse: sondear hasta 4 s a que aparezca
+    // y aceptarla. Sin confirmación visible NO se cuenta nada como borrado.
+    let confirmado = false;
+    for (let e = 0; e < 16 && !confirmado; e += 1) {
+      await sleep(250);
+      confirmado = await confirmBlazorPopup(page);
+    }
+    if (!confirmado) {
+      setLive(`[pedido] ⚠ 点了 Eliminar 但确认框没出现（${codigo}）`);
+      break;
+    }
     await sleep(700);
-    await confirmBlazorPopup(page);
-    await sleep(1000);
     // El borrado dispara un refresco del grid: esperar a que termine (con
     // rescate si se cuelga) ANTES de dar la fila por borrada — el 19/07 el
     // refresco se quedó colgado y la fila seguía allí.
@@ -991,7 +1023,7 @@ async function eliminarFilasVacias(page, config) {
     let marcada = false;
     for (let pg = 0; pg < 30 && !marcada; pg += 1) {
       await sleep(400);
-      marcada = await page.evaluate(() => {
+      const handleVacia = await page.evaluateHandle(() => {
         const clean = (s) => (s || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
         const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
         const tables = Array.from(document.querySelectorAll('table')).filter(isVisible);
@@ -1012,19 +1044,32 @@ async function eliminarFilasVacias(page, config) {
             const articulo = idxArticulo >= 0 ? (cells[idxArticulo] || '') : '';
             if (central || codigo || articulo) continue;
             const chk = tr.querySelector('input[type="checkbox"]');
-            if (chk) { chk.click(); return true; }
+            if (chk) return chk;
           }
         }
-        return false;
+        return null;
       });
+      const chkVacia = handleVacia.asElement();
+      if (chkVacia) {
+        marcada = await clickRealYVerificarCheckbox(page, chkVacia);
+        await handleVacia.dispose();
+        if (!marcada) { setLive('[pedido] ⚠ 勾不上空行的选择框（点了但没选中）'); return borradas; }
+      } else {
+        await handleVacia.dispose();
+      }
       if (!marcada && !(await gridClickPageDelta(page, +1))) break;
     }
     if (!marcada) return borradas;
     const clicado = await clickActionMatching(page, 'eliminar', 3000);
     if (!clicado.ok) return borradas;
+    let confirmado = false;
+    for (let e = 0; e < 16 && !confirmado; e += 1) {
+      await sleep(250);
+      confirmado = await confirmBlazorPopup(page);
+    }
+    if (!confirmado) { setLive('[pedido] ⚠ 点了 Eliminar 但确认框没出现（空行）'); return borradas; }
     await sleep(700);
-    await confirmBlazorPopup(page);
-    await sleep(1000);
+    await esperarGridLibre(page, config, '删空行后刷新');
     borradas += 1;
   }
   return borradas;
