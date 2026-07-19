@@ -415,11 +415,11 @@ export function renderPanelPage(version) {
     </div>
     <div id="lateral">
       <div id="tarjetas">
-        <div class="tarjeta clicable" onclick="run('/pedido')" title="点一下：今天的叫货提醒">
+        <div class="tarjeta clicable" onclick="abrirDetalle('hoy')" title="点开看今天到货明细">
           <div class="titulo">今日</div>
           <div class="dato" id="tHoy">—</div>
         </div>
-        <div class="tarjeta clicable" onclick="run('/ahorro')" title="点一下：促销省钱策略">
+        <div class="tarjeta clicable" onclick="abrirDetalle('promos')" title="点开看全部促销商品">
           <div class="titulo">促销</div>
           <div class="dato" id="tPromo">—</div>
         </div>
@@ -1015,6 +1015,17 @@ async function pollChat() {
 }
 pollChat();
 setInterval(pollChat, 2500);
+// Tarjetas 今日/促销: el click abre el DETALLE completo en el lector
+// (lista de llegada de hoy / todos los articulos en promocion), sin chat.
+async function abrirDetalle(que) {
+  try {
+    const r = await fetch('/detalle?que=' + que);
+    if (!r.ok) { aviso('拿不到数据'); return; }
+    const d = await r.json();
+    if (!d || !d.texto) { aviso('没有数据'); return; }
+    abrirLector(d.titulo || '', d.csv ? (csvLegible(d.texto) || d.texto) : d.texto);
+  } catch { aviso('连不上 BOT'); }
+}
 async function run(cmd) {
   if (/^(取消|算了|不要|不用了?|no|cancelar?)$/i.test(String(cmd).trim())) cerrarCajon();
   mostrarPensando();
