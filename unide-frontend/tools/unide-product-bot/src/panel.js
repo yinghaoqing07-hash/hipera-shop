@@ -133,6 +133,33 @@ export function startPanel(config, logger, hooks) {
         res.end(JSON.stringify({ ok: true, toast }));
         return;
       }
+      if (req.method === 'POST' && req.url === '/auto_tarea') {
+        // Tareas diarias automáticas: cambiar hora u on/off desde la
+        // tarjeta 定时任务. Los errores de validación (hora mala) vuelven
+        // como toast legible, no como 500.
+        const body = await readBody(req);
+        let id = '';
+        const cambios = {};
+        try {
+          const p = JSON.parse(body || '{}');
+          id = String(p.id || '').trim();
+          if (p.enabled !== undefined) cambios.enabled = Boolean(p.enabled);
+          if (p.time !== undefined) cambios.time = String(p.time);
+        } catch { /* json roto */ }
+        if (!id) { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        logger?.info('panel auto task', { id, cambios });
+        let ok = true;
+        let toast = '';
+        try {
+          toast = hooks.autoTarea ? await hooks.autoTarea(id, cambios) : '';
+        } catch (error) {
+          ok = false;
+          toast = error.message;
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok, toast }));
+        return;
+      }
       if (req.method === 'POST' && req.url === '/admin') {
         const body = await readBody(req);
         let accion = '';

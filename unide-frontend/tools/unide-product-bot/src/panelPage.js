@@ -143,6 +143,13 @@ export function renderPanelPage(version) {
   .tarjeta .dato { font-size: 15px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
   .tarjeta .dato .hora { color: #5f7184; font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  /* Tareas diarias: la hora es un input editable con el mismo aspecto que el texto. */
+  .tarjeta .dato input.horaAuto { background: none; border: none; border-bottom: 1px dashed rgba(200,211,220,.25); color: #8fa5b8; font: inherit; font-size: 12px; padding: 0; width: 40px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  .tarjeta .dato input.horaAuto:hover, .tarjeta .dato input.horaAuto:focus { color: #cfe9f7; outline: none; border-bottom-color: rgba(200,211,220,.55); }
+  .tarjeta .dato .filaDiaria { display: flex; align-items: baseline; gap: 7px; }
+  .tarjeta .dato .filaDiaria.apagada { opacity: .45; }
+  .tarjeta .dato .filaDiaria .etiqueta { flex: 1; min-width: 0; font-size: 13px; }
+  .tarjeta .dato .filaDiaria .marca { color: #5f7184; font-size: 11px; margin-left: 4px; }
   #charla {
     /* flex 1: el chat se estira hasta la línea de comando, pegada abajo */
     flex: 1 1 0; min-height: 0; width: min(980px, 100%); overflow-y: auto;
@@ -1134,10 +1141,15 @@ function pintarTarjetas(s) {
     document.getElementById('tPromo').textContent = '还没有促销数据，点「刷新促销」';
   }
   const tareas = Array.isArray(s.scheduledTasks) ? s.scheduledTasks : [];
+  const diarias = Array.isArray(s.autoTareas) ? s.autoTareas : [];
   const tarjetaTareas = document.getElementById('tTareasCard');
-  tarjetaTareas.style.display = tareas.length ? '' : 'none';
+  tarjetaTareas.style.display = (diarias.length || tareas.length) ? '' : 'none';
   const contTareas = document.getElementById('tTareas');
+  // No repintar mientras se edita una hora: el repintado periódico se
+  // comería el campo con el foco.
+  if (!contTareas.contains(document.activeElement)) {
   contTareas.innerHTML = '';
+  diarias.forEach((t) => contTareas.appendChild(filaDiaria(t)));
   tareas.slice(0, 6).forEach((t) => {
     const fila = document.createElement('div');
     const hora = document.createElement('span');
@@ -1160,6 +1172,7 @@ function pintarTarjetas(s) {
     fila.append(hora, nombre, quitar);
     contTareas.appendChild(fila);
   });
+  }
   const act = (s.activity || []).slice(0, 14).map((a) => {
     const t = new Date(a.at);
     const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
@@ -1168,6 +1181,43 @@ function pintarTarjetas(s) {
   const elAct = document.getElementById('tActividad');
   const htmlAct = act.join('<br>');
   if (elAct.innerHTML !== htmlAct) { elAct.innerHTML = htmlAct; elAct.scrollTop = elAct.scrollHeight; }
+}
+// Fila de una tarea diaria automática: hora editable (se guarda sola al
+// cambiarla), etiqueta y botón 开/关. Los cambios van a POST /auto_tarea y
+// se aplican en caliente en el bot.
+function filaDiaria(t) {
+  const fila = document.createElement('div');
+  fila.className = 'filaDiaria' + (t.enabled ? '' : ' apagada');
+  const hora = document.createElement('input');
+  hora.type = 'text';
+  hora.className = 'horaAuto';
+  hora.value = t.time || '';
+  hora.maxLength = 5;
+  hora.title = '每天这个时间自动跑。点击可以改，改成像 07:30 这样，回车或点别处保存';
+  hora.onchange = () => { const v = hora.value.trim(); if (v && v !== t.time) mandarAutoTarea(t.id, { time: v }); };
+  const etiqueta = document.createElement('span');
+  etiqueta.className = 'etiqueta';
+  etiqueta.textContent = t.label || t.id;
+  etiqueta.title = (t.desc || '') + '\\n每天 ' + (t.time || '?') + ' 自动执行';
+  const marca = document.createElement('span');
+  marca.className = 'marca';
+  marca.textContent = !t.enabled ? '已停用' : (t.hoy ? '今天已跑' : '每天');
+  const boton = document.createElement('button');
+  boton.textContent = t.enabled ? '关' : '开';
+  boton.title = t.enabled ? '停用这个每日任务' : '重新启用这个每日任务';
+  boton.style.cssText = 'background:none;border:1px solid rgba(200,211,220,.25);border-radius:2px;color:#8195a7;cursor:pointer;margin-left:6px;padding:0 7px;';
+  boton.onclick = () => mandarAutoTarea(t.id, { enabled: !t.enabled });
+  fila.append(hora, etiqueta, marca, boton);
+  return fila;
+}
+async function mandarAutoTarea(id, cambios) {
+  try {
+    const r = await (await fetch('/auto_tarea', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ id: id }, cambios)) })).json();
+    aviso(r.toast || (r.ok ? '已保存' : '没保存上'));
+    // Soltar el foco para que el siguiente repintado pueda redibujar la tarjeta.
+    try { document.activeElement.blur(); } catch { }
+    refrescar();
+  } catch { aviso('连不上 BOT'); }
 }
 function escapar(x) { const d = document.createElement('div'); d.textContent = x; return d.innerHTML; }
 refrescar();
