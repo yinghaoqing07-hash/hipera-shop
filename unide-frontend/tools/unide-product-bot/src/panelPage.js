@@ -134,6 +134,11 @@ export function renderPanelPage(version) {
   #cajon.abierto ~ #lateral { display: none; }
   #cajonTeclado { display: none; }
   .tarjeta { border-top: 1px solid rgba(200,211,220,.1); padding: 12px 2px 6px; }
+  /* 今日/促销 son clicables: lanzan su consulta de solo lectura en el chat. */
+  .tarjeta.clicable { cursor: pointer; transition: background .18s; border-radius: 2px; }
+  .tarjeta.clicable:hover { background: rgba(255,255,255,.04); }
+  .tarjeta.clicable:hover .titulo { color: #a8c3d6; }
+  .tarjeta.clicable:active { opacity: .75; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .08em; color: #5f7184; margin-bottom: 9px; }
   .tarjeta .dato { font-size: 15px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
@@ -410,11 +415,11 @@ export function renderPanelPage(version) {
     </div>
     <div id="lateral">
       <div id="tarjetas">
-        <div class="tarjeta">
+        <div class="tarjeta clicable" onclick="run('/pedido')" title="点一下：今天的叫货提醒">
           <div class="titulo">今日</div>
           <div class="dato" id="tHoy">—</div>
         </div>
-        <div class="tarjeta">
+        <div class="tarjeta clicable" onclick="run('/ahorro')" title="点一下：促销省钱策略">
           <div class="titulo">促销</div>
           <div class="dato" id="tPromo">—</div>
         </div>
