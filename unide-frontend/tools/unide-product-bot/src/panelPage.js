@@ -20,10 +20,9 @@ export function renderPanelPage(version) {
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
-    margin: 0; background: #111927; color: #d7e1ea;
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    margin: 0; background: #0d1117; color: #c9d4de;
+    font-family: Consolas, "Cascadia Mono", "Courier New", "Microsoft YaHei", monospace;
     display: flex; flex-direction: column;
-    background-image: radial-gradient(ellipse 70% 45% at 50% 38%, rgba(111,156,189,.12), transparent 70%);
   }
   header {
     display: flex; justify-content: space-between; align-items: center;
@@ -33,11 +32,13 @@ export function renderPanelPage(version) {
   #logo { color: #a8c3d6; font-weight: 600; }
   #estado { display: flex; gap: 18px; align-items: center; }
   #btnCajon {
-    background: rgba(255,255,255,.05); border: 1px solid rgba(168,195,214,.3); color: #97c9e3;
-    border-radius: 7px; padding: 5px 16px; font-size: 11px; letter-spacing: .08em;
+    background: none; border: none; color: #8fa2b5;
+    padding: 5px 2px; font-size: 12px; letter-spacing: .08em;
     cursor: pointer; font-family: inherit;
   }
-  #btnCajon:hover { border-color: rgba(168,195,214,.65); color: #d5ecf8; }
+  #btnCajon::before { content: '[ '; color: #46556a; }
+  #btnCajon::after { content: ' ]'; color: #46556a; }
+  #btnCajon:hover { color: #d5ecf8; }
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
   /* Paso de escritorio EN VIVO (lo escribe unideges-search.ps1 antes de
@@ -78,7 +79,7 @@ export function renderPanelPage(version) {
   #linea::before { content: "›"; color: #6f9cbd; font-size: 26px; line-height: 1; }
   #libre {
     flex: 1; background: none; border: none; outline: none; color: #e6eef4;
-    font-size: 20px; font-weight: 300; letter-spacing: .02em; caret-color: #6f9cbd;
+    font-size: 17px; font-weight: 400; letter-spacing: .02em; caret-color: #6f9cbd;
   }
   #libre::placeholder { color: #53657a; }
   /* Subir archivo: discreto al final de la línea de comandos. */
@@ -87,21 +88,23 @@ export function renderPanelPage(version) {
     font-size: 22px; line-height: 1; padding: 0 2px; font-family: inherit;
   }
   #btnSubir:hover { color: #cfe9f7; }
-  #pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  #pills { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; }
   .pill {
-    background: rgba(255,255,255,.05); border: 1px solid rgba(200,211,220,.13); color: #c3ced9;
-    border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer;
-    transition: all .2s;
+    background: none; border: none; color: #8fa2b5;
+    padding: 7px 4px; font-size: 14.5px; cursor: pointer;
+    font-family: inherit; transition: color .2s;
   }
-  .pill:hover { background: rgba(255,255,255,.1); border-color: rgba(200,211,220,.26); color: #e8f0f6; }
+  .pill::before { content: '[ '; color: #465564; }
+  .pill::after { content: ' ]'; color: #465564; }
+  .pill:hover { color: #e8f0f6; }
   .pill:active { transform: scale(.97); }
-  #reloj { margin-top: 2vh; font-size: 76px; font-weight: 200; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
-  #reloj span.seg { font-size: 26px; color: #6f9cbd; font-weight: 300; margin-left: 6px; }
-  #fecha { margin: 12px 0 40px; font-size: 13px; letter-spacing: .1em; color: #76879a; }
-  #tarjetas { margin-top: 22px; display: grid; gap: 10px; grid-template-columns: 1fr; }
+  #reloj { margin-top: 12px; font-size: 34px; font-weight: 400; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
+  #reloj span.seg { font-size: 14px; color: #6f9cbd; font-weight: 400; margin-left: 6px; }
+  #fecha { margin: 6px 0 22px; font-size: 13px; letter-spacing: .1em; color: #76879a; }
+  #tarjetas { margin-top: 22px; display: grid; gap: 2px; grid-template-columns: 1fr; }
   #mantenimiento { margin-top: 26px; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
   #cajonTeclado { display: none; }
-  .tarjeta { border: 1px solid rgba(200,211,220,.16); background: rgba(148,180,205,.05); border-radius: 12px; padding: 14px 16px; min-height: 88px; }
+  .tarjeta { border-top: 1px solid rgba(200,211,220,.1); padding: 12px 2px 6px; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .08em; color: #5f7184; margin-bottom: 9px; }
   .tarjeta .dato { font-size: 15px; color: #aebdcb; line-height: 1.65; }
   .tarjeta .dato b { color: #cfe9f7; font-weight: 500; }
@@ -120,7 +123,7 @@ export function renderPanelPage(version) {
   .msg.saliendo { animation: mensajeSale var(--motion-fast) ease-in both; pointer-events: none; }
   .burbuja {
     max-width: 84%;
-    font-size: 17px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+    font-size: 15.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-word;
     color: #b4c2cf;
   }
   .mia .burbuja { color: #cfe9f7; text-align: right; }
@@ -153,13 +156,13 @@ export function renderPanelPage(version) {
   .esperandoPuntos i:nth-child(3) { animation-delay: 240ms; }
   .burbuja .meta { display: block; font-size: 10.5px; color: #53657a; letter-spacing: .04em; margin-top: 4px; }
   .chipTeclado, .chipLeer {
-    display: inline-flex; align-items: center; margin: 8px 8px 0 0;
-    background: none; border: 1px solid rgba(111,156,189,.4); color: #97c9e3;
-    border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer; letter-spacing: .04em;
-    transition: transform var(--motion-fast) var(--motion-ease), border-color var(--motion-fast), color var(--motion-fast), background var(--motion-fast);
+    display: inline-block; color: #7d94a9; padding: 2px 0; margin-right: 10px;
+    font-size: 12.5px; cursor: pointer; letter-spacing: .04em; transition: color .18s;
   }
-  .chipTeclado:hover, .chipLeer:hover { border-color: rgba(168,195,214,.6); color: #d5ecf8; background: rgba(111,156,189,.06); transform: translateY(-1px); }
-  .chipTeclado:active, .chipLeer:active { transform: translateY(0) scale(.97); }
+  .chipTeclado::before, .chipLeer::before { content: '[ '; color: #46556a; }
+  .chipTeclado::after, .chipLeer::after { content: ' ]'; color: #46556a; }
+  .chipTeclado:hover, .chipLeer:hover { color: #d5ecf8; }
+  .chipTeclado:active, .chipLeer:active { opacity: .7; }
   /* --- cajón lateral: donde viven los teclados interactivos --- */
   /* Nada de paneles que se deslizan por encima: el cajón y el lector viven
      en las columnas laterales, que siempre están ahí vacías — el contenido
@@ -186,12 +189,12 @@ export function renderPanelPage(version) {
   }
   #cajon .cab button:hover { color: #cfe9f7; }
   #cajon .cuerpo { flex: 1; overflow-y: auto; padding: 4px 6px 24px; scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent; }
-  #cajon .texto { font-size: 16.5px; color: #b9c8d6; line-height: 1.7; white-space: pre-wrap; margin-bottom: 16px; }
-  #cajon img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); margin-bottom: 14px; display: block; }
+  #cajon .texto { font-size: 15px; color: #b9c8d6; line-height: 1.7; white-space: pre-wrap; margin-bottom: 16px; }
+  #cajon img { max-width: 100%; border-radius: 2px; border: 1px solid rgba(200,211,220,.12); margin-bottom: 14px; display: block; }
   #cajon .filaB { display: flex; gap: 8px; margin-bottom: 8px; }
   #cajon .filaB button {
-    flex: 1; min-width: 0; background: rgba(111,156,189,.06); border: 1px solid rgba(111,156,189,.35); color: #b9e2f6;
-    border-radius: 10px; padding: 13px 10px; font-size: 15.5px; cursor: pointer; transition: all .15s;
+    flex: 1; min-width: 0; background: none; border: 1px solid rgba(200,211,220,.28); color: #c9dcea;
+    border-radius: 2px; padding: 13px 10px; font-size: 15.5px; cursor: pointer; transition: all .15s;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #cajon .filaB button:hover { background: rgba(111,156,189,.16); color: #e2f3fc; }
@@ -214,7 +217,7 @@ export function renderPanelPage(version) {
   }
   #lector .cab b { color: #a8c3d6; font-weight: 600; white-space: nowrap; }
   #lectorFoto { padding: 0 6px; }
-  #lectorFoto img { max-width: 100%; border-radius: 10px; border: 1px solid rgba(200,211,220,.12); }
+  #lectorFoto img { max-width: 100%; border-radius: 2px; border: 1px solid rgba(200,211,220,.12); }
   #lector .cab span.titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; letter-spacing: .1em; }
   #lector .cab button { background: none; border: none; color: #76879a; font-size: 18px; cursor: pointer; padding: 2px 6px; }
   #lector .cab button:hover { color: #cfe9f7; }
@@ -266,7 +269,7 @@ export function renderPanelPage(version) {
   }
   #fotoVivo.visible { opacity: 1; visibility: visible; transform: translateY(0); transition-delay: 0s; }
   #fotoVivo img {
-    width: 100%; max-height: 56vh; object-fit: contain; border-radius: 10px;
+    width: 100%; max-height: 56vh; object-fit: contain; border-radius: 2px;
     border: 1px solid rgba(168,195,214,.28); box-shadow: 0 10px 42px rgba(0,0,0,.55);
     background: #0b1220;
   }
@@ -287,7 +290,7 @@ export function renderPanelPage(version) {
     transition: opacity var(--motion-base) ease, visibility 0s linear var(--motion-base);
   }
   #lupa.visible { opacity: 1; visibility: visible; transition-delay: 0s; }
-  #lupa img { max-width: 95vw; max-height: 95vh; border-radius: 8px; box-shadow: 0 24px 90px rgba(0,0,0,.75); }
+  #lupa img { max-width: 95vw; max-height: 95vh; border-radius: 2px; box-shadow: 0 24px 90px rgba(0,0,0,.75); }
   /* Mientras la foto está arriba, el registro cede SOLO lo que la foto
      ocupa de verdad: el resto de la columna es todo suyo. El alto exacto
      lo pone ajustarRegistroBajoFoto() en línea; este 60% es el arranque
