@@ -88,7 +88,6 @@ export function renderPanelPage(version) {
     font-size: 22px; line-height: 1; padding: 0 2px; font-family: inherit;
   }
   #btnSubir:hover { color: #cfe9f7; }
-  #pills { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; }
   .pill {
     background: none; border: none; color: #8fa2b5;
     padding: 7px 4px; font-size: 14.5px; cursor: pointer;
@@ -101,8 +100,19 @@ export function renderPanelPage(version) {
   #reloj { margin-top: 12px; font-size: 34px; font-weight: 400; letter-spacing: .06em; color: #eef5fa; line-height: 1; font-variant-numeric: tabular-nums; }
   #reloj span.seg { font-size: 14px; color: #6f9cbd; font-weight: 400; margin-left: 6px; }
   #fecha { margin: 6px 0 22px; font-size: 13px; letter-spacing: .1em; color: #76879a; }
-  #tarjetas { margin-top: 22px; display: grid; gap: 2px; grid-template-columns: 1fr; }
-  #mantenimiento { margin-top: 26px; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
+  #tarjetas { display: grid; gap: 2px; grid-template-columns: 1fr; }
+  #mantenimiento { margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
+  /* Columna lateral FIJA (petición del dueño): las tarjetas de estado y el
+     botón de actualizar viven aquí SIEMPRE, no dentro del 操作台. El cajón,
+     al abrirse en la misma columna, la tapa temporalmente. */
+  #lateral {
+    grid-column: 1; grid-row: 1; min-height: 0;
+    display: flex; flex-direction: column; overflow-y: auto;
+    padding: 4px 6px; scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
+    animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
+  }
+  #cajon.abierto ~ #lateral { display: none; }
+  #lateral .tarjeta:first-child { border-top: none; }
   #cajonTeclado { display: none; }
   .tarjeta { border-top: 1px solid rgba(200,211,220,.1); padding: 12px 2px 6px; }
   .tarjeta .titulo { font-size: 11px; letter-spacing: .08em; color: #5f7184; margin-bottom: 9px; }
@@ -372,15 +382,16 @@ export function renderPanelPage(version) {
   <div class="cab"><button onclick="cerrarCajon()" title="关闭">✕</button></div>
   <div class="cuerpo">
     <div id="cajonInicio">
-      <div id="pills">
-        <button class="pill" onclick="run('/llegada')">打印今天清单</button>
-        <button class="pill" onclick="run('/promociones')">刷新促销</button>
-        <button class="pill" onclick="run('/ahorro_pedido')">PDA 省钱分析</button>
-        <button class="pill" onclick="run('/pedido')">叫货提醒</button>
-        <button class="pill" onclick="run('/carne')">肉类盘点</button>
-        <button class="pill" onclick="run('/fruta')">果蔬盘点</button>
-        <button class="pill" onclick="run('/ahorro')">总体省钱策略</button>
-      </div>
+      <div class="titulo" style="color:#5f7184;font-size:12px;">没有进行中的操作面板</div>
+    </div>
+    <div id="cajonTeclado">
+      <div class="texto" id="cajonTexto"></div>
+      <div id="cajonFoto"></div>
+      <div id="cajonBotones"></div>
+    </div>
+  </div>
+    </div>
+    <div id="lateral">
       <div id="tarjetas">
         <div class="tarjeta">
           <div class="titulo">今日</div>
@@ -402,13 +413,6 @@ export function renderPanelPage(version) {
       <div id="mantenimiento">
         <button class="pill" onclick="admin('update')">更新 BOT</button>
       </div>
-    </div>
-    <div id="cajonTeclado">
-      <div class="texto" id="cajonTexto"></div>
-      <div id="cajonFoto"></div>
-      <div id="cajonBotones"></div>
-    </div>
-  </div>
     </div>
     <div id="centro">
       <div id="reloj">--:--</div>
