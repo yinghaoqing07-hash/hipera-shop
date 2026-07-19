@@ -796,9 +796,32 @@ async function esperarGridLibre(page, config, etiqueta) {
     if (!est.cargando) return true;
     await sleep(200);
   }
-  setLive(`[pedido] ⚠ 表格卡在 Loading 超 8 秒（卡点：${etiqueta}），已拍照，继续尝试…`);
   const foto = await screenshot(page, config, `grid-colgado-${etiqueta}`);
   if (foto) { setLiveShot(foto); liveShotDone(); }
+  // Rescate 1: Escape — cierra un popup invisible que retenga el grid.
+  try { await page.keyboard.press('Escape'); } catch { /* sin foco */ }
+  await sleep(1500);
+  const trasEscape = await page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    return Array.from(document.querySelectorAll('[class*="load" i]'))
+      .some((el) => isVisible(el) && /loading|cargando/i.test(el.textContent || ''));
+  }).catch(() => false);
+  if (!trasEscape) {
+    setLive(`[pedido] ⚠ 表格卡了一下（卡点：${etiqueta}），按 Esc 后恢复，继续…`);
+    return true;
+  }
+  // Rescate 2: el overlay "Loading..." a veces queda HUÉRFANO con el grid
+  // vivo debajo — se oculta a mano (solo el velo pequeño, nunca un
+  // contenedor grande) y se sigue; si el grid está muerto de verdad, el
+  // siguiente gesto fallará y quedará reportado con su propio motivo.
+  await page.evaluate(() => {
+    const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    for (const el of document.querySelectorAll('[class*="load" i]')) {
+      const t = (el.textContent || '').trim();
+      if (isVisible(el) && /loading|cargando/i.test(t) && t.length < 40) el.style.display = 'none';
+    }
+  }).catch(() => {});
+  setLive(`[pedido] ⚠ 表格卡在 Loading 超 8 秒（卡点：${etiqueta}），已拍照并揭掉卡死的遮罩，继续尝试…`);
   return false;
 }
 
@@ -946,6 +969,10 @@ async function eliminarFilaDuplicada(page, config, codigo, qtyEsperada, sobran) 
     await sleep(700);
     await confirmBlazorPopup(page);
     await sleep(1000);
+    // El borrado dispara un refresco del grid: esperar a que termine (con
+    // rescate si se cuelga) ANTES de dar la fila por borrada — el 19/07 el
+    // refresco se quedó colgado y la fila seguía allí.
+    await esperarGridLibre(page, config, `删行${codigo}后刷新`);
     borradas += 1;
   }
   return borradas;
@@ -1147,7 +1174,13 @@ export async function editOrderWeb(config, logger, expectName, cambios, hooks = 
           if (!b) break;
           borradas += b;
         }
-        hechos.push(borradas ? `✔ ${c.codigo} 已删除（${borradas} 行）` : `✘ ${c.codigo} 表里没找到，没删任何行`);
+        // Verificación REAL: releer el grid. "Pulsé Eliminar" no es "se
+        // borró" — el 19/07 el refresco se colgó y la fila seguía allí
+        // aunque el bot había contado 1 borrada.
+        const sigueAhi = await irAPaginaDeFila(page, config, c.codigo, '');
+        if (sigueAhi) hechos.push(`✘ ${c.codigo} 点了删除但这行还在表里（表格卡住或页面报错），请手动勾选删一下`);
+        else if (borradas) hechos.push(`✔ ${c.codigo} 已删除（${borradas} 行），已确认表里没有了`);
+        else hechos.push(`✔ ${c.codigo} 表里本来就没有这行`);
       } else if (c.tipo === 'agregar') {
         const label = c.item.code || c.item.nombre || '';
         setLive(`[pedido] 新增 ${label}…`);
