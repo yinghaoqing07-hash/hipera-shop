@@ -12,6 +12,7 @@ import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, l
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
+import { applyAutoTaskOverrides, listAutoTasks, setAutoTask } from './autoTasks.js';
 import { ActiveConversationStore, classifyShortDecision } from './activeConversation.js';
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
@@ -45,6 +46,9 @@ const UPDATE_PACKAGE_NAME = 'unide-product-bot-store-pc.zip';
 const START_TIME = Date.now(); // identifica ESTE arranque (ver status.boot)
 const config = loadConfig(readArg('--config'));
 const logger = createLogger(config.logsDir);
+// Horas/on-off de las tareas diarias cambiadas desde el panel: se vuelven
+// a aplicar sobre config ANTES de crear los schedulers.
+applyAutoTaskOverrides(config, logger);
 const memoryStore = new MemoryStore(config.memory, logger);
 const operationLedger = new OperationLedger(config.operationLedger, logger);
 const scheduledTasks = new ScheduledTaskStore(config.scheduledTasks, logger);
@@ -474,7 +478,7 @@ function formatCommandList() {
     '',
     '【其他】',
     '直接用中文说事也行，比如「帮我打一下152的清单」（需要配好 AI key）',
-    '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（config 里 autoAdvisor 可调）',
+    '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（时间和开关在面板「定时任务」卡片里点一下就能改）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
     '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
     '/debug on — 桌面调试模式：每步截图+完整痕迹（用完 /debug off）',
@@ -2749,6 +2753,17 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 // Últimas acciones para la tarjeta "最近动态" del panel: comandos que
 // llegan (Telegram o panel) y tareas automáticas. Solo en memoria.
 const panelActivity = [];
+// ¿La tarea diaria ya corrió hoy? Cada scheduler guarda sus claves con su
+// propio formato; aquí solo se mira, no se toca.
+function autoTaskRanToday(id) {
+  const hoy = todayString(config);
+  try {
+    if (id === 'advisor') return Boolean(autoAdvisor.state.sent[`auto|${hoy}`]);
+    if (id === 'llegada') return Boolean(arrivalScheduler.sent[`llegada|${hoy}`]);
+    if (id === 'recordatorio') return Object.keys(orderReminderScheduler.sent || {}).some((k) => k.startsWith(`${hoy}|`));
+  } catch { /* estado aún no cargado */ }
+  return false;
+}
 function notePanelActivity(text) {
   panelActivity.unshift({ at: new Date().toISOString(), text: String(text).slice(0, 60) });
   if (panelActivity.length > 8) panelActivity.pop();
@@ -2848,6 +2863,7 @@ if (config.panel?.enabled !== false) {
         scheduledTasks: scheduledTasks.list({ status: 'pending', limit: 12 }).map((task) => ({
           id: task.id, label: task.label, command: task.command, runAt: task.runAt
         })),
+        autoTareas: listAutoTasks(config).map((t) => ({ ...t, hoy: autoTaskRanToday(t.id) })),
         activity: panelActivity
       };
     },
@@ -2902,6 +2918,15 @@ if (config.panel?.enabled !== false) {
       if (!cancelled) throw new Error('任务不存在，或者已经不是待执行状态');
       notePanelActivity('取消定时：' + cancelled.label);
       return '已取消 #' + cancelled.id + ' ' + cancelled.label;
+    },
+    // Tareas diarias automáticas: cambiar hora u on/off desde el panel.
+    // Aplica en caliente (los schedulers releen config) y persiste.
+    autoTarea: (id, cambios) => {
+      const t = setAutoTask(config, id, cambios, logger);
+      const estado = t.enabled ? '每天 ' + t.time : '已停用';
+      notePanelActivity('每日任务 · ' + estado);
+      logger.info('panel auto task change', { id: t.id, enabled: t.enabled, time: t.time });
+      return t.label + ' → ' + estado;
     },
     // Mantenimiento desde el propio panel: como el bot ya corre elevado,
     // puede lanzar el updater o pararse a si mismo sin UAC ni ventanas.
