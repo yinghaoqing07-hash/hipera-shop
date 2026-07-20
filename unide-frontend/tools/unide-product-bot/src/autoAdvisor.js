@@ -1,5 +1,5 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import { readJsonSafe, writeJsonAtomic } from './safeJson.js';
 
 // Tarea diaria automática (config.autoAdvisor): una vez al día, a la hora
 // configurada, el bot (1) refresca las promociones de la web y (2) busca
@@ -61,9 +61,7 @@ export class AutoAdvisorScheduler {
 
   save() {
     try {
-      const file = path.resolve(this.config.logsDir || '.', STATE_FILE);
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(this.state, null, 2));
+      writeJsonAtomic(path.resolve(this.config.logsDir || '.', STATE_FILE), this.state);
     } catch (error) {
       this.logger?.warn('auto advisor state save failed', { error: error.message });
     }
@@ -72,11 +70,8 @@ export class AutoAdvisorScheduler {
 
 function loadState(logsDir, logger) {
   try {
-    const file = path.resolve(logsDir || '.', STATE_FILE);
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return { sent: parsed.sent || {}, analyzedOrders: parsed.analyzedOrders || {} };
-    }
+    const parsed = readJsonSafe(path.resolve(logsDir || '.', STATE_FILE), null, logger);
+    if (parsed) return { sent: parsed.sent || {}, analyzedOrders: parsed.analyzedOrders || {} };
   } catch (error) {
     logger?.warn('auto advisor state load failed', { error: error.message });
   }

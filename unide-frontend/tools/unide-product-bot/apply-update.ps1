@@ -35,6 +35,21 @@ try {
   }
 
   $excludeNames = @(".env", "config.local.json", "logs", "screenshots", "updates", "node_modules")
+
+  # Copia de seguridad de la version ACTUAL antes de pisarla: todo lo que se
+  # va a reemplazar se guarda en updates\backup-prev (se machaca en cada
+  # update). Si la version nueva no arranca, update-bot.ps1 restaura de aqui.
+  $backupDir = Join-Path $updatesDir "backup-prev"
+  if (Test-Path $backupDir) { Remove-Item -LiteralPath $backupDir -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+  Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
+    if ($excludeNames -contains $_.Name) { return }
+    $actual = Join-Path $root $_.Name
+    if (Test-Path -LiteralPath $actual) {
+      Copy-Item -LiteralPath $actual -Destination $backupDir -Recurse -Force
+    }
+  }
+
   Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
     if ($excludeNames -contains $_.Name) { return }
     Copy-Item -LiteralPath $_.FullName -Destination $root -Recurse -Force

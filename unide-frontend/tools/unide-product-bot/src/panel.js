@@ -227,7 +227,9 @@ export function startPanel(config, logger, hooks) {
     // a la vez se pelean por los mensajes de Telegram: este proceso sale.
     if (error.code === 'EADDRINUSE') {
       logger?.error('panel port already in use: another bot is running, exiting to avoid a duplicate', { port });
-      setTimeout(() => process.exit(1), 300);
+      // Código 3 = "ya hay otro bot": el bucle vigilante de start-bot.cmd
+      // NO debe relanzar este proceso (relanzaría el duplicado en bucle).
+      setTimeout(() => process.exit(3), 300);
     }
   });
   // SOLO loopback: el panel no lleva autenticación, no debe salir del PC.

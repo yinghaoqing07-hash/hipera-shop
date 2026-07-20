@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeJsonAtomic } from './safeJson.js';
 
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 const ORDER_DAYS = new Set([0, 1, 3, 4]);
@@ -506,8 +507,7 @@ function loadSentState(logsDir, logger) {
 function saveSentState(logsDir, sent, logger) {
   const file = statePath(logsDir);
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(sent, null, 2));
+    writeJsonAtomic(file, sent);
   } catch (error) {
     logger?.warn?.('could not save ordering reminder state', { error: error.message });
   }

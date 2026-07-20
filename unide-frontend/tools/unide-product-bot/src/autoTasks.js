@@ -1,5 +1,5 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import { readJsonSafe, writeJsonAtomic } from './safeJson.js';
 
 // Tareas AUTOMÁTICAS DIARIAS del bot (recordatorio de pedidos, lista de
 // llegada, asesor matinal). Hasta ahora su hora y su on/off vivían solo en
@@ -117,22 +117,13 @@ function overridesPath(config) {
 }
 
 function leerOverrides(config, logger) {
-  try {
-    const file = overridesPath(config);
-    if (!fs.existsSync(file)) return {};
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (error) {
-    logger?.warn?.('auto task overrides load failed', { error: error.message });
-    return {};
-  }
+  const parsed = readJsonSafe(overridesPath(config), {}, logger);
+  return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
 function guardarOverrides(config, overrides, logger) {
   try {
-    const file = overridesPath(config);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(overrides, null, 2));
+    writeJsonAtomic(overridesPath(config), overrides);
   } catch (error) {
     logger?.warn?.('auto task overrides save failed', { error: error.message });
     throw new Error('改好了但没能保存到磁盘，重启后可能丢：' + error.message);

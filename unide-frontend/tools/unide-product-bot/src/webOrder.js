@@ -28,6 +28,7 @@ import { liveShotDone, setLive, setLiveShot } from './liveStatus.js';
 import { llmConfigured, llmDiagnoseScreenshot } from './llm.js';
 import { gridActivePage, gridClickPageDelta, gridWaitForPageChange } from './webPromotions.js';
 import { selectLatestOrderRows } from './recentOrders.js';
+import { readJsonSafe, writeJsonAtomic } from './safeJson.js';
 
 // Sube (o localiza) la pestaña de UnideGes, la trae al frente y se asegura
 // de que estamos en Pedidos. Esto evita pulsar por error un "Nuevo" de otra
@@ -535,7 +536,7 @@ function leerCodigosSinDatos(config) {
   const mapa = new Map();
   try {
     const ruta = rutaCodigosSinDatos(config);
-    const raw = JSON.parse(fs.readFileSync(ruta, 'utf8'));
+    const raw = readJsonSafe(ruta, {});
     const corte = Date.now() - SIN_DATOS_DIAS * 24 * 3600 * 1000;
     let habiaSucias = false;
     const limpio = {};
@@ -548,7 +549,7 @@ function leerCodigosSinDatos(config) {
       const t = Date.parse(entrada?.fecha || '');
       if (Number.isFinite(t) && t >= corte) mapa.set(codigo, entrada);
     }
-    if (habiaSucias) fs.writeFileSync(ruta, JSON.stringify(limpio, null, 2), 'utf8');
+    if (habiaSucias) writeJsonAtomic(ruta, limpio);
   } catch { /* sin lista todavía */ }
   return mapa;
 }
@@ -556,16 +557,14 @@ function leerCodigosSinDatos(config) {
 function anotarCodigoSinDatos(config, codigo, nombre, motivo) {
   try {
     const ruta = rutaCodigosSinDatos(config);
-    fs.mkdirSync(path.dirname(ruta), { recursive: true });
-    let raw = {};
-    try { raw = JSON.parse(fs.readFileSync(ruta, 'utf8')) || {}; } catch { /* archivo nuevo */ }
+    const raw = readJsonSafe(ruta, {}) || {};
     raw[String(codigo)] = {
       fecha: new Date().toISOString().slice(0, 10),
       nombre: String(nombre || '').slice(0, 60),
       motivo: String(motivo || '').slice(0, 120),
       firme: true
     };
-    fs.writeFileSync(ruta, JSON.stringify(raw, null, 2), 'utf8');
+    writeJsonAtomic(ruta, raw);
   } catch { /* la lista es una mejora, no un requisito */ }
 }
 

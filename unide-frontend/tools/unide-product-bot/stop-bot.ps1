@@ -6,6 +6,14 @@ Set-Location $root
 # VERIFICA que el puerto queda libre (reintentando). Sale con 0 si el bot
 # quedo parado (o no corria), con 1 si el puerto sigue ocupado; el updater
 # usa ese codigo para NO arrancar un segundo bot encima del viejo.
+# Señal para el bucle vigilante de start-bot.cmd: esta parada es A
+# PROPOSITO (stop manual o updater), que no relance el bot. Se escribe
+# ANTES de matar el proceso; el vigilante la borra al verla.
+try {
+  New-Item -ItemType Directory -Force -Path (Join-Path $root "logs") | Out-Null
+  Set-Content -LiteralPath (Join-Path $root "logs\stop.flag") -Value (Get-Date).ToString("s")
+} catch { }
+
 $port = 8765
 try {
   $cfg = Get-Content -Raw -LiteralPath (Join-Path $root "config.local.json") | ConvertFrom-Json
