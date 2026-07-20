@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { readJsonSafe, writeJsonAtomic } from './safeJson.js';
 
 // Lista de comprobación de LLEGADA: cuando el bot rellena un pedido, lo
 // registra en logs/orders-history.json; el día estimado de llegada (fecha
@@ -33,8 +34,7 @@ export function recordFilledOrder(config, draft, logger, now = new Date()) {
       }))
     });
     pruneHistory(history, now);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(history, null, 2));
+    writeJsonAtomic(file, history);
     logger?.info('order recorded for arrival checklist', { name: draft.orderName, lines: draft.items?.length });
     return true;
   } catch (error) {
@@ -310,13 +310,8 @@ function historyPath(config) {
 }
 
 function loadHistory(file) {
-  try {
-    if (!fs.existsSync(file)) return [];
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const parsed = readJsonSafe(file, []);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 function pruneHistory(history, now) {
@@ -374,22 +369,13 @@ function statePath(logsDir) {
 }
 
 function loadSentState(logsDir, logger) {
-  try {
-    const file = statePath(logsDir);
-    if (!fs.existsSync(file)) return {};
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (error) {
-    logger?.warn?.('could not load arrival checklist state', { error: error.message });
-    return {};
-  }
+  const parsed = readJsonSafe(statePath(logsDir), {}, logger);
+  return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
 function saveSentState(logsDir, sent, logger) {
   try {
-    const file = statePath(logsDir);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(sent, null, 2));
+    writeJsonAtomic(statePath(logsDir), sent);
   } catch (error) {
     logger?.warn?.('could not save arrival checklist state', { error: error.message });
   }

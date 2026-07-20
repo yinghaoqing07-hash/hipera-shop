@@ -46,9 +46,41 @@ call npm install
 if errorlevel 1 goto npm_failed
 
 :run
+rem Bucle vigilante: si el bot muere con error, se relanza solo a los 5 s.
+rem NO se relanza cuando: salio limpio (codigo 0: panel "stop"), stop-bot o
+rem el updater dejaron logs\stop.flag (parada a proposito), o ya hay otro
+rem bot corriendo (codigo 3, puerto del panel ocupado). Si se cae 6 veces
+rem seguidas nada mas arrancar, algo va mal de verdad y se para de insistir.
+set REINICIOS=0
+
+:bucle
+if exist "logs\stop.flag" del /q "logs\stop.flag" >nul 2>&1
+for /f %%t in ('powershell -NoProfile -Command "[DateTimeOffset]::Now.ToUnixTimeSeconds()"') do set INICIO=%%t
 node src\bot.js --config config.local.json
-pause
-exit /b 0
+set CODIGO=%errorlevel%
+if "%CODIGO%"=="0" exit /b 0
+if "%CODIGO%"=="3" (
+  echo Ya hay otro bot corriendo. Esta ventana sobra y se cierra.
+  timeout /t 5 /nobreak >nul
+  exit /b 0
+)
+if exist "logs\stop.flag" (
+  del /q "logs\stop.flag" >nul 2>&1
+  exit /b 0
+)
+for /f %%t in ('powershell -NoProfile -Command "[DateTimeOffset]::Now.ToUnixTimeSeconds()"') do set AHORA=%%t
+set /a DURACION=AHORA-INICIO
+if %DURACION% GEQ 300 set REINICIOS=0
+set /a REINICIOS+=1
+if %REINICIOS% GEQ 6 (
+  echo El bot se ha caido %REINICIOS% veces seguidas nada mas arrancar.
+  echo Mira el ultimo archivo de la carpeta logs y manda el error a Claude.
+  pause
+  exit /b 1
+)
+echo El bot se cerro con error %CODIGO%. Reinicio %REINICIOS%/5 en 5 segundos...
+timeout /t 5 /nobreak >nul
+goto bucle
 
 :npm_failed
 echo.

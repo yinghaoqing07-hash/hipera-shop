@@ -159,6 +159,41 @@ try {
   }
 
   if ($instalado) {
+    # Prueba de vida: la version recien instalada tiene que levantar el
+    # panel en menos de ~50 s. Si no responde, se restaura la copia que
+    # apply-update.ps1 dejo en updates\backup-prev y se arranca la version
+    # anterior — un update malo no puede dejar la tienda sin bot.
+    Paso "comprobando que la version nueva arranca..."
+    $puerto = 8765
+    try {
+      $cfgLocal = Get-Content -Raw -LiteralPath (Join-Path $root "config.local.json") | ConvertFrom-Json
+      if ($cfgLocal.panel -and $cfgLocal.panel.port) { $puerto = [int]$cfgLocal.panel.port }
+    } catch { }
+    $vivo = $false
+    for ($i = 0; $i -lt 25; $i++) {
+      Start-Sleep -Seconds 2
+      try {
+        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$puerto/status" -UseBasicParsing -TimeoutSec 3
+        if ($resp.StatusCode -eq 200) { $vivo = $true; break }
+      } catch { }
+    }
+    if (-not $vivo) {
+      $backupDir = Join-Path $root "updates\backup-prev"
+      if (Test-Path $backupDir) {
+        Paso "la version nueva no arranca - restaurando la anterior..."
+        try { powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript | Out-Null } catch { }
+        Get-ChildItem -LiteralPath $backupDir -Force | ForEach-Object {
+          Copy-Item -LiteralPath $_.FullName -Destination $root -Recurse -Force
+        }
+        if (-not (Reiniciar-Bot)) {
+          Write-Host "Double-click start-bot.cmd to start the bot." -ForegroundColor Yellow
+        }
+        Paso "ERROR: $v no arranco - restaurada y arrancada la version anterior"
+        try { Stop-Transcript | Out-Null } catch { }
+        exit 1
+      }
+      Paso "AVISO: el panel no responde tras el update y no hay copia previa que restaurar"
+    }
     Paso "hecho: instalado $v"
     Write-Host ""
     Write-Host "Update finished. Version instalada: $v" -ForegroundColor Green

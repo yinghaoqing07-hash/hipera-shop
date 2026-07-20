@@ -20,6 +20,9 @@ import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, s
 import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatus.js';
+import { conCandadoWeb } from './webLock.js';
+import { writeJsonAtomic } from './safeJson.js';
+import { limpiarArchivosViejos } from './housekeeping.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -66,6 +69,40 @@ if (process.argv.includes('--help')) { console.log('Usage: node src/bot.js --con
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegram = new TelegramClient(token);
 
+// Blindaje: un fallo NO capturado nunca debe matar el bot en silencio (el
+// caso /ahorro_pedido mudo). Se registra con stack, se intenta avisar por
+// Telegram y solo si el proceso está roto de verdad (uncaughtException) se
+// sale con código 1 para que el bucle vigilante de start-bot.cmd relance.
+let crashAvisado = false;
+function avisarCrash(titulo, error) {
+  if (crashAvisado) return Promise.resolve();
+  crashAvisado = true;
+  const detalle = String(error?.message || error).slice(0, 300);
+  const promesa = (async () => {
+    try {
+      const ids = arrivalChatIds();
+      if (ids.length) {
+        await Promise.race([
+          telegram.sendMessage(ids[0], `🆘 ${titulo}：${detalle}`, { __skipAI: true }),
+          sleep(8000)
+        ]);
+      }
+    } catch { /* sin red: al menos queda el log */ }
+    crashAvisado = false;
+  })();
+  return promesa;
+}
+process.on('unhandledRejection', (error) => {
+  logger.error('unhandled rejection', { error: String(error?.message || error), stack: String(error?.stack || '').slice(0, 2000) });
+  avisarCrash('有个后台任务出错了（我还活着，继续干活）', error);
+});
+process.on('uncaughtException', (error) => {
+  logger.error('uncaught exception, exiting so the watchdog restarts us', { error: String(error?.message || error), stack: String(error?.stack || '').slice(0, 2000) });
+  avisarCrash('我崩了一下，5 秒后自动重启', error).finally(() => setTimeout(() => process.exit(1), 500));
+  // Red muerta o Telegram colgado: salir igual, el vigilante nos relanza.
+  setTimeout(() => process.exit(1), 9000);
+});
+
 // --- transcripción de la conversación (para el chat del panel) -----------
 // El bot es el punto de paso de TODOS los mensajes: lo que llega de
 // Telegram, lo tecleado en el panel y lo que él responde — botones de
@@ -95,7 +132,7 @@ let chatSaveTimer = null;
 function scheduleChatSave() {
   clearTimeout(chatSaveTimer);
   chatSaveTimer = setTimeout(() => {
-    try { fs.writeFileSync(CHAT_LOG_FILE(), JSON.stringify({ seq: chatSeq, entryId: chatEntryId, messages: chatLog })); }
+    try { writeJsonAtomic(CHAT_LOG_FILE(), { seq: chatSeq, entryId: chatEntryId, messages: chatLog }); }
     catch (error) { logger.warn('chat log save failed', { error: error.message }); }
   }, 1500);
 }
@@ -207,6 +244,19 @@ let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length, memories: memoryStore.count, operations: operationLedger.count });
 
+// Candado del navegador con aviso: SOLO un flujo web a la vez (la tarea
+// matinal y un /fruta a medias no pueden pelearse por la misma pestaña).
+// Si hay que esperar, se le dice al dueño qué está corriendo y que su
+// tarea arranca sola al terminar. chatId null = tarea automática, sin aviso.
+function conNavegador(chatId, etiqueta, fn) {
+  return conCandadoWeb(etiqueta, fn, (t) => {
+    notePanelActivity(`排队：${etiqueta}`);
+    if (!chatId || !t) return;
+    const min = t.minutos > 0 ? `（已经跑了 ${t.minutos} 分钟）` : '';
+    telegram.sendMessage(chatId, `浏览器这会儿正忙着「${t.etiqueta}」${min}。「${etiqueta}」排在它后面，完了会自动开始，不用再发一遍。`, { __skipAI: true }).catch(() => {});
+  });
+}
+
 // OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).
 // Antes era un `while (true)` aquí en medio: como no termina nunca, los
 // const/let declarados más abajo (LABEL_STEPS, fruitBatchRunning, …)
@@ -228,7 +278,24 @@ async function mainLoop() {
       await maybePrintArrivalChecklist();
       await maybeRunAutoAdvisor();
       await maybeRunScheduledTasks();
+      maybeHousekeeping();
     } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
+  }
+}
+
+// Limpieza diaria de archivos viejos (logs, capturas, zips de updates):
+// que el disco no se llene en silencio. Barata; corre en el primer ciclo
+// tras arrancar y luego una vez por día.
+let ultimaLimpieza = '';
+function maybeHousekeeping() {
+  const hoy = todayString(config);
+  if (ultimaLimpieza === hoy) return;
+  ultimaLimpieza = hoy;
+  try {
+    const r = limpiarArchivosViejos(config, logger);
+    if (r.borrados > 0) logger.info('housekeeping done', r);
+  } catch (error) {
+    logger.warn('housekeeping failed', { error: error.message });
   }
 }
 
@@ -275,6 +342,7 @@ async function handleUpdate(update) {
   if (text === '/start' || text === '/help' || /^\/(comandos|commands|menu)\b/i.test(text)) { await telegram.sendMessage(chatId, formatCommandList()); return; }
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
+  if (text === '/salud' || text === '/health') { await handleSalud(chatId); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
   if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
@@ -481,6 +549,7 @@ function formatCommandList() {
     '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（时间和开关在面板「定时任务」卡片里点一下就能改）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
     '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
+    '/salud — 体检：Edge 连不连得上、AI key、促销数据新旧、磁盘空间',
     '/debug on — 桌面调试模式：每步截图+完整痕迹（用完 /debug off）',
     '/whoami — 看这个对话的 chat id'
   ].join('\n');
@@ -971,7 +1040,7 @@ async function resolveNextNameLine(chatId, id) {
     return;
   }
   await telegram.sendMessage(chatId, `正在网页搜第 ${idx + 1} 行「${item.name}」…`);
-  const res = await searchArticleOptions(config, item.name, logger);
+  const res = await conNavegador(chatId, `搜商品 ${item.name}`, () => searchArticleOptions(config, item.name, logger));
   if (!res.ok) {
     await telegram.sendMessage(chatId, await humanizarError(`网页搜索「${item.name}」`, `搜「${item.name}」失败（${res.stage || '?'}）：\n${res.error}`));
     return;
@@ -1399,10 +1468,13 @@ async function handleAhorroPedido(chatId, text) {
   // silencio y el dueño se quedó mirando la nada).
   let fetched;
   try {
-    fetched = await Promise.race([
+    // El perro guardián corre DENTRO del candado: si esta lectura está en
+    // cola detrás de otro flujo, los 3 min no empiezan a contar hasta que
+    // de verdad le toca el navegador.
+    fetched = await conNavegador(chatId, '订单省钱分析', () => Promise.race([
       fetchOrderLinesByName(config, arg, logger),
       new Promise((_, reject) => setTimeout(() => reject(new Error('读单子超过 3 分钟没结束')), 180000))
-    ]);
+    ]));
   } catch (error) {
     const paso = getLive()?.line || '（没有日志）';
     await telegram.sendMessage(chatId, `读取单子中断：${error.message}
@@ -1722,7 +1794,7 @@ async function handlePromotions(chatId, text = '') {
   }
   const dateStr = requested || today;
   await telegram.sendMessage(chatId, `正在读取 Promociones，筛选 ${dateStr} 未过期项目，并逐个打开抓商品明细…（Edge 要开着）`);
-  const result = await fetchActivePromotions(config, dateStr, logger);
+  const result = await conNavegador(chatId, '刷新促销', () => fetchActivePromotions(config, dateStr, logger));
   if (!result.ok) {
     await sendWithOptionalScreenshot(chatId, result, await humanizarError('刷新促销', `Promociones 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`));
     if (result.dumpFile) { try { await telegram.sendDocument(chatId, result.dumpFile, 'Promociones 页面结构（发给 Claude）'); } catch { /* noop */ } }
@@ -1820,9 +1892,9 @@ async function handleOrderEditCambios(chatId, cambios) {
     : `加${c.item.code || c.item.nombre}×${c.item.quantity || 1}`).join('、');
   notePanelActivity(`改单 ${resumen}`);
   await telegram.sendMessage(chatId, `收到：${resumen}。这就去改，改完发截图；不会点 Guardar。`, { __skipAI: true });
-  const result = await editOrderWeb(config, logger, lastWebOrderName, cambios, {
+  const result = await conNavegador(chatId, '改订单', () => editOrderWeb(config, logger, lastWebOrderName, cambios, {
     avisar: (t) => telegram.sendMessage(chatId, t, { __skipAI: true, __nota: true }).catch(() => {})
-  });
+  }));
   if (!result.ok) {
     await telegram.sendMessage(chatId, `订单改动失败（${result.stage || '?'}）：${result.error || '未知错误'}`, { __skipAI: true });
     return;
@@ -1897,10 +1969,10 @@ async function handleOrderApply(chatId, callbackId, id) {
   if (config.webOrder?.enabled) {
     let result;
     try {
-      result = await applyOrderWeb(session.orderDraft, config, logger, {
+      result = await conNavegador(chatId, '填订单', () => applyOrderWeb(session.orderDraft, config, logger, {
         // Cada diagnóstico visual de la IA cae al chat al momento, tal cual.
         avisar: (texto) => telegram.sendMessage(chatId, texto, { __skipAI: true, __nota: true }).catch(() => {})
-      });
+      }));
     } catch (error) {
       const failure = `unexpected: ${error.message}`;
       logger.error('order apply crashed', { error: error.stack || error.message });
@@ -1997,7 +2069,7 @@ async function handleOrderSave(chatId, callbackId, id) {
   os.running = true;
   sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, '正在点 Guardar');
-  const result = await saveOrderWeb(config, logger, os.orderName);
+  const result = await conNavegador(chatId, '保存订单', () => saveOrderWeb(config, logger, os.orderName));
   os.running = false;
   if (!result.ok) {
     sessions.set(id, session);
@@ -2027,7 +2099,7 @@ async function handleOrderSend(chatId, callbackId, id) {
   os.running = true;
   sessions.set(id, session);
   await telegram.answerCallbackQuery(callbackId, '正在发送');
-  const result = await sendOrderWeb(config, logger, os.orderName);
+  const result = await conNavegador(chatId, '发送订单', () => sendOrderWeb(config, logger, os.orderName));
   if (!result.ok) {
     os.running = false;
     sessions.set(id, session);
@@ -2042,12 +2114,66 @@ async function handleOrderSend(chatId, callbackId, id) {
   await sendWithOptionalScreenshot(chatId, { status: 'ok', screenshot: result.screenshot }, `✅ ${result.message}`);
 }
 
+// --- /salud: chequeo rápido de todo lo que hace falta para trabajar ----
+// Mira el Edge (puerto de depuración), la key de IA, la edad del CSV de
+// promociones y el disco. Corre también solo antes de la tarea matinal:
+// si el Edge no está, se avisa UNA vez y las tareas web del día se saltan
+// limpiamente en vez de morir a timeouts una por una.
+async function chequeoSalud() {
+  const bien = [];
+  const mal = [];
+  let edgeVivo = null; // null = webOrder apagado, no aplica
+  if (config.webOrder?.enabled) {
+    const base = String(config.webOrder.debugUrl || 'http://127.0.0.1:9222').replace(/\/+$/, '');
+    try {
+      const r = await fetch(base + '/json/version', { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      edgeVivo = true;
+      bien.push('Edge 调试口正常，网页功能可用');
+    } catch {
+      edgeVivo = false;
+      mal.push('Edge 没开（或没开调试模式）：叫货、促销、改单这些网页功能全用不了。去店里电脑双击 launch-edge-debug.cmd');
+    }
+  }
+  if (llmConfigured(config)) bien.push('AI key 已配置');
+  else mal.push('AI key 没配置：看图救援和自然语言理解不可用');
+  const latestCsv = findLatestPromotionsCsv(config);
+  if (!latestCsv) mal.push('还没有促销数据（发 /promociones 抓一次）');
+  else {
+    const dias = Math.floor((Date.now() - latestCsv.mtime) / 86400000);
+    if (dias >= 3) mal.push(`促销数据是 ${dias} 天前的了，省钱分析可能不准（/promociones 刷新）`);
+    else bien.push(dias <= 0 ? '促销数据是今天的' : `促销数据是 ${dias} 天前的`);
+  }
+  try {
+    const st = fs.statfsSync(config.logsDir || '.');
+    const libreGb = (st.bavail * st.bsize) / (1024 ** 3);
+    if (libreGb < 2) mal.push(`磁盘只剩 ${libreGb.toFixed(1)} GB，快满了（满了什么都保存不了）`);
+    else bien.push(`磁盘剩 ${Math.round(libreGb)} GB`);
+  } catch { /* statfsSync no disponible en este Node: se omite */ }
+  return { bien, mal, edgeVivo };
+}
+
+async function handleSalud(chatId) {
+  await telegram.sendMessage(chatId, '正在体检：Edge、AI、促销数据、磁盘…', { __skipAI: true });
+  const s = await chequeoSalud();
+  const lineas = [];
+  if (!s.mal.length) lineas.push('✅ 体检全部正常');
+  else {
+    lineas.push(`⚠ 发现 ${s.mal.length} 个问题：`);
+    s.mal.forEach((m) => lineas.push('✘ ' + m));
+    lineas.push('');
+  }
+  s.bien.forEach((b) => lineas.push('✔ ' + b));
+  lineas.push(`✔ 已连续运行 ${humanUptime(process.uptime())}`);
+  await telegram.sendMessage(chatId, lineas.join('\n'), { __skipAI: true });
+}
+
 // /pedido_web_test — diagnóstico de la automatización web: conecta al
 // Edge, localiza la pestaña de Pedidos, resume lo que ve y envía el HTML
 // de la página como documento (para afinar los selectores del grid).
 async function handlePedidoWebTest(chatId) {
   await telegram.sendMessage(chatId, '正在连接 Edge 并读取 Pedidos 页面…（如果失败，请先双击 launch-edge-debug.cmd）');
-  const result = await inspectOrderPage(config, logger);
+  const result = await conNavegador(chatId, '读取 Pedidos 页面', () => inspectOrderPage(config, logger));
   if (!result.ok) {
     await telegram.sendMessage(chatId, await humanizarError('读取 Pedidos 页面', `读取失败（${result.stage}）：\n${result.error}`));
     return;
@@ -2076,7 +2202,7 @@ async function handlePedidoWebTest(chatId) {
 // Deja un borrador sin guardar; no pulsa Guardar ni Enviar.
 async function handlePedidoWebForm(chatId) {
   await telegram.sendMessage(chatId, '正在点开 "Nuevo" 并读取订单编辑表单…（会留一个未保存的空订单草稿，不会保存也不会发送）');
-  const result = await inspectFormPage(config, logger);
+  const result = await conNavegador(chatId, '读取订单表单', () => inspectFormPage(config, logger));
   if (!result.ok) {
     await telegram.sendMessage(chatId, await humanizarError('读取 Pedidos 页面', `读取失败（${result.stage}）：\n${result.error}`));
     return;
@@ -2122,7 +2248,7 @@ async function collectArrivalOrders(dateStr) {
   const offset = Number.isFinite(Number(config.arrival?.offsetDays)) ? Number(config.arrival.offsetDays) : 2;
   if (config.webOrder?.enabled) {
     const creationDate = addDays(dateStr, -offset);
-    const res = await fetchArrivingOrders(config, creationDate, logger);
+    const res = await conNavegador(null, '到货清单抓取', () => fetchArrivingOrders(config, creationDate, logger));
     if (res.ok) return { source: 'web', orders: res.orders };
     logger.warn('web arrival fetch failed, using local history', { error: res.error });
     return { source: 'local', orders: ordersArrivingOn(config, dateStr), webError: res.error };
@@ -2211,11 +2337,28 @@ async function maybeRunAutoAdvisor() {
   autoAdvisor.markSent(due.key); // primero: si algo casca a mitad, no reintentar en bucle
   const chatId = chatIds[0];
 
+  // 0. Chequeo previo: detectar los problemas AHORA (Edge apagado, disco
+  // lleno...) y contarlos de una vez, en vez de que cada tarea muera a
+  // timeouts por su cuenta. Sin Edge, las tareas web del día se saltan.
+  try {
+    const salud = await chequeoSalud();
+    if (salud.mal.length) {
+      await telegram.sendMessage(chatId, '⏰ 每日自动任务，先体检：\n' + salud.mal.map((m) => '✘ ' + m).join('\n'), { __skipAI: true });
+    }
+    if (salud.edgeVivo === false) {
+      await telegram.sendMessage(chatId, '今天的自动刷新促销和新单分析先跳过。Edge 开好后随时可以发 /promociones 手动补。', { __skipAI: true });
+      notePanelActivity('⏰ 每日任务跳过：Edge 没开');
+      return;
+    }
+  } catch (error) {
+    logger.warn('morning health check failed', { error: error.message });
+  }
+
   // 1. Promociones frescas para que /ahorro_pedido no trabaje con datos viejos.
   try {
     notePanelActivity('⏰ 每日自动任务');
     await telegram.sendMessage(chatId, '⏰ 每日自动任务：先刷新促销数据…');
-    const result = await fetchActivePromotions(config, due.dateStr, logger);
+    const result = await conNavegador(chatId, '每日刷新促销', () => fetchActivePromotions(config, due.dateStr, logger));
     if (result.ok) await telegram.sendMessage(chatId, `促销数据已刷新 ✅\n${formatPromotionsSummary(result, config).split('\n').slice(0, 3).join('\n')}`);
     else await telegram.sendMessage(chatId, await humanizarError('每日自动刷新促销', `自动刷新促销失败（${result.stage || '?'}）：${result.error || '未知'}。今天先用旧数据。`));
   } catch (error) {
@@ -2225,7 +2368,7 @@ async function maybeRunAutoAdvisor() {
 
   // 2. Pedidos PDA nuevos → análisis de ahorro automático.
   try {
-    const listed = await listOrders(config, logger);
+    const listed = await conNavegador(chatId, '读订单列表', () => listOrders(config, logger));
     if (!listed.ok) { await telegram.sendMessage(chatId, `自动任务读不了 Pedidos 列表：${listed.error}`); return; }
     const lookback = Number.isFinite(Number(config.autoAdvisor?.lookbackDays)) ? Number(config.autoAdvisor.lookbackDays) : 2;
     const cutoff = addDays(due.dateStr, -lookback);
@@ -2257,7 +2400,7 @@ async function handleRecentOrders(chatId, request) {
     chatId,
     `正在只读检查最近 ${limit} 张 Pedidos…\n会逐张翻完全部明细页，不会 Guardar，也不会 Enviar Pedido。`
   );
-  const result = await fetchLatestOrders(config, limit, logger);
+  const result = await conNavegador(chatId, '检查最近订单', () => fetchLatestOrders(config, limit, logger));
   if (!result.ok) {
     const friendly = await humanizarError('查看最近订单', result.error || '无法读取 Pedidos');
     await telegram.sendMessage(chatId, `最近订单检查失败：${friendly}`);
@@ -2304,7 +2447,7 @@ async function handleArrivalByNames(chatId, arg) {
     return;
   }
   await telegram.sendMessage(chatId, `正在打开 Pedidos 找「${arg}」…`);
-  const res = await fetchOrdersBySelectors(config, arg, logger);
+  const res = await conNavegador(chatId, '按单名找单', () => fetchOrdersBySelectors(config, arg, logger));
   if (!res.ok) {
     await telegram.sendMessage(chatId, `读取失败：${res.error}`);
     return;

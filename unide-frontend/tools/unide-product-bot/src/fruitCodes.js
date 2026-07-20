@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readJsonSafe, writeJsonAtomic } from './safeJson.js';
 
 // Diccionario "fruta/verdura → código" con APRENDIZAJE, para el cambio de
 // precio automatizado (/precio_fruta):
@@ -46,14 +47,8 @@ function mapPath(config) {
 }
 
 export function loadFruitMap(config) {
-  try {
-    const file = mapPath(config);
-    if (!fs.existsSync(file)) return {};
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
+  const parsed = readJsonSafe(mapPath(config), {});
+  return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
 export function saveFruitEntry(config, name, codigo, articulo, logger) {
@@ -63,8 +58,7 @@ export function saveFruitEntry(config, name, codigo, articulo, logger) {
     const file = mapPath(config);
     const map = loadFruitMap(config);
     map[key] = { codigo: String(codigo), articulo: String(articulo || '').trim(), savedAt: new Date().toISOString() };
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(map, null, 2));
+    writeJsonAtomic(file, map);
     return true;
   } catch (error) {
     logger?.warn?.('could not save fruit code entry', { error: error.message });
