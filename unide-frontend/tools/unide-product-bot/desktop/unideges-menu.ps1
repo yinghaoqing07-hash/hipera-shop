@@ -182,8 +182,19 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
   Start-Sleep -Milliseconds 300
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-  Start-Sleep -Milliseconds 700
+  # El segundo campo (operario) tarda un momento en rellenarse tras el
+  # primer Enter; si el segundo Enter llega pronto no cuaja y el dialogo se
+  # queda en la segunda caja (paso el 20/07). Espera larga y, mientras el
+  # dialogo siga delante sin menu a la vista, reintentos de Enter.
+  Start-Sleep -Milliseconds 1500
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  for ($j = 0; $j -lt 3; $j++) {
+    Start-Sleep -Milliseconds 1200
+    if (Find-MenuWindow) { break }
+    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { break }
+    $warnings.Add("El dialogo sigue delante: Enter de nuevo ($($j + 1))") | Out-Null
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  }
   return $true
 }
 
