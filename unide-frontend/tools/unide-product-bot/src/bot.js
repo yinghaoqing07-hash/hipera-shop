@@ -555,7 +555,7 @@ function formatCommandList() {
     '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（时间和开关在面板「定时任务」卡片里点一下就能改）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
     '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
-    '/unideges — UnideGes 遥控器：打开程序、进 Artículos/Albaranes/Utilidades，开始营业和日结要确认（也可以直接说「打开unideges」）',
+    '/unideges — UnideGes 遥控器：打开程序、进开始营业/Artículos/Albaranes/Utilidades，日结要确认（也可以直接说「打开unideges」）',
     '/salud — 体检：Edge 连不连得上、AI key、促销数据新旧、磁盘空间',
     '/debug on — 桌面调试模式：每步截图+完整痕迹（用完 /debug off）',
     '/whoami — 看这个对话的 chat id'
@@ -2190,11 +2190,11 @@ function tecladoUnideges() {
           { text: 'Artículos 商品', callback_data: 'ug:articulos' },
           { text: 'Albaranes 收货单', callback_data: 'ug:albaranes' }
         ],
-        [{ text: 'Utilidades 工具', callback_data: 'ug:utilidades' }],
         [
-          { text: '⚠ Inicio de día 开始营业', callback_data: 'ug:ask:inicio' },
-          { text: '⚠ Fin de día 日结', callback_data: 'ug:ask:fin' }
-        ]
+          { text: 'Utilidades 工具', callback_data: 'ug:utilidades' },
+          { text: 'Inicio de día 开始营业', callback_data: 'ug:inicio' }
+        ],
+        [{ text: '⚠ Fin de día 日结', callback_data: 'ug:ask:fin' }]
       ]
     }
   };
@@ -2206,7 +2206,7 @@ async function handleUnideges(chatId, cmd) {
     return;
   }
   if (cmd.accion === 'menu') {
-    await telegram.sendMessage(chatId, 'UnideGes 遥控器 — 想进哪里？\n（没开的话我会先把程序打开；开始营业和日结会先跟你确认）', tecladoUnideges());
+    await telegram.sendMessage(chatId, 'UnideGes 遥控器 — 想进哪里？\n（没开的话我会先把程序打开；只有日结会先跟你确认）', tecladoUnideges());
     return;
   }
   if (cmd.accion === 'abrir') { await ejecutarUnideges(chatId, 'abrir'); return; }

@@ -113,8 +113,10 @@ function Take-MenuShot([string]$Etiqueta) {
 }
 
 # Localiza con que abrir UnideGes: el ExePath configurado o, si no hay, un
-# acceso directo (.lnk) del Escritorio / Menu Inicio cuyo nombre case con
-# el patron (madisa|unide).
+# acceso directo (.lnk) del Escritorio / Menu Inicio. Se puntuan TODOS los
+# candidatos ('unideges' > 'madisa' > 'unide' a secas) y se excluyen los
+# del propio bot y herramientas (JARVIS, panel, edge debug, updater...):
+# el 20/07 un lnk equivocado se llevo el primer intento de apertura.
 function Find-Launcher {
   if ($ExePath -and (Test-Path -LiteralPath $ExePath)) { return $ExePath }
   $carpetas = @(
@@ -123,28 +125,54 @@ function Find-Launcher {
     [Environment]::GetFolderPath('StartMenu'),
     [Environment]::GetFolderPath('CommonStartMenu')
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+  $mejor = $null
+  $mejorPuntos = 0
+  $vistos = New-Object System.Collections.Generic.List[string]
   foreach ($carpeta in $carpetas) {
-    $lnk = Get-ChildItem -LiteralPath $carpeta -Recurse -Filter *.lnk -ErrorAction SilentlyContinue |
-      Where-Object { $_.BaseName -match $ShortcutRegex } |
-      Select-Object -First 1
-    if ($lnk) { return $lnk.FullName }
+    foreach ($lnk in (Get-ChildItem -LiteralPath $carpeta -Recurse -Filter *.lnk -ErrorAction SilentlyContinue)) {
+      $nombre = $lnk.BaseName
+      if ($nombre -notmatch $ShortcutRegex) { continue }
+      $vistos.Add($nombre) | Out-Null
+      if ($nombre -match 'jarvis|bot|panel|debug|edge|update|start|stop') { continue }
+      $puntos = 1
+      if ($nombre -match 'madisa') { $puntos = 2 }
+      if ($nombre -match 'unideges') { $puntos = 3 }
+      if ($puntos -gt $mejorPuntos) { $mejorPuntos = $puntos; $mejor = $lnk.FullName }
+    }
   }
-  return $null
+  if (-not $mejor -and $vistos.Count -gt 0) {
+    $warnings.Add("Accesos directos que casan pero se excluyeron: $($vistos -join ', ')") | Out-Null
+  }
+  return $mejor
+}
+
+# Titulos de las ventanas visibles AHORA (para contar que paso cuando el
+# menu no aparece: que se abrio en su lugar, si hay un login, etc).
+function Visible-Titles {
+  $titulos = New-Object System.Collections.Generic.List[string]
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    $buf = New-Object System.Text.StringBuilder 512
+    [W32Menu]::GetWindowText([IntPtr]$par[0], $buf, 512) | Out-Null
+    $t = $buf.ToString()
+    if ($t -and -not $titulos.Contains($t)) { $titulos.Add($t) | Out-Null }
+  }
+  return ($titulos | Select-Object -First 12) -join ' · '
 }
 
 function Open-UnidegesAndWait {
   $lanzador = Find-Launcher
   if (-not $lanzador) {
-    throw "No encontre con que abrir UnideGes: ni exePath configurado ni acceso directo (patron '$ShortcutRegex') en Escritorio/Menu Inicio."
+    throw "No encontre con que abrir UnideGes: ni exePath configurado ni acceso directo (patron '$ShortcutRegex') en Escritorio/Menu Inicio. Dime como se llama el icono del escritorio y lo configuro."
   }
   $warnings.Add("Abriendo: $lanzador") | Out-Null
   Start-Process -FilePath $lanzador | Out-Null
-  for ($i = 0; $i -lt 30; $i++) {
+  for ($i = 0; $i -lt 45; $i++) {
     Start-Sleep -Seconds 2
     $win = Find-MenuWindow
     if ($win) { return $win }
   }
-  throw "Lance '$lanzador' pero la ventana del menu ($TitleRegex) no aparecio en 60 s."
+  $warnings.Add("Ventanas visibles al agotar la espera: $(Visible-Titles)") | Out-Null
+  throw "Lance '$lanzador' pero la ventana del menu ($TitleRegex) no aparecio en 90 s. Mira la captura y las ventanas listadas abajo para ver que se abrio."
 }
 
 try {
