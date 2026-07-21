@@ -1,0 +1,109 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// Menú principal de la app de escritorio UnideGes ("MadisaNet"): abrirla,
+// traerla al frente y entrar a los módulos habituales con sus teclas F.
+// Todo lo hace desktop/unideges-menu.ps1; aquí solo se parsea el comando,
+// se lanza el PS y se interpreta su línea JSON. Inicio de día y Fin de día
+// son operaciones de negocio de verdad: bot.js les pone confirmación.
+
+export const MODULOS_UNIDEGES = {
+  inicio: { tecla: 'F1', nombre: 'Inicio de día', peligro: true },
+  articulos: { tecla: 'F3', nombre: 'Artículos', peligro: false },
+  utilidades: { tecla: 'F6', nombre: 'Utilidades', peligro: false },
+  albaranes: { tecla: 'F7', nombre: 'Albaranes', peligro: false },
+  fin: { tecla: 'F12', nombre: 'Fin de día', peligro: true }
+};
+
+const ALIAS = {
+  abrir: 'abrir', open: 'abrir', 打开: 'abrir',
+  inicio: 'inicio', inicio_dia: 'inicio', 开始营业: 'inicio', 开业: 'inicio',
+  articulos: 'articulos', artículos: 'articulos', 商品: 'articulos',
+  utilidades: 'utilidades', 工具: 'utilidades',
+  albaranes: 'albaranes', 收货单: 'albaranes', 收货: 'albaranes',
+  fin: 'fin', fin_dia: 'fin', 日结: 'fin', 关店: 'fin'
+};
+
+// '/unideges' → menú de botones; '/unideges abrir' → abrir; '/unideges
+// articulos' → módulo. null si el texto no es un comando de UnideGes.
+export function parseUnidegesCommand(text) {
+  const m = String(text || '').trim().match(/^\/(?:unideges|ug)(?:@\w+)?(?:\s+(\S+))?\s*$/i);
+  if (!m) return null;
+  if (!m[1]) return { accion: 'menu' };
+  const id = ALIAS[m[1].toLowerCase()];
+  if (!id) return { accion: 'menu' };
+  if (id === 'abrir') return { accion: 'abrir' };
+  return { accion: 'modulo', modulo: id };
+}
+
+// Frases sueltas tipo "打开unideges" / "abre el unideges": ir directo a
+// abrir, sin pasar por el enrutador LLM. Solo con mención EXPLÍCITA de la
+// app, para no robar frases de otros flujos.
+export function matchAbrirUnideges(text) {
+  const t = String(text || '').trim();
+  if (!/unide\s*ges|madisa/i.test(t)) return false;
+  return /打开|开一下|启动|abre|abrir|arranca/i.test(t) || /^\s*(?:unide\s*ges|madisa)\s*$/i.test(t);
+}
+
+export async function accionUnideges(config, logger, accion, moduloId) {
+  const ug = config.unideges || {};
+  const script = ug.script || '';
+  if (!fs.existsSync(script)) {
+    return { status: 'error', mensaje: `没找到脚本 ${path.basename(script || 'unideges-menu.ps1')}，先更新 BOT` };
+  }
+  const args = [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
+    '-Accion', accion === 'modulo' ? 'modulo' : accion,
+    '-OutDir', config.desktop?.screenshotDir || 'screenshots',
+    '-ExePath', String(ug.exePath || ''),
+    '-TitleRegex', String(ug.menuTitleRegex || '^MadisaNet'),
+    '-ShortcutRegex', String(ug.shortcutRegex || 'madisa|unide')
+  ];
+  if (accion === 'modulo') {
+    const modulo = MODULOS_UNIDEGES[moduloId];
+    if (!modulo) return { status: 'error', mensaje: `没有这个模块：${moduloId}` };
+    args.push('-Tecla', modulo.tecla);
+  }
+  logger?.info('unideges menu action', { accion, modulo: moduloId || '' });
+  const res = await run('powershell.exe', args, { timeoutMs: 90000 });
+  const parsed = parseLastJson(res.stdout);
+  if (!parsed) {
+    return { status: 'error', mensaje: (res.stderr || res.stdout || '').trim().slice(0, 300) || 'PowerShell 没有返回结果' };
+  }
+  if (parsed.screenshot) parsed.screenshot = path.resolve(parsed.screenshot);
+  return parsed;
+}
+
+function run(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      resolve({ exitCode: -1, stdout, stderr: `${stderr}\nTimeout`.trim() });
+    }, options.timeoutMs ?? 90000);
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('close', (exitCode) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ exitCode, stdout, stderr });
+    });
+  });
+}
+
+function parseLastJson(stdout) {
+  const lines = String(stdout || '').trim().split(/\r?\n/).reverse();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) continue;
+    try { return JSON.parse(trimmed); } catch { /* seguir buscando */ }
+  }
+  return null;
+}

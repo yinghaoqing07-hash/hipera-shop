@@ -121,6 +121,17 @@ const defaultConfig = {
     codeSearchSteps: [],
     orderApplySteps: defaultOrderApplySteps
   },
+  // Menú principal de la app de escritorio UnideGes (ventana "MadisaNet"):
+  // el bot puede abrirla, traerla al frente y entrar a los módulos por su
+  // tecla F (F1 Inicio de día, F3 Artículos, F6 Utilidades, F7 Albaranes,
+  // F12 Fin de día) — comando /unideges. exePath vacío = buscar un acceso
+  // directo (madisa|unide) en el Escritorio o el Menú Inicio.
+  unideges: {
+    script: 'desktop/unideges-menu.ps1',
+    menuTitleRegex: '^MadisaNet',
+    exePath: '',
+    shortcutRegex: 'madisa|unide'
+  },
   // Panel de escritorio: mini web SOLO en 127.0.0.1 con botones para las
   // acciones diarias. panel.cmd la abre en el navegador del PC de la tienda.
   panel: {
@@ -214,6 +225,7 @@ export function loadConfig(configPath) {
   config.operationLedger.path = resolveToolPath(config.operationLedger.path);
   config.scheduledTasks.path = resolveToolPath(config.scheduledTasks.path);
   config.desktop.script = resolveToolPath(config.desktop.script);
+  config.unideges.script = resolveToolPath(config.unideges.script);
   config.desktop.screenshotDir = resolveToolPath(config.desktop.screenshotDir);
   normalizeDesktopDefaults(config);
 
