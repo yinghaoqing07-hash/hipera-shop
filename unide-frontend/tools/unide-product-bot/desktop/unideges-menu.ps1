@@ -22,10 +22,14 @@ Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 public class W32Menu {
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+  [DllImport("user32.dll")] public static extern void mouse_event(UInt32 dwFlags, UInt32 dx, UInt32 dy, UInt32 dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
@@ -168,7 +172,31 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   [W32Menu]::SetForegroundWindow($Handle) | Out-Null
   Start-Sleep -Milliseconds 400
   if ([W32Menu]::GetForegroundWindow() -ne $Handle) { return $false }
-  $warnings.Add("Login detectado (ventana '$Titulo'): tecleo usuario y Enter x2") | Out-Null
+  # El foco inicial del dialogo puede caer en el desplegable de la derecha
+  # (el 20/07 el '1' acabo alli): NO se confia en el foco — se hace CLIC
+  # REAL en la caja "Usuario". El dialogo es de tamaño fijo, asi que la
+  # caja esta siempre en la misma fraccion del rectangulo de la ventana
+  # (~38% del ancho, ~43% del alto, medido sobre captura real).
+  $r = New-Object W32Menu+RECT
+  if ([W32Menu]::GetWindowRect($Handle, [ref]$r)) {
+    $x = [int]($r.Left + ($r.Right - $r.Left) * 0.38)
+    $y = [int]($r.Top + ($r.Bottom - $r.Top) * 0.43)
+    [W32Menu]::SetCursorPos($x, $y) | Out-Null
+    Start-Sleep -Milliseconds 150
+    $pos = [System.Windows.Forms.Cursor]::Position
+    if ([Math]::Abs($pos.X - $x) -le 3 -and [Math]::Abs($pos.Y - $y) -le 3) {
+      [W32Menu]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 80
+      [W32Menu]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 250
+    } else {
+      $warnings.Add("El raton no se movio (UIPI): tecleo sin clic previo") | Out-Null
+    }
+  }
+  $warnings.Add("Login detectado (ventana '$Titulo'): clic en Usuario, tecleo y Enter x2") | Out-Null
+  # Limpiar la caja por si quedo algo de un intento anterior y teclear.
+  [System.Windows.Forms.SendKeys]::SendWait("^a{DEL}")
+  Start-Sleep -Milliseconds 150
   [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
   Start-Sleep -Milliseconds 300
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
