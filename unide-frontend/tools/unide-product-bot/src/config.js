@@ -130,7 +130,8 @@ const defaultConfig = {
     script: 'desktop/unideges-menu.ps1',
     menuTitleRegex: '^MadisaNet',
     exePath: '',
-    shortcutRegex: 'madisa|unide'
+    shortcutRegex: 'madisa|unide',
+    loginUser: '1'             // diálogo de acceso: usuario + Enter x2; '' = no auto-login
   },
   // Panel de escritorio: mini web SOLO en 127.0.0.1 con botones para las
   // acciones diarias. panel.cmd la abre en el navegador del PC de la tienda.
