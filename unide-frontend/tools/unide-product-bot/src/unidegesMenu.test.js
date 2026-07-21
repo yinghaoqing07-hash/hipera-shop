@@ -17,9 +17,9 @@ test('parseUnidegesCommand: menu, abrir y modulos con alias', () => {
   assert.equal(parseUnidegesCommand('unideges'), null);
 });
 
-test('los modulos peligrosos son exactamente inicio y fin de dia', () => {
+test('solo fin de dia pide confirmacion (inicio entra directo desde v215)', () => {
   const peligrosos = Object.entries(MODULOS_UNIDEGES).filter(([, m]) => m.peligro).map(([id]) => id).sort();
-  assert.deepEqual(peligrosos, ['fin', 'inicio']);
+  assert.deepEqual(peligrosos, ['fin']);
   assert.equal(MODULOS_UNIDEGES.articulos.tecla, 'F3');
   assert.equal(MODULOS_UNIDEGES.fin.tecla, 'F12');
 });

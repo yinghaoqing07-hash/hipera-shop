@@ -9,7 +9,9 @@ import path from 'node:path';
 // son operaciones de negocio de verdad: bot.js les pone confirmación.
 
 export const MODULOS_UNIDEGES = {
-  inicio: { tecla: 'F1', nombre: 'Inicio de día', peligro: true },
+  // El dueño pidió (20/07) que Inicio de día entre SIN confirmación: se usa
+  // a diario sin riesgo. Fin de día sí la mantiene (cierre del negocio).
+  inicio: { tecla: 'F1', nombre: 'Inicio de día', peligro: false },
   articulos: { tecla: 'F3', nombre: 'Artículos', peligro: false },
   utilidades: { tecla: 'F6', nombre: 'Utilidades', peligro: false },
   albaranes: { tecla: 'F7', nombre: 'Albaranes', peligro: false },
@@ -66,12 +68,19 @@ export async function accionUnideges(config, logger, accion, moduloId) {
     args.push('-Tecla', modulo.tecla);
   }
   logger?.info('unideges menu action', { accion, modulo: moduloId || '' });
-  const res = await run('powershell.exe', args, { timeoutMs: 90000 });
+  // El PS puede esperar hasta 90 s a que aparezca la ventana al abrir la
+  // app: el tope de Node tiene que ser mayor para no matarlo a mitad.
+  const res = await run('powershell.exe', args, { timeoutMs: 150000 });
   const parsed = parseLastJson(res.stdout);
   if (!parsed) {
     return { status: 'error', mensaje: (res.stderr || res.stdout || '').trim().slice(0, 300) || 'PowerShell 没有返回结果' };
   }
   if (parsed.screenshot) parsed.screenshot = path.resolve(parsed.screenshot);
+  // Los warnings del PS ("Abriendo: <ruta>", ventanas vistas...) son ORO
+  // para diagnosticar a distancia un fallo de apertura: van en el mensaje.
+  if (parsed.status !== 'ok' && Array.isArray(parsed.warnings) && parsed.warnings.length) {
+    parsed.mensaje = `${parsed.mensaje || ''}\n${parsed.warnings.join('\n')}`.trim();
+  }
   return parsed;
 }
 
