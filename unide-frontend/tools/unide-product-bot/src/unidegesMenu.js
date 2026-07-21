@@ -60,7 +60,10 @@ export async function accionUnideges(config, logger, accion, moduloId) {
     '-OutDir', config.desktop?.screenshotDir || 'screenshots',
     '-ExePath', String(ug.exePath || ''),
     '-TitleRegex', String(ug.menuTitleRegex || '^MadisaNet'),
-    '-ShortcutRegex', String(ug.shortcutRegex || 'madisa|unide')
+    '-ShortcutRegex', String(ug.shortcutRegex || 'madisa|unide'),
+    // Diálogo de acceso al arrancar: usuario + Enter x2 (receta del dueño,
+    // 20/07). loginUser '' en config = no intentar el auto-login.
+    '-LoginUser', String(ug.loginUser ?? '1')
   ];
   if (accion === 'modulo') {
     const modulo = MODULOS_UNIDEGES[moduloId];

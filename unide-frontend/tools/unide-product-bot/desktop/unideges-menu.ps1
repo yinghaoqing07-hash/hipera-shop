@@ -4,7 +4,8 @@ param(
   [string]$OutDir = "screenshots",
   [string]$ExePath = "",                            # exe o .lnk configurado; '' = buscar acceso directo
   [string]$TitleRegex = "^MadisaNet",
-  [string]$ShortcutRegex = "madisa|unide"
+  [string]$ShortcutRegex = "madisa|unide",
+  [string]$LoginUser = "1"                          # usuario del dialogo de acceso; '' = no auto-login
 )
 
 # Conduce el MENU PRINCIPAL de UnideGes (ventana "MadisaNet"): traerlo al
@@ -159,17 +160,95 @@ function Visible-Titles {
   return ($titulos | Select-Object -First 12) -join ' · '
 }
 
+# El dialogo de acceso (Usuario/Clave) que sale al arrancar: la receta del
+# dueño es teclear el usuario ('1') y Enter dos veces. Se busca entre las
+# ventanas de procesos NUEVOS (que no existian antes del Start-Process, asi
+# da igual que el lanzador engendre hijos) que no sean ya el menu.
+function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
+  [W32Menu]::SetForegroundWindow($Handle) | Out-Null
+  Start-Sleep -Milliseconds 400
+  if ([W32Menu]::GetForegroundWindow() -ne $Handle) { return $false }
+  $warnings.Add("Login detectado (ventana '$Titulo'): tecleo usuario y Enter x2") | Out-Null
+  [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
+  Start-Sleep -Milliseconds 300
+  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  Start-Sleep -Milliseconds 700
+  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  return $true
+}
+
+function Try-Login($PidsAntes) {
+  if (-not $LoginUser) { return $false }
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    if ($PidsAntes.Contains([long]$par[1])) { continue }
+    $handle = [IntPtr]$par[0]
+    $buf = New-Object System.Text.StringBuilder 512
+    [W32Menu]::GetWindowText($handle, $buf, 512) | Out-Null
+    $titulo = $buf.ToString()
+    if ($titulo -match $TitleRegex) { continue }
+    if (Send-LoginKeys $handle $titulo) { return $true }
+  }
+  return $false
+}
+
+# La app puede estar YA abierta con el dialogo de login delante (p. ej. la
+# abrio alguien a mano y la dejo ahi). Antes de lanzar OTRA instancia se
+# busca una ventana suelta que parezca de UnideGes y se intenta el login
+# sobre ella.
+function Find-UnidegesLoose {
+  $porPid = @{}
+  foreach ($proc in Get-Process) { $porPid[[long]$proc.Id] = $proc.ProcessName.ToLowerInvariant() }
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    $nombreProc = $porPid[[long]$par[1]]
+    if ($nombreProc -and ($procesosExcluidos -contains $nombreProc)) { continue }
+    $handle = [IntPtr]$par[0]
+    $buf = New-Object System.Text.StringBuilder 512
+    [W32Menu]::GetWindowText($handle, $buf, 512) | Out-Null
+    $titulo = $buf.ToString()
+    if (-not $titulo) { continue }
+    if ($titulo -match $TitleRegex) { continue }
+    if ($titulo -match 'unide|madisa') { return @{ Handle = $handle; Title = $titulo } }
+  }
+  return $null
+}
+
 function Open-UnidegesAndWait {
+  # ¿Ya esta abierta pero parada en el login? Entrar por ahi, sin lanzar
+  # una SEGUNDA instancia.
+  if ($LoginUser) {
+    $suelto = Find-UnidegesLoose
+    if ($suelto) {
+      $warnings.Add("La app parece ya abierta (ventana '$($suelto.Title)'): pruebo el login sin relanzar") | Out-Null
+      Send-LoginKeys $suelto.Handle $suelto.Title | Out-Null
+      for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Seconds 2
+        $win = Find-MenuWindow
+        if ($win) { return $win }
+      }
+      $warnings.Add("Ventanas visibles: $(Visible-Titles)") | Out-Null
+      throw "Habia una ventana de UnideGes ('$($suelto.Title)') pero tras el login el menu no aparecio en 20 s. Mira la captura; no lanzo otra instancia."
+    }
+  }
   $lanzador = Find-Launcher
   if (-not $lanzador) {
     throw "No encontre con que abrir UnideGes: ni exePath configurado ni acceso directo (patron '$ShortcutRegex') en Escritorio/Menu Inicio. Dime como se llama el icono del escritorio y lo configuro."
   }
+  # Foto de los pids de ANTES: cualquier ventana de un pid nuevo despues de
+  # lanzar es de UnideGes (o su login), venga del lnk o de un hijo.
+  $pidsAntes = New-Object System.Collections.Generic.HashSet[long]
+  foreach ($proc in Get-Process) { $pidsAntes.Add([long]$proc.Id) | Out-Null }
   $warnings.Add("Abriendo: $lanzador") | Out-Null
   Start-Process -FilePath $lanzador | Out-Null
+  $loginsHechos = 0
   for ($i = 0; $i -lt 45; $i++) {
     Start-Sleep -Seconds 2
     $win = Find-MenuWindow
     if ($win) { return $win }
+    # Darle un par de segundos al dialogo antes del primer intento; como
+    # mucho dos intentos de login para no teclear a ciegas en bucle.
+    if ($i -ge 1 -and $loginsHechos -lt 2) {
+      if (Try-Login $pidsAntes) { $loginsHechos++ ; Start-Sleep -Seconds 2 }
+    }
   }
   $warnings.Add("Ventanas visibles al agotar la espera: $(Visible-Titles)") | Out-Null
   throw "Lance '$lanzador' pero la ventana del menu ($TitleRegex) no aparecio en 90 s. Mira la captura y las ventanas listadas abajo para ver que se abrio."
