@@ -23,6 +23,7 @@ import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatu
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
 import { limpiarArchivosViejos } from './housekeeping.js';
+import { MODULOS_UNIDEGES, accionUnideges, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -343,6 +344,8 @@ async function handleUpdate(update) {
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/salud' || text === '/health') { await handleSalud(chatId); return; }
+  const ugCmd = parseUnidegesCommand(text);
+  if (ugCmd) { await handleUnideges(chatId, ugCmd); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
   if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
@@ -364,6 +367,9 @@ async function handleUpdate(update) {
   // acababan en la ayuda de plantillas.
   if (/^(?:我要)?叫(?:肉|肉类)(?:吧|了)?$/.test(text)) { notePanelActivity('/carne'); await startTally(chatId, 'carne'); return; }
   if (/^(?:我要)?叫(?:水果|果蔬|蔬菜|菜|水果蔬菜)(?:吧|了)?$/.test(text)) { notePanelActivity('/fruta'); await startTally(chatId, 'fruta'); return; }
+  // "打开unideges" y variantes: mención explícita de la app → abrirla sin
+  // pasar por el enrutador LLM (misma filosofía que 叫肉/叫水果).
+  if (matchAbrirUnideges(text)) { await handleUnideges(chatId, { accion: 'abrir' }); return; }
   // Retoques del pedido dichos en claro ("把851040改成一箱", "加一个851220",
   // "删掉850574"): se reconocen AQUÍ por regla, ANTES del lector de códigos
   // de producto y del router LLM — son órdenes inequívocas y se ejecutan
@@ -549,6 +555,7 @@ function formatCommandList() {
     '每天早上我会自动刷新促销、发现新 PDA 单就自动做省钱分析（时间和开关在面板「定时任务」卡片里点一下就能改）',
     '给我发 unide-product-bot-store-pc.zip — 自动更新版本',
     '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
+    '/unideges — UnideGes 遥控器：打开程序、进 Artículos/Albaranes/Utilidades，开始营业和日结要确认（也可以直接说「打开unideges」）',
     '/salud — 体检：Edge 连不连得上、AI key、促销数据新旧、磁盘空间',
     '/debug on — 桌面调试模式：每步截图+完整痕迹（用完 /debug off）',
     '/whoami — 看这个对话的 chat id'
@@ -984,6 +991,7 @@ async function handleCallback(callback) {
   if (data.startsWith('orderApply:')) { await handleOrderApply(chatId, callback.id, data.slice(11)); return; }
   if (data.startsWith('osave:')) { await handleOrderSave(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('osend:')) { await handleOrderSend(chatId, callback.id, data.slice(6)); return; }
+  if (data.startsWith('ug:')) { await handleUnidegesCallback(chatId, callback.id, data.slice(3)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
@@ -2166,6 +2174,95 @@ async function handleSalud(chatId) {
   s.bien.forEach((b) => lineas.push('✔ ' + b));
   lineas.push(`✔ 已连续运行 ${humanUptime(process.uptime())}`);
   await telegram.sendMessage(chatId, lineas.join('\n'), { __skipAI: true });
+}
+
+// --- /unideges: mando a distancia del MENÚ de la app de escritorio -----
+// Abre UnideGes (o lo trae al frente) y entra a los módulos habituales con
+// su tecla F. El bot SOLO abre la puerta y manda captura; no navega dentro
+// del módulo. Inicio de día y Fin de día piden confirmación: son
+// operaciones de negocio (apertura/cierre del día), no una consulta.
+function tecladoUnideges() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🖥 打开 UnideGes / 带到前台', callback_data: 'ug:abrir' }],
+        [
+          { text: 'Artículos 商品', callback_data: 'ug:articulos' },
+          { text: 'Albaranes 收货单', callback_data: 'ug:albaranes' }
+        ],
+        [{ text: 'Utilidades 工具', callback_data: 'ug:utilidades' }],
+        [
+          { text: '⚠ Inicio de día 开始营业', callback_data: 'ug:ask:inicio' },
+          { text: '⚠ Fin de día 日结', callback_data: 'ug:ask:fin' }
+        ]
+      ]
+    }
+  };
+}
+
+async function handleUnideges(chatId, cmd) {
+  if (!config.desktop?.enabled) {
+    await telegram.sendMessage(chatId, '桌面自动化没启用（config.local.json 里 desktop.enabled），操作不了 UnideGes。');
+    return;
+  }
+  if (cmd.accion === 'menu') {
+    await telegram.sendMessage(chatId, 'UnideGes 遥控器 — 想进哪里？\n（没开的话我会先把程序打开；开始营业和日结会先跟你确认）', tecladoUnideges());
+    return;
+  }
+  if (cmd.accion === 'abrir') { await ejecutarUnideges(chatId, 'abrir'); return; }
+  const modulo = MODULOS_UNIDEGES[cmd.modulo];
+  if (!modulo) { await telegram.sendMessage(chatId, '没有这个模块。发 /unideges 看按钮。'); return; }
+  if (modulo.peligro) { await pedirConfirmacionUnideges(chatId, cmd.modulo); return; }
+  await ejecutarUnideges(chatId, 'modulo', cmd.modulo);
+}
+
+async function pedirConfirmacionUnideges(chatId, moduloId) {
+  const modulo = MODULOS_UNIDEGES[moduloId];
+  if (!modulo) return;
+  await telegram.sendMessage(
+    chatId,
+    `「${modulo.nombre}」${moduloId === 'fin' ? '是当天日结（关店流程）' : '是开店初始化流程'}，确认要进吗？\n我只负责打开这个模块并发截图，里面的步骤还是你来操作。`,
+    { reply_markup: { inline_keyboard: [[
+      { text: `✅ 进 ${modulo.nombre}`, callback_data: `ug:go:${moduloId}` },
+      { text: '取消', callback_data: 'ug:no' }
+    ]] } }
+  );
+}
+
+async function ejecutarUnideges(chatId, accion, moduloId) {
+  const etiqueta = accion === 'abrir' ? '打开 UnideGes' : `UnideGes → ${MODULOS_UNIDEGES[moduloId].nombre}`;
+  notePanelActivity('/unideges ' + (moduloId || 'abrir'));
+  await telegram.sendMessage(chatId, `${etiqueta}…（这几秒别动店里电脑的鼠标键盘）`, { __skipAI: true });
+  const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, accion, moduloId));
+  if (res.status !== 'ok') {
+    await telegram.sendMessage(chatId, await humanizarError(etiqueta, `${etiqueta}失败：${res.mensaje || '未知错误'}`));
+    if (res.screenshot && fs.existsSync(res.screenshot)) {
+      try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
+    }
+    return;
+  }
+  const msg = accion === 'abrir'
+    ? (String(res.mensaje || '').includes('ya estaba') ? 'UnideGes 本来就开着，已经带到前台了 ✅' : 'UnideGes 打开了 ✅')
+    : `已按 ${MODULOS_UNIDEGES[moduloId].tecla}，${MODULOS_UNIDEGES[moduloId].nombre} 应该开了 ✅ 看截图确认${res.ventana ? `（当前窗口：${res.ventana}）` : ''}`;
+  if (res.screenshot && fs.existsSync(res.screenshot)) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
+  }
+  await telegram.sendMessage(chatId, msg, { __skipAI: true });
+}
+
+async function handleUnidegesCallback(chatId, callbackId, resto) {
+  if (!config.desktop?.enabled) { await telegram.answerCallbackQuery(callbackId, '桌面自动化没启用'); return; }
+  if (resto === 'no') { await telegram.answerCallbackQuery(callbackId, '已取消'); await telegram.sendMessage(chatId, '好，不进了。', { __skipAI: true }); return; }
+  if (resto === 'abrir') { await telegram.answerCallbackQuery(callbackId, '打开中'); await ejecutarUnideges(chatId, 'abrir'); return; }
+  if (resto.startsWith('ask:')) { await telegram.answerCallbackQuery(callbackId); await pedirConfirmacionUnideges(chatId, resto.slice(4)); return; }
+  if (resto.startsWith('go:')) { await telegram.answerCallbackQuery(callbackId, '开工'); await ejecutarUnideges(chatId, 'modulo', resto.slice(3)); return; }
+  if (MODULOS_UNIDEGES[resto]) {
+    await telegram.answerCallbackQuery(callbackId, MODULOS_UNIDEGES[resto].nombre);
+    if (MODULOS_UNIDEGES[resto].peligro) { await pedirConfirmacionUnideges(chatId, resto); return; }
+    await ejecutarUnideges(chatId, 'modulo', resto);
+    return;
+  }
+  await telegram.answerCallbackQuery(callbackId, '未知操作');
 }
 
 // /pedido_web_test — diagnóstico de la automatización web: conecta al
