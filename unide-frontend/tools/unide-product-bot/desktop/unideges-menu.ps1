@@ -5,7 +5,8 @@ param(
   [string]$ExePath = "",                            # exe o .lnk configurado; '' = buscar acceso directo
   [string]$TitleRegex = "^MadisaNet",
   [string]$ShortcutRegex = "madisa|unide",
-  [string]$LoginUser = "1"                          # usuario del dialogo de acceso; '' = no auto-login
+  [string]$LoginUser = "1",                         # usuario del dialogo de acceso; '' = no auto-login
+  [string]$LogsDir = ""                             # para la linea viva del panel (desktop-estado.txt)
 )
 
 # Conduce el MENU PRINCIPAL de UnideGes (ventana "MadisaNet"): traerlo al
@@ -31,9 +32,19 @@ public class W32Menu {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern void mouse_event(UInt32 dwFlags, UInt32 dx, UInt32 dy, UInt32 dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, System.Text.StringBuilder lParam);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct GUITHREADINFO {
+    public int cbSize; public int flags;
+    public IntPtr hwndActive; public IntPtr hwndFocus; public IntPtr hwndCapture;
+    public IntPtr hwndMenuOwner; public IntPtr hwndMoveSize; public IntPtr hwndCaret;
+    public RECT rcCaret;
+  }
+  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   // TODAS las ventanas top-level visibles con su pid: la del menu puede no
   // ser la "MainWindow" del proceso cuando hay un modulo abierto delante.
@@ -53,13 +64,78 @@ public class W32Menu {
 
 $warnings = New-Object System.Collections.Generic.List[string]
 
+# --- CAJA NEGRA -------------------------------------------------------
+# Cada paso queda en $trace con su segundo relativo: que tecla se mando, en
+# que ventana/control estaba el foco y QUE quedo escrito de verdad en la
+# caja (lectura por WM_GETTEXT). La traza viaja entera en el JSON de salida
+# y la linea actual se escribe en logs\desktop-estado.txt para que el panel
+# la enseñe en vivo. Sin esto, cada fallo del login era adivinar a ciegas.
+$trace = New-Object System.Collections.Generic.List[string]
+$cronometro = [System.Diagnostics.Stopwatch]::StartNew()
+$estadoFile = if ($LogsDir) { Join-Path $LogsDir "desktop-estado.txt" } else { "" }
+
+function Traza([string]$Texto) {
+  $linea = "+$([Math]::Round($cronometro.Elapsed.TotalSeconds, 1))s $Texto"
+  $trace.Add($linea) | Out-Null
+  if ($estadoFile) {
+    try { Set-Content -LiteralPath $estadoFile -Value "unideges: $Texto" -Encoding UTF8 } catch { }
+  }
+}
+
+# ¿Donde esta el foco AHORA y que texto tiene ese control? (ventana en
+# primer plano -> su hilo -> hwndFocus -> clase + WM_GETTEXT). Es la
+# "lectura de vuelta": despues de teclear se comprueba que quedo escrito.
+function Get-FocusInfo {
+  try {
+    $fg = [W32Menu]::GetForegroundWindow()
+    $bufV = New-Object System.Text.StringBuilder 512
+    [W32Menu]::GetWindowText($fg, $bufV, 512) | Out-Null
+    $pidOwner = [uint32]0
+    $tid = [W32Menu]::GetWindowThreadProcessId($fg, [ref]$pidOwner)
+    $gui = New-Object W32Menu+GUITHREADINFO
+    $gui.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($gui)
+    $descFoco = "?"
+    if ([W32Menu]::GetGUIThreadInfo($tid, [ref]$gui) -and $gui.hwndFocus -ne [IntPtr]::Zero) {
+      $bufC = New-Object System.Text.StringBuilder 256
+      [W32Menu]::GetClassName($gui.hwndFocus, $bufC, 256) | Out-Null
+      $bufT = New-Object System.Text.StringBuilder 512
+      [W32Menu]::SendMessage($gui.hwndFocus, 0x000D, [IntPtr]512, $bufT) | Out-Null
+      $descFoco = "$($bufC.ToString()) texto='$($bufT.ToString())'"
+    }
+    return "ventana '$($bufV.ToString())' foco: $descFoco"
+  } catch {
+    return "foco ilegible: $($_.Exception.Message)"
+  }
+}
+
+# Texto del control con el foco (solo el texto, para comparar con lo tecleado).
+function Read-FocusText {
+  try {
+    $fg = [W32Menu]::GetForegroundWindow()
+    $pidOwner = [uint32]0
+    $tid = [W32Menu]::GetWindowThreadProcessId($fg, [ref]$pidOwner)
+    $gui = New-Object W32Menu+GUITHREADINFO
+    $gui.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($gui)
+    if ([W32Menu]::GetGUIThreadInfo($tid, [ref]$gui) -and $gui.hwndFocus -ne [IntPtr]::Zero) {
+      $bufT = New-Object System.Text.StringBuilder 512
+      [W32Menu]::SendMessage($gui.hwndFocus, 0x000D, [IntPtr]512, $bufT) | Out-Null
+      return $bufT.ToString()
+    }
+  } catch { }
+  return $null
+}
+
 function Emit([string]$Status, [string]$Mensaje, [string]$Ventana, [string]$Shot) {
+  if ($estadoFile) {
+    try { Set-Content -LiteralPath $estadoFile -Value "" -Encoding UTF8 } catch { }
+  }
   $out = [ordered]@{
     status = $Status
     mensaje = $Mensaje
     ventana = $Ventana
     screenshot = $Shot
     warnings = @($warnings)
+    trace = @($trace)
   }
   ($out | ConvertTo-Json -Compress -Depth 4)
 }
@@ -174,25 +250,37 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   # OJO: activar la ventana de mas mueve el foco al desplegable (asi acabo
   # el '1' alli en v216), asi que solo se trae al frente si NO lo esta ya.
   if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
+    Traza "login: la ventana no esta delante, la activo"
     [W32Menu]::SetForegroundWindow($Handle) | Out-Null
     Start-Sleep -Milliseconds 400
-    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { return $false }
+    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { Traza "login: no pude activarla — $(Get-FocusInfo)"; return $false }
   }
   $warnings.Add("Login detectado (ventana '$Titulo'): usuario y Enter x2") | Out-Null
+  Traza "login: antes de teclear — $(Get-FocusInfo)"
   [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
   Start-Sleep -Milliseconds 300
+  # Lectura de vuelta: ¿quedo el usuario escrito en la caja con el foco?
+  $leido = Read-FocusText
+  Traza "login: tecleado '$LoginUser', la caja con foco contiene '$leido'"
+  if ($null -ne $leido -and $leido -ne $LoginUser) {
+    $warnings.Add("OJO: tecleé '$LoginUser' pero la caja contiene '$leido' (¿foco en otro control?)") | Out-Null
+  }
+  Traza "login: Enter 1"
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   # El segundo campo (operario) tarda un momento en rellenarse tras el
   # primer Enter; si el segundo Enter llega pronto no cuaja y el dialogo se
   # queda en la segunda caja (paso el 20/07). Espera larga y, mientras el
   # dialogo siga delante sin menu a la vista, reintentos de Enter.
   Start-Sleep -Milliseconds 1500
+  Traza "login: tras Enter 1 — $(Get-FocusInfo)"
+  Traza "login: Enter 2"
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   for ($j = 0; $j -lt 3; $j++) {
     Start-Sleep -Milliseconds 1200
-    if (Find-MenuWindow) { break }
-    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { break }
+    if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; break }
+    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { Traza "login: el dialogo ya no esta delante — $(Get-FocusInfo)"; break }
     $warnings.Add("El dialogo sigue delante: Enter de nuevo ($($j + 1))") | Out-Null
+    Traza "login: sigue el dialogo ($(Get-FocusInfo)) — Enter extra $($j + 1)"
     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   }
   return $true
@@ -254,6 +342,7 @@ function Open-UnidegesAndWait {
   if (-not $lanzador) {
     throw "No encontre con que abrir UnideGes: ni exePath configurado ni acceso directo (patron '$ShortcutRegex') en Escritorio/Menu Inicio. Dime como se llama el icono del escritorio y lo configuro."
   }
+  Traza "lanzo: $lanzador"
   # Foto de los pids de ANTES: cualquier ventana de un pid nuevo despues de
   # lanzar es de UnideGes (o su login), venga del lnk o de un hijo.
   $pidsAntes = New-Object System.Collections.Generic.HashSet[long]
@@ -269,6 +358,7 @@ function Open-UnidegesAndWait {
     # mucho dos intentos de login para no teclear a ciegas en bucle.
     if ($i -ge 1 -and $loginsHechos -lt 2) {
       if (Try-Login $pidsAntes) { $loginsHechos++ ; Start-Sleep -Seconds 2 }
+      elseif ($i % 5 -eq 1) { Traza "espero al menu o al login ($([int]($i*2))s) - $(Get-FocusInfo)" }
     }
   }
   $warnings.Add("Ventanas visibles al agotar la espera: $(Visible-Titles)") | Out-Null
@@ -283,8 +373,10 @@ try {
   }
 
   if ($Accion -eq 'abrir') {
+    Traza "accion abrir: busco la ventana del menu"
     $win = Find-MenuWindow
     $yaEstaba = [bool]$win
+    Traza $(if ($yaEstaba) { "menu encontrado: '$($win.Title)'" } else { "menu no encontrado: toca abrir la app" })
     if (-not $win) { $win = Open-UnidegesAndWait }
     Focus-MenuWindow $win
     $shot = Take-MenuShot 'abrir'
@@ -297,12 +389,15 @@ try {
     # Lista blanca dura: SOLO las teclas del menu principal que se pidieron.
     $teclasPermitidas = @('F1', 'F3', 'F6', 'F7', 'F12')
     if ($teclasPermitidas -notcontains $Tecla) { throw "Tecla no permitida: '$Tecla' (validas: $($teclasPermitidas -join ', '))" }
+    Traza "accion modulo: tecla $Tecla"
     $win = Find-MenuWindow
-    if (-not $win) { $win = Open-UnidegesAndWait }
+    if (-not $win) { Traza "menu no encontrado: abro la app primero"; $win = Open-UnidegesAndWait }
     Focus-MenuWindow $win
+    Traza "menu delante ('$($win.Title)') - mando {$Tecla}"
     [System.Windows.Forms.SendKeys]::SendWait("{$Tecla}")
     # El modulo tarda un momento en pintar; la captura es la prueba de vida.
     Start-Sleep -Milliseconds 2500
+    Traza "tras {$Tecla}: $(Get-FocusInfo)"
     $shot = Take-MenuShot "modulo-$Tecla"
     $fg = [W32Menu]::GetForegroundWindow()
     $buf = New-Object System.Text.StringBuilder 512

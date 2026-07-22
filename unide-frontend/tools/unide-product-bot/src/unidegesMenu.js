@@ -63,7 +63,10 @@ export async function accionUnideges(config, logger, accion, moduloId) {
     '-ShortcutRegex', String(ug.shortcutRegex || 'madisa|unide'),
     // Diálogo de acceso al arrancar: usuario + Enter x2 (receta del dueño,
     // 20/07). loginUser '' en config = no intentar el auto-login.
-    '-LoginUser', String(ug.loginUser ?? '1')
+    '-LoginUser', String(ug.loginUser ?? '1'),
+    // Caja negra: el PS escribe su paso actual en logs/desktop-estado.txt
+    // (línea viva del panel) y devuelve la traza completa en el JSON.
+    '-LogsDir', String(config.logsDir || '')
   ];
   if (accion === 'modulo') {
     const modulo = MODULOS_UNIDEGES[moduloId];
@@ -76,8 +79,9 @@ export async function accionUnideges(config, logger, accion, moduloId) {
   const res = await run('powershell.exe', args, { timeoutMs: 150000 });
   const parsed = parseLastJson(res.stdout);
   if (!parsed) {
-    return { status: 'error', mensaje: (res.stderr || res.stdout || '').trim().slice(0, 300) || 'PowerShell 没有返回结果' };
+    return { status: 'error', mensaje: (res.stderr || res.stdout || '').trim().slice(0, 300) || 'PowerShell 没有返回结果', trace: [] };
   }
+  if (!Array.isArray(parsed.trace)) parsed.trace = [];
   if (parsed.screenshot) parsed.screenshot = path.resolve(parsed.screenshot);
   // Los warnings del PS ("Abriendo: <ruta>", ventanas vistas...) son ORO
   // para diagnosticar a distancia un fallo de apertura: van en el mensaje.
