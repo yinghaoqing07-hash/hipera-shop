@@ -1105,8 +1105,10 @@ async function pollChat() {
         for (const l of lineasCaja) {
           const div = document.createElement('div');
           const texto = String(l);
+          // Cabeceras y línea de cierre SIEMPRE en tono normal (petición
+          // del dueño); rojo solo para pasos con ERROR/OJO de verdad.
           if (texto.charAt(0) === '·' || texto.charAt(0) === '=') div.classList.add('cab');
-          if (texto.indexOf('ERROR') >= 0 || texto.indexOf('OJO') >= 0 || texto.indexOf('失败') >= 0) div.classList.add('err');
+          else if (texto.indexOf('ERROR') >= 0 || texto.indexOf('OJO') >= 0) div.classList.add('err');
           div.appendChild(document.createTextNode(texto));
           cajaCont.appendChild(div);
         }
