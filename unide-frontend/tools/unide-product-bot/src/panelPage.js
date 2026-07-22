@@ -298,6 +298,21 @@ export function renderPanelPage(version) {
     max-height: 100%; opacity: 1;
     transition: max-height var(--motion-slow) var(--motion-ease), opacity var(--motion-base) ease, padding var(--motion-base) ease;
   }
+  /* Caja negra del escritorio: el paso a paso de la última operación de
+     UnideGes, ENCIMA del registro y con su misma pinta de log (petición
+     del dueño: nada de volcados técnicos en el chat). Sin contenido no
+     ocupa nada; a los 15 min de la última operación desaparece sola. */
+  #cajaNegraLineas {
+    display: none; overflow: auto; padding: 6px 6px 4px; min-height: 0;
+    max-height: 45%; flex: none;
+    font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.7;
+    color: #8fa2b5; white-space: pre-wrap; word-break: break-word;
+    user-select: text; scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
+    border-bottom: 1px solid rgba(200,211,220,.12); margin-bottom: 4px;
+  }
+  #cajaNegraLineas.con { display: block; }
+  #cajaNegraLineas .cab { color: #566b80; }
+  #cajaNegraLineas .err { color: #f87171; }
   #registroLineas > div { transform-origin: right bottom; }
   #registroLineas > div.lineaNueva { animation: lineaRegistroEntra var(--motion-base) var(--motion-ease) both; }
   #registroLineas .err { color: #f87171; }
@@ -474,6 +489,7 @@ export function renderPanelPage(version) {
         <div id="tActividad"></div>
       </div>
       <div id="registro">
+        <div id="cajaNegraLineas"></div>
         <div id="registroLineas"></div>
         <button id="registroBtn" onclick="plegarRegistro()" title="收起/展开">︿</button>
       </div>
@@ -1075,6 +1091,29 @@ async function pollChat() {
         }
         if (pegado || !cont.dataset.visto) { cont.scrollTop = cont.scrollHeight; cont.dataset.visto = '1'; }
       }
+    }
+    // Caja negra del escritorio: encima del registro, misma pinta de log.
+    // El bot manda las líneas (en vivo durante la operación y la verdad
+    // final al terminar); null = nada reciente y la franja desaparece.
+    const cajaCont = document.getElementById('cajaNegraLineas');
+    if (cajaCont) {
+      const lineasCaja = Array.isArray(r.cajaNegra) ? r.cajaNegra : [];
+      const claveCaja = lineasCaja.length + '|' + (lineasCaja[lineasCaja.length - 1] || '');
+      if (cajaCont.dataset.clave !== claveCaja) {
+        cajaCont.dataset.clave = claveCaja;
+        cajaCont.textContent = '';
+        for (const l of lineasCaja) {
+          const div = document.createElement('div');
+          const texto = String(l);
+          if (texto.charAt(0) === '·' || texto.charAt(0) === '=') div.classList.add('cab');
+          if (texto.indexOf('ERROR') >= 0 || texto.indexOf('OJO') >= 0 || texto.indexOf('失败') >= 0) div.classList.add('err');
+          div.appendChild(document.createTextNode(texto));
+          cajaCont.appendChild(div);
+        }
+        cajaCont.scrollTop = cajaCont.scrollHeight;
+      }
+      cajaCont.classList.toggle('con', lineasCaja.length > 0);
+      if (lineasCaja.length && reg) reg.classList.add('con');
     }
     if (r.messages && r.messages.length) {
       const caja = document.getElementById('charla');
