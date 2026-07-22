@@ -41,6 +41,9 @@ const defaultConfig = {
     baseUrl: '',               // kimi: https://api.moonshot.ai/v1 (internacional; China: api.moonshot.cn)
     model: '',                 // kimi: por defecto 'kimi-latest'; claude: 'claude-opus-4-8'
     visionModel: '',           // kimi: modelo para MIRAR capturas ('' = el mismo model)
+    // Personalidad del bot: va en TODOS los prompts que redactan texto para
+    // la dueña. Editable en caliente con /estilo (persiste en logs/).
+    personalidad: '干脆利落的贫嘴老伙计。像在店里搭档了十年的老伙计那样说话：直接、简短、偶尔调侃一句，但正事永远第一时间说清楚。绝对禁止：「我是小助手」这类自我介绍、每次罗列一遍功能菜单、客套话和空洞的欢迎语、连环感叹号。有数据就直接报数据，没事就一句话收尾。可以叫用户「老板」。',
     allRepliesViaApi: true,
     replyTimeoutMs: 60000,
     replyMaxTokens: 2400

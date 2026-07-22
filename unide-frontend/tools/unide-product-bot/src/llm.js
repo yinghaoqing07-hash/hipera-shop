@@ -38,6 +38,17 @@ export function proveedorLlm(config) {
   return (p === 'kimi' || p === 'moonshot' || p === 'openai') ? 'kimi' : 'anthropic';
 }
 
+// Personalidad configurable (config.llm.personalidad / comando /estilo):
+// se añade a TODOS los prompts que redactan texto para la dueña, para que
+// el tono sea estable venga de donde venga la respuesta. Los prompts
+// puramente analiticos (promos similares, extraccion de memoria,
+// diagnostico RPA) no la llevan.
+function conEstilo(system, config) {
+  const estilo = String(config?.llm?.personalidad || '').trim();
+  if (!estilo) return system;
+  return `${system}\n\n=== 说话风格（对用户输出时必须遵守） ===\n${estilo.slice(0, 1200)}`;
+}
+
 async function pedirModelo(config, logger, opts) {
   // opts: { system, messages, maxTokens, timeoutMs, schema, model, vision }
   const apiKey = llmApiKey(config);
@@ -337,9 +348,10 @@ export async function llmRouteIntent(text, config, logger, extras = {}) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
   const history = Array.isArray(extras.history) ? extras.history : [];
-  const system = extras.datos
+  const systemBase = extras.datos
     ? `${INTENT_SYSTEM}\n\n=== DATOS DE HOY ===\n${String(extras.datos).slice(0, 150000)}`
     : INTENT_SYSTEM;
+  const system = conEstilo(systemBase, config);
   const { texto, usage } = await pedirModelo(config, logger, {
     system,
     schema: INTENT_SCHEMA,
@@ -421,7 +433,7 @@ export async function llmComposeReply(draft, config, logger, extras = {}) {
   ].filter(Boolean).join('\n\n');
 
   const { texto, usage } = await pedirModelo(config, logger, {
-    system: extras.natural ? REPLY_SYSTEM_NATURAL : REPLY_SYSTEM,
+    system: conEstilo(extras.natural ? REPLY_SYSTEM_NATURAL : REPLY_SYSTEM, config),
     schema: REPLY_SCHEMA,
     model: config?.llm?.replyModel || undefined,
     maxTokens: Number(config?.llm?.replyMaxTokens) || 2400,
@@ -456,7 +468,7 @@ export async function llmFriendlyError(contexto, rawMessage, config, logger) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
   const { texto, usage } = await pedirModelo(config, logger, {
-    system: FRIENDLY_SYSTEM,
+    system: conEstilo(FRIENDLY_SYSTEM, config),
     maxTokens: 300,
     timeoutMs: Number(config?.llm?.timeoutMs) || 30000,
     messages: [{ role: 'user', content: `操作：${contexto}\n技术错误：\n${String(rawMessage || '').slice(0, 1500)}` }]
@@ -475,7 +487,7 @@ export async function llmKeyboardIntro(texto, config, logger) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
   const { texto: fraseSalida, usage } = await pedirModelo(config, logger, {
-    system: 'El bot de una tienda acaba de abrir un teclado interactivo en el panel (columna izquierda) cuyo texto completo recibirás. Escribe UNA sola frase corta EN CHINO, natural y de compañía, que anuncie qué se abrió y qué hacer al terminar (p. ej. 点货单开好了，在左边点数量，点完按「生成订单」。). No repitas las instrucciones enteras, no uses emojis, máximo ~40 caracteres.',
+    system: conEstilo('El bot de una tienda acaba de abrir un teclado interactivo en el panel (columna izquierda) cuyo texto completo recibirás. Escribe UNA sola frase corta EN CHINO, natural y de compañía, que anuncie qué se abrió y qué hacer al terminar (p. ej. 点货单开好了，在左边点数量，点完按「生成订单」。). No repitas las instrucciones enteras, no uses emojis, máximo ~40 caracteres.', config),
     model: config?.llm?.replyModel || undefined,
     maxTokens: 120,
     timeoutMs: 20000,
