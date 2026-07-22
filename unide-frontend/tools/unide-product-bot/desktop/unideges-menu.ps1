@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$Accion,   # estado | abrir | modulo
   [string]$Tecla = "",                              # F1 F3 F6 F7 F12 (solo Accion=modulo)
   [string]$OutDir = "screenshots",
@@ -22,6 +22,10 @@ param(
 # "$(...)" dentro de cadenas que mataron el script entero en v220-v222;
 # pwsh 7 las acepta, asi que un chequeo con pwsh NO las detecta. Calcula
 # primero en una variable y luego interpola.
+# Y ADEMAS: el archivo se guarda CON BOM UTF-8 y las cadenas son ASCII
+# puro. Sin BOM, PS 5.1 lee el archivo como ANSI y el guion largo (em
+# dash) contiene el byte 0x94 = comilla tipografica, que CIERRA la cadena
+# a mitad y descuadra todas las llaves (el fallo real de v220-v223).
 
 $ErrorActionPreference = "Stop"
 # Si algo falla ANTES del try principal (p. ej. el interop no compila),
@@ -91,7 +95,7 @@ if ($LogsDir) {
   $estadoFile = Join-Path $LogsDir "desktop-estado.txt"
   $cajaFile = Join-Path $LogsDir "caja-negra.txt"
   $cabecera = Get-Date -Format "HH:mm:ss"
-  try { Set-Content -LiteralPath $cajaFile -Value "· unideges $Accion $Tecla · $cabecera ·" -Encoding UTF8 } catch { $cajaFile = "" }
+  try { Set-Content -LiteralPath $cajaFile -Value "= unideges $Accion $Tecla = $cabecera" -Encoding UTF8 } catch { $cajaFile = "" }
 }
 
 function Traza([string]$Texto) {
@@ -273,7 +277,7 @@ function Visible-Titles {
     $t = Titulo-De ([IntPtr]$par[0])
     if ($t -and -not $titulos.Contains($t)) { $titulos.Add($t) | Out-Null }
   }
-  return ($titulos | Select-Object -First 12) -join ' · '
+  return ($titulos | Select-Object -First 12) -join ' | '
 }
 
 # El dialogo de acceso (Usuario/Clave) del arranque. Receta EXACTA del
@@ -288,13 +292,13 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
     Start-Sleep -Milliseconds 400
     if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
       $foco = Get-FocusInfo
-      Traza "login: no pude activarla — $foco"
+      Traza "login: no pude activarla - $foco"
       return $false
     }
   }
   Aviso "Login detectado (ventana '$Titulo'): usuario y Enter x2"
   $foco = Get-FocusInfo
-  Traza "login: antes de teclear — $foco"
+  Traza "login: antes de teclear - $foco"
   [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
   Start-Sleep -Milliseconds 300
   # Lectura de vuelta: ¿quedo el usuario escrito en la caja con el foco?
@@ -310,7 +314,7 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   # mientras el dialogo siga delante sin menu, reintentos.
   Start-Sleep -Milliseconds 1500
   $foco = Get-FocusInfo
-  Traza "login: tras Enter 1 — $foco"
+  Traza "login: tras Enter 1 - $foco"
   Traza "login: Enter 2"
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   for ($j = 0; $j -lt 3; $j++) {
@@ -318,7 +322,7 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
     if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; break }
     if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
       $foco = Get-FocusInfo
-      Traza "login: el dialogo ya no esta delante — $foco"
+      Traza "login: el dialogo ya no esta delante - $foco"
       break
     }
     $intento = $j + 1
@@ -399,7 +403,7 @@ function Open-UnidegesAndWait {
       } elseif ($i % 5 -eq 1) {
         $segundos = $i * 2
         $foco = Get-FocusInfo
-        Traza "espero al menu o al login (${segundos}s) — $foco"
+        Traza "espero al menu o al login (${segundos}s) - $foco"
       }
     }
   }
@@ -445,7 +449,7 @@ try {
     if (-not $win) { Traza "menu no encontrado: abro la app primero"; $win = Open-UnidegesAndWait }
     Focus-MenuWindow $win
     $tituloMenu = $win.Title
-    Traza "menu delante ('$tituloMenu') — mando la tecla $Tecla"
+    Traza "menu delante ('$tituloMenu') - mando la tecla $Tecla"
     [System.Windows.Forms.SendKeys]::SendWait("{$Tecla}")
     # El modulo tarda un momento en pintar; la captura es la prueba de vida.
     Start-Sleep -Milliseconds 2500
