@@ -17,6 +17,14 @@ param(
 # Salida: una linea JSON en stdout (mismo contrato que unideges-search.ps1).
 
 $ErrorActionPreference = "Stop"
+# Si el interop no compila, hay que EMITIR JSON igualmente: sin esto, un
+# fallo aqui mataba el script sin estructura y el bot solo veia stderr.
+trap {
+  try {
+    (@{ status = 'error'; mensaje = "fallo antes de empezar: $($_.Exception.Message)"; ventana = ''; screenshot = $null; warnings = @(); trace = @() } | ConvertTo-Json -Compress)
+  } catch { Write-Output '{"status":"error","mensaje":"fallo antes de empezar"}' }
+  exit 1
+}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @"

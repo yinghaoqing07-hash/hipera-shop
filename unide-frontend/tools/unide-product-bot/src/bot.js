@@ -2240,7 +2240,11 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     logger.info('unideges trace', { accion, modulo: moduloId || '', trace: res.trace });
   }
   if (res.status !== 'ok') {
-    await telegram.sendMessage(chatId, await humanizarError(etiqueta, `${etiqueta}失败：${res.mensaje || '未知错误'}`));
+    // SIN humanizarError: el 20/07 el LLM reescribio el error del escritorio
+    // como "sesion de Edge caducada" (plantilla de los flujos web) y enterro
+    // el diagnostico real. Aqui el mensaje tecnico ES el diagnostico.
+    logger.warn('unideges action failed', { accion, modulo: moduloId || '', error: String(res.mensaje || '').slice(0, 500) });
+    await telegram.sendMessage(chatId, `${etiqueta}失败。原始报错（直接转发给 Claude 就能定位）：\n${String(res.mensaje || '未知错误').slice(0, 1200)}`, { __skipAI: true });
     if (Array.isArray(res.trace) && res.trace.length) {
       const traza = res.trace.slice(-25).join('\n').slice(0, 2500);
       await telegram.sendMessage(chatId, `黑匣子记录（每一步按了什么、焦点在哪、格子里实际是什么）：\n${traza}`, { __skipAI: true, __nota: true }).catch(() => {});
