@@ -334,6 +334,7 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   # Confirmar: BM_CLICK directo al boton Aceptar — el Enter simulado con el
   # foco en el campo del operario NO disparaba el boton (20/07). BM_CLICK
   # no depende del foco. Si no aparece el boton, Enter como antes.
+  Traza-Hijos $Handle
   for ($j = 0; $j -lt 4; $j++) {
     if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; return $true }
     if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
@@ -346,8 +347,10 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
     if ($btn -ne [IntPtr]::Zero) {
       Traza "login: clic BM_CLICK en Aceptar ($intento)"
       [W32Menu]::SendMessage($btn, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    } elseif (Click-RealAt $Handle 0.33 0.82) {
+      Traza "login: clic REAL sobre Aceptar (33% ancho, 82% alto) ($intento)"
     } else {
-      Traza "login: no veo el boton Aceptar; Enter ($intento)"
+      Traza "login: no pude mover el raton (UIPI?); Enter ($intento)"
       [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
     }
     Start-Sleep -Milliseconds 1500
@@ -363,6 +366,41 @@ function Find-ChildButton([IntPtr]$Parent, [string]$TextoRegex) {
     if ($texto -and $texto -match $TextoRegex) { return $hijo }
   }
   return [IntPtr]::Zero
+}
+
+# Inventario de los controles del dialogo (clase='texto'): la proxima caja
+# negra dira exactamente que control es el boton Aceptar.
+function Traza-Hijos([IntPtr]$Handle) {
+  $partes = New-Object System.Collections.Generic.List[string]
+  foreach ($h in [W32Menu]::ChildWindows($Handle)) {
+    $hijo = [IntPtr]$h
+    $bufC = New-Object System.Text.StringBuilder 128
+    [W32Menu]::GetClassName($hijo, $bufC, 128) | Out-Null
+    $clase = $bufC.ToString() -replace '^WindowsForms10\.', ''
+    $texto = Titulo-De $hijo
+    $partes.Add("$clase='$texto'") | Out-Null
+    if ($partes.Count -ge 14) { break }
+  }
+  $lista = $partes -join ' | '
+  Traza "login: controles del dialogo: $lista"
+}
+
+# Clic REAL de raton en una fraccion del rectangulo de la ventana (los
+# botones ovalados del login son imagenes autodibujadas: ni tienen texto ni
+# responden a BM_CLICK; el raton de verdad si funciona).
+function Click-RealAt([IntPtr]$Handle, [double]$FracX, [double]$FracY) {
+  $r = New-Object W32Menu+RECT
+  if (-not [W32Menu]::GetWindowRect($Handle, [ref]$r)) { return $false }
+  $x = [int]($r.Left + ($r.Right - $r.Left) * $FracX)
+  $y = [int]($r.Top + ($r.Bottom - $r.Top) * $FracY)
+  [W32Menu]::SetCursorPos($x, $y) | Out-Null
+  Start-Sleep -Milliseconds 150
+  $pos = [System.Windows.Forms.Cursor]::Position
+  if ([Math]::Abs($pos.X - $x) -gt 3 -or [Math]::Abs($pos.Y - $y) -gt 3) { return $false }
+  [W32Menu]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 80
+  [W32Menu]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  return $true
 }
 
 function Try-Login($PidsAntes) {
@@ -388,9 +426,16 @@ function Find-UnidegesLoose {
     if ($nombreProc -and ($procesosExcluidos -contains $nombreProc)) { continue }
     $handle = [IntPtr]$par[0]
     $titulo = Titulo-De $handle
-    if (-not $titulo) { continue }
     if ($titulo -match $TitleRegex) { continue }
-    if ($titulo -match 'unide|madisa') { return @{ Handle = $handle; Title = $titulo } }
+    # El dialogo de login NO tiene titulo: se reconoce tambien por el
+    # nombre del proceso (si no, se lanzaba una segunda instancia encima).
+    $esUnide = $false
+    if ($titulo -and $titulo -match 'unide|madisa') { $esUnide = $true }
+    if ($nombreProc -and $nombreProc -match 'unide|madisa') { $esUnide = $true }
+    if ($esUnide) {
+      if (-not $titulo) { $titulo = '(sin titulo)' }
+      return @{ Handle = $handle; Title = $titulo }
+    }
   }
   return $null
 }
