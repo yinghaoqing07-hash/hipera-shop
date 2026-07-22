@@ -14,11 +14,102 @@ const DEFAULT_MODEL = 'claude-opus-4-8';
 
 export function llmConfigured(config) {
   if (config?.llm?.enabled === false) return false;
-  return Boolean(config?.llm?.apiKey || process.env.ANTHROPIC_API_KEY);
+  return Boolean(config?.llm?.apiKey || process.env.MOONSHOT_API_KEY || process.env.ANTHROPIC_API_KEY);
 }
 
 function llmApiKey(config) {
-  return config?.llm?.apiKey || process.env.ANTHROPIC_API_KEY;
+  return config?.llm?.apiKey || process.env.MOONSHOT_API_KEY || process.env.ANTHROPIC_API_KEY;
+}
+
+// ---------- capa de proveedor ----------
+// El bot habla con Anthropic (Claude) o con la API compatible-OpenAI de
+// Moonshot (Kimi, config.llm.provider='kimi' — mejor precio, eleccion del
+// dueño 22/07). Cada funcion construye su prompt en el FORMATO ANTHROPIC
+// (system + messages con bloques text/image) y llama aqui; las diferencias
+// de peticion/respuesta entre proveedores viven SOLO en esta funcion.
+
+const KIMI_BASE_DEFAULT = 'https://api.moonshot.ai/v1'; // internacional; China: https://api.moonshot.cn/v1
+const KIMI_MODEL_DEFAULT = 'kimi-latest';
+
+export function proveedorLlm(config) {
+  const p = String(config?.llm?.provider || '').toLowerCase();
+  return (p === 'kimi' || p === 'moonshot' || p === 'openai') ? 'kimi' : 'anthropic';
+}
+
+async function pedirModelo(config, logger, opts) {
+  // opts: { system, messages, maxTokens, timeoutMs, schema, model, vision }
+  const apiKey = llmApiKey(config);
+  if (!apiKey) throw new Error('LLM sin apiKey');
+  const prov = proveedorLlm(config);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs || Number(config?.llm?.timeoutMs) || 60000);
+  let response;
+  try {
+    if (prov === 'kimi') {
+      const base = String(config?.llm?.baseUrl || KIMI_BASE_DEFAULT).replace(/\/+$/, '');
+      let model = opts.model || config?.llm?.model || KIMI_MODEL_DEFAULT;
+      if (opts.vision && config?.llm?.visionModel) model = config.llm.visionModel;
+      // Kimi no tiene json_schema nativo: response_format json_object y el
+      // esquema exacto descrito dentro del system.
+      let system = opts.system || '';
+      if (opts.schema) {
+        system += `\n\nRESPONDE UNICAMENTE con un objeto JSON valido (sin markdown ni texto extra) que cumpla EXACTAMENTE este JSON Schema:\n${JSON.stringify(opts.schema)}`;
+      }
+      const messages = [];
+      if (system) messages.push({ role: 'system', content: system });
+      for (const m of opts.messages || []) {
+        if (typeof m.content === 'string') { messages.push({ role: m.role, content: m.content }); continue; }
+        const partes = (m.content || []).map((b) => b.type === 'image'
+          ? { type: 'image_url', image_url: { url: `data:${b.source?.media_type || 'image/png'};base64,${b.source?.data || ''}` } }
+          : { type: 'text', text: String(b.text || '') });
+        messages.push({ role: m.role, content: partes });
+      }
+      const body = { model, max_tokens: opts.maxTokens || 1000, temperature: 0.3, messages };
+      if (opts.schema) body.response_format = { type: 'json_object' };
+      response = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(body)
+      });
+    } else {
+      const body = {
+        model: opts.model || config?.llm?.model || DEFAULT_MODEL,
+        max_tokens: opts.maxTokens || 1000,
+        messages: opts.messages || []
+      };
+      if (opts.system) body.system = opts.system;
+      if (opts.schema) body.output_config = { format: { type: 'json_schema', schema: opts.schema } };
+      response = await fetch(API_URL, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': API_VERSION },
+        body: JSON.stringify(body)
+      });
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const cuerpo = await response.text().catch(() => '');
+    throw new Error(`LLM API (${prov}) ${response.status}: ${cuerpo.slice(0, 250)}`);
+  }
+  const data = await response.json();
+  let texto;
+  let usage;
+  if (prov === 'kimi') {
+    texto = data?.choices?.[0]?.message?.content;
+    usage = { input_tokens: data?.usage?.prompt_tokens, output_tokens: data?.usage?.completion_tokens };
+    if (data?.choices?.[0]?.finish_reason === 'length') logger?.warn?.('llm respuesta truncada por max_tokens');
+  } else {
+    if (data.stop_reason === 'refusal') throw new Error('refusal');
+    if (data.stop_reason === 'max_tokens') logger?.warn?.('llm respuesta truncada por max_tokens');
+    texto = (data.content || []).find((b) => b.type === 'text')?.text;
+    usage = data.usage || {};
+  }
+  if (!texto) throw new Error('respuesta sin texto');
+  if (opts.schema) texto = texto.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+  return { texto, usage };
 }
 
 const PAIRS_SCHEMA = {
@@ -204,40 +295,13 @@ const DIAG_SCHEMA = {
 // chino con dos partes — qué pasó de verdad y cómo mejorar el bot. La
 // dueña lo reenvía tal cual a quien mantiene el código: bucle de mejora.
 export async function llmRetrospectivaPedido(datos, config, logger) {
-  const apiKey = llmApiKey(config);
-  if (!apiKey) throw new Error('LLM sin apiKey');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 900,
-        system: 'Eres el analista post-mortem de un bot que rellena pedidos web (DevExpress Blazor). Te llegan los diagnósticos visuales de la ejecución y el resultado de la auditoría final. Responde EN CHINO, conciso, con exactamente dos bloques: 【这次发生了什么】 (2-4 líneas, causas concretas, no síntomas) y 【改进 bot 的建议】 (2-4 puntos accionables de código/flujo, específicos). Sin florituras.',
-        messages: [{ role: 'user', content: JSON.stringify(datos).slice(0, 12000) }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('refusal');
-  const textOut = (data.content || []).find((b) => b.type === 'text')?.text;
-  if (!textOut) throw new Error('respuesta sin texto');
-  logger?.info('llm retrospectiva', { inputTokens: data.usage?.input_tokens });
-  return textOut.trim();
+  const { texto, usage } = await pedirModelo(config, logger, {
+    system: 'Eres el analista post-mortem de un bot que rellena pedidos web (DevExpress Blazor). Te llegan los diagnósticos visuales de la ejecución y el resultado de la auditoría final. Responde EN CHINO, conciso, con exactamente dos bloques: 【这次发生了什么】 (2-4 líneas, causas concretas, no síntomas) y 【改进 bot 的建议】 (2-4 puntos accionables de código/flujo, específicos). Sin florituras.',
+    messages: [{ role: 'user', content: JSON.stringify(datos).slice(0, 12000) }],
+    maxTokens: 900
+  });
+  logger?.info('llm retrospectiva', { inputTokens: usage?.input_tokens });
+  return texto.trim();
 }
 
 export async function llmDiagnoseScreenshot(imagePath, contexto, config, logger) {
@@ -246,44 +310,20 @@ export async function llmDiagnoseScreenshot(imagePath, contexto, config, logger)
   const fs = await import('node:fs');
   const bytes = fs.readFileSync(imagePath);
   if (bytes.length > 4.5 * 1024 * 1024) throw new Error('captura demasiado grande para diagnosticar');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 700,
-        system: 'Eres el ojo de un bot que automatiza UnideGes (pedidos web DevExpress/Blazor y la app de escritorio). Te llega la captura de pantalla del momento en que la automatización se atascó, más el contexto. Dictamina QUÉ se ve (¿salió el desplegable de autocompletado? ¿hay un diálogo/error? ¿el foco está donde debe? ¿la fila del editor quedó fuera de vista? ¿sesión caducada?) y si un reintento simple puede salvarlo. problema y pista van EN CHINO y cortos: los lee la dueña de la tienda.',
-        output_config: { format: { type: 'json_schema', schema: DIAG_SCHEMA } },
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } },
-            { type: 'text', text: `Contexto: ${String(contexto?.tarea || '')}。刚输入的搜索词: ${String(contexto?.termino || '')}（商品: ${String(contexto?.nombre || '')}）。程序判定的失败类型: ${String(contexto?.fallo || '')}（nomatch=没检测到自动补全下拉）。请看图诊断。` }
-          ]
-        }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('refusal');
-  const textOut = (data.content || []).find((b) => b.type === 'text')?.text;
-  if (!textOut) throw new Error('respuesta sin texto');
-  const parsed = JSON.parse(textOut);
+  const { texto } = await pedirModelo(config, logger, {
+    system: 'Eres el ojo de un bot que automatiza UnideGes (pedidos web DevExpress/Blazor y la app de escritorio). Te llega la captura de pantalla del momento en que la automatización se atascó, más el contexto. Dictamina QUÉ se ve (¿salió el desplegable de autocompletado? ¿hay un diálogo/error? ¿el foco está donde debe? ¿la fila del editor quedó fuera de vista? ¿sesión caducada?) y si un reintento simple puede salvarlo. problema y pista van EN CHINO y cortos: los lee la dueña de la tienda.',
+    schema: DIAG_SCHEMA,
+    vision: true,
+    maxTokens: 700,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } },
+        { type: 'text', text: `Contexto: ${String(contexto?.tarea || '')}。刚输入的搜索词: ${String(contexto?.termino || '')}（商品: ${String(contexto?.nombre || '')}）。程序判定的失败类型: ${String(contexto?.fallo || '')}（nomatch=没检测到自动补全下拉）。请看图诊断。` }
+      ]
+    }]
+  });
+  const parsed = JSON.parse(texto);
   logger?.info('llm screenshot diagnosis', { problema: parsed.problema, recuperable: parsed.recuperable });
   return parsed;
 }
@@ -295,39 +335,14 @@ export async function llmRouteIntent(text, config, logger, extras = {}) {
   const system = extras.datos
     ? `${INTENT_SYSTEM}\n\n=== DATOS DE HOY ===\n${String(extras.datos).slice(0, 150000)}`
     : INTENT_SYSTEM;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 60000);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 1500,
-        system,
-        output_config: { format: { type: 'json_schema', schema: INTENT_SCHEMA } },
-        messages: [...history, { role: 'user', content: String(text || '').slice(0, 2000) }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('refusal');
-  const textOut = (data.content || []).find((b) => b.type === 'text')?.text;
-  if (!textOut) throw new Error('respuesta sin texto');
-  const parsed = JSON.parse(textOut);
-  logger?.info('llm intent', { accion: parsed.accion, argumento: parsed.argumento, inputTokens: data.usage?.input_tokens });
+  const { texto, usage } = await pedirModelo(config, logger, {
+    system,
+    schema: INTENT_SCHEMA,
+    maxTokens: 1500,
+    messages: [...history, { role: 'user', content: String(text || '').slice(0, 2000) }]
+  });
+  const parsed = JSON.parse(texto);
+  logger?.info('llm intent', { accion: parsed.accion, argumento: parsed.argumento, inputTokens: usage?.input_tokens });
   return {
     accion: String(parsed.accion || 'responder'),
     argumento: String(parsed.argumento || '').trim(),
@@ -343,39 +358,21 @@ export async function llmExtractMemories(userText, config, logger, extras = {}) 
   const system = existingMemory
     ? `${MEMORY_SYSTEM}\n\n=== MEMORIA EXISTENTE ===\n${existingMemory.slice(0, 8000)}\nSi el mensaje corrige una memoria existente, conserva su topic para sustituirla.`
     : MEMORY_SYSTEM;
-  const controller = new AbortController();
-  const timeoutMs = Number(config?.memory?.extractionTimeoutMs) || Number(config?.llm?.timeoutMs) || 45000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
+  let respuesta;
   try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.memory?.model || config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 1200,
-        system,
-        output_config: { format: { type: 'json_schema', schema: MEMORY_SCHEMA } },
-        messages: [...history, { role: 'user', content: String(userText || '').slice(0, 2500) }]
-      })
+    respuesta = await pedirModelo(config, logger, {
+      system,
+      schema: MEMORY_SCHEMA,
+      maxTokens: 1200,
+      model: config?.memory?.model || undefined,
+      timeoutMs: Number(config?.memory?.extractionTimeoutMs) || Number(config?.llm?.timeoutMs) || 45000,
+      messages: [...history, { role: 'user', content: String(userText || '').slice(0, 2500) }]
     });
-  } finally {
-    clearTimeout(timer);
+  } catch (error) {
+    if (error.message === 'refusal') return [];
+    throw error;
   }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') return [];
-  const textOut = (data.content || []).find((block) => block.type === 'text')?.text;
-  if (!textOut) throw new Error('respuesta de memoria sin texto');
-  const parsed = JSON.parse(textOut);
+  const parsed = JSON.parse(respuesta.texto);
   const memories = (Array.isArray(parsed.memories) ? parsed.memories : [])
     .map((memory) => ({
       text: String(memory.text || '').trim().slice(0, 320),
@@ -389,7 +386,7 @@ export async function llmExtractMemories(userText, config, logger, extras = {}) 
     }))
     .filter((memory) => memory.text && memory.importance >= 3)
     .slice(0, 3);
-  logger?.info('llm memory extraction', { memories: memories.length, inputTokens: data.usage?.input_tokens });
+  logger?.info('llm memory extraction', { memories: memories.length, inputTokens: respuesta.usage?.input_tokens });
   return memories;
 }
 
@@ -418,44 +415,20 @@ export async function llmComposeReply(draft, config, logger, extras = {}) {
     `Devuelve una sola respuesta de como máximo ${maxChars} caracteres.`
   ].filter(Boolean).join('\n\n');
 
-  const controller = new AbortController();
-  const timeoutMs = Number(config?.llm?.replyTimeoutMs) || Number(config?.llm?.timeoutMs) || 60000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.replyModel || config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: Number(config?.llm?.replyMaxTokens) || 2400,
-        system: extras.natural ? REPLY_SYSTEM_NATURAL : REPLY_SYSTEM,
-        output_config: { format: { type: 'json_schema', schema: REPLY_SCHEMA } },
-        messages: [{ role: 'user', content: user }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('refusal');
-  const textOut = (data.content || []).find((block) => block.type === 'text')?.text;
-  if (!textOut) throw new Error('respuesta final sin texto');
-  const parsed = JSON.parse(textOut);
+  const { texto, usage } = await pedirModelo(config, logger, {
+    system: extras.natural ? REPLY_SYSTEM_NATURAL : REPLY_SYSTEM,
+    schema: REPLY_SCHEMA,
+    model: config?.llm?.replyModel || undefined,
+    maxTokens: Number(config?.llm?.replyMaxTokens) || 2400,
+    timeoutMs: Number(config?.llm?.replyTimeoutMs) || Number(config?.llm?.timeoutMs) || 60000,
+    messages: [{ role: 'user', content: user }]
+  });
+  const parsed = JSON.parse(texto);
   const answer = String(parsed.respuesta || '').trim();
   if (!answer) throw new Error('respuesta final vacía');
   logger?.info('llm reply composed', {
-    inputTokens: data.usage?.input_tokens,
-    outputTokens: data.usage?.output_tokens,
+    inputTokens: usage?.input_tokens,
+    outputTokens: usage?.output_tokens,
     draftChars: original.length,
     replyChars: answer.length
   });
@@ -477,38 +450,14 @@ Mantén los nombres propios (UnideGes, Edge, Pedidos, Promociones) tal cual. Nad
 export async function llmFriendlyError(contexto, rawMessage, config, logger) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(config?.llm?.timeoutMs) || 30000);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 300,
-        system: FRIENDLY_SYSTEM,
-        messages: [{ role: 'user', content: `操作：${contexto}\n技术错误：\n${String(rawMessage || '').slice(0, 1500)}` }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('refusal');
-  const text = (data.content || []).find((b) => b.type === 'text')?.text;
-  if (!text) throw new Error('respuesta sin texto');
-  logger?.info('llm friendly error', { contexto, inputTokens: data.usage?.input_tokens });
-  return text.trim();
+  const { texto, usage } = await pedirModelo(config, logger, {
+    system: FRIENDLY_SYSTEM,
+    maxTokens: 300,
+    timeoutMs: Number(config?.llm?.timeoutMs) || 30000,
+    messages: [{ role: 'user', content: `操作：${contexto}\n技术错误：\n${String(rawMessage || '').slice(0, 1500)}` }]
+  });
+  logger?.info('llm friendly error', { contexto, inputTokens: usage?.input_tokens });
+  return texto.trim();
 }
 
 // ---------- frase de compañía para teclados ----------
@@ -520,35 +469,16 @@ export async function llmFriendlyError(contexto, rawMessage, config, logger) {
 export async function llmKeyboardIntro(texto, config, logger) {
   const apiKey = llmApiKey(config);
   if (!apiKey) throw new Error('LLM sin apiKey');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.replyModel || config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 120,
-        system: 'El bot de una tienda acaba de abrir un teclado interactivo en el panel (columna izquierda) cuyo texto completo recibirás. Escribe UNA sola frase corta EN CHINO, natural y de compañía, que anuncie qué se abrió y qué hacer al terminar (p. ej. 点货单开好了，在左边点数量，点完按「生成订单」。). No repitas las instrucciones enteras, no uses emojis, máximo ~40 caracteres.',
-        messages: [{ role: 'user', content: String(texto || '').slice(0, 1200) }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('refusal');
-  const out = (data.content || []).find((b) => b.type === 'text')?.text;
-  if (!out || !out.trim()) throw new Error('respuesta vacía');
-  logger?.info('llm keyboard intro', { inputTokens: data.usage?.input_tokens });
-  return out.trim();
+  const { texto: fraseSalida, usage } = await pedirModelo(config, logger, {
+    system: 'El bot de una tienda acaba de abrir un teclado interactivo en el panel (columna izquierda) cuyo texto completo recibirás. Escribe UNA sola frase corta EN CHINO, natural y de compañía, que anuncie qué se abrió y qué hacer al terminar (p. ej. 点货单开好了，在左边点数量，点完按「生成订单」。). No repitas las instrucciones enteras, no uses emojis, máximo ~40 caracteres.',
+    model: config?.llm?.replyModel || undefined,
+    maxTokens: 120,
+    timeoutMs: 20000,
+    messages: [{ role: 'user', content: String(texto || '').slice(0, 1200) }]
+  });
+  if (!fraseSalida.trim()) throw new Error('respuesta vacía');
+  logger?.info('llm keyboard intro', { inputTokens: usage?.input_tokens });
+  return fraseSalida.trim();
 }
 
 // orderLines: [{code, nombre}] — líneas a precio normal.
@@ -562,41 +492,14 @@ export async function llmPickSimilarPromos(orderLines, promoItems, config, logge
   const promoTxt = promoItems.map((p) => `${p.code}|${p.name}|ahorro ${Number.isFinite(p.pct) ? p.pct.toFixed(0) : '?'}%`).join('\n');
   const user = `LÍNEAS DEL PEDIDO A PRECIO NORMAL (codigo|nombre):\n${orderTxt}\n\nPRODUCTOS EN PROMOCIÓN (codigo|nombre|ahorro):\n${promoTxt}`;
 
-  const controller = new AbortController();
-  const timeoutMs = Number(config?.llm?.timeoutMs) || 180000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(API_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION
-      },
-      body: JSON.stringify({
-        model: config?.llm?.model || DEFAULT_MODEL,
-        max_tokens: 8000,
-        system: SYSTEM_PROMPT,
-        output_config: { format: { type: 'json_schema', schema: PAIRS_SCHEMA } },
-        messages: [{ role: 'user', content: user }]
-      })
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Anthropic API ${response.status}: ${body.slice(0, 300)}`);
-  }
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') throw new Error('Anthropic API rechazó la petición (refusal)');
-  if (data.stop_reason === 'max_tokens') logger?.warn('llm similar: respuesta truncada por max_tokens');
-  const text = (data.content || []).find((b) => b.type === 'text')?.text;
-  if (!text) throw new Error('Anthropic API: respuesta sin texto');
-  const parsed = JSON.parse(text);
+  const { texto, usage } = await pedirModelo(config, logger, {
+    system: SYSTEM_PROMPT,
+    schema: PAIRS_SCHEMA,
+    maxTokens: 8000,
+    timeoutMs: Number(config?.llm?.timeoutMs) || 180000,
+    messages: [{ role: 'user', content: user }]
+  });
+  const parsed = JSON.parse(texto);
 
   const lineCodes = new Set(orderLines.map((l) => String(l.code)));
   const promoCodes = new Set(promoItems.map((p) => String(p.code)));
@@ -611,11 +514,48 @@ export async function llmPickSimilarPromos(orderLines, promoItems, config, logge
     out.push({ lineCode, promoCode, motivo: String(p.motivo || '').trim() });
   }
   logger?.info('llm similar pairs', {
-    model: config?.llm?.model || DEFAULT_MODEL,
+    proveedor: proveedorLlm(config),
     proposed: (parsed.pares || []).length,
     accepted: out.length,
-    inputTokens: data.usage?.input_tokens,
-    outputTokens: data.usage?.output_tokens
+    inputTokens: usage?.input_tokens,
+    outputTokens: usage?.output_tokens
   });
   return out;
+}
+
+// ---------- diagnostico RPA (bucle semi-automatico de reparacion) ----------
+// Recibe el paquete de evidencia de un fallo (log de la caja negra, codigo
+// fuente del script, log del ultimo exito del mismo paso) y hasta 2
+// capturas. Devuelve texto libre con el diagnostico y, si hace falta tocar
+// codigo, el archivo COMPLETO corregido entre marcas parseables.
+const DIAG_RPA_SYSTEM = `Eres un ingeniero experto en RPA de aplicaciones de escritorio Windows (SendKeys, foco, Win32, PowerShell 5.1). Te llega la evidencia de una ejecucion FALLIDA de la automatizacion de UnideGes: el log paso a paso (caja negra), capturas de pantalla, el codigo fuente del script PowerShell que la conduce y, si existe, el log de la ultima ejecucion EXITOSA del mismo paso para comparar.
+
+Procede en este orden:
+1. Diagnostica la CAUSA RAIZ (foco / tiempos / forma de entrada / localizacion de controles), comparando exito vs fallo si tienes ambos.
+2. Propon una correccion concreta.
+3. SOLO si hace falta cambiar codigo: entrega el archivo desktop/unideges-menu.ps1 COMPLETO y corregido entre las marcas <<<ARCHIVO:unideges-menu.ps1>>> y <<<FIN>>>, sin markdown dentro. Respeta las reglas de la cabecera del archivo: cadenas 100% ASCII y JAMAS subexpresiones $() dentro de cadenas (PowerShell 5.1).
+4. Si la evidencia NO basta para confirmar la causa, dilo claramente y lista que datos de observacion faltan. PROHIBIDO inventar una correccion sin evidencia que la respalde.
+
+Responde EN CHINO (el bloque de codigo va tal cual), con esta estructura: 【出错步骤】 【根因判断】 【修复方案】 y despues el bloque <<<ARCHIVO:...>>> si aplica.`;
+
+export async function llmDiagnosticoRPA(evidencia, imagenes, config, logger) {
+  const fs = await import('node:fs');
+  const content = [];
+  for (const ruta of (imagenes || []).slice(0, 2)) {
+    try {
+      const bytes = fs.readFileSync(ruta);
+      if (bytes.length > 4.5 * 1024 * 1024) continue;
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } });
+    } catch { /* captura ilegible: seguimos con el texto */ }
+  }
+  content.push({ type: 'text', text: String(evidencia || '').slice(0, 120000) });
+  const { texto, usage } = await pedirModelo(config, logger, {
+    system: DIAG_RPA_SYSTEM,
+    vision: content.length > 1,
+    maxTokens: 8000,
+    timeoutMs: 240000,
+    messages: [{ role: 'user', content }]
+  });
+  logger?.info('llm diagnostico rpa', { inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens });
+  return texto.trim();
 }

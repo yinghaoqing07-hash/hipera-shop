@@ -36,9 +36,22 @@ const defaultConfig = {
   logsDir: 'logs',
   llm: {
     enabled: true,
+    provider: '',              // '' = Claude (Anthropic); 'kimi' = Kimi/Moonshot (API compatible OpenAI, mejor precio)
+    apiKey: '',                // o variables de entorno ANTHROPIC_API_KEY / MOONSHOT_API_KEY
+    baseUrl: '',               // kimi: https://api.moonshot.ai/v1 (internacional; China: api.moonshot.cn)
+    model: '',                 // kimi: por defecto 'kimi-latest'; claude: 'claude-opus-4-8'
+    visionModel: '',           // kimi: modelo para MIRAR capturas ('' = el mismo model)
     allRepliesViaApi: true,
     replyTimeoutMs: 60000,
     replyMaxTokens: 2400
+  },
+  // Bucle semi-automatico de reparacion: al fallar una accion de UnideGes
+  // se empaqueta la evidencia (caja negra + capturas + codigo + ultimo
+  // exito), el modelo la diagnostica y la propuesta llega a Telegram con
+  // botones. NADA se aplica sin confirmar; maxCiclos y a humano.
+  diagnostico: {
+    enabled: true,
+    maxCiclos: 2
   },
   memory: {
     enabled: true,
