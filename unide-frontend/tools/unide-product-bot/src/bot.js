@@ -54,6 +54,14 @@ const logger = createLogger(config.logsDir);
 // Horas/on-off de las tareas diarias cambiadas desde el panel: se vuelven
 // a aplicar sobre config ANTES de crear los schedulers.
 applyAutoTaskOverrides(config, logger);
+// Personalidad editable con /estilo: el valor de config/config.local es el
+// punto de partida; si el dueño la cambio desde el chat, el archivo de
+// logs manda. Se captura el valor por defecto para poder hacer reset.
+const personalidadPorDefecto = String(config.llm?.personalidad || '');
+try {
+  const personalidadGuardada = fs.readFileSync(path.resolve(config.logsDir || '.', 'personalidad.txt'), 'utf8').replace(/^\uFEFF/, '').trim();
+  if (personalidadGuardada) { config.llm = config.llm || {}; config.llm.personalidad = personalidadGuardada; }
+} catch { /* sin override guardado */ }
 const memoryStore = new MemoryStore(config.memory, logger);
 const operationLedger = new OperationLedger(config.operationLedger, logger);
 const scheduledTasks = new ScheduledTaskStore(config.scheduledTasks, logger);
@@ -345,6 +353,7 @@ async function handleUpdate(update) {
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/salud' || text === '/health') { await handleSalud(chatId); return; }
+  if (/^\/estilo\b/i.test(text)) { await handleEstilo(chatId, text.replace(/^\/estilo\s*/i, '')); return; }
   const ugCmd = parseUnidegesCommand(text);
   if (ugCmd) { await handleUnideges(chatId, ugCmd); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
@@ -558,6 +567,7 @@ function formatCommandList() {
     '双击 panel.cmd — 在店里电脑上打开控制面板（大按钮版）',
     '/unideges — UnideGes 遥控器：打开程序、进开始营业/Artículos/Albaranes/Utilidades，日结要确认（也可以直接说「打开unideges」）',
     '/salud — 体检：Edge 连不连得上、AI key、促销数据新旧、磁盘空间',
+    '/estilo — 看/改我的说话风格（/estilo 后面直接写新风格；/estilo reset 恢复默认）',
     '/debug on — 桌面调试模式：每步截图+完整痕迹（用完 /debug off）',
     '/whoami — 看这个对话的 chat id'
   ].join('\n');
@@ -2176,6 +2186,30 @@ async function handleSalud(chatId) {
   s.bien.forEach((b) => lineas.push('✔ ' + b));
   lineas.push(`✔ 已连续运行 ${humanUptime(process.uptime())}`);
   await telegram.sendMessage(chatId, lineas.join('\n'), { __skipAI: true });
+}
+
+// --- /estilo: personalidad del bot, editable desde el chat --------------
+// El texto va en TODOS los prompts que redactan respuestas (conEstilo en
+// llm.js). Cambiar aqui = cambia el tono al instante y sobrevive reinicios
+// (logs/personalidad.txt); /estilo reset vuelve a la de fabrica.
+async function handleEstilo(chatId, arg) {
+  const texto = String(arg || '').trim();
+  const archivo = path.resolve(config.logsDir || '.', 'personalidad.txt');
+  if (!texto) {
+    await telegram.sendMessage(chatId, `现在的说话风格设定：\n${config.llm?.personalidad || '（没有设定）'}\n\n改：/estilo 新的风格描述\n恢复默认：/estilo reset`, { __skipAI: true });
+    return;
+  }
+  if (/^(reset|默认|恢复默认?)$/i.test(texto)) {
+    try { fs.unlinkSync(archivo); } catch { /* no habia override */ }
+    config.llm.personalidad = personalidadPorDefecto;
+    await telegram.sendMessage(chatId, '已恢复默认风格（干脆利落的贫嘴老伙计）。', { __skipAI: true });
+    return;
+  }
+  config.llm = config.llm || {};
+  config.llm.personalidad = texto.slice(0, 1200);
+  try { fs.writeFileSync(archivo, config.llm.personalidad, 'utf8'); } catch { /* al menos en caliente */ }
+  notePanelActivity('/estilo');
+  await telegram.sendMessage(chatId, '说话风格已更新，马上生效。随便聊一句看看效果。', { __skipAI: true });
 }
 
 // --- /unideges: mando a distancia del MENÚ de la app de escritorio -----
