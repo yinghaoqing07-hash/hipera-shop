@@ -83,7 +83,8 @@ $cronometro = [System.Diagnostics.Stopwatch]::StartNew()
 $estadoFile = if ($LogsDir) { Join-Path $LogsDir "desktop-estado.txt" } else { "" }
 
 function Traza([string]$Texto) {
-  $linea = "+$([Math]::Round($cronometro.Elapsed.TotalSeconds, 1))s $Texto"
+  $segundos = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
+  $linea = "+${segundos}s $Texto"
   $trace.Add($linea) | Out-Null
   if ($estadoFile) {
     try { Set-Content -LiteralPath $estadoFile -Value "unideges: $Texto" -Encoding UTF8 } catch { }
@@ -366,7 +367,12 @@ function Open-UnidegesAndWait {
     # mucho dos intentos de login para no teclear a ciegas en bucle.
     if ($i -ge 1 -and $loginsHechos -lt 2) {
       if (Try-Login $pidsAntes) { $loginsHechos++ ; Start-Sleep -Seconds 2 }
-      elseif ($i % 5 -eq 1) { Traza "espero al menu o al login ($([int]($i*2))s) - $(Get-FocusInfo)" }
+      elseif ($i % 5 -eq 1) {
+        # OJO: nada de aritmetica dentro de "$(...)" — PS 5.1 no parseaba
+        # $([int]($i*2))s y el script entero moria sin arrancar (v220).
+        $segundos = $i * 2
+        Traza "espero al menu o al login (${segundos}s) - $(Get-FocusInfo)"
+      }
     }
   }
   $warnings.Add("Ventanas visibles al agotar la espera: $(Visible-Titles)") | Out-Null
