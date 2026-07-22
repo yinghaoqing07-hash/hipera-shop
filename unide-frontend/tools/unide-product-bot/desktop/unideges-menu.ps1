@@ -186,7 +186,12 @@ function Emit([string]$Status, [string]$Mensaje, [string]$Ventana, [string]$Shot
   $durSeg = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
   $resumenCorto = ($Mensaje -split "`n")[0]
   if ($resumenCorto.Length -gt 100) { $resumenCorto = $resumenCorto.Substring(0, 100) }
-  $lineaResult = "RESULT: accion=$Accion tecla=$Tecla status=$Status duration=${durSeg}s msg=$resumenCorto"
+  # Claves SIEMPRE identicas a las del RESULT de login (peticion del
+  # dueño): step= status= intentos= duration= msg= — un solo formato que
+  # parsear, hoy a ojo y mañana por programa.
+  $stepGlobal = $Accion
+  if ($Tecla) { $stepGlobal = "$Accion-$Tecla" }
+  $lineaResult = "RESULT: step=$stepGlobal status=$Status intentos=1 duration=${durSeg}s msg=$resumenCorto"
   $trace.Add($lineaResult) | Out-Null
   if ($cajaFile) {
     try { Add-Content -LiteralPath $cajaFile -Value $lineaResult -Encoding UTF8 } catch { }
@@ -348,13 +353,15 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   for ($j = 0; $j -lt 4; $j++) {
     if (Find-MenuWindow) {
       Traza "login: el menu ya esta a la vista"
-      Traza "RESULT: step=login status=ok intentos=$j"
+      $durLogin = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
+      Traza "RESULT: step=login status=ok intentos=$j duration=${durLogin}s msg=menu_visible"
       return $true
     }
     if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
       $foco = Get-FocusInfo
       Traza "login: el dialogo ya no esta delante - $foco"
-      Traza "RESULT: step=login status=ventana_cambio intentos=$j"
+      $durLogin = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
+      Traza "RESULT: step=login status=incierto intentos=$j duration=${durLogin}s msg=la_ventana_ya_no_esta_delante"
       return $true
     }
     $intento = $j + 1
@@ -377,7 +384,8 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
     }
     Start-Sleep -Milliseconds 1500
   }
-  Traza "RESULT: step=login status=fail reason=dialogo_sigue_delante intentos=4"
+  $durLogin = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
+  Traza "RESULT: step=login status=fail intentos=4 duration=${durLogin}s msg=dialogo_sigue_delante"
   return $true
 }
 
