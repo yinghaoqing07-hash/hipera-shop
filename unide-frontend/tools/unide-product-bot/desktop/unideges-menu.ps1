@@ -59,12 +59,20 @@ public class W32Menu {
     public RECT rcCaret;
   }
   [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc cb, IntPtr lParam);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   // TODAS las ventanas top-level visibles con su pid: la del menu puede no
   // ser la "MainWindow" del proceso cuando hay un modulo abierto delante.
+  // Controles hijos de una ventana (para localizar el boton Aceptar).
+  public static System.Collections.Generic.List<long> ChildWindows(IntPtr parent) {
+    var list = new System.Collections.Generic.List<long>();
+    EnumChildWindows(parent, delegate(IntPtr h, IntPtr l) { list.Add(h.ToInt64()); return true; }, IntPtr.Zero);
+    return list;
+  }
   public static System.Collections.Generic.List<long[]> VisibleWindows() {
     var list = new System.Collections.Generic.List<long[]>();
     EnumWindows(delegate(IntPtr h, IntPtr l) {
@@ -256,9 +264,11 @@ function Find-Launcher {
       if ($nombre -notmatch $ShortcutRegex) { continue }
       $vistos.Add($nombre) | Out-Null
       if ($nombre -match 'jarvis|bot|panel|debug|edge|update|start|stop') { continue }
-      $puntos = 1
-      if ($nombre -match 'madisa') { $puntos = 2 }
-      if ($nombre -match 'unideges') { $puntos = 3 }
+      $puntos = 10
+      if ($nombre -match 'madisa') { $puntos = 20 }
+      if ($nombre -match 'unideges') { $puntos = 30 }
+      # Un acceso directo dentro de BACKUP/copias vale menos que uno normal.
+      if ($lnk.FullName -match 'backup|copia|old|antigu') { $puntos = $puntos - 5 }
       if ($puntos -gt $mejorPuntos) { $mejorPuntos = $puntos; $mejor = $lnk.FullName }
     }
   }
@@ -275,7 +285,8 @@ function Visible-Titles {
   $titulos = New-Object System.Collections.Generic.List[string]
   foreach ($par in [W32Menu]::VisibleWindows()) {
     $t = Titulo-De ([IntPtr]$par[0])
-    if ($t -and -not $titulos.Contains($t)) { $titulos.Add($t) | Out-Null }
+    if (-not $t) { $t = '(sin titulo)' }
+    if (-not $titulos.Contains($t)) { $titulos.Add($t) | Out-Null }
   }
   return ($titulos | Select-Object -First 12) -join ' | '
 }
@@ -296,40 +307,62 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
       return $false
     }
   }
-  Aviso "Login detectado (ventana '$Titulo'): usuario y Enter x2"
-  $foco = Get-FocusInfo
-  Traza "login: antes de teclear - $foco"
-  [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
-  Start-Sleep -Milliseconds 300
-  # Lectura de vuelta: ¿quedo el usuario escrito en la caja con el foco?
-  $leido = Read-FocusText
-  Traza "login: tecleado '$LoginUser', la caja con foco contiene '$leido'"
-  if ($null -ne $leido -and $leido -ne $LoginUser) {
-    Aviso "OJO: teclee '$LoginUser' pero la caja contiene '$leido' (foco en otro control?)"
+  Aviso "Login detectado (ventana '$Titulo')"
+  # Si el dialogo YA tiene datos (segundo intento: el foco suele estar en
+  # el campo del operario con 'Operario 1'), NO teclear encima — el 20/07
+  # el reintento machaco el operario con '1' y dejo el dialogo invalido.
+  $textoFoco = Read-FocusText
+  if ($textoFoco -and $textoFoco -ne $LoginUser) {
+    Traza "login: el dialogo ya tiene datos (foco contiene '$textoFoco'); voy directo a Aceptar"
+  } else {
+    $foco = Get-FocusInfo
+    Traza "login: antes de teclear - $foco"
+    [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
+    Start-Sleep -Milliseconds 300
+    # Lectura de vuelta: ¿quedo el usuario escrito en la caja con el foco?
+    $leido = Read-FocusText
+    Traza "login: tecleado '$LoginUser', la caja con foco contiene '$leido'"
+    if ($null -ne $leido -and $leido -ne $LoginUser) {
+      Aviso "OJO: teclee '$LoginUser' pero la caja contiene '$leido' (foco en otro control?)"
+    }
+    Traza "login: Enter 1 (rellena el operario)"
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    Start-Sleep -Milliseconds 1500
+    $foco = Get-FocusInfo
+    Traza "login: tras Enter 1 - $foco"
   }
-  Traza "login: Enter 1"
-  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-  # El segundo campo (operario) tarda en rellenarse tras el primer Enter;
-  # si el segundo Enter llega pronto no cuaja (20/07). Espera larga y,
-  # mientras el dialogo siga delante sin menu, reintentos.
-  Start-Sleep -Milliseconds 1500
-  $foco = Get-FocusInfo
-  Traza "login: tras Enter 1 - $foco"
-  Traza "login: Enter 2"
-  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-  for ($j = 0; $j -lt 3; $j++) {
-    Start-Sleep -Milliseconds 1200
-    if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; break }
+  # Confirmar: BM_CLICK directo al boton Aceptar — el Enter simulado con el
+  # foco en el campo del operario NO disparaba el boton (20/07). BM_CLICK
+  # no depende del foco. Si no aparece el boton, Enter como antes.
+  for ($j = 0; $j -lt 4; $j++) {
+    if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; return $true }
     if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
       $foco = Get-FocusInfo
       Traza "login: el dialogo ya no esta delante - $foco"
-      break
+      return $true
     }
     $intento = $j + 1
-    Aviso "El dialogo sigue delante: Enter de nuevo ($intento)"
-    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    $btn = Find-ChildButton $Handle 'Aceptar'
+    if ($btn -ne [IntPtr]::Zero) {
+      Traza "login: clic BM_CLICK en Aceptar ($intento)"
+      [W32Menu]::SendMessage($btn, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    } else {
+      Traza "login: no veo el boton Aceptar; Enter ($intento)"
+      [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    }
+    Start-Sleep -Milliseconds 1500
   }
   return $true
+}
+
+# Boton hijo cuyo texto casa (p. ej. 'Aceptar') dentro del dialogo.
+function Find-ChildButton([IntPtr]$Parent, [string]$TextoRegex) {
+  foreach ($h in [W32Menu]::ChildWindows($Parent)) {
+    $hijo = [IntPtr]$h
+    $texto = Titulo-De $hijo
+    if ($texto -and $texto -match $TextoRegex) { return $hijo }
+  }
+  return [IntPtr]::Zero
 }
 
 function Try-Login($PidsAntes) {
