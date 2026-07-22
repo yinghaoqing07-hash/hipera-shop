@@ -2247,6 +2247,12 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     logger.warn('unideges action failed', { accion, modulo: moduloId || '', error: String(res.mensaje || '').slice(0, 500) });
     registrarCajaNegra(etiqueta, res);
     await telegram.sendMessage(chatId, `${etiqueta}失败：${String(res.mensaje || '未知错误').split('\n')[0].slice(0, 160)}\n完整过程在面板右边的黑匣子里（日志上面那栏）。`, { __skipAI: true });
+    // Paquete de diagnóstico automático: la caja negra viaja como ARCHIVO
+    // (el chat queda limpio, pero desde casa se ve todo sin tocar el PC).
+    try {
+      const cajaFile = path.resolve(config.logsDir || '.', CAJA_NEGRA);
+      if (fs.existsSync(cajaFile)) await telegram.sendDocument(chatId, cajaFile, 'UnideGes 黑匣子记录（转发给 Claude 就能定位）');
+    } catch { /* sin red o sin archivo */ }
     if (res.screenshot && fs.existsSync(res.screenshot)) {
       try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
     }
