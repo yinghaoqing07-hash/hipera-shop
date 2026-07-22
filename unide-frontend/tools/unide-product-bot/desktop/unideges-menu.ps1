@@ -59,6 +59,9 @@ public class W32Menu {
     public RECT rcCaret;
   }
   [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+  [DllImport("user32.dll")] public static extern void mouse_event(UInt32 dwFlags, UInt32 dx, UInt32 dy, UInt32 dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc cb, IntPtr lParam);
@@ -385,6 +388,19 @@ function Traza-Hijos([IntPtr]$Handle) {
   Traza "login: controles del dialogo: $lista"
 }
 
+# ¿Tiene la ventana algun campo de texto? El dialogo de login SI (las
+# cajas Usuario/Clave son EDIT); las ventanitas Sniffer/Scheduler de la
+# suite solo tienen etiquetas — sin esto, el 22/07 se intento el login
+# sobre 'Sniffer' por casar el nombre de proceso.
+function Tiene-CampoTexto([IntPtr]$Handle) {
+  foreach ($h in [W32Menu]::ChildWindows($Handle)) {
+    $bufC = New-Object System.Text.StringBuilder 128
+    [W32Menu]::GetClassName([IntPtr]$h, $bufC, 128) | Out-Null
+    if ($bufC.ToString() -match 'EDIT') { return $true }
+  }
+  return $false
+}
+
 # Clic REAL de raton en una fraccion del rectangulo de la ventana (los
 # botones ovalados del login son imagenes autodibujadas: ni tienen texto ni
 # responden a BM_CLICK; el raton de verdad si funciona).
@@ -410,6 +426,8 @@ function Try-Login($PidsAntes) {
     $handle = [IntPtr]$par[0]
     $titulo = Titulo-De $handle
     if ($titulo -match $TitleRegex) { continue }
+    if ($titulo -match 'sniffer|scheduler') { continue }
+    if (-not (Tiene-CampoTexto $handle)) { continue }
     if (Send-LoginKeys $handle $titulo) { return $true }
   }
   return $false
@@ -429,10 +447,11 @@ function Find-UnidegesLoose {
     if ($titulo -match $TitleRegex) { continue }
     # El dialogo de login NO tiene titulo: se reconoce tambien por el
     # nombre del proceso (si no, se lanzaba una segunda instancia encima).
+    if ($titulo -match 'sniffer|scheduler') { continue }
     $esUnide = $false
     if ($titulo -and $titulo -match 'unide|madisa') { $esUnide = $true }
     if ($nombreProc -and $nombreProc -match 'unide|madisa') { $esUnide = $true }
-    if ($esUnide) {
+    if ($esUnide -and (Tiene-CampoTexto $handle)) {
       if (-not $titulo) { $titulo = '(sin titulo)' }
       return @{ Handle = $handle; Title = $titulo }
     }
