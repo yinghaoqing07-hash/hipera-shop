@@ -8,7 +8,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmComposeReply, llmConfigured, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRetrospectivaPedido, llmRouteIntent } from './llm.js';
+import { llmComposeReply, llmConfigured, llmDiagnosticoRPA, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRetrospectivaPedido, llmRouteIntent, proveedorLlm } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
@@ -23,6 +23,7 @@ import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatu
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
 import { limpiarArchivosViejos } from './housekeeping.js';
+import { aplicarFix, empaquetarEvidencia, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo } from './diagnostico.js';
 import { MODULOS_UNIDEGES, accionUnideges, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
@@ -992,6 +993,7 @@ async function handleCallback(callback) {
   if (data.startsWith('osave:')) { await handleOrderSave(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('osend:')) { await handleOrderSend(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('ug:')) { await handleUnidegesCallback(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('dg:')) { await handleDiagCallback(chatId, callback.id, data.slice(3)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
@@ -2143,7 +2145,7 @@ async function chequeoSalud() {
       mal.push('Edge 没开（或没开调试模式）：叫货、促销、改单这些网页功能全用不了。去店里电脑双击 launch-edge-debug.cmd');
     }
   }
-  if (llmConfigured(config)) bien.push('AI key 已配置');
+  if (llmConfigured(config)) bien.push(`AI key 已配置（${proveedorLlm(config) === 'kimi' ? 'Kimi/Moonshot' : 'Claude/Anthropic'}）`);
   else mal.push('AI key 没配置：看图救援和自然语言理解不可用');
   const latestCsv = findLatestPromotionsCsv(config);
   if (!latestCsv) mal.push('还没有促销数据（发 /promociones 抓一次）');
@@ -2229,6 +2231,79 @@ async function pedirConfirmacionUnideges(chatId, moduloId) {
   );
 }
 
+// --- bucle semi-automatico de diagnostico (fallo → evidencia → modelo →
+// propuesta con botones → confirmar → aplicar+reintentar). Los reintentos
+// automaticos solo tocan estas acciones de SOLO LECTURA (abrir/modulo);
+// las valvulas duras (lista blanca de archivos, backup, validacion con el
+// parser real) viven en diagnostico.js.
+const diagPendientes = new Map();
+const diagCiclos = new Map();
+let diagSeq = 1;
+
+async function lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res) {
+  const step = moduloId ? `modulo-${MODULOS_UNIDEGES[moduloId]?.tecla || moduloId}` : accion;
+  const maxCiclos = Number(config.diagnostico?.maxCiclos) || 2;
+  const ciclo = (diagCiclos.get(step) || 0) + 1;
+  if (ciclo > maxCiclos) {
+    await telegram.sendMessage(chatId, `这个问题已经诊断了 ${maxCiclos} 轮还没修好，标记「需要人工」——把黑匣子文件转发给 Claude 吧。`, { __skipAI: true });
+    return;
+  }
+  diagCiclos.set(step, ciclo);
+  notePanelActivity('AI 诊断：' + etiqueta);
+  await telegram.sendMessage(chatId, `正在打包证据给 AI 诊断（第 ${ciclo}/${maxCiclos} 轮，需要一两分钟）…`, { __skipAI: true });
+  const paquete = empaquetarEvidencia(config, { etiqueta, step, res });
+  const respuesta = await llmDiagnosticoRPA(paquete.texto, paquete.imagenes, config, logger);
+  const fix = extraerArchivoCorregido(respuesta);
+  const resumen = resumenSinCodigo(respuesta).slice(0, 3000);
+  const id = String(diagSeq++);
+  diagPendientes.set(id, { fix: fix && fix.contenido ? fix : null, accion, moduloId, chatId, etiqueta });
+  const botones = [];
+  if (fix?.contenido) botones.push({ text: '✅ 应用修复并重试', callback_data: `dg:fix:${id}` });
+  botones.push({ text: '🔁 只重试一次', callback_data: `dg:retry:${id}` });
+  botones.push({ text: '忽略', callback_data: `dg:no:${id}` });
+  const notaRechazo = fix?.rechazo ? `\n\n⚠ ${fix.rechazo}` : '';
+  await telegram.sendMessage(chatId, `🩺 AI 诊断（${etiqueta}，第 ${ciclo}/${maxCiclos} 轮）：\n${resumen}${notaRechazo}`, {
+    __skipAI: true,
+    reply_markup: { inline_keyboard: [botones] }
+  });
+}
+
+async function handleDiagCallback(chatId, callbackId, resto) {
+  const [verbo, id] = resto.split(':');
+  const pend = diagPendientes.get(id);
+  if (!pend) { await telegram.answerCallbackQuery(callbackId, '这条诊断已过期'); return; }
+  if (verbo === 'no') {
+    diagPendientes.delete(id);
+    await telegram.answerCallbackQuery(callbackId, '已忽略');
+    await telegram.sendMessage(chatId, '好，先不动。', { __skipAI: true });
+    return;
+  }
+  if (verbo === 'retry') {
+    diagPendientes.delete(id);
+    await telegram.answerCallbackQuery(callbackId, '重试');
+    await ejecutarUnideges(chatId, pend.accion, pend.moduloId);
+    return;
+  }
+  if (verbo === 'fix') {
+    await telegram.answerCallbackQuery(callbackId, '应用中');
+    if (!pend.fix) { await telegram.sendMessage(chatId, '这条诊断没有附带可应用的代码。', { __skipAI: true }); return; }
+    // Valvulas dentro de aplicarFix: lista blanca, cordura, validacion con
+    // el PowerShell REAL de esta maquina y backup con marca de tiempo.
+    const resultado = aplicarFix(config, pend.fix);
+    if (!resultado.ok) {
+      await telegram.sendMessage(chatId, `没应用：${resultado.motivo}`, { __skipAI: true });
+      return;
+    }
+    diagPendientes.delete(id);
+    notePanelActivity('已应用 AI 修复');
+    logger.info('diagnostico fix aplicado', { backup: resultado.backup });
+    await telegram.sendMessage(chatId, '修复已应用（旧文件已备份在 logs/diagnosticos）。自动重试一次…', { __skipAI: true });
+    await ejecutarUnideges(chatId, pend.accion, pend.moduloId);
+    return;
+  }
+  await telegram.answerCallbackQuery(callbackId, '未知操作');
+}
+
 async function ejecutarUnideges(chatId, accion, moduloId) {
   const etiqueta = accion === 'abrir' ? '打开 UnideGes' : `UnideGes → ${MODULOS_UNIDEGES[moduloId].nombre}`;
   notePanelActivity('/unideges ' + (moduloId || 'abrir'));
@@ -2256,9 +2331,20 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     if (res.screenshot && fs.existsSync(res.screenshot)) {
       try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
     }
+    if (config.diagnostico?.enabled !== false && llmConfigured(config)) {
+      lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res).catch((error) => {
+        logger.warn('diagnostico automatico fallo', { error: error.message });
+        telegram.sendMessage(chatId, `自动诊断没跑成：${String(error.message || '').slice(0, 150)}`, { __skipAI: true }).catch(() => {});
+      });
+    }
     return;
   }
   registrarCajaNegra(etiqueta, res);
+  // Referencia de EXITO del paso (comparar exito-vs-fallo es el camino mas
+  // corto al diagnostico) y reset del contador de ciclos de reparacion.
+  const stepDiag = moduloId ? `modulo-${MODULOS_UNIDEGES[moduloId]?.tecla || moduloId}` : accion;
+  guardarExitoPaso(config, stepDiag, res.trace || []);
+  diagCiclos.delete(stepDiag);
   const msg = accion === 'abrir'
     ? (String(res.mensaje || '').includes('ya estaba') ? 'UnideGes 本来就开着，已经带到前台了 ✅' : 'UnideGes 打开了 ✅')
     : `已按 ${MODULOS_UNIDEGES[moduloId].tecla}，${MODULOS_UNIDEGES[moduloId].nombre} 应该开了 ✅ 看截图确认${res.ventana ? `（当前窗口：${res.ventana}）` : ''}`;
