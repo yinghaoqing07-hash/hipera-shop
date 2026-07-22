@@ -2234,12 +2234,25 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
   notePanelActivity('/unideges ' + (moduloId || 'abrir'));
   await telegram.sendMessage(chatId, `${etiqueta}…（这几秒别动店里电脑的鼠标键盘）`, { __skipAI: true });
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, accion, moduloId));
+  // Caja negra: la traza completa SIEMPRE al log; al chat solo si falló
+  // (como nota plegable), que es cuando hace falta leerla.
+  if (Array.isArray(res.trace) && res.trace.length) {
+    logger.info('unideges trace', { accion, modulo: moduloId || '', trace: res.trace });
+  }
   if (res.status !== 'ok') {
     await telegram.sendMessage(chatId, await humanizarError(etiqueta, `${etiqueta}失败：${res.mensaje || '未知错误'}`));
+    if (Array.isArray(res.trace) && res.trace.length) {
+      const traza = res.trace.slice(-25).join('\n').slice(0, 2500);
+      await telegram.sendMessage(chatId, `黑匣子记录（每一步按了什么、焦点在哪、格子里实际是什么）：\n${traza}`, { __skipAI: true, __nota: true }).catch(() => {});
+    }
     if (res.screenshot && fs.existsSync(res.screenshot)) {
       try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
     }
     return;
+  }
+  // Éxito con avisos (recuperaciones por el camino): que se sepan, plegados.
+  if (Array.isArray(res.warnings) && res.warnings.length) {
+    await telegram.sendMessage(chatId, `成了，但过程里有几处波折：\n${res.warnings.join('\n').slice(0, 1200)}`, { __skipAI: true, __nota: true }).catch(() => {});
   }
   const msg = accion === 'abrir'
     ? (String(res.mensaje || '').includes('ya estaba') ? 'UnideGes 本来就开着，已经带到前台了 ✅' : 'UnideGes 打开了 ✅')
