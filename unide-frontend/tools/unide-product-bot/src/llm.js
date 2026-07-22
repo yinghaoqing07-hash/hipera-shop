@@ -29,7 +29,9 @@ function llmApiKey(config) {
 // de peticion/respuesta entre proveedores viven SOLO en esta funcion.
 
 const KIMI_BASE_DEFAULT = 'https://api.moonshot.ai/v1'; // internacional; China: https://api.moonshot.cn/v1
-const KIMI_MODEL_DEFAULT = 'kimi-latest';
+// 'kimi-latest' NO existe en la cuenta del dueño (404 el 23/07); su
+// plataforma .ai expone la serie kimi-k3.
+const KIMI_MODEL_DEFAULT = 'kimi-k3';
 
 export function proveedorLlm(config) {
   const p = String(config?.llm?.provider || '').toLowerCase();
