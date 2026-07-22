@@ -79,7 +79,8 @@ export async function accionUnideges(config, logger, accion, moduloId) {
   const res = await run('powershell.exe', args, { timeoutMs: 150000 });
   const parsed = parseLastJson(res.stdout);
   if (!parsed) {
-    return { status: 'error', mensaje: (res.stderr || res.stdout || '').trim().slice(0, 300) || 'PowerShell 没有返回结果', trace: [] };
+    const crudo = `${res.stderr || ''}\n${res.stdout || ''}`.trim().slice(0, 600);
+    return { status: 'error', mensaje: `PowerShell 没返回结果（退出码 ${res.exitCode}）${crudo ? '：\n' + crudo : ''}`, trace: [] };
   }
   if (!Array.isArray(parsed.trace)) parsed.trace = [];
   if (parsed.screenshot) parsed.screenshot = path.resolve(parsed.screenshot);
