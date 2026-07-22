@@ -66,7 +66,10 @@ async function pedirModelo(config, logger, opts) {
           : { type: 'text', text: String(b.text || '') });
         messages.push({ role: m.role, content: partes });
       }
-      const body = { model, max_tokens: opts.maxTokens || 1000, temperature: 0.3, messages };
+      // kimi-k3 rechaza cualquier temperature distinta de 1 ('invalid
+      // temperature: only 1 is allowed', 23/07): no se manda y que el
+      // servidor use su valor por defecto.
+      const body = { model, max_tokens: opts.maxTokens || 1000, messages };
       if (opts.schema) body.response_format = { type: 'json_object' };
       response = await fetch(`${base}/chat/completions`, {
         method: 'POST',
