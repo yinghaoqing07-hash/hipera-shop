@@ -181,8 +181,15 @@ function Emit([string]$Status, [string]$Mensaje, [string]$Ventana, [string]$Shot
   if ($estadoFile) {
     try { Set-Content -LiteralPath $estadoFile -Value "" -Encoding UTF8 } catch { }
   }
+  # Linea final ESTRUCTURADA (legible por maquina y de un vistazo): la
+  # narrativa esta arriba; esta linea dice que paso sin leer español.
+  $durSeg = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
+  $resumenCorto = ($Mensaje -split "`n")[0]
+  if ($resumenCorto.Length -gt 100) { $resumenCorto = $resumenCorto.Substring(0, 100) }
+  $lineaResult = "RESULT: accion=$Accion tecla=$Tecla status=$Status duration=${durSeg}s msg=$resumenCorto"
+  $trace.Add($lineaResult) | Out-Null
   if ($cajaFile) {
-    try { Add-Content -LiteralPath $cajaFile -Value "= fin: $Status $Mensaje" -Encoding UTF8 } catch { }
+    try { Add-Content -LiteralPath $cajaFile -Value $lineaResult -Encoding UTF8 } catch { }
   }
   $out = [ordered]@{
     status = $Status
@@ -339,13 +346,25 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
   # no depende del foco. Si no aparece el boton, Enter como antes.
   Traza-Hijos $Handle
   for ($j = 0; $j -lt 4; $j++) {
-    if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; return $true }
+    if (Find-MenuWindow) {
+      Traza "login: el menu ya esta a la vista"
+      Traza "RESULT: step=login status=ok intentos=$j"
+      return $true
+    }
     if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
       $foco = Get-FocusInfo
       Traza "login: el dialogo ya no esta delante - $foco"
+      Traza "RESULT: step=login status=ventana_cambio intentos=$j"
       return $true
     }
     $intento = $j + 1
+    # Captura ANTES de cada intento: si el clic no surte efecto, la foto
+    # dice como estaba la pantalla en ese instante exacto.
+    $shotIntento = Take-MenuShot "login-intento-$intento"
+    if ($shotIntento) {
+      $nombreShot = Split-Path -Leaf $shotIntento
+      Traza "login: captura $nombreShot"
+    }
     $btn = Find-ChildButton $Handle 'Aceptar'
     if ($btn -ne [IntPtr]::Zero) {
       Traza "login: clic BM_CLICK en Aceptar ($intento)"
@@ -358,6 +377,7 @@ function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
     }
     Start-Sleep -Milliseconds 1500
   }
+  Traza "RESULT: step=login status=fail reason=dialogo_sigue_delante intentos=4"
   return $true
 }
 
