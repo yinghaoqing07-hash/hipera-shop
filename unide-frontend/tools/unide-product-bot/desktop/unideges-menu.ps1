@@ -6,7 +6,7 @@ param(
   [string]$TitleRegex = "^MadisaNet",
   [string]$ShortcutRegex = "madisa|unide",
   [string]$LoginUser = "1",                         # usuario del dialogo de acceso; '' = no auto-login
-  [string]$LogsDir = ""                             # para la linea viva del panel (desktop-estado.txt)
+  [string]$LogsDir = ""                             # linea viva del panel + caja-negra.txt
 )
 
 # Conduce el MENU PRINCIPAL de UnideGes (ventana "MadisaNet"): traerlo al
@@ -15,13 +15,21 @@ param(
 # F12 Fin de dia). NO navega dentro de los modulos: abre la puerta, hace
 # captura y el dueño ve en la foto que el modulo quedo abierto.
 # Salida: una linea JSON en stdout (mismo contrato que unideges-search.ps1).
+#
+# REGLA DE ESTILO OBLIGATORIA (v223): dentro de cadenas "..." SOLO
+# variables simples ($x / ${x}), JAMAS subexpresiones "$(...)". Windows
+# PowerShell 5.1 (el que corre en la tienda) tiene rarezas de parseo con
+# "$(...)" dentro de cadenas que mataron el script entero en v220-v222;
+# pwsh 7 las acepta, asi que un chequeo con pwsh NO las detecta. Calcula
+# primero en una variable y luego interpola.
 
 $ErrorActionPreference = "Stop"
-# Si el interop no compila, hay que EMITIR JSON igualmente: sin esto, un
-# fallo aqui mataba el script sin estructura y el bot solo veia stderr.
+# Si algo falla ANTES del try principal (p. ej. el interop no compila),
+# hay que EMITIR JSON igualmente: sin esto el bot solo ve stderr suelto.
 trap {
+  $motivo = $_.Exception.Message
   try {
-    (@{ status = 'error'; mensaje = "fallo antes de empezar: $($_.Exception.Message)"; ventana = ''; screenshot = $null; warnings = @(); trace = @() } | ConvertTo-Json -Compress)
+    (@{ status = 'error'; mensaje = "fallo antes de empezar: $motivo"; ventana = ''; screenshot = $null; warnings = @(); trace = @() } | ConvertTo-Json -Compress)
   } catch { Write-Output '{"status":"error","mensaje":"fallo antes de empezar"}' }
   exit 1
 }
@@ -36,9 +44,6 @@ public class W32Menu {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
-  [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
-  [DllImport("user32.dll")] public static extern void mouse_event(UInt32 dwFlags, UInt32 dx, UInt32 dy, UInt32 dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, System.Text.StringBuilder lParam);
@@ -75,12 +80,19 @@ $warnings = New-Object System.Collections.Generic.List[string]
 # --- CAJA NEGRA -------------------------------------------------------
 # Cada paso queda en $trace con su segundo relativo: que tecla se mando, en
 # que ventana/control estaba el foco y QUE quedo escrito de verdad en la
-# caja (lectura por WM_GETTEXT). La traza viaja entera en el JSON de salida
-# y la linea actual se escribe en logs\desktop-estado.txt para que el panel
-# la enseñe en vivo. Sin esto, cada fallo del login era adivinar a ciegas.
+# caja (WM_GETTEXT). La traza viaja en el JSON, la linea actual va a
+# logs\desktop-estado.txt (estado vivo del panel) y cada linea se APPENDEA
+# a logs\caja-negra.txt, que el panel enseña como un log mas.
 $trace = New-Object System.Collections.Generic.List[string]
 $cronometro = [System.Diagnostics.Stopwatch]::StartNew()
-$estadoFile = if ($LogsDir) { Join-Path $LogsDir "desktop-estado.txt" } else { "" }
+$estadoFile = ""
+$cajaFile = ""
+if ($LogsDir) {
+  $estadoFile = Join-Path $LogsDir "desktop-estado.txt"
+  $cajaFile = Join-Path $LogsDir "caja-negra.txt"
+  $cabecera = Get-Date -Format "HH:mm:ss"
+  try { Set-Content -LiteralPath $cajaFile -Value "· unideges $Accion $Tecla · $cabecera ·" -Encoding UTF8 } catch { $cajaFile = "" }
+}
 
 function Traza([string]$Texto) {
   $segundos = [Math]::Round($cronometro.Elapsed.TotalSeconds, 1)
@@ -89,16 +101,29 @@ function Traza([string]$Texto) {
   if ($estadoFile) {
     try { Set-Content -LiteralPath $estadoFile -Value "unideges: $Texto" -Encoding UTF8 } catch { }
   }
+  if ($cajaFile) {
+    try { Add-Content -LiteralPath $cajaFile -Value $linea -Encoding UTF8 } catch { }
+  }
+}
+
+function Aviso([string]$Texto) {
+  $warnings.Add($Texto) | Out-Null
+  Traza "AVISO: $Texto"
+}
+
+# Titulo de una ventana cualquiera.
+function Titulo-De([IntPtr]$Handle) {
+  $buf = New-Object System.Text.StringBuilder 512
+  [W32Menu]::GetWindowText($Handle, $buf, 512) | Out-Null
+  return $buf.ToString()
 }
 
 # ¿Donde esta el foco AHORA y que texto tiene ese control? (ventana en
-# primer plano -> su hilo -> hwndFocus -> clase + WM_GETTEXT). Es la
-# "lectura de vuelta": despues de teclear se comprueba que quedo escrito.
+# primer plano -> su hilo -> hwndFocus -> clase + WM_GETTEXT).
 function Get-FocusInfo {
   try {
     $fg = [W32Menu]::GetForegroundWindow()
-    $bufV = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText($fg, $bufV, 512) | Out-Null
+    $tituloFg = Titulo-De $fg
     $pidOwner = [uint32]0
     $tid = [W32Menu]::GetWindowThreadProcessId($fg, [ref]$pidOwner)
     $gui = New-Object W32Menu+GUITHREADINFO
@@ -107,17 +132,20 @@ function Get-FocusInfo {
     if ([W32Menu]::GetGUIThreadInfo($tid, [ref]$gui) -and $gui.hwndFocus -ne [IntPtr]::Zero) {
       $bufC = New-Object System.Text.StringBuilder 256
       [W32Menu]::GetClassName($gui.hwndFocus, $bufC, 256) | Out-Null
+      $clase = $bufC.ToString()
       $bufT = New-Object System.Text.StringBuilder 512
       [W32Menu]::SendMessage($gui.hwndFocus, 0x000D, [IntPtr]512, $bufT) | Out-Null
-      $descFoco = "$($bufC.ToString()) texto='$($bufT.ToString())'"
+      $textoCtrl = $bufT.ToString()
+      $descFoco = "$clase texto='$textoCtrl'"
     }
-    return "ventana '$($bufV.ToString())' foco: $descFoco"
+    return "ventana '$tituloFg' foco: $descFoco"
   } catch {
-    return "foco ilegible: $($_.Exception.Message)"
+    $motivo = $_.Exception.Message
+    return "foco ilegible: $motivo"
   }
 }
 
-# Texto del control con el foco (solo el texto, para comparar con lo tecleado).
+# Texto del control con el foco (para comparar con lo tecleado).
 function Read-FocusText {
   try {
     $fg = [W32Menu]::GetForegroundWindow()
@@ -137,6 +165,9 @@ function Read-FocusText {
 function Emit([string]$Status, [string]$Mensaje, [string]$Ventana, [string]$Shot) {
   if ($estadoFile) {
     try { Set-Content -LiteralPath $estadoFile -Value "" -Encoding UTF8 } catch { }
+  }
+  if ($cajaFile) {
+    try { Add-Content -LiteralPath $cajaFile -Value "= fin: $Status $Mensaje" -Encoding UTF8 } catch { }
   }
   $out = [ordered]@{
     status = $Status
@@ -160,9 +191,7 @@ function Find-MenuWindow {
     $handle = [IntPtr]$par[0]
     $nombreProc = $porPid[[long]$par[1]]
     if ($nombreProc -and ($procesosExcluidos -contains $nombreProc)) { continue }
-    $buf = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText($handle, $buf, 512) | Out-Null
-    $titulo = $buf.ToString()
+    $titulo = Titulo-De $handle
     if ($titulo -and $titulo -match $TitleRegex) {
       return @{ Handle = $handle; Title = $titulo; ProcId = [long]$par[1] }
     }
@@ -174,13 +203,12 @@ function Focus-MenuWindow($win) {
   if ([W32Menu]::IsIconic($win.Handle)) { [W32Menu]::ShowWindow($win.Handle, 9) | Out-Null; Start-Sleep -Milliseconds 300 }
   [W32Menu]::SetForegroundWindow($win.Handle) | Out-Null
   Start-Sleep -Milliseconds 500
-  # Igual que Click-Point en unideges-search.ps1: si UnideGes corre elevado
-  # y el bot no, el foco no cambia de verdad y las teclas caerian en OTRA app.
+  # Si UnideGes corre elevado y el bot no, el foco no cambia de verdad y
+  # las teclas caerian en OTRA aplicacion.
   $fg = [W32Menu]::GetForegroundWindow()
   if ($fg -ne [IntPtr]$win.Handle) {
-    $buf = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText($fg, $buf, 512) | Out-Null
-    throw "No pude traer UnideGes al frente (delante esta '$($buf.ToString())'). Causa tipica: el bot no corre como administrador."
+    $tituloDelante = Titulo-De $fg
+    throw "No pude traer UnideGes al frente (delante esta '$tituloDelante'). Causa tipica: el bot no corre como administrador."
   }
 }
 
@@ -197,7 +225,8 @@ function Take-MenuShot([string]$Etiqueta) {
     $graphics.Dispose(); $bitmap.Dispose()
     return $ruta
   } catch {
-    $warnings.Add("Screenshot failed: $($_.Exception.Message)") | Out-Null
+    $motivo = $_.Exception.Message
+    Aviso "Screenshot failed: $motivo"
     return $null
   }
 }
@@ -205,8 +234,7 @@ function Take-MenuShot([string]$Etiqueta) {
 # Localiza con que abrir UnideGes: el ExePath configurado o, si no hay, un
 # acceso directo (.lnk) del Escritorio / Menu Inicio. Se puntuan TODOS los
 # candidatos ('unideges' > 'madisa' > 'unide' a secas) y se excluyen los
-# del propio bot y herramientas (JARVIS, panel, edge debug, updater...):
-# el 20/07 un lnk equivocado se llevo el primer intento de apertura.
+# del propio bot y herramientas (JARVIS, panel, edge debug, updater...).
 function Find-Launcher {
   if ($ExePath -and (Test-Path -LiteralPath $ExePath)) { return $ExePath }
   $carpetas = @(
@@ -231,65 +259,70 @@ function Find-Launcher {
     }
   }
   if (-not $mejor -and $vistos.Count -gt 0) {
-    $warnings.Add("Accesos directos que casan pero se excluyeron: $($vistos -join ', ')") | Out-Null
+    $lista = $vistos -join ', '
+    Aviso "Accesos directos que casan pero se excluyeron: $lista"
   }
   return $mejor
 }
 
-# Titulos de las ventanas visibles AHORA (para contar que paso cuando el
-# menu no aparece: que se abrio en su lugar, si hay un login, etc).
+# Titulos de las ventanas visibles AHORA (diagnostico cuando el menu no
+# aparece: que se abrio en su lugar, si hay un login, etc).
 function Visible-Titles {
   $titulos = New-Object System.Collections.Generic.List[string]
   foreach ($par in [W32Menu]::VisibleWindows()) {
-    $buf = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText([IntPtr]$par[0], $buf, 512) | Out-Null
-    $t = $buf.ToString()
+    $t = Titulo-De ([IntPtr]$par[0])
     if ($t -and -not $titulos.Contains($t)) { $titulos.Add($t) | Out-Null }
   }
   return ($titulos | Select-Object -First 12) -join ' · '
 }
 
-# El dialogo de acceso (Usuario/Clave) que sale al arrancar: la receta del
-# dueño es teclear el usuario ('1') y Enter dos veces. Se busca entre las
-# ventanas de procesos NUEVOS (que no existian antes del Start-Process, asi
-# da igual que el lanzador engendre hijos) que no sean ya el menu.
+# El dialogo de acceso (Usuario/Clave) del arranque. Receta EXACTA del
+# dueño (20/07): al abrirse, el cursor YA esta en la primera caja — se
+# teclea el usuario y Enter dos veces, sin clics. Activar la ventana de
+# mas mueve el foco al desplegable (asi acabo el '1' alli en v216): solo
+# se trae al frente si NO lo esta ya.
 function Send-LoginKeys([IntPtr]$Handle, [string]$Titulo) {
-  # Receta EXACTA del dueño (20/07): al abrirse el dialogo el cursor YA
-  # esta en la primera caja (Usuario) — usuario y Enter x2, sin clics.
-  # OJO: activar la ventana de mas mueve el foco al desplegable (asi acabo
-  # el '1' alli en v216), asi que solo se trae al frente si NO lo esta ya.
   if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
     Traza "login: la ventana no esta delante, la activo"
     [W32Menu]::SetForegroundWindow($Handle) | Out-Null
     Start-Sleep -Milliseconds 400
-    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { Traza "login: no pude activarla — $(Get-FocusInfo)"; return $false }
+    if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
+      $foco = Get-FocusInfo
+      Traza "login: no pude activarla — $foco"
+      return $false
+    }
   }
-  $warnings.Add("Login detectado (ventana '$Titulo'): usuario y Enter x2") | Out-Null
-  Traza "login: antes de teclear — $(Get-FocusInfo)"
+  Aviso "Login detectado (ventana '$Titulo'): usuario y Enter x2"
+  $foco = Get-FocusInfo
+  Traza "login: antes de teclear — $foco"
   [System.Windows.Forms.SendKeys]::SendWait($LoginUser)
   Start-Sleep -Milliseconds 300
   # Lectura de vuelta: ¿quedo el usuario escrito en la caja con el foco?
   $leido = Read-FocusText
   Traza "login: tecleado '$LoginUser', la caja con foco contiene '$leido'"
   if ($null -ne $leido -and $leido -ne $LoginUser) {
-    $warnings.Add("OJO: tecleé '$LoginUser' pero la caja contiene '$leido' (¿foco en otro control?)") | Out-Null
+    Aviso "OJO: teclee '$LoginUser' pero la caja contiene '$leido' (foco en otro control?)"
   }
   Traza "login: Enter 1"
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-  # El segundo campo (operario) tarda un momento en rellenarse tras el
-  # primer Enter; si el segundo Enter llega pronto no cuaja y el dialogo se
-  # queda en la segunda caja (paso el 20/07). Espera larga y, mientras el
-  # dialogo siga delante sin menu a la vista, reintentos de Enter.
+  # El segundo campo (operario) tarda en rellenarse tras el primer Enter;
+  # si el segundo Enter llega pronto no cuaja (20/07). Espera larga y,
+  # mientras el dialogo siga delante sin menu, reintentos.
   Start-Sleep -Milliseconds 1500
-  Traza "login: tras Enter 1 — $(Get-FocusInfo)"
+  $foco = Get-FocusInfo
+  Traza "login: tras Enter 1 — $foco"
   Traza "login: Enter 2"
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   for ($j = 0; $j -lt 3; $j++) {
     Start-Sleep -Milliseconds 1200
     if (Find-MenuWindow) { Traza "login: el menu ya esta a la vista"; break }
-    if ([W32Menu]::GetForegroundWindow() -ne $Handle) { Traza "login: el dialogo ya no esta delante — $(Get-FocusInfo)"; break }
-    $warnings.Add("El dialogo sigue delante: Enter de nuevo ($($j + 1))") | Out-Null
-    Traza "login: sigue el dialogo ($(Get-FocusInfo)) — Enter extra $($j + 1)"
+    if ([W32Menu]::GetForegroundWindow() -ne $Handle) {
+      $foco = Get-FocusInfo
+      Traza "login: el dialogo ya no esta delante — $foco"
+      break
+    }
+    $intento = $j + 1
+    Aviso "El dialogo sigue delante: Enter de nuevo ($intento)"
     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   }
   return $true
@@ -300,19 +333,16 @@ function Try-Login($PidsAntes) {
   foreach ($par in [W32Menu]::VisibleWindows()) {
     if ($PidsAntes.Contains([long]$par[1])) { continue }
     $handle = [IntPtr]$par[0]
-    $buf = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText($handle, $buf, 512) | Out-Null
-    $titulo = $buf.ToString()
+    $titulo = Titulo-De $handle
     if ($titulo -match $TitleRegex) { continue }
     if (Send-LoginKeys $handle $titulo) { return $true }
   }
   return $false
 }
 
-# La app puede estar YA abierta con el dialogo de login delante (p. ej. la
-# abrio alguien a mano y la dejo ahi). Antes de lanzar OTRA instancia se
-# busca una ventana suelta que parezca de UnideGes y se intenta el login
-# sobre ella.
+# La app puede estar YA abierta con el login delante (la abrio alguien a
+# mano). Antes de lanzar OTRA instancia se busca una ventana suelta que
+# parezca de UnideGes y se intenta el login sobre ella.
 function Find-UnidegesLoose {
   $porPid = @{}
   foreach ($proc in Get-Process) { $porPid[[long]$proc.Id] = $proc.ProcessName.ToLowerInvariant() }
@@ -320,9 +350,7 @@ function Find-UnidegesLoose {
     $nombreProc = $porPid[[long]$par[1]]
     if ($nombreProc -and ($procesosExcluidos -contains $nombreProc)) { continue }
     $handle = [IntPtr]$par[0]
-    $buf = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText($handle, $buf, 512) | Out-Null
-    $titulo = $buf.ToString()
+    $titulo = Titulo-De $handle
     if (-not $titulo) { continue }
     if ($titulo -match $TitleRegex) { continue }
     if ($titulo -match 'unide|madisa') { return @{ Handle = $handle; Title = $titulo } }
@@ -331,20 +359,21 @@ function Find-UnidegesLoose {
 }
 
 function Open-UnidegesAndWait {
-  # ¿Ya esta abierta pero parada en el login? Entrar por ahi, sin lanzar
-  # una SEGUNDA instancia.
+  # ¿Ya abierta pero parada en el login? Entrar por ahi, sin relanzar.
   if ($LoginUser) {
     $suelto = Find-UnidegesLoose
     if ($suelto) {
-      $warnings.Add("La app parece ya abierta (ventana '$($suelto.Title)'): pruebo el login sin relanzar") | Out-Null
-      Send-LoginKeys $suelto.Handle $suelto.Title | Out-Null
+      $tituloSuelto = $suelto.Title
+      Aviso "La app parece ya abierta (ventana '$tituloSuelto'): pruebo el login sin relanzar"
+      Send-LoginKeys $suelto.Handle $tituloSuelto | Out-Null
       for ($i = 0; $i -lt 10; $i++) {
         Start-Sleep -Seconds 2
         $win = Find-MenuWindow
         if ($win) { return $win }
       }
-      $warnings.Add("Ventanas visibles: $(Visible-Titles)") | Out-Null
-      throw "Habia una ventana de UnideGes ('$($suelto.Title)') pero tras el login el menu no aparecio en 20 s. Mira la captura; no lanzo otra instancia."
+      $vistas = Visible-Titles
+      Aviso "Ventanas visibles: $vistas"
+      throw "Habia una ventana de UnideGes ('$tituloSuelto') pero tras el login el menu no aparecio en 20 s. Mira la caja negra; no lanzo otra instancia."
     }
   }
   $lanzador = Find-Launcher
@@ -352,31 +381,31 @@ function Open-UnidegesAndWait {
     throw "No encontre con que abrir UnideGes: ni exePath configurado ni acceso directo (patron '$ShortcutRegex') en Escritorio/Menu Inicio. Dime como se llama el icono del escritorio y lo configuro."
   }
   Traza "lanzo: $lanzador"
-  # Foto de los pids de ANTES: cualquier ventana de un pid nuevo despues de
-  # lanzar es de UnideGes (o su login), venga del lnk o de un hijo.
+  # Foto de los pids de ANTES: cualquier ventana de un pid nuevo despues
+  # de lanzar es de UnideGes (o su login), venga del lnk o de un hijo.
   $pidsAntes = New-Object System.Collections.Generic.HashSet[long]
   foreach ($proc in Get-Process) { $pidsAntes.Add([long]$proc.Id) | Out-Null }
-  $warnings.Add("Abriendo: $lanzador") | Out-Null
+  Aviso "Abriendo: $lanzador"
   Start-Process -FilePath $lanzador | Out-Null
   $loginsHechos = 0
   for ($i = 0; $i -lt 45; $i++) {
     Start-Sleep -Seconds 2
     $win = Find-MenuWindow
     if ($win) { return $win }
-    # Darle un par de segundos al dialogo antes del primer intento; como
-    # mucho dos intentos de login para no teclear a ciegas en bucle.
     if ($i -ge 1 -and $loginsHechos -lt 2) {
-      if (Try-Login $pidsAntes) { $loginsHechos++ ; Start-Sleep -Seconds 2 }
-      elseif ($i % 5 -eq 1) {
-        # OJO: nada de aritmetica dentro de "$(...)" — PS 5.1 no parseaba
-        # $([int]($i*2))s y el script entero moria sin arrancar (v220).
+      if (Try-Login $pidsAntes) {
+        $loginsHechos++
+        Start-Sleep -Seconds 2
+      } elseif ($i % 5 -eq 1) {
         $segundos = $i * 2
-        Traza "espero al menu o al login (${segundos}s) - $(Get-FocusInfo)"
+        $foco = Get-FocusInfo
+        Traza "espero al menu o al login (${segundos}s) — $foco"
       }
     }
   }
-  $warnings.Add("Ventanas visibles al agotar la espera: $(Visible-Titles)") | Out-Null
-  throw "Lance '$lanzador' pero la ventana del menu ($TitleRegex) no aparecio en 90 s. Mira la captura y las ventanas listadas abajo para ver que se abrio."
+  $vistas = Visible-Titles
+  Aviso "Ventanas visibles al agotar la espera: $vistas"
+  throw "Lance '$lanzador' pero la ventana del menu ($TitleRegex) no aparecio en 90 s. Mira la caja negra para ver que se abrio."
 }
 
 try {
@@ -390,8 +419,13 @@ try {
     Traza "accion abrir: busco la ventana del menu"
     $win = Find-MenuWindow
     $yaEstaba = [bool]$win
-    Traza $(if ($yaEstaba) { "menu encontrado: '$($win.Title)'" } else { "menu no encontrado: toca abrir la app" })
-    if (-not $win) { $win = Open-UnidegesAndWait }
+    if ($yaEstaba) {
+      $tituloMenu = $win.Title
+      Traza "menu encontrado: '$tituloMenu'"
+    } else {
+      Traza "menu no encontrado: toca abrir la app"
+      $win = Open-UnidegesAndWait
+    }
     Focus-MenuWindow $win
     $shot = Take-MenuShot 'abrir'
     $msg = if ($yaEstaba) { 'ya estaba abierto; lo he traido al frente' } else { 'abierto' }
@@ -400,29 +434,35 @@ try {
   }
 
   if ($Accion -eq 'modulo') {
-    # Lista blanca dura: SOLO las teclas del menu principal que se pidieron.
+    # Lista blanca dura: SOLO las teclas del menu principal pedidas.
     $teclasPermitidas = @('F1', 'F3', 'F6', 'F7', 'F12')
-    if ($teclasPermitidas -notcontains $Tecla) { throw "Tecla no permitida: '$Tecla' (validas: $($teclasPermitidas -join ', '))" }
+    if ($teclasPermitidas -notcontains $Tecla) {
+      $validas = $teclasPermitidas -join ', '
+      throw "Tecla no permitida: '$Tecla' (validas: $validas)"
+    }
     Traza "accion modulo: tecla $Tecla"
     $win = Find-MenuWindow
     if (-not $win) { Traza "menu no encontrado: abro la app primero"; $win = Open-UnidegesAndWait }
     Focus-MenuWindow $win
-    Traza "menu delante ('$($win.Title)') - mando {$Tecla}"
+    $tituloMenu = $win.Title
+    Traza "menu delante ('$tituloMenu') — mando la tecla $Tecla"
     [System.Windows.Forms.SendKeys]::SendWait("{$Tecla}")
     # El modulo tarda un momento en pintar; la captura es la prueba de vida.
     Start-Sleep -Milliseconds 2500
-    Traza "tras {$Tecla}: $(Get-FocusInfo)"
+    $foco = Get-FocusInfo
+    Traza "tras la tecla ${Tecla}: $foco"
     $shot = Take-MenuShot "modulo-$Tecla"
     $fg = [W32Menu]::GetForegroundWindow()
-    $buf = New-Object System.Text.StringBuilder 512
-    [W32Menu]::GetWindowText($fg, $buf, 512) | Out-Null
-    Emit 'ok' "tecla $Tecla enviada" $buf.ToString() $shot
+    $tituloFinal = Titulo-De $fg
+    Emit 'ok' "tecla $Tecla enviada" $tituloFinal $shot
     exit 0
   }
 
   throw "Accion desconocida: $Accion (validas: estado, abrir, modulo)"
 } catch {
+  $motivo = $_.Exception.Message
+  Traza "ERROR: $motivo"
   $shot = Take-MenuShot 'error'
-  Emit 'error' $_.Exception.Message '' $shot
+  Emit 'error' $motivo '' $shot
   exit 1
 }

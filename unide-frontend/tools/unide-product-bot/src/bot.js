@@ -2240,26 +2240,19 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     logger.info('unideges trace', { accion, modulo: moduloId || '', trace: res.trace });
   }
   if (res.status !== 'ok') {
-    // SIN humanizarError: el 20/07 el LLM reescribio el error del escritorio
-    // como "sesion de Edge caducada" (plantilla de los flujos web) y enterro
-    // el diagnostico real. Aqui el mensaje tecnico ES el diagnostico — pero
-    // va PLEGADO en una nota, no en medio del chat (peticion del dueño).
+    // SIN humanizarError (el LLM reescribia el error como "sesion de Edge
+    // caducada" y enterraba el diagnostico) y SIN volcado tecnico en el
+    // chat (peticion del dueño): el detalle vive en la caja negra del
+    // panel (columna derecha, encima del registro) y en el log.
     logger.warn('unideges action failed', { accion, modulo: moduloId || '', error: String(res.mensaje || '').slice(0, 500) });
-    await telegram.sendMessage(chatId, `${etiqueta}失败。技术记录折叠在下面这条小字备注里，展开转发给 Claude 就能定位。`, { __skipAI: true });
-    const detalle = [`原始报错：${String(res.mensaje || '未知错误')}`];
-    if (Array.isArray(res.trace) && res.trace.length) {
-      detalle.push('', '黑匣子（每步按键/焦点/格子内容）：', ...res.trace.slice(-25));
-    }
-    await telegram.sendMessage(chatId, detalle.join('\n').slice(0, 3000), { __skipAI: true, __nota: true }).catch(() => {});
+    registrarCajaNegra(etiqueta, res);
+    await telegram.sendMessage(chatId, `${etiqueta}失败：${String(res.mensaje || '未知错误').split('\n')[0].slice(0, 160)}\n完整过程在面板右边的黑匣子里（日志上面那栏）。`, { __skipAI: true });
     if (res.screenshot && fs.existsSync(res.screenshot)) {
       try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
     }
     return;
   }
-  // Éxito con avisos (recuperaciones por el camino): que se sepan, plegados.
-  if (Array.isArray(res.warnings) && res.warnings.length) {
-    await telegram.sendMessage(chatId, `成了，但过程里有几处波折：\n${res.warnings.join('\n').slice(0, 1200)}`, { __skipAI: true, __nota: true }).catch(() => {});
-  }
+  registrarCajaNegra(etiqueta, res);
   const msg = accion === 'abrir'
     ? (String(res.mensaje || '').includes('ya estaba') ? 'UnideGes 本来就开着，已经带到前台了 ✅' : 'UnideGes 打开了 ✅')
     : `已按 ${MODULOS_UNIDEGES[moduloId].tecla}，${MODULOS_UNIDEGES[moduloId].nombre} 应该开了 ✅ 看截图确认${res.ventana ? `（当前窗口：${res.ventana}）` : ''}`;
@@ -3078,7 +3071,7 @@ if (config.panel?.enabled !== false) {
       if (vivoPs) noteLive(vivoPs.line);
       const vivos = [vivoPs, getLive()].filter(Boolean).sort((a, b) => a.ageSec - b.ageSec);
       const foto = getLiveShot();
-      return { seq: chatSeq, messages, desktopLive: vivos[0] || null, liveLog: getLiveLog(), liveShot: foto ? { at: foto.at, ageSec: foto.ageSec, busy: Boolean(foto.busy) } : null };
+      return { seq: chatSeq, messages, desktopLive: vivos[0] || null, liveLog: getLiveLog(), cajaNegra: leerCajaNegra(), liveShot: foto ? { at: foto.at, ageSec: foto.ageSec, busy: Boolean(foto.busy) } : null };
     },
     callback: async (data) => {
       const ids = arrivalChatIds();
@@ -3243,6 +3236,33 @@ function lanzarUpdater(updater) {
 const UPDATE_LOG = 'update-panel.log';
 const UPDATE_ESTADO = 'update-estado.txt';
 const DESKTOP_ESTADO = 'desktop-estado.txt';
+const CAJA_NEGRA = 'caja-negra.txt';
+
+// Caja negra de la automatización de escritorio, para la columna derecha
+// del panel (encima del registro). El PS la va escribiendo EN VIVO línea a
+// línea; al terminar, aquí se reescribe con la verdad final (si el PS
+// murió sin escribir nada — error de parseo — al menos queda el mensaje).
+function registrarCajaNegra(etiqueta, res) {
+  try {
+    const file = path.resolve(config.logsDir || '.', CAJA_NEGRA);
+    const hora = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
+    const lineas = [`· ${etiqueta} · ${hora} ·`];
+    if (Array.isArray(res.trace) && res.trace.length) lineas.push(...res.trace);
+    lineas.push(`= ${res.status === 'ok' ? '完成' : '失败'}：${String(res.mensaje || '').split('\n').join(' · ').slice(0, 400)}`);
+    fs.writeFileSync(file, lineas.join('\n'), 'utf8');
+  } catch { /* la caja negra es una mejora, no un requisito */ }
+}
+
+function leerCajaNegra() {
+  try {
+    const file = path.resolve(config.logsDir || '.', CAJA_NEGRA);
+    const st = fs.statSync(file);
+    // Vieja no es útil: pasados 15 min la columna vuelve a quedar limpia.
+    if (Date.now() - st.mtimeMs > 15 * 60000) return null;
+    const lineas = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean).slice(-40);
+    return lineas.length ? lineas : null;
+  } catch { return null; }
+}
 
 // Línea viva de la automatización de escritorio: unideges-search.ps1 la
 // escribe ANTES de cada paso (y "listo"/"ERROR: ..." al terminar). El panel
