@@ -2242,13 +2242,15 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
   if (res.status !== 'ok') {
     // SIN humanizarError: el 20/07 el LLM reescribio el error del escritorio
     // como "sesion de Edge caducada" (plantilla de los flujos web) y enterro
-    // el diagnostico real. Aqui el mensaje tecnico ES el diagnostico.
+    // el diagnostico real. Aqui el mensaje tecnico ES el diagnostico — pero
+    // va PLEGADO en una nota, no en medio del chat (peticion del dueño).
     logger.warn('unideges action failed', { accion, modulo: moduloId || '', error: String(res.mensaje || '').slice(0, 500) });
-    await telegram.sendMessage(chatId, `${etiqueta}失败。原始报错（直接转发给 Claude 就能定位）：\n${String(res.mensaje || '未知错误').slice(0, 1200)}`, { __skipAI: true });
+    await telegram.sendMessage(chatId, `${etiqueta}失败。技术记录折叠在下面这条小字备注里，展开转发给 Claude 就能定位。`, { __skipAI: true });
+    const detalle = [`原始报错：${String(res.mensaje || '未知错误')}`];
     if (Array.isArray(res.trace) && res.trace.length) {
-      const traza = res.trace.slice(-25).join('\n').slice(0, 2500);
-      await telegram.sendMessage(chatId, `黑匣子记录（每一步按了什么、焦点在哪、格子里实际是什么）：\n${traza}`, { __skipAI: true, __nota: true }).catch(() => {});
+      detalle.push('', '黑匣子（每步按键/焦点/格子内容）：', ...res.trace.slice(-25));
     }
+    await telegram.sendMessage(chatId, detalle.join('\n').slice(0, 3000), { __skipAI: true, __nota: true }).catch(() => {});
     if (res.screenshot && fs.existsSync(res.screenshot)) {
       try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
     }
