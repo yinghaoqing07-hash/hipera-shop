@@ -6,17 +6,21 @@ import '@xyflow/react/dist/style.css';
 import './estilos.css';
 
 // Panel de flujo del bot, DOS vistas (idea del dueño, 23/07):
-// - 功能树: árbol de funciones (flujo.yaml) coloreado con el estado real
-//   de ejecución (/api/flujo, cada 3 s).
-// - 想法本: sus ideas de optimización como tarjetas (pendientes/hechas),
-//   con completar/borrar/exportar vía el canal de botones del panel.
-// Las dos series a propósito separadas: el árbol es la REALIDAD, las
-// ideas son el deseo; cuando una idea se implementa, pasa de una a otra.
+// - 功能树: árbol de funciones (flujo.yaml) coloreado con el estado real.
+// - 想法本: sus ideas de optimización, cada una ANCLADA al árbol: clic
+//   derecho en un nodo del árbol → aparece en 想法本 la cadena completa
+//   hasta ese nodo con un nodo EN BLANCO al final donde escribe el nombre
+//   y el prompt de diseño (petición literal del dueño, 23/07). Así dentro
+//   de meses se sigue sabiendo dónde encaja cada idea.
 
 const ANCHO = 192;
 const ALTO = 64;
 const IDEA_W = 240;
 const IDEA_H = 104;
+const GHOST_W = 132;
+const GHOST_H = 38;
+const BORR_W = 268;
+const BORR_H = 210;
 
 const embebido = window.self !== window.top;
 
@@ -50,7 +54,7 @@ async function mandarCallback(data) {
   }
 }
 
-// --- vista 功能树 -------------------------------------------------------
+// --- nodos --------------------------------------------------------------
 
 function PasoNodo({ data }) {
   return (
@@ -68,20 +72,67 @@ function PasoNodo({ data }) {
   );
 }
 
+// Eslabón gris de la cadena: un nodo del árbol REAL, repetido en la vista
+// de ideas solo como contexto ("de dónde cuelga esto").
+function GhostNodo({ data }) {
+  return (
+    <div className="nodoGhost">
+      <Handle type="target" position={Position.Left} className="asa" />
+      {data.nombre}
+      <Handle type="source" position={Position.Right} className="asa" />
+    </div>
+  );
+}
+
 function IdeaNodo({ data }) {
   const corto = data.texto.length > 90 ? data.texto.slice(0, 90) + '…' : data.texto;
   return (
     <div className={`nodoIdea ${data.estado === 'hecha' ? 'i-hecha' : 'i-pendiente'}`}>
+      <Handle type="target" position={Position.Left} className="asa" />
       <div className="ideaCabecera">
         <span>#{data.id} · {String(data.creado).slice(5, 10).replace('-', '/')}</span>
         <span className="ideaEstado">{data.estado === 'hecha' ? '✅ 已实现' : '💡 待做'}</span>
       </div>
+      {data.nombre && <div className="ideaNombre">{data.nombre}</div>}
       <div className="ideaTexto">{corto}</div>
     </div>
   );
 }
 
-const TIPOS = { paso: PasoNodo, idea: IdeaNodo };
+// El nodo EN BLANCO al final de la cadena: aquí escribe el dueño el nombre
+// y el prompt. Vive dentro del lienzo, como él lo describió.
+function BorradorNodo({ data }) {
+  const [nombre, setNombre] = useState('');
+  const [texto, setTexto] = useState('');
+  return (
+    <div className="nodoBorrador nodrag nowheel">
+      <Handle type="target" position={Position.Left} className="asa" />
+      <div className="borrTitulo">✏️ 新想法（挂在 {data.anclaNombre} 下）</div>
+      <input
+        className="borrNombre"
+        placeholder="节点名字（短）"
+        value={nombre}
+        maxLength={60}
+        onChange={(e) => setNombre(e.target.value)}
+        autoFocus
+      />
+      <textarea
+        className="borrTexto"
+        placeholder="设计/实现 prompt：想让它做什么、怎么算做好了…"
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+      />
+      <div className="borrBotones">
+        <button onClick={() => data.onGuardar(nombre, texto)} disabled={!texto.trim()}>💾 存进想法本</button>
+        <button className="peligro" onClick={data.onCancelar}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+const TIPOS = { paso: PasoNodo, idea: IdeaNodo, ghost: GhostNodo, borrador: BorradorNodo };
+
+// --- layouts ------------------------------------------------------------
 
 function calcularPosiciones(nodos, edges) {
   const g = new dagre.graphlib.Graph();
@@ -98,27 +149,89 @@ function calcularPosiciones(nodos, edges) {
   return pos;
 }
 
-// Ideas en rejilla: pendientes arriba (nuevas primero), hechas debajo.
-function posicionesIdeas(ideas) {
-  const cols = 4;
-  const pos = {};
-  const colocar = (lista, desdeFila) => {
-    lista.forEach((idea, i) => {
-      pos[`idea-${idea.id}`] = {
-        x: (i % cols) * (IDEA_W + 20) + 20,
-        y: (desdeFila + Math.floor(i / cols)) * (IDEA_H + 18) + 20
-      };
+const bordeGhost = { stroke: '#3d4a5c', strokeWidth: 1.2, strokeDasharray: '5 4' };
+
+// Vista 想法本: una FILA por idea pendiente — cadena de eslabones grises
+// (su ruta en el árbol) y la tarjeta al final; debajo, las hechas en
+// rejilla compacta. El borrador (si hay) ocupa la primera fila.
+function construirVistaIdeas(ideas, borrador, handlers) {
+  const nodes = [];
+  const edges = [];
+  let y = 20;
+
+  const filaCadena = (ruta, prefijo, finalNode, finalW, finalH) => {
+    let x = 20;
+    let anterior = null;
+    ruta.forEach((nombre, i) => {
+      const id = `${prefijo}-g${i}`;
+      nodes.push({
+        id,
+        type: 'ghost',
+        position: { x, y: y + (finalH - GHOST_H) / 2 },
+        data: { nombre },
+        draggable: false,
+        selectable: false
+      });
+      if (anterior) edges.push({ id: `${prefijo}-e${i}`, source: anterior, target: id, style: bordeGhost });
+      anterior = id;
+      x += GHOST_W + 26;
     });
-    return desdeFila + Math.ceil(lista.length / cols);
+    finalNode.position = { x, y };
+    nodes.push(finalNode);
+    if (anterior) {
+      edges.push({
+        id: `${prefijo}-efin`,
+        source: anterior,
+        target: finalNode.id,
+        style: bordeGhost,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#3d4a5c', width: 14, height: 14 }
+      });
+    }
+    y += finalH + 22;
   };
+
+  if (borrador) {
+    filaCadena(borrador.ruta, 'borr', {
+      id: 'borrador',
+      type: 'borrador',
+      data: {
+        anclaNombre: borrador.ruta[borrador.ruta.length - 1] || '?',
+        onGuardar: handlers.onGuardar,
+        onCancelar: handlers.onCancelar
+      },
+      draggable: false
+    }, BORR_W, BORR_H);
+  }
+
   const pend = ideas.filter((i) => i.estado === 'pendiente').slice().reverse();
+  for (const idea of pend) {
+    filaCadena(idea.ruta || [], `i${idea.id}`, {
+      id: `idea-${idea.id}`,
+      type: 'idea',
+      data: idea,
+      draggable: false
+    }, IDEA_W, IDEA_H);
+  }
+
   const hechas = ideas.filter((i) => i.estado === 'hecha').slice().reverse();
-  let fila = colocar(pend, 0);
-  if (hechas.length) colocar(hechas, fila + (pend.length ? 0.35 : 0));
-  return pos;
+  if (hechas.length) {
+    y += 18;
+    hechas.forEach((idea, i) => {
+      nodes.push({
+        id: `idea-${idea.id}`,
+        type: 'idea',
+        position: { x: (i % 4) * (IDEA_W + 20) + 20, y: y + Math.floor(i / 4) * (IDEA_H + 16) },
+        data: idea,
+        draggable: false
+      });
+    });
+  }
+  return { nodes, edges };
 }
 
-function Lateral({ nodo, detalle, onCerrar }) {
+// --- barras laterales ---------------------------------------------------
+
+function Lateral({ nodo, detalle, onCerrar, onColgarIdea }) {
   const historia = detalle?.historia || [];
   const ultimoError = historia.find((h) => h.estado === 'error');
   const capturas = [];
@@ -138,6 +251,9 @@ function Lateral({ nodo, detalle, onCerrar }) {
       <div className="latStats">
         {nodo.total === 0 ? '这个步骤还没跑过。'
           : `共 ${nodo.total} 次 · 成功率 ${nodo.exito}% · 平均耗时 ${fmtDur(nodo.duracionMediaMs)}`}
+      </div>
+      <div className="latBloque ideaBotones">
+        <button onClick={() => onColgarIdea(nodo.id)}>💡 在这里挂个想法</button>
       </div>
       {capturas.length > 0 && (
         <div className="latBloque">
@@ -182,10 +298,13 @@ function LateralIdea({ idea, onCerrar, onAccion }) {
       <div className="latCabecera">
         <div>
           <div className="latGrupo">想法 #{idea.id} · {fmtHora(idea.creado)}</div>
-          <div className="latNombre">{idea.estado === 'hecha' ? '✅ 已实现' : '💡 待做'}</div>
+          <div className="latNombre">{idea.nombre || (idea.estado === 'hecha' ? '✅ 已实现' : '💡 待做')}</div>
         </div>
         <button className="latCerrar" onClick={onCerrar}>✕</button>
       </div>
+      {idea.ruta?.length > 0 && (
+        <div className="latStats">位置：{idea.ruta.join(' → ')} → <b>[新] {idea.nombre || '(未命名)'}</b></div>
+      )}
       <div className="latBloque">
         <pre className="ideaCompleta">{idea.texto}</pre>
       </div>
@@ -202,12 +321,15 @@ function LateralIdea({ idea, onCerrar, onAccion }) {
   );
 }
 
+// --- app ----------------------------------------------------------------
+
 function App() {
   const [vista, setVista] = useState('arbol');
   const [grafo, setGrafo] = useState(null);
   const [ideas, setIdeas] = useState([]);
   const [sel, setSel] = useState('');
   const [detalle, setDetalle] = useState(null);
+  const [borrador, setBorrador] = useState(null);
   const [aviso, setAviso] = useState('');
   const selRef = useRef('');
   const vistaRef = useRef('arbol');
@@ -249,8 +371,52 @@ function App() {
   const nodos = grafo?.nodos || [];
   const edges = grafo?.edges || [];
 
-  // dagre solo cuando cambia la TOPOLOGÍA (ids/edges), no en cada poll:
-  // así el grafo no "salta" mientras los nodos cambian de color.
+  // Ruta raíz→nodo calculada en el cliente (primer padre de cada edge),
+  // para pintar la cadena del borrador sin esperar al servidor.
+  const rutaDe = useCallback((id) => {
+    const padre = new Map();
+    for (const e of edges) if (!padre.has(e.target)) padre.set(e.target, e.source);
+    const nombre = new Map(nodos.map((n) => [n.id, n.nombre]));
+    const ruta = [];
+    let actual = id;
+    for (let i = 0; i < 12 && actual && nombre.has(actual); i += 1) {
+      ruta.unshift(nombre.get(actual));
+      actual = padre.get(actual);
+    }
+    return ruta;
+  }, [nodos, edges]);
+
+  // Clic derecho en un nodo del árbol (o botón de la barra lateral):
+  // crear ahí una idea — salta a 想法本 con la cadena y el nodo en blanco.
+  const colgarIdea = useCallback((idNodo) => {
+    setBorrador({ ancla: idNodo, ruta: rutaDe(idNodo) });
+    setVista('ideas');
+    setSel('');
+    setDetalle(null);
+  }, [rutaDe]);
+
+  const guardarBorrador = useCallback(async (nombre, texto) => {
+    if (!borrador || !texto.trim()) return;
+    try {
+      const r = await fetch('/api/flujo/idea', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ancla: borrador.ancla, nombre, texto })
+      });
+      const j = await r.json();
+      if (j.ok) {
+        avisar(`已存 #${j.id}`);
+        setBorrador(null);
+        refrescar();
+      } else {
+        avisar(j.error || '没存上');
+      }
+    } catch {
+      avisar('没存上（bot 在重启？）');
+    }
+  }, [borrador, avisar, refrescar]);
+
+  // dagre solo cuando cambia la TOPOLOGÍA (ids/edges), no en cada poll.
   const claveTopo = useMemo(
     () => nodos.map((n) => n.id).join('|') + '::' + edges.map((e) => e.id).join('|'),
     [nodos, edges]
@@ -272,19 +438,13 @@ function App() {
     markerEnd: { type: MarkerType.ArrowClosed, color: '#3d4a5c', width: 16, height: 16 }
   }));
 
-  const posIdeas = useMemo(
-    () => posicionesIdeas(ideas),
-    [ideas.map((i) => `${i.id}:${i.estado}`).join('|')] // eslint-disable-line react-hooks/exhaustive-deps
+  const vistaIdeas = useMemo(
+    () => construirVistaIdeas(ideas, borrador, { onGuardar: guardarBorrador, onCancelar: () => setBorrador(null) }),
+    [ideas, borrador, guardarBorrador]
   );
-  const rfNodosIdeas = ideas.map((i) => ({
-    id: `idea-${i.id}`,
-    type: 'idea',
-    position: posIdeas[`idea-${i.id}`] || { x: 0, y: 0 },
-    data: i,
-    selected: sel === `idea-${i.id}`
-  }));
 
   const abrirNodo = useCallback((_ev, nodo) => {
+    if (nodo.type === 'ghost' || nodo.type === 'borrador') return;
     setSel(nodo.id);
     if (vistaRef.current !== 'arbol') return;
     setDetalle(null);
@@ -293,6 +453,11 @@ function App() {
       .then((d) => { if (d) setDetalle(d); })
       .catch(() => {});
   }, []);
+
+  const menuNodo = useCallback((ev, nodo) => {
+    ev.preventDefault();
+    if (nodo.type === 'paso') colgarIdea(nodo.id);
+  }, [colgarIdea]);
 
   const cambiarVista = useCallback((v) => {
     setVista(v);
@@ -314,7 +479,7 @@ function App() {
         </span>
         {vista === 'arbol' && (
           <span className="leyenda">
-            <i className="lg ok" />成功 <i className="lg run" />运行中 <i className="lg err" />失败 <i className="lg no" />没跑过
+            <i className="lg ok" />成功 <i className="lg run" />运行中 <i className="lg err" />失败 <i className="lg no" />没跑过 · 右键节点 = 挂想法
           </span>
         )}
         {vista === 'ideas' && pendientes > 0 && (
@@ -333,6 +498,7 @@ function App() {
             edges={rfEdgesArbol}
             nodeTypes={TIPOS}
             onNodeClick={abrirNodo}
+            onNodeContextMenu={menuNodo}
             onPaneClick={() => setSel('')}
             fitView
             minZoom={0.3}
@@ -345,20 +511,20 @@ function App() {
             <Background color="#1c2530" gap={22} />
             <Controls showInteractive={false} />
           </ReactFlow>
-        ) : ideas.length === 0 ? (
+        ) : ideas.length === 0 && !borrador ? (
           <div className="ideasVacio">
             想法本还是空的。<br />
-            在 Jarvis 里说「记个想法：…」或者发 /idea 就会出现在这里。
+            去「功能树」里右键一个节点挂想法，或者在 Jarvis 里说「记个想法：…」。
           </div>
         ) : (
           <ReactFlow
-            nodes={rfNodosIdeas}
-            edges={[]}
+            nodes={vistaIdeas.nodes}
+            edges={vistaIdeas.edges}
             nodeTypes={TIPOS}
             onNodeClick={abrirNodo}
             onPaneClick={() => setSel('')}
             fitView
-            minZoom={0.3}
+            minZoom={0.25}
             maxZoom={1.4}
             nodesDraggable={false}
             nodesConnectable={false}
@@ -368,7 +534,7 @@ function App() {
             <Controls showInteractive={false} />
           </ReactFlow>
         )}
-        {nodoSel && <Lateral nodo={nodoSel} detalle={detalle} onCerrar={() => setSel('')} />}
+        {nodoSel && <Lateral nodo={nodoSel} detalle={detalle} onCerrar={() => setSel('')} onColgarIdea={colgarIdea} />}
         {ideaSel && <LateralIdea idea={ideaSel} onCerrar={() => setSel('')} onAccion={accionIdea} />}
       </div>
     </div>

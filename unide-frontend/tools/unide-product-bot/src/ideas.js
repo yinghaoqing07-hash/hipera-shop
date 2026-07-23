@@ -28,11 +28,16 @@ export class IdeaStore {
     }
   }
 
-  agregar(texto) {
+  // extra.ancla = id del nodo del árbol donde el dueño colgó la idea (al
+  // crearla con el clic derecho del panel de flujo); extra.nombre = el
+  // nombre corto del futuro nodo. Las ideas dictadas por chat van sin ancla.
+  agregar(texto, extra = {}) {
     const limpio = String(texto || '').trim().slice(0, TOPE_TEXTO);
     if (!limpio) return null;
     this.seq += 1;
     const idea = { id: this.seq, texto: limpio, creado: new Date().toISOString(), estado: 'pendiente' };
+    if (extra.ancla) idea.ancla = String(extra.ancla).slice(0, 60);
+    if (extra.nombre) idea.nombre = String(extra.nombre).trim().slice(0, 60);
     this.ideas.push(idea);
     if (this.ideas.length > TOPE_IDEAS) this.ideas = this.ideas.slice(-TOPE_IDEAS);
     this.guardar();
@@ -69,8 +74,9 @@ export class IdeaStore {
   }
 
   // Documento para reenviar a Claude: las pendientes numeradas, con fecha,
-  // en texto plano. El encabezado ya viene redactado como petición.
-  exportarTexto() {
+  // nombre y su ruta en el árbol de funciones (rutaPor: ancla → [nombres],
+  // la aporta bot.js desde flujoArbol). El encabezado ya es la petición.
+  exportarTexto(rutaPor) {
     const pend = this.pendientes();
     if (!pend.length) return '';
     const lineas = [
@@ -78,8 +84,13 @@ export class IdeaStore {
       ''
     ];
     for (let i = 0; i < pend.length; i += 1) {
-      const fecha = String(pend[i].creado).slice(0, 10);
-      lineas.push(`${i + 1}. [#${pend[i].id} · ${fecha}]`, pend[i].texto, '');
+      const idea = pend[i];
+      const fecha = String(idea.creado).slice(0, 10);
+      const titulo = idea.nombre ? ` ${idea.nombre}` : '';
+      lineas.push(`${i + 1}. [#${idea.id} · ${fecha}]${titulo}`);
+      const ruta = idea.ancla && rutaPor ? rutaPor(idea.ancla) : null;
+      if (ruta && ruta.length) lineas.push(`位置：${ruta.join(' → ')} → [新] ${idea.nombre || '(未命名)'}`);
+      lineas.push(idea.texto, '');
     }
     return lineas.join('\n');
   }
@@ -107,18 +118,21 @@ export function matchIdeaNatural(text) {
   return null;
 }
 
-export function formatIdeaList(store) {
+export function formatIdeaList(store, rutaPor) {
   const pend = store.pendientes();
   const hechas = store.hechas().length;
   if (!pend.length) {
     return hechas
-      ? `想法本是空的（已完成 ${hechas} 条）。想到什么就发「/idea 内容」或者直接说「记个想法：…」。`
-      : '想法本还是空的。想到什么就发「/idea 内容」或者直接说「记个想法：…」。';
+      ? `想法本是空的（已完成 ${hechas} 条）。想到什么就发「/idea 内容」，或者在流程图的树上右键挂一个。`
+      : '想法本还是空的。想到什么就发「/idea 内容」，或者在流程图的树上右键挂一个。';
   }
   const lineas = [`💡 想法本 · ${pend.length} 条待做${hechas ? `（另有 ${hechas} 条已完成）` : ''}`, ''];
   for (const idea of pend) {
     const fecha = String(idea.creado).slice(5, 10).replace('-', '/');
-    lineas.push(`#${idea.id} · ${fecha}`, idea.texto.length > 200 ? idea.texto.slice(0, 200) + '…' : idea.texto, '');
+    lineas.push(`#${idea.id} · ${fecha}${idea.nombre ? ` · ${idea.nombre}` : ''}`);
+    const ruta = idea.ancla && rutaPor ? rutaPor(idea.ancla) : null;
+    if (ruta && ruta.length) lineas.push(`位置：${ruta.join(' → ')}`);
+    lineas.push(idea.texto.length > 200 ? idea.texto.slice(0, 200) + '…' : idea.texto, '');
   }
   lineas.push('攒够了按「📤 导出发给 Claude」，一个文件全带走。');
   return lineas.join('\n');

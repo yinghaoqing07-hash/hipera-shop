@@ -116,10 +116,27 @@ function construirArbol(nodos, edges, error) {
   const patrones = [];
   for (const n of nodos) for (const p of n.match) if (p) patrones.push({ p, id: n.id });
   patrones.sort((a, b) => b.p.length - a.p.length);
+  // primer padre de cada nodo (el árbol es un DAG; para "la ruta" basta un
+  // camino, y el primero declarado en el yaml es el natural).
+  const padreDe = new Map();
+  for (const [a, b] of edges) if (!padreDe.has(b)) padreDe.set(b, a);
+  const nombreDe = new Map(nodos.map((n) => [n.id, n.nombre]));
   return {
     nodos,
     edges,
     error,
+    // Ruta raíz→nodo como lista de nombres (para anclar ideas al árbol).
+    // null si el id no existe; con tope por si alguien edita un ciclo.
+    rutaHasta(id) {
+      if (!nombreDe.has(id)) return null;
+      const ruta = [];
+      let actual = id;
+      for (let i = 0; i < 12 && actual; i += 1) {
+        ruta.unshift(nombreDe.get(actual));
+        actual = padreDe.get(actual);
+      }
+      return ruta;
+    },
     // etiqueta de conNavegador → id de nodo ('' si ninguno): exacto o prefijo,
     // así "搜商品 manzana" cae en el nodo 搜商品.
     nodoPorEtiqueta(etiqueta) {

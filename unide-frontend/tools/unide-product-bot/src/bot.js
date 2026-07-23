@@ -618,14 +618,14 @@ async function enviarListaIdeas(chatId) {
     { text: `🗑 删 #${i.id}`, callback_data: `idea:del:${i.id}` }
   ]));
   if (pend.length) botones.push([{ text: '📤 导出发给 Claude', callback_data: 'idea:exp' }]);
-  await telegram.sendMessage(chatId, formatIdeaList(ideaStore), {
+  await telegram.sendMessage(chatId, formatIdeaList(ideaStore, (ancla) => flujoArbol.rutaHasta(ancla)), {
     __skipAI: true,
     ...(botones.length ? { reply_markup: { inline_keyboard: botones } } : {})
   });
 }
 
 async function exportarIdeas(chatId) {
-  const texto = ideaStore.exportarTexto();
+  const texto = ideaStore.exportarTexto((ancla) => flujoArbol.rutaHasta(ancla));
   if (!texto) {
     await telegram.sendMessage(chatId, '想法本里没有待做的想法，先存几条再导出。', { __skipAI: true });
     return;
@@ -3543,8 +3543,24 @@ if (config.panel?.enabled !== false) {
         return { id, nombre: nodo.nombre, grupo: nodo.grupo, historia: flujoEstado.historial(id, 40) };
       },
       // Segunda vista del panel de flujo: el cuaderno de ideas (las
-      // "ganas de optimizar" del dueño, separadas del árbol real).
-      ideas: () => ({ ideas: ideaStore.ideas }),
+      // "ganas de optimizar" del dueño, separadas del árbol real). Cada
+      // idea viaja con su ruta en el árbol para que se dibuje la cadena.
+      ideas: () => ({
+        ideas: ideaStore.ideas.map((i) => ({
+          ...i,
+          ruta: i.ancla ? (flujoArbol.rutaHasta(i.ancla) || []) : []
+        }))
+      }),
+      // Creación MANUAL desde el panel de flujo (clic derecho en un nodo
+      // del árbol): ancla + nombre + prompt. La vía de chat sigue viva.
+      crearIdea: ({ ancla, nombre, texto }) => {
+        const anclaValida = ancla && flujoArbol.rutaHasta(String(ancla)) ? String(ancla) : '';
+        const idea = ideaStore.agregar(texto, { ancla: anclaValida, nombre });
+        if (!idea) return { ok: false, error: '想法内容是空的' };
+        notePanelActivity('💡 新想法 #' + idea.id);
+        logger.info('idea creada desde el panel de flujo', { id: idea.id, ancla: anclaValida });
+        return { ok: true, id: idea.id };
+      },
       // Capturas del historial: SOLO basename y SOLO de la carpeta de
       // capturas (nada de rutas arbitrarias desde el navegador).
       foto: (nombre) => {

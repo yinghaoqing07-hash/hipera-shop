@@ -52,6 +52,27 @@ test('cargarArbol nunca lanza: yaml roto → árbol vacío con error', () => {
   assert.match(sinArchivo.error, /flujo\.yaml/);
 });
 
+test('rutaHasta recorre los padres hasta la raíz', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flujo-'));
+  fs.writeFileSync(path.join(dir, 'flujo.yaml'), [
+    'nodos:',
+    '  - id: a',
+    '    nombre: A',
+    '  - id: b',
+    '    nombre: B',
+    '  - id: c',
+    '    nombre: C',
+    'edges:',
+    '  - [a, b]',
+    '  - [b, c]',
+    ''
+  ].join('\n'), 'utf8');
+  const arbol = cargarArbol({ __toolRoot: dir }, null);
+  assert.deepEqual(arbol.rutaHasta('c'), ['A', 'B', 'C']);
+  assert.deepEqual(arbol.rutaHasta('a'), ['A']);
+  assert.equal(arbol.rutaHasta('zz'), null);
+});
+
 test('el flujo.yaml real del repo carga sin errores', () => {
   const arbol = cargarArbol({ __toolRoot: path.resolve(import.meta.dirname, '..') }, null);
   assert.equal(arbol.error, '');
