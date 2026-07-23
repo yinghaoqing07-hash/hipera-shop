@@ -139,6 +139,11 @@ export function startPanel(config, logger, hooks) {
         res.end(JSON.stringify(hooks.flujo ? hooks.flujo.grafo() : { nodos: [], edges: [] }));
         return;
       }
+      if (req.method === 'GET' && req.url === '/api/flujo/ideas') {
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(hooks.flujo?.ideas ? hooks.flujo.ideas() : { ideas: [] }));
+        return;
+      }
       if (req.method === 'GET' && req.url.startsWith('/api/flujo/paso')) {
         let id = '';
         try { id = String(new URL(req.url, 'http://x').searchParams.get('id') || ''); } catch { /* sin query */ }
