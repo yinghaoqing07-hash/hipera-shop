@@ -8,7 +8,7 @@ import { parseFruitBatchLines, parseFruitCommandArg, partitionFruitBatch, resolv
 import { buildDraftFromTally, buildTallyKeyboard, cycleCount, loadTemplate } from './orderTemplates.js';
 import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.js';
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
-import { llmComposeReply, llmConfigured, llmDiagnosticoRPA, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRetrospectivaPedido, llmRouteIntent, proveedorLlm } from './llm.js';
+import { llmComposeReply as llmComposeReplyRaw, llmConfigured, llmDiagnosticoRPA, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRetrospectivaPedido, llmRouteIntent as llmRouteIntentRaw, proveedorLlm } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
@@ -17,7 +17,7 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop, applyOrderDesktop, applyPriceDesktop, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop, searchDesktop, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop as applyBloqDesktopRaw, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
@@ -259,6 +259,37 @@ const autoAdvisor = new AutoAdvisorScheduler(config, logger);
 // sondas explícitas (tareas diarias, diagnóstico).
 const flujoArbol = cargarArbol(config, logger);
 const flujoEstado = await abrirFlujoEstado(config, logger);
+
+// Sonda genérica para pasos que NO pasan por conNavegador (RPA de
+// escritorio, llamadas al LLM): misma semántica que la sonda de
+// conNavegador. Los resultados 'disabled'/'skipped' no cuentan como
+// ejecución; `cuando` (opcional) apaga la sonda sin tocar la función.
+function conSondaFlujo(nodo, fn, cuando) {
+  return async (...args) => {
+    if (cuando && !cuando()) return fn(...args);
+    flujoEstado.iniciar(nodo);
+    let res;
+    try {
+      res = await fn(...args);
+    } catch (error) {
+      flujoEstado.terminar(nodo, { ok: false, detalle: error.message });
+      throw error;
+    }
+    if (res && (res.status === 'disabled' || res.status === 'skipped')) {
+      flujoEstado.abandonar(nodo);
+      return res;
+    }
+    flujoEstado.terminar(nodo, { ok: esResultadoFlujoOk(res), detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
+    return res;
+  };
+}
+const searchDesktop = conSondaFlujo('ug-buscar', searchDesktopRaw);
+const readPriceDesktop = conSondaFlujo('ug-leer-precio', readPriceDesktopRaw);
+const applyPriceDesktop = conSondaFlujo('ug-cambiar-precio', applyPriceDesktopRaw);
+const applyBloqDesktop = conSondaFlujo('ug-bloq', applyBloqDesktopRaw);
+const applyOrderDesktop = conSondaFlujo('ug-rellenar-pedido', applyOrderDesktopRaw);
+const llmRouteIntent = conSondaFlujo('ai-router', llmRouteIntentRaw, () => llmConfigured(config));
+const llmComposeReply = conSondaFlujo('ai-responder', llmComposeReplyRaw, () => llmConfigured(config));
 let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length, memories: memoryStore.count, operations: operationLedger.count });
@@ -914,6 +945,7 @@ async function handleProductDiagnosticsDocument(message) {
   const reportPath = path.join(reportsDir, `${stamp}-product-diagnostics.csv`);
 
   activeConversations.update(chatId, { status: 'running', fileName });
+  flujoEstado.iniciar('herr-diag-productos');
   try {
     if (document.__localPath) {
       // Subido desde el panel: ya esta en disco, solo copiar.
@@ -974,12 +1006,14 @@ async function handleProductDiagnosticsDocument(message) {
     }
 
     setLive('[diagnostico] listo');
+    flujoEstado.terminar('herr-diag-productos', { ok: true, detalle: `${results.length} 件` });
     writeDiagnosticsCsv(reportPath, results);
     await telegram.sendMessage(chatId, formatDiagnosticsSummary(results, parsed.meta), { __skipAI: true });
     await telegram.sendDocument(chatId, reportPath, '诊断明细 CSV', { __skipAI: true, __autoAbrir: true });
     activeConversations.clear(chatId);
   } catch (error) {
     setLive('[diagnostico] ERROR: ' + error.message);
+    flujoEstado.terminar('herr-diag-productos', { ok: false, detalle: error.message });
     logger.error('product diagnostics failed', { fileName, error: error.message });
     activeConversations.update(chatId, {
       status: 'awaiting_file',
@@ -1012,10 +1046,12 @@ async function handleDocument(message) {
   try {
     const file = await telegram.getFile(document.file_id);
     await telegram.downloadFile(file.file_path, zipPath);
+    flujoEstado.iniciar('herr-update');
     const result = await applyUpdatePackage(zipPath, config, logger);
+    flujoEstado.terminar('herr-update', { ok: result.status === 'ok', detalle: result.status === 'ok' ? 'zip por Telegram' : String(result.error || '').slice(0, 300) });
     if (result.status === 'ok') await telegram.sendMessage(chatId, '更新完成。已保留 .env 和 config.local.json。请关掉黑窗口，重新双击 start-bot.cmd，让新版生效。');
     else await telegram.sendMessage(chatId, `更新失败：\n${result.error}`);
-  } catch (error) { logger.error('telegram update failed', { error: error.message }); await telegram.sendMessage(chatId, `更新失败：\n${error.message}`); }
+  } catch (error) { flujoEstado.terminar('herr-update', { ok: false, detalle: error.message }); logger.error('telegram update failed', { error: error.message }); await telegram.sendMessage(chatId, `更新失败：\n${error.message}`); }
 }
 
 async function handleCallback(callback) {
@@ -1780,6 +1816,10 @@ async function startTally(chatId, name) {
   );
   const session = sessions.get(id);
   if (session && sent?.message_id) { session.tally.messageId = sent.message_id; sessions.set(id, session); }
+  // Sonda del flujo: el punteo es interactivo (dura lo que tarde el dueño),
+  // así que se registra el LANZAMIENTO como evento instantáneo.
+  flujoEstado.iniciar('herr-tally');
+  flujoEstado.terminar('herr-tally', { ok: true, detalle: name });
 }
 
 async function handleTallyTap(chatId, callbackId, payload) {
@@ -2597,15 +2637,7 @@ async function maybePrintArrivalChecklist() {
     arrivalScheduler.markSent(due.key);
     return;
   }
-  flujoEstado.iniciar('auto-imprimir');
-  let delivered = false;
-  try {
-    delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
-  } catch (error) {
-    flujoEstado.terminar('auto-imprimir', { ok: false, detalle: error.message });
-    throw error;
-  }
-  flujoEstado.terminar('auto-imprimir', { ok: Boolean(delivered), detalle: delivered ? '' : '没能发送/打印清单' });
+  const delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
   if (delivered) arrivalScheduler.markSent(due.key);
 }
 
@@ -2822,7 +2854,21 @@ async function handleArrivalByNames(chatId, arg) {
 // lista entera en el chat era demasiado larga). El texto completo solo se
 // manda como respaldo si la impresión no salió (no-Windows, error o
 // autoPrint desactivado). Devuelve true si algo llegó (para markSent).
+// Sonda del flujo AQUÍ y no en el llamador: así cuentan igual la impresión
+// automática del día y los /llegada manuales.
 async function sendAndPrintChecklist(chatIds, collected, dateStr) {
+  flujoEstado.iniciar('auto-imprimir');
+  try {
+    const delivered = await imprimirYEnviarChecklist(chatIds, collected, dateStr);
+    flujoEstado.terminar('auto-imprimir', { ok: Boolean(delivered), detalle: delivered ? '' : '没能发送/打印清单' });
+    return delivered;
+  } catch (error) {
+    flujoEstado.terminar('auto-imprimir', { ok: false, detalle: error.message });
+    throw error;
+  }
+}
+
+async function imprimirYEnviarChecklist(chatIds, collected, dateStr) {
   const orders = collected.orders;
   const checklist = formatChecklist(orders, dateStr);
   const names = orders.map((o) => `${o.orderName}（${o.items?.length ?? 0} 行）`).join('、');
@@ -3477,7 +3523,14 @@ if (config.panel?.enabled !== false) {
         const updater = path.join(config.__toolRoot, 'update-bot.ps1');
         if (!fs.existsSync(updater)) return '找不到 update-bot.ps1，先手动跑一次 update-bot.cmd';
         logger.info('panel admin: update', { updater });
-        if (!lanzarUpdater(updater)) return '启动更新器失败，看看 logs 里的报错';
+        // El resultado real llega tras reiniciar; aquí solo consta que se
+        // lanzó el actualizador (evento instantáneo en el panel de flujo).
+        flujoEstado.iniciar('herr-update');
+        if (!lanzarUpdater(updater)) {
+          flujoEstado.terminar('herr-update', { ok: false, detalle: '更新器启动失败' });
+          return '启动更新器失败，看看 logs 里的报错';
+        }
+        flujoEstado.terminar('herr-update', { ok: true, detalle: '面板触发，更新器已启动' });
         return '正在后台更新。面板会断开一两分钟，更新完 bot 自己回来，刷新即可';
       }
       return '';

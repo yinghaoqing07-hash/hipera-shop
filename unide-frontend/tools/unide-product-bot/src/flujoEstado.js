@@ -47,6 +47,11 @@ export async function abrirFlujoEstado(config, logger, opciones = {}) {
       };
       try { backend.insertar(fila); } catch (error) { logger?.warn('flujo estado no pudo escribir', { error: error.message }); }
     },
+    // Cancela el "corriendo" SIN escribir fila: para resultados 'disabled'
+    // o 'skipped' que no son ejecuciones de verdad.
+    abandonar(nodo) {
+      corriendo.delete(nodo);
+    },
     corriendo: () => [...corriendo.keys()],
     // resumen() → { [nodo]: { ultimoEstado, ultimaVez, total, exitos,
     // duracionMediaMs } } (media solo de ejecuciones OK: los fallos suelen
