@@ -26,6 +26,9 @@ import { limpiarArchivosViejos } from './housekeeping.js';
 import { aplicarFix, empaquetarEvidencia, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, rutaEnRepo, validarPropuesta } from './diagnostico.js';
 import { abrirPrConArchivo, githubConfigured } from './github.js';
 import { MODULOS_UNIDEGES, accionUnideges, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
+import { cargarArbol } from './flujoArbol.js';
+import { abrirFlujoEstado } from './flujoEstado.js';
+import { renderFlujoPage } from './flujoPage.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -251,6 +254,11 @@ const panelToasts = new Map();
 const orderReminderScheduler = new OrderReminderScheduler(config, logger);
 const arrivalScheduler = new ArrivalChecklistScheduler(config, logger);
 const autoAdvisor = new AutoAdvisorScheduler(config, logger);
+// Panel de flujo (/flujo): árbol de funciones + estado de ejecución por
+// nodo. Se alimenta desde conNavegador (etiqueta → nodo) y unas pocas
+// sondas explícitas (tareas diarias, diagnóstico).
+const flujoArbol = cargarArbol(config, logger);
+const flujoEstado = await abrirFlujoEstado(config, logger);
 let offset = 0;
 
 logger.info('unide product bot started', { desktopEnabled: config.desktop.enabled, supplierRows: supplierIndex.rows.length, storeRows: storeIndex.rows.length, memories: memoryStore.count, operations: operationLedger.count });
@@ -260,12 +268,41 @@ logger.info('unide product bot started', { desktopEnabled: config.desktop.enable
 // Si hay que esperar, se le dice al dueño qué está corriendo y que su
 // tarea arranca sola al terminar. chatId null = tarea automática, sin aviso.
 function conNavegador(chatId, etiqueta, fn) {
-  return conCandadoWeb(etiqueta, fn, (t) => {
+  // Sonda del panel de flujo: si la etiqueta corresponde a un nodo del
+  // árbol, se registra inicio/fin/duración/captura. iniciar() va DENTRO
+  // del candado: mientras espera cola el nodo no debe salir "corriendo".
+  const nodo = flujoArbol.nodoPorEtiqueta(etiqueta);
+  const fnConSonda = !nodo ? fn : async () => {
+    flujoEstado.iniciar(nodo);
+    try {
+      const res = await fn();
+      flujoEstado.terminar(nodo, { ok: esResultadoFlujoOk(res), detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
+      return res;
+    } catch (error) {
+      flujoEstado.terminar(nodo, { ok: false, detalle: error.message });
+      throw error;
+    }
+  };
+  return conCandadoWeb(etiqueta, fnConSonda, (t) => {
     notePanelActivity(`排队：${etiqueta}`);
     if (!chatId || !t) return;
     const min = t.minutos > 0 ? `（已经跑了 ${t.minutos} 分钟）` : '';
     telegram.sendMessage(chatId, `浏览器这会儿正忙着「${t.etiqueta}」${min}。「${etiqueta}」排在它后面，完了会自动开始，不用再发一遍。`, { __skipAI: true }).catch(() => {});
   });
+}
+
+// Convención de resultados de los flujos web/escritorio: objetos con
+// { ok: false } o { status: != 'ok' } son fallo; todo lo demás, éxito.
+function esResultadoFlujoOk(res) {
+  if (!res || typeof res !== 'object') return true;
+  if (res.ok === false) return false;
+  if (res.status && res.status !== 'ok') return false;
+  return true;
+}
+
+function detalleResultadoFlujo(res) {
+  if (!res || typeof res !== 'object') return '';
+  return String(res.error || res.mensaje || '').slice(0, 300);
 }
 
 // OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).
@@ -2288,8 +2325,18 @@ async function lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res
   diagCiclos.set(step, ciclo);
   notePanelActivity('AI 诊断：' + etiqueta);
   await telegram.sendMessage(chatId, `正在打包证据给 AI 诊断（第 ${ciclo}/${maxCiclos} 轮，需要一两分钟）…`, { __skipAI: true });
+  flujoEstado.iniciar('diag-evidencia');
   const paquete = empaquetarEvidencia(config, { etiqueta, step, res });
-  const respuesta = await llmDiagnosticoRPA(paquete.texto, paquete.imagenes, config, logger);
+  flujoEstado.terminar('diag-evidencia', { ok: true, detalle: etiqueta });
+  flujoEstado.iniciar('diag-llm');
+  let respuesta;
+  try {
+    respuesta = await llmDiagnosticoRPA(paquete.texto, paquete.imagenes, config, logger);
+  } catch (error) {
+    flujoEstado.terminar('diag-llm', { ok: false, detalle: error.message });
+    throw error;
+  }
+  flujoEstado.terminar('diag-llm', { ok: true, detalle: etiqueta });
   const fix = extraerArchivoCorregido(respuesta);
   const resumen = resumenSinCodigo(respuesta).slice(0, 3000);
   const id = String(diagSeq++);
@@ -2329,7 +2376,9 @@ async function handleDiagCallback(chatId, callbackId, resto) {
     if (!pend.fix) { await telegram.sendMessage(chatId, '这条诊断没有附带可应用的代码。', { __skipAI: true }); return; }
     // Valvulas dentro de aplicarFix: lista blanca, cordura, validacion con
     // el PowerShell REAL de esta maquina y backup con marca de tiempo.
+    flujoEstado.iniciar('diag-fix');
     const resultado = aplicarFix(config, pend.fix);
+    flujoEstado.terminar('diag-fix', { ok: resultado.ok, detalle: resultado.ok ? pend.etiqueta : resultado.motivo });
     if (!resultado.ok) {
       await telegram.sendMessage(chatId, `没应用：${resultado.motivo}`, { __skipAI: true });
       return;
@@ -2348,8 +2397,9 @@ async function handleDiagCallback(chatId, callbackId, resto) {
     // MISMAS valvulas que el parche local (lista blanca + cordura + parser
     // real de PowerShell), pero sin tocar el archivo de la maquina: aqui
     // solo se valida y, si pasa, se abre el PR. main NUNCA se toca.
+    flujoEstado.iniciar('diag-pr');
     const val = validarPropuesta(config, pend.fix);
-    if (!val.ok) { await telegram.sendMessage(chatId, `没提交：${val.motivo}`, { __skipAI: true }); return; }
+    if (!val.ok) { flujoEstado.terminar('diag-pr', { ok: false, detalle: val.motivo }); await telegram.sendMessage(chatId, `没提交：${val.motivo}`, { __skipAI: true }); return; }
     await telegram.sendMessage(chatId, '正在开 PR（推分支 + 建 PR）…', { __skipAI: true });
     try {
       const sello = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -2363,9 +2413,11 @@ async function handleDiagCallback(chatId, callbackId, resto) {
       });
       diagPendientes.delete(id);
       notePanelActivity('AI 修复已开 PR');
+      flujoEstado.terminar('diag-pr', { ok: true, detalle: pr.url });
       logger.info('diagnostico PR abierto', { url: pr.url, rama: pr.rama });
       await telegram.sendMessage(chatId, `已开 PR，你看一眼 diff，满意就在页面上点 Merge（合并后按「更新 BOT」装上）：\n${pr.url}`, { __skipAI: true });
     } catch (error) {
+      flujoEstado.terminar('diag-pr', { ok: false, detalle: error.message });
       logger.error('diagnostico PR fallo', { error: error.message });
       await telegram.sendMessage(chatId, `开 PR 失败：${String(error.message || '').slice(0, 200)}`, { __skipAI: true });
     }
@@ -2499,6 +2551,7 @@ async function handlePedidoWebForm(chatId) {
 async function maybeSendOrderReminder() {
   const due = orderReminderScheduler.due(new Date());
   if (!due) return;
+  flujoEstado.iniciar('auto-recordatorio');
   let sent = 0;
   for (const chatId of due.chatIds) {
     try {
@@ -2508,6 +2561,7 @@ async function maybeSendOrderReminder() {
       logger.error('ordering reminder failed', { chatId, error: error.message });
     }
   }
+  flujoEstado.terminar('auto-recordatorio', { ok: sent > 0, detalle: sent > 0 ? '' : '一条都没发出去（网络？）' });
   if (sent > 0) orderReminderScheduler.markSent(due.key);
 }
 
@@ -2543,7 +2597,15 @@ async function maybePrintArrivalChecklist() {
     arrivalScheduler.markSent(due.key);
     return;
   }
-  const delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
+  flujoEstado.iniciar('auto-imprimir');
+  let delivered = false;
+  try {
+    delivered = await sendAndPrintChecklist(arrivalChatIds(), collected, due.dateStr);
+  } catch (error) {
+    flujoEstado.terminar('auto-imprimir', { ok: false, detalle: error.message });
+    throw error;
+  }
+  flujoEstado.terminar('auto-imprimir', { ok: Boolean(delivered), detalle: delivered ? '' : '没能发送/打印清单' });
   if (delivered) arrivalScheduler.markSent(due.key);
 }
 
@@ -2558,11 +2620,14 @@ async function maybeRunScheduledTasks() {
     for (const task of due) {
       try {
         notePanelActivity('定时：' + task.label);
+        flujoEstado.iniciar('tarea-programada');
         replyContextByChat.set(String(task.chatId), { text: '定时任务：' + task.label, at: Date.now() });
         await telegram.sendMessage(task.chatId, '定时任务到点 #' + task.id + '：' + task.label + '\n现在开始执行 ' + task.command + '。');
         await executeScheduledTask(task);
         scheduledTasks.complete(task.id);
+        flujoEstado.terminar('tarea-programada', { ok: true, detalle: task.label });
       } catch (error) {
+        flujoEstado.terminar('tarea-programada', { ok: false, detalle: `${task.label}：${error.message}`.slice(0, 300) });
         scheduledTasks.fail(task.id, error.message);
         logger.error('scheduled task failed', { taskId: task.id, action: task.action, error: error.message });
         try { await telegram.sendMessage(task.chatId, '定时任务 #' + task.id + ' 执行失败：' + error.message); } catch { /* sin red */ }
@@ -2606,8 +2671,19 @@ async function maybeRunAutoAdvisor() {
   const chatIds = arrivalChatIds();
   if (!chatIds.length || !config.webOrder?.enabled) { autoAdvisor.markSent(due.key); return; }
   autoAdvisor.markSent(due.key); // primero: si algo casca a mitad, no reintentar en bucle
-  const chatId = chatIds[0];
+  // Sonda del panel de flujo: la tarea compuesta del día. Los pasos web
+  // que lanza (promos, análisis) ya se registran solos vía conNavegador.
+  flujoEstado.iniciar('auto-advisor');
+  const fallos = [];
+  try {
+    await correrAutoAdvisor(due, chatIds[0], fallos);
+  } catch (error) {
+    fallos.push(error.message);
+  }
+  flujoEstado.terminar('auto-advisor', { ok: fallos.length === 0, detalle: fallos.join('; ').slice(0, 300) });
+}
 
+async function correrAutoAdvisor(due, chatId, fallos) {
   // 0. Chequeo previo: detectar los problemas AHORA (Edge apagado, disco
   // lleno...) y contarlos de una vez, en vez de que cada tarea muera a
   // timeouts por su cuenta. Sin Edge, las tareas web del día se saltan.
@@ -2619,6 +2695,7 @@ async function maybeRunAutoAdvisor() {
     if (salud.edgeVivo === false) {
       await telegram.sendMessage(chatId, '今天的自动刷新促销和新单分析先跳过。Edge 开好后随时可以发 /promociones 手动补。', { __skipAI: true });
       notePanelActivity('⏰ 每日任务跳过：Edge 没开');
+      fallos.push('Edge 没开，今天跳过');
       return;
     }
   } catch (error) {
@@ -2631,8 +2708,12 @@ async function maybeRunAutoAdvisor() {
     await telegram.sendMessage(chatId, '⏰ 每日自动任务：先刷新促销数据…');
     const result = await conNavegador(chatId, '每日刷新促销', () => fetchActivePromotions(config, due.dateStr, logger));
     if (result.ok) await telegram.sendMessage(chatId, `促销数据已刷新 ✅\n${formatPromotionsSummary(result, config).split('\n').slice(0, 3).join('\n')}`);
-    else await telegram.sendMessage(chatId, await humanizarError('每日自动刷新促销', `自动刷新促销失败（${result.stage || '?'}）：${result.error || '未知'}。今天先用旧数据。`));
+    else {
+      fallos.push(`刷新促销失败（${result.stage || '?'}）`);
+      await telegram.sendMessage(chatId, await humanizarError('每日自动刷新促销', `自动刷新促销失败（${result.stage || '?'}）：${result.error || '未知'}。今天先用旧数据。`));
+    }
   } catch (error) {
+    fallos.push(`刷新促销出错：${error.message}`);
     logger.error('auto promotions failed', { error: error.message });
     try { await telegram.sendMessage(chatId, `自动刷新促销出错：${error.message}`); } catch { /* noop */ }
   }
@@ -2640,7 +2721,7 @@ async function maybeRunAutoAdvisor() {
   // 2. Pedidos PDA nuevos → análisis de ahorro automático.
   try {
     const listed = await conNavegador(chatId, '读订单列表', () => listOrders(config, logger));
-    if (!listed.ok) { await telegram.sendMessage(chatId, `自动任务读不了 Pedidos 列表：${listed.error}`); return; }
+    if (!listed.ok) { fallos.push('读不了 Pedidos 列表'); await telegram.sendMessage(chatId, `自动任务读不了 Pedidos 列表：${listed.error}`); return; }
     const lookback = Number.isFinite(Number(config.autoAdvisor?.lookbackDays)) ? Number(config.autoAdvisor.lookbackDays) : 2;
     const cutoff = addDays(due.dateStr, -lookback);
     const fresh = listed.rows.filter((r) => /pda/i.test(r.nombre)
@@ -2654,6 +2735,7 @@ async function maybeRunAutoAdvisor() {
       autoAdvisor.markOrderAnalyzed(row.nombre);
     }
   } catch (error) {
+    fallos.push(`分析新单出错：${error.message}`);
     logger.error('auto advisor failed', { error: error.message });
     try { await telegram.sendMessage(chatId, `自动分析新单出错：${error.message}`); } catch { /* noop */ }
   }
@@ -3282,6 +3364,46 @@ if (config.panel?.enabled !== false) {
       };
     },
     commandList: () => formatCommandList(),
+    // Panel de flujo (/flujo): árbol + estado fusionados en un JSON. La
+    // página lo pide cada 3 s para colorear los nodos en vivo.
+    flujo: {
+      pagina: (version) => renderFlujoPage(version),
+      grafo: () => {
+        const r = flujoEstado.resumen();
+        const activos = new Set(flujoEstado.corriendo());
+        return {
+          motor: flujoEstado.motor,
+          error: flujoArbol.error || '',
+          nodos: flujoArbol.nodos.map((n) => {
+            const s = r[n.id];
+            return {
+              id: n.id,
+              nombre: n.nombre,
+              grupo: n.grupo,
+              estado: activos.has(n.id) ? 'corriendo' : (s ? (s.ultimoEstado === 'ok' ? 'ok' : 'error') : 'nunca'),
+              exito: s && s.total ? Math.round((100 * s.exitos) / s.total) : null,
+              duracionMediaMs: s ? s.duracionMediaMs : 0,
+              total: s ? s.total : 0,
+              ultimaVez: s ? s.ultimaVez : ''
+            };
+          }),
+          edges: flujoArbol.edges.map(([a, b]) => ({ id: `${a}->${b}`, source: a, target: b }))
+        };
+      },
+      paso: (id) => {
+        const nodo = flujoArbol.nodos.find((n) => n.id === id);
+        if (!nodo) return null;
+        return { id, nombre: nodo.nombre, grupo: nodo.grupo, historia: flujoEstado.historial(id, 40) };
+      },
+      // Capturas del historial: SOLO basename y SOLO de la carpeta de
+      // capturas (nada de rutas arbitrarias desde el navegador).
+      foto: (nombre) => {
+        const base = String(nombre || '').split(/[\\/]/).pop();
+        if (!base || !/\.(png|jpe?g)$/i.test(base)) return null;
+        const ruta = path.join(config.desktop?.screenshotDir || 'screenshots', base);
+        return fs.existsSync(ruta) ? ruta : null;
+      }
+    },
     // Detalle de las tarjetas del panel: 今日 = lista de llegada de hoy
     // (mismo formato imprimible), 促销 = el CSV completo de promociones
     // (el panel lo vuelve legible con csvLegible).

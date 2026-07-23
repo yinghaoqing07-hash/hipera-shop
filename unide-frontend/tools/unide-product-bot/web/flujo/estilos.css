@@ -1,0 +1,122 @@
+/* Panel de flujo: misma familia visual que el panel JARVIS (fondo #0d1117,
+   monoespaciada, verde/rojo/ámbar). */
+
+html, body, #raiz { height: 100%; margin: 0; }
+body {
+  background: #0d1117; color: #c9d4de;
+  font-family: Consolas, "Cascadia Mono", "Courier New", "Microsoft YaHei", monospace;
+}
+* { box-sizing: border-box; }
+
+.pantalla { display: flex; flex-direction: column; height: 100%; }
+
+.barra {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 20px; font-size: 13px; letter-spacing: .06em;
+  color: #76879a; border-bottom: 1px solid #1c2530;
+}
+.titulo { color: #a8c3d6; }
+.pastilla {
+  font-size: 11px; color: #6f9cbd; border: 1px solid #2a3646;
+  border-radius: 9px; padding: 1px 8px;
+}
+.leyenda { font-size: 11px; display: flex; align-items: center; gap: 6px; font-style: normal; }
+.lg { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 8px; }
+.lg.ok { background: #22c55e; }
+.lg.run { background: #eab308; }
+.lg.err { background: #ef4444; }
+.lg.no { background: #4b5563; }
+.hueco { flex: 1; }
+.volver { color: #8fa2b5; text-decoration: none; }
+.volver:hover { color: #d5ecf8; }
+
+.aviso {
+  padding: 8px 20px; font-size: 12px;
+  color: #fbbf24; background: #21160a; border-bottom: 1px solid #3a2c12;
+}
+
+.lienzo { flex: 1; position: relative; min-height: 0; }
+
+/* nodos */
+.nodoPaso {
+  width: 192px; min-height: 64px;
+  background: #131a23; border: 1.5px solid #3d4a5c; border-radius: 9px;
+  padding: 7px 11px; cursor: pointer;
+  transition: border-color .25s, box-shadow .25s;
+}
+.nodoPaso:hover { box-shadow: 0 0 0 2px rgba(111, 156, 189, .25); }
+.nodoGrupo { font-size: 9px; color: #5b6b7e; letter-spacing: .08em; }
+.nodoNombre { font-size: 13px; color: #d5e2ec; margin: 2px 0 3px; }
+.nodoStats { font-size: 10px; color: #76879a; }
+
+.nodoPaso.e-ok { border-color: #22c55e; background: #101d16; }
+.nodoPaso.e-ok .nodoStats { color: #6dbb8b; }
+.nodoPaso.e-error { border-color: #ef4444; background: #211114; }
+.nodoPaso.e-error .nodoStats { color: #e08a8a; }
+.nodoPaso.e-corriendo { border-color: #eab308; background: #201a09; animation: latidoNodo 1.2s ease-in-out infinite; }
+.nodoPaso.e-corriendo .nodoStats { color: #d8b64a; }
+.nodoPaso.e-nunca { border-color: #333e4d; }
+.nodoPaso.e-nunca .nodoNombre { color: #7d8a99; }
+@keyframes latidoNodo {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, .45); }
+  50% { box-shadow: 0 0 0 6px rgba(234, 179, 8, 0); }
+}
+.asa { opacity: 0; width: 6px; height: 6px; }
+
+/* barra lateral */
+.lateral {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 360px;
+  background: #0f151d; border-left: 1px solid #1c2530;
+  overflow-y: auto; padding: 14px 16px; z-index: 5;
+}
+.latCabecera { display: flex; justify-content: space-between; align-items: flex-start; }
+.latGrupo { font-size: 10px; color: #5b6b7e; letter-spacing: .08em; }
+.latNombre { font-size: 16px; color: #d5e2ec; margin-top: 2px; }
+.latCerrar {
+  background: none; border: none; color: #76879a; cursor: pointer;
+  font-size: 14px; font-family: inherit; padding: 2px 6px;
+}
+.latCerrar:hover { color: #d5ecf8; }
+.latStats { font-size: 11px; color: #8fa2b5; margin: 8px 0 4px; }
+.latBloque { margin-top: 14px; }
+.latTitulo { font-size: 11px; color: #6f9cbd; letter-spacing: .08em; margin-bottom: 6px; }
+.latTitulo.err { color: #e08a8a; }
+.latVacio { font-size: 11px; color: #5b6b7e; }
+
+.latFotos { display: flex; gap: 8px; flex-wrap: wrap; }
+.latFotos a { display: block; width: 104px; text-decoration: none; }
+.latFotos img {
+  width: 104px; height: 62px; object-fit: cover;
+  border: 1px solid #2a3646; border-radius: 5px; background: #131a23;
+}
+.latFotos span { display: block; font-size: 9px; color: #5b6b7e; margin-top: 2px; }
+
+.latError {
+  font-size: 11px; color: #e0a3a3; background: #191014;
+  border: 1px solid #3a2020; border-radius: 6px;
+  padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
+  max-height: 180px; overflow-y: auto; margin: 0;
+}
+
+.latHistoria { list-style: none; margin: 0; padding: 0; font-size: 11px; }
+.latHistoria li {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 4px 0; border-bottom: 1px dashed #1c2530;
+}
+.latHistoria .hIcono { width: 12px; }
+.latHistoria li.ok .hIcono { color: #22c55e; }
+.latHistoria li.err .hIcono { color: #ef4444; }
+.latHistoria .hHora { color: #8fa2b5; white-space: nowrap; }
+.latHistoria .hDur { color: #5b6b7e; white-space: nowrap; }
+.latHistoria .hDetalle {
+  color: #76879a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* retoques react-flow en oscuro */
+.react-flow__controls { box-shadow: none; }
+.react-flow__controls button {
+  background: #131a23; border-bottom: 1px solid #1c2530; fill: #8fa2b5;
+}
+.react-flow__controls button:hover { background: #1a2330; }
+.react-flow__attribution { background: transparent; color: #333e4d; }
+.react-flow__attribution a { color: #333e4d; }

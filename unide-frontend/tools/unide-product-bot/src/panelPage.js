@@ -30,14 +30,14 @@ export function renderPanelPage(version) {
     animation: aparecerSuave var(--motion-slow) var(--motion-ease) both;
   }
   #estado { display: flex; gap: 18px; align-items: center; }
-  #btnCajon {
+  #btnCajon, #btnFlujo {
     background: none; border: none; color: #8fa2b5;
     padding: 5px 2px; font-size: 12px; letter-spacing: .08em;
     cursor: pointer; font-family: inherit;
   }
-  #btnCajon::before { content: '[ '; color: #46556a; }
-  #btnCajon::after { content: ' ]'; color: #46556a; }
-  #btnCajon:hover { color: #d5ecf8; }
+  #btnCajon::before, #btnFlujo::before { content: '[ '; color: #46556a; }
+  #btnCajon::after, #btnFlujo::after { content: ' ]'; color: #46556a; }
+  #btnCajon:hover, #btnFlujo:hover { color: #d5ecf8; }
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
   /* Paso de escritorio EN VIVO (lo escribe unideges-search.ps1 antes de
@@ -431,7 +431,7 @@ export function renderPanelPage(version) {
 </head>
 <body>
 <header>
-  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
+  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><button id="btnFlujo" onclick="window.open('/flujo', '_blank')">流 程 图</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
 </header>
 <main>
   <div id="zona">

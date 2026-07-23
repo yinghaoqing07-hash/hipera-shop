@@ -118,6 +118,45 @@ export function startPanel(config, logger, hooks) {
         res.end(JSON.stringify(detalle));
         return;
       }
+      if (req.method === 'GET' && (req.url === '/flujo' || req.url.startsWith('/flujo?'))) {
+        // Panel de flujo: árbol de funciones con estado en vivo (React Flow).
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(hooks.flujo ? hooks.flujo.pagina(VERSION) : 'panel de flujo no disponible');
+        return;
+      }
+      if (req.method === 'GET' && (req.url.startsWith('/flujo.js') || req.url.startsWith('/flujo.css'))) {
+        // Bundle precompilado (web/flujo.bundle.*): sin CDN ni build en la
+        // tienda. La página lo pide con ?v=<versión>, así que cachear vale.
+        const js = req.url.startsWith('/flujo.js');
+        const archivo = pathJoin(pathDirname(fileURLToPath(import.meta.url)), '..', 'web', js ? 'flujo.bundle.js' : 'flujo.bundle.css');
+        if (!fs.existsSync(archivo)) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': js ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8', 'cache-control': 'max-age=3600' });
+        fs.createReadStream(archivo).pipe(res);
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/api/flujo') {
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(hooks.flujo ? hooks.flujo.grafo() : { nodos: [], edges: [] }));
+        return;
+      }
+      if (req.method === 'GET' && req.url.startsWith('/api/flujo/paso')) {
+        let id = '';
+        try { id = String(new URL(req.url, 'http://x').searchParams.get('id') || ''); } catch { /* sin query */ }
+        const detalle = id && hooks.flujo ? hooks.flujo.paso(id) : null;
+        if (!detalle) { res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(JSON.stringify(detalle));
+        return;
+      }
+      if (req.method === 'GET' && req.url.startsWith('/api/flujo/foto')) {
+        let nombre = '';
+        try { nombre = String(new URL(req.url, 'http://x').searchParams.get('f') || ''); } catch { /* sin query */ }
+        const foto = nombre && hooks.flujo ? hooks.flujo.foto(nombre) : null;
+        if (!foto || !fs.existsSync(foto)) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': foto.toLowerCase().endsWith('.jpg') || foto.toLowerCase().endsWith('.jpeg') ? 'image/jpeg' : 'image/png' });
+        fs.createReadStream(foto).pipe(res);
+        return;
+      }
       if (req.method === 'GET' && req.url === '/comandos') {
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
         res.end(hooks.commandList());
