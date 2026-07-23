@@ -30,6 +30,27 @@ body {
 .volver { color: #8fa2b5; text-decoration: none; }
 .volver:hover { color: #d5ecf8; }
 
+/* pestañas 功能树 / 想法本 */
+.pestanas { display: flex; gap: 2px; }
+.pestanas button {
+  background: none; border: 1px solid #2a3646; color: #8fa2b5;
+  font-family: inherit; font-size: 12px; letter-spacing: .06em;
+  padding: 4px 14px; cursor: pointer;
+}
+.pestanas button:first-child { border-radius: 7px 0 0 7px; }
+.pestanas button:last-child { border-radius: 0 7px 7px 0; }
+.pestanas button.activa { background: #1a2330; color: #d5ecf8; border-color: #3d4a5c; }
+.pestanas button:hover { color: #d5ecf8; }
+
+.exportar {
+  background: none; border: 1px solid #2a5a3a; color: #6dbb8b;
+  font-family: inherit; font-size: 12px; padding: 4px 12px;
+  border-radius: 7px; cursor: pointer;
+}
+.exportar:hover { background: #101d16; color: #8fe0ab; }
+
+.toast { font-size: 11px; color: #d8b64a; }
+
 .aviso {
   padding: 8px 20px; font-size: 12px;
   color: #fbbf24; background: #21160a; border-bottom: 1px solid #3a2c12;
@@ -62,6 +83,48 @@ body {
   50% { box-shadow: 0 0 0 6px rgba(234, 179, 8, 0); }
 }
 .asa { opacity: 0; width: 6px; height: 6px; }
+
+/* tarjetas de idea (vista 想法本) */
+.nodoIdea {
+  width: 240px; min-height: 104px;
+  background: #131a23; border: 1.5px solid #3a5f83; border-radius: 9px;
+  padding: 8px 12px; cursor: pointer;
+  transition: border-color .25s, box-shadow .25s;
+}
+.nodoIdea:hover { box-shadow: 0 0 0 2px rgba(111, 156, 189, .25); }
+.nodoIdea.i-hecha { border-color: #22633c; opacity: .7; }
+.ideaCabecera {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: #5b6b7e; letter-spacing: .06em;
+}
+.nodoIdea.i-pendiente .ideaEstado { color: #6f9cbd; }
+.nodoIdea.i-hecha .ideaEstado { color: #6dbb8b; }
+.ideaTexto {
+  font-size: 12px; color: #c9d4de; margin-top: 6px;
+  line-height: 1.45; word-break: break-word; white-space: pre-wrap;
+}
+.nodoIdea.i-hecha .ideaTexto { color: #76879a; }
+
+.ideasVacio {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  text-align: center; color: #5b6b7e; font-size: 13px; line-height: 2;
+}
+
+.ideaCompleta {
+  font-size: 12px; color: #c9d4de; background: #131a23;
+  border: 1px solid #2a3646; border-radius: 6px;
+  padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+  margin: 0; line-height: 1.5;
+}
+.ideaBotones { display: flex; gap: 10px; }
+.ideaBotones button {
+  background: none; border: 1px solid #2a5a3a; color: #6dbb8b;
+  font-family: inherit; font-size: 12px; padding: 5px 12px;
+  border-radius: 7px; cursor: pointer;
+}
+.ideaBotones button:hover { background: #101d16; }
+.ideaBotones button.peligro { border-color: #5a2a2a; color: #e08a8a; }
+.ideaBotones button.peligro:hover { background: #211114; }
 
 /* barra lateral */
 .lateral {

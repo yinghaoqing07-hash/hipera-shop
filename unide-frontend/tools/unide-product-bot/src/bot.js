@@ -3542,6 +3542,9 @@ if (config.panel?.enabled !== false) {
         if (!nodo) return null;
         return { id, nombre: nodo.nombre, grupo: nodo.grupo, historia: flujoEstado.historial(id, 40) };
       },
+      // Segunda vista del panel de flujo: el cuaderno de ideas (las
+      // "ganas de optimizar" del dueño, separadas del árbol real).
+      ideas: () => ({ ideas: ideaStore.ideas }),
       // Capturas del historial: SOLO basename y SOLO de la carpeta de
       // capturas (nada de rutas arbitrarias desde el navegador).
       foto: (nombre) => {
