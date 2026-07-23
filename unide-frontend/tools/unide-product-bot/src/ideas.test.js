@@ -55,6 +55,21 @@ test('matchIdeaNatural', () => {
   assert.equal(matchIdeaNatural('想法很多的人'), null);
 });
 
+test('idea con ancla y nombre: se guardan y salen en lista y export', () => {
+  const store = tienda();
+  const idea = store.agregar('搜完自动比价', { ancla: 'ug-buscar', nombre: '促销比价' });
+  assert.equal(idea.ancla, 'ug-buscar');
+  assert.equal(idea.nombre, '促销比价');
+  const rutaPor = (ancla) => (ancla === 'ug-buscar' ? ['打开 UnideGes', '商品 (F3)', '查商品'] : null);
+  const lista = formatIdeaList(store, rutaPor);
+  assert.match(lista, /促销比价/);
+  assert.match(lista, /位置：打开 UnideGes → 商品 \(F3\) → 查商品/);
+  const texto = store.exportarTexto(rutaPor);
+  assert.match(texto, /位置：.*查商品 → \[新\] 促销比价/);
+  // sin rutaPor tampoco casca
+  assert.match(store.exportarTexto(), /搜完自动比价/);
+});
+
 test('exportarTexto lleva las pendientes numeradas', () => {
   const store = tienda();
   store.agregar('idea uno');
