@@ -305,14 +305,20 @@ function conNavegador(chatId, etiqueta, fn) {
   // árbol, se registra inicio/fin/duración/captura. iniciar() va DENTRO
   // del candado: mientras espera cola el nodo no debe salir "corriendo".
   const nodo = flujoArbol.nodoPorEtiqueta(etiqueta);
+  // Toda operación del grupo 网页 pasa por aquí y prueba (o no) que el Edge
+  // estaba conectado a la web: eso alimenta el nodo raíz "打开 Unide 网页".
+  const esWeb = nodo && flujoArbol.grupoDe(nodo).startsWith('网页');
   const fnConSonda = !nodo ? fn : async () => {
     flujoEstado.iniciar(nodo);
     try {
       const res = await fn();
-      flujoEstado.terminar(nodo, { ok: esResultadoFlujoOk(res), detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
+      const ok = esResultadoFlujoOk(res);
+      flujoEstado.terminar(nodo, { ok, detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
+      if (esWeb) marcarAperturaWeb(ok || !esFalloConexion(res), etiqueta);
       return res;
     } catch (error) {
       flujoEstado.terminar(nodo, { ok: false, detalle: error.message });
+      if (esWeb) marcarAperturaWeb(!esFalloConexion(error), etiqueta);
       throw error;
     }
   };
@@ -336,6 +342,26 @@ function esResultadoFlujoOk(res) {
 function detalleResultadoFlujo(res) {
   if (!res || typeof res !== 'object') return '';
   return String(res.error || res.mensaje || '').slice(0, 300);
+}
+
+// "打开 Unide 网页" (web-abrir): salud de la conexión a Edge. No mide
+// duración (no la tenemos en esta capa: duracionMs=0 la deja fuera de la
+// media), solo si la sesión web estaba lista cuando arrancó la operación.
+function marcarAperturaWeb(conectado, etiqueta) {
+  flujoEstado.terminar('web-abrir', {
+    ok: conectado,
+    detalle: conectado ? `会话就绪（${etiqueta}）` : '连不上 Edge 调试端口',
+    duracionMs: 0
+  });
+}
+
+// ¿El fallo es de CONEXIÓN al Edge (no del paso en sí)? connectBrowser
+// marca stage='connect'; el resto se detecta por el mensaje.
+function esFalloConexion(x) {
+  if (!x || typeof x !== 'object') return false;
+  if (x.stage === 'connect') return true;
+  const msg = String(x.error || x.mensaje || x.message || '');
+  return /无法连接到 *Edge|调试端口|ECONNREFUSED|127\.0\.0\.1:9222|:9222/i.test(msg);
 }
 
 // OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).

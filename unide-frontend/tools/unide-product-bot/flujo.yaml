@@ -56,6 +56,13 @@ nodos:
     nombre: 桌面填单
     grupo: 桌面 UnideGes
 
+  # Raíz de todo lo web: para tocar promociones/pedidos/hacer un pedido,
+  # el Edge tiene que estar conectado a la web de UnideGes. Este nodo es
+  # el equivalente a "abrir UnideGes" pero para el navegador; su estado
+  # sale de CADA operación web (si arranca, es que el Edge conectó).
+  - id: web-abrir
+    nombre: 打开 Unide 网页
+    grupo: 网页
   - id: web-promos
     nombre: 刷新促销
     grupo: 网页 · 查询分析
@@ -153,6 +160,11 @@ edges:
   - [ug-abrir, ug-utilidades]
   - [ug-abrir, ug-albaranes]
   - [ug-abrir, ug-fin]
+  - [web-abrir, web-promos]
+  - [web-abrir, web-listar]
+  - [web-abrir, web-recientes]
+  - [web-abrir, web-buscar-pedido]
+  - [web-abrir, web-buscar]
   - [web-promos, web-ahorro]
   - [web-listar, web-ahorro]
   - [web-promos, auto-advisor]
