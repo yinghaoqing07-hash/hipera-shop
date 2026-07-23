@@ -180,6 +180,9 @@ function App() {
   }, []);
 
   const nodoSel = nodos.find((n) => n.id === sel);
+  // Dentro del panel JARVIS la página va embebida en un iframe: ahí el
+  // botón de cierre lo pone el propio panel y este enlace sobra.
+  const embebido = window.self !== window.top;
 
   return (
     <div className="pantalla">
@@ -190,7 +193,7 @@ function App() {
           <i className="lg ok" />成功 <i className="lg run" />运行中 <i className="lg err" />失败 <i className="lg no" />没跑过
         </span>
         <span className="hueco" />
-        <a className="volver" href="/">[ 返回面板 ]</a>
+        {!embebido && <a className="volver" href="/">[ 返回面板 ]</a>}
       </header>
       {grafo?.error && <div className="aviso">{grafo.error}</div>}
       <div className="lienzo">
