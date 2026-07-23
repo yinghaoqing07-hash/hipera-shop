@@ -38,6 +38,24 @@ export function renderPanelPage(version) {
   #btnCajon::before, #btnFlujo::before { content: '[ '; color: #46556a; }
   #btnCajon::after, #btnFlujo::after { content: ' ]'; color: #46556a; }
   #btnCajon:hover, #btnFlujo:hover { color: #d5ecf8; }
+  /* Panel de flujo EMBEBIDO: capa a pantalla completa dentro de la misma
+     ventana de JARVIS (nada de abrir otra pestaña). El iframe carga /flujo
+     la primera vez que se abre, no al arrancar el panel. */
+  #capaFlujo {
+    position: fixed; inset: 0; z-index: 60; background: #0d1117;
+    display: none; flex-direction: column;
+    animation: aparecerSuave var(--motion-base) var(--motion-ease) both;
+  }
+  #capaFlujo.abierta { display: flex; }
+  #capaFlujo iframe { border: 0; flex: 1; width: 100%; height: 100%; background: #0d1117; }
+  #cerrarFlujo {
+    position: absolute; top: 8px; right: 16px; z-index: 61;
+    background: none; border: none; color: #8fa2b5; cursor: pointer;
+    font-size: 13px; letter-spacing: .08em; font-family: inherit; padding: 6px 4px;
+  }
+  #cerrarFlujo::before { content: '[ '; color: #46556a; }
+  #cerrarFlujo::after { content: ' ]'; color: #46556a; }
+  #cerrarFlujo:hover { color: #d5ecf8; }
   #punto { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; margin-right: 7px; vertical-align: 1px; animation: latido 2.4s ease-in-out infinite; }
   #punto.rojo { background: #ef4444; animation: none; }
   /* Paso de escritorio EN VIVO (lo escribe unideges-search.ps1 antes de
@@ -431,7 +449,7 @@ export function renderPanelPage(version) {
 </head>
 <body>
 <header>
-  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><button id="btnFlujo" onclick="window.open('/flujo', '_blank')">流 程 图</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
+  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><button id="btnFlujo" onclick="abrirFlujo()">流 程 图</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
 </header>
 <main>
   <div id="zona">
@@ -502,6 +520,10 @@ export function renderPanelPage(version) {
 <div id="lupa" onclick="cerrarLupa()"><img id="lupaImg" alt=""></div>
 <div id="aviso"></div>
 <div id="ver">${version}</div>
+<div id="capaFlujo">
+  <button id="cerrarFlujo" onclick="cerrarFlujo()">✕ 关闭流程图</button>
+  <iframe id="marcoFlujo" title="流程图"></iframe>
+</div>
 <script>
 const libre = document.getElementById('libre');
 
@@ -918,6 +940,21 @@ function cerrarCajon() {
 }
 // Vista por defecto del cajón: los accesos rápidos y las tarjetas de estado
 // (antes vivían en el centro de la página; el chat necesitaba el sitio).
+// Flujo embebido: la capa vive dentro de la ventana de JARVIS. El iframe
+// se carga la primera vez (362KB que no hace falta pagar al arrancar) y
+// se queda vivo entre aperturas para no re-renderizar el grafo.
+function abrirFlujo() {
+  var marco = document.getElementById('marcoFlujo');
+  if (!marco.getAttribute('src')) marco.setAttribute('src', '/flujo');
+  document.getElementById('capaFlujo').classList.add('abierta');
+}
+function cerrarFlujo() {
+  document.getElementById('capaFlujo').classList.remove('abierta');
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') cerrarFlujo();
+});
+
 function abrirCajonInicio() {
   cajonId = null;
   document.getElementById('cajonTeclado').style.display = 'none';
