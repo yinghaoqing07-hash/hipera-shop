@@ -3553,6 +3553,7 @@ if (config.panel?.enabled !== false) {
               id: n.id,
               nombre: n.nombre,
               grupo: n.grupo,
+              desc: n.desc || '',
               estado: activos.has(n.id) ? 'corriendo' : (s ? (s.ultimoEstado === 'ok' ? 'ok' : 'error') : 'nunca'),
               exito: s && s.total ? Math.round((100 * s.exitos) / s.total) : null,
               duracionMediaMs: s ? s.duracionMediaMs : 0,
