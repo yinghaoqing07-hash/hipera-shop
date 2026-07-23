@@ -56,6 +56,17 @@ const defaultConfig = {
     enabled: true,
     maxCiclos: 2
   },
+  // GitHub: para que el bucle de diagnostico proponga su reparacion como PR
+  // revisable en vez de solo parchear el PC. NUNCA toca main: crea una rama
+  // y abre el PR; el merge es SIEMPRE humano. Token en config.github.token o
+  // env GITHUB_TOKEN — usa un PAT FINO: solo este repo, permisos Contents +
+  // Pull requests (read/write). Sin token, el boton de PR no aparece.
+  github: {
+    token: '',
+    repo: 'yinghaoqing07-hash/hipera-shop',
+    base: 'main',
+    repoPathPrefix: 'unide-frontend/tools/unide-product-bot'
+  },
   memory: {
     enabled: true,
     path: 'data/bot-memory.json',

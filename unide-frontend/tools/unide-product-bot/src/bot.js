@@ -23,7 +23,8 @@ import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatu
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
 import { limpiarArchivosViejos } from './housekeeping.js';
-import { aplicarFix, empaquetarEvidencia, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo } from './diagnostico.js';
+import { aplicarFix, empaquetarEvidencia, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, rutaEnRepo, validarPropuesta } from './diagnostico.js';
+import { abrirPrConArchivo, githubConfigured } from './github.js';
 import { MODULOS_UNIDEGES, accionUnideges, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
@@ -2157,6 +2158,8 @@ async function chequeoSalud() {
   }
   if (llmConfigured(config)) bien.push(`AI key 已配置（${proveedorLlm(config) === 'kimi' ? 'Kimi/Moonshot' : 'Claude/Anthropic'}）`);
   else mal.push('AI key 没配置：看图救援和自然语言理解不可用');
+  if (githubConfigured(config)) bien.push('GitHub 已配置：AI 修复可开 PR');
+  else bien.push('GitHub 没配（AI 修复只能本地应用，不能开 PR）');
   const latestCsv = findLatestPromotionsCsv(config);
   if (!latestCsv) mal.push('还没有促销数据（发 /promociones 抓一次）');
   else {
@@ -2290,9 +2293,12 @@ async function lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res
   const fix = extraerArchivoCorregido(respuesta);
   const resumen = resumenSinCodigo(respuesta).slice(0, 3000);
   const id = String(diagSeq++);
-  diagPendientes.set(id, { fix: fix && fix.contenido ? fix : null, accion, moduloId, chatId, etiqueta });
+  diagPendientes.set(id, { fix: fix && fix.contenido ? fix : null, resumen, accion, moduloId, chatId, etiqueta });
   const botones = [];
-  if (fix?.contenido) botones.push({ text: '✅ 应用修复并重试', callback_data: `dg:fix:${id}` });
+  if (fix?.contenido) botones.push({ text: '✅ 本地应用并重试', callback_data: `dg:fix:${id}` });
+  // Con GitHub configurado, la reparacion tambien puede llegar como PR
+  // revisable (main queda intacto; el merge lo decides tu).
+  if (fix?.contenido && githubConfigured(config)) botones.push({ text: '📤 提交成 PR（你审核）', callback_data: `dg:pr:${id}` });
   botones.push({ text: '🔁 只重试一次', callback_data: `dg:retry:${id}` });
   botones.push({ text: '忽略', callback_data: `dg:no:${id}` });
   const notaRechazo = fix?.rechazo ? `\n\n⚠ ${fix.rechazo}` : '';
@@ -2333,6 +2339,36 @@ async function handleDiagCallback(chatId, callbackId, resto) {
     logger.info('diagnostico fix aplicado', { backup: resultado.backup });
     await telegram.sendMessage(chatId, '修复已应用（旧文件已备份在 logs/diagnosticos）。自动重试一次…', { __skipAI: true });
     await ejecutarUnideges(chatId, pend.accion, pend.moduloId);
+    return;
+  }
+  if (verbo === 'pr') {
+    await telegram.answerCallbackQuery(callbackId, '提交 PR 中');
+    if (!pend.fix) { await telegram.sendMessage(chatId, '这条诊断没有附带可提交的代码。', { __skipAI: true }); return; }
+    if (!githubConfigured(config)) { await telegram.sendMessage(chatId, 'GitHub 没配置（config.github.token / repo），开不了 PR。', { __skipAI: true }); return; }
+    // MISMAS valvulas que el parche local (lista blanca + cordura + parser
+    // real de PowerShell), pero sin tocar el archivo de la maquina: aqui
+    // solo se valida y, si pasa, se abre el PR. main NUNCA se toca.
+    const val = validarPropuesta(config, pend.fix);
+    if (!val.ok) { await telegram.sendMessage(chatId, `没提交：${val.motivo}`, { __skipAI: true }); return; }
+    await telegram.sendMessage(chatId, '正在开 PR（推分支 + 建 PR）…', { __skipAI: true });
+    try {
+      const sello = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const bytes = Buffer.from('\uFEFF' + String(pend.fix.contenido).replace(/^\uFEFF/, ''), 'utf8');
+      const pr = await abrirPrConArchivo(config, {
+        rutaRepo: rutaEnRepo(config, pend.fix.archivo),
+        contenidoBytes: bytes,
+        tituloPr: `AI 自动修复：${pend.etiqueta}`,
+        cuerpoPr: `店里 bot 自动诊断出的修复（改 ${pend.fix.archivo}）。**未经人工审核，合并前请看 diff。**\n\n${String(pend.resumen || '').slice(0, 3500)}\n\n🤖 由 UnideGes 桌面自动化的诊断循环生成`,
+        rama: `autofix/unideges-${sello}`
+      });
+      diagPendientes.delete(id);
+      notePanelActivity('AI 修复已开 PR');
+      logger.info('diagnostico PR abierto', { url: pr.url, rama: pr.rama });
+      await telegram.sendMessage(chatId, `已开 PR，你看一眼 diff，满意就在页面上点 Merge（合并后按「更新 BOT」装上）：\n${pr.url}`, { __skipAI: true });
+    } catch (error) {
+      logger.error('diagnostico PR fallo', { error: error.message });
+      await telegram.sendMessage(chatId, `开 PR 失败：${String(error.message || '').slice(0, 200)}`, { __skipAI: true });
+    }
     return;
   }
   await telegram.answerCallbackQuery(callbackId, '未知操作');

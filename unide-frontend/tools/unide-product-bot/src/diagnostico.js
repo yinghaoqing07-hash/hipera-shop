@@ -90,25 +90,25 @@ export function resumenSinCodigo(respuesta) {
   return String(respuesta || '').replace(/<<<ARCHIVO:[^>]+>>>[\s\S]*?<<<FIN>>>/g, '〔随附修改后的脚本文件〕').trim();
 }
 
-// Aplica el archivo propuesto con las tres valvulas. `validar` es
-// inyectable en tests; en produccion valida con el PowerShell local.
-export function aplicarFix(config, fix, validar = validarConPowerShell) {
+// Comprueba las valvulas SIN tocar nada: lista blanca, cordura de tamaño y
+// estructura, y el parser REAL de PowerShell. Devuelve { ok, motivo, temp }
+// (temp = archivo propuesto ya validado, con BOM). Lo usan aplicarFix (parche
+// local) y el camino de PR.
+export function validarPropuesta(config, fix, validar = validarConPowerShell) {
   if (!fix?.archivo || !fix?.contenido) return { ok: false, motivo: '没有可应用的文件内容' };
   if (!ARCHIVOS_PERMITIDOS.includes(fix.archivo)) return { ok: false, motivo: `文件不在白名单里：${fix.archivo}` };
   const destino = path.resolve(config.__toolRoot || '.', fix.archivo);
   let actual = '';
   try { actual = fs.readFileSync(destino, 'utf8'); } catch { return { ok: false, motivo: '找不到要修改的原文件' }; }
 
-  // Cordura: tamaño comparable y estructura esperada del script.
   const nuevo = String(fix.contenido);
   if (nuevo.length < actual.length * 0.4 || nuevo.length > actual.length * 2.5) {
-    return { ok: false, motivo: `新文件大小可疑（原 ${actual.length} 字符，新 ${nuevo.length}），不应用` };
+    return { ok: false, motivo: `新文件大小可疑（原 ${actual.length} 字符，新 ${nuevo.length}），不采用` };
   }
   for (const requerido of ['param(', 'function Emit', 'ConvertTo-Json']) {
-    if (!nuevo.includes(requerido)) return { ok: false, motivo: `新文件缺少关键结构（${requerido}），不应用` };
+    if (!nuevo.includes(requerido)) return { ok: false, motivo: `新文件缺少关键结构（${requerido}），不采用` };
   }
 
-  // Validar el archivo NUEVO con el parser real antes de tocar nada.
   const sello = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = path.resolve(config.logsDir || '.', 'diagnosticos');
   fs.mkdirSync(dir, { recursive: true });
@@ -116,14 +116,29 @@ export function aplicarFix(config, fix, validar = validarConPowerShell) {
   fs.writeFileSync(temp, '\uFEFF' + nuevo.replace(/^\uFEFF/, ''), 'utf8');
   const veredicto = validar(temp);
   if (!veredicto.ok) {
-    return { ok: false, motivo: `新文件没通过 PowerShell 语法验证：${veredicto.detalle || '?'}（原文件未动）`, propuesta: temp };
+    return { ok: false, motivo: `新文件没通过 PowerShell 语法验证：${veredicto.detalle || '?'}`, temp };
   }
+  return { ok: true, temp, destino };
+}
 
-  // Copia de seguridad y reemplazo atomico.
-  const backup = path.join(dir, `backup-${sello}-${path.basename(destino)}`);
-  fs.copyFileSync(destino, backup);
-  fs.copyFileSync(temp, destino);
-  return { ok: true, backup, destino };
+// Aplica el archivo propuesto EN LOCAL (parche en la maquina): valida y, si
+// pasa, hace backup con sello y reemplaza el original.
+export function aplicarFix(config, fix, validar = validarConPowerShell) {
+  const val = validarPropuesta(config, fix, validar);
+  if (!val.ok) return { ok: false, motivo: `${val.motivo}（原文件未动）`, propuesta: val.temp };
+  const sello = new Date().toISOString().replace(/[:.]/g, '-');
+  const dir = path.resolve(config.logsDir || '.', 'diagnosticos');
+  const backup = path.join(dir, `backup-${sello}-${path.basename(val.destino)}`);
+  fs.copyFileSync(val.destino, backup);
+  fs.copyFileSync(val.temp, val.destino);
+  return { ok: true, backup, destino: val.destino };
+}
+
+// Ruta del archivo del fix DENTRO del repo (para el PR): prefijo del repo
+// hasta la carpeta del bot + la ruta de la lista blanca.
+export function rutaEnRepo(config, archivoLista) {
+  const prefijo = String(config?.github?.repoPathPrefix || 'unide-frontend/tools/unide-product-bot').replace(/\/+$/, '');
+  return `${prefijo}/${archivoLista}`;
 }
 
 // Parser REAL de la maquina (en la tienda: Windows PowerShell 5.1 — el
