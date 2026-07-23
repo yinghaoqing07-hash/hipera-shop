@@ -2471,6 +2471,7 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
   notePanelActivity('/unideges ' + (moduloId || 'abrir'));
   await telegram.sendMessage(chatId, `${etiqueta}…（这几秒别动店里电脑的鼠标键盘）`, { __skipAI: true });
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, accion, moduloId));
+  registrarSubpasosUnideges(res);
   // Caja negra: la traza completa SIEMPRE al log; al chat solo si falló
   // (como nota plegable), que es cuando hace falta leerla.
   if (Array.isArray(res.trace) && res.trace.length) {
@@ -2514,6 +2515,30 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
   }
   await telegram.sendMessage(chatId, msg, { __skipAI: true });
+}
+
+// Subpasos de abrir UnideGes para el panel de flujo, leídos de la caja
+// negra del PS (única fuente real): "lanzo:" = hubo que arrancar el exe;
+// la línea "RESULT: step=login" trae estado, intentos y duración medida.
+// Si la app ya estaba abierta no hay ni lanzamiento ni login, y no se
+// registra nada (por eso no usan iniciar(): son eventos reconstruidos).
+function registrarSubpasosUnideges(res) {
+  try {
+    const texto = (res?.trace || []).join('\n');
+    if (!texto) return;
+    if (/lanzo: /.test(texto)) {
+      const llegoAlgo = res.status === 'ok' || /step=login/.test(texto) || /menu encontrado/.test(texto);
+      flujoEstado.terminar('ug-abrir-lanzar', { ok: llegoAlgo, detalle: llegoAlgo ? '' : '启动后没等到窗口' });
+    }
+    const m = texto.match(/RESULT: step=login status=(\w+) intentos=(\d+) duration=([\d.]+)s msg=(\S+)/);
+    if (m) {
+      flujoEstado.terminar('ug-abrir-login', {
+        ok: m[1] !== 'fail',
+        detalle: `${m[4]}（第 ${m[2]} 次尝试）`,
+        duracionMs: Number(m[3]) * 1000
+      });
+    }
+  } catch { /* la sonda nunca debe romper el flujo real */ }
 }
 
 async function handleUnidegesCallback(chatId, callbackId, resto) {

@@ -6,6 +6,15 @@
 # y se queda vacío (el bot sigue funcionando normal).
 
 nodos:
+  # Subpasos REALES de abrir la app (salen de la caja negra del PS:
+  # "lanzo:" y la línea RESULT de login). Solo aparecen cuando tocan:
+  # si la app ya estaba abierta no hay lanzamiento ni login.
+  - id: ug-abrir-lanzar
+    nombre: 启动程序
+    grupo: 桌面 UnideGes
+  - id: ug-abrir-login
+    nombre: 自动登录
+    grupo: 桌面 UnideGes
   - id: ug-abrir
     nombre: 打开 UnideGes
     grupo: 桌面 UnideGes
@@ -137,6 +146,8 @@ nodos:
     grupo: AI 修复
 
 edges:
+  - [ug-abrir-lanzar, ug-abrir-login]
+  - [ug-abrir-login, ug-abrir]
   - [ug-abrir, ug-inicio]
   - [ug-abrir, ug-articulos]
   - [ug-abrir, ug-utilidades]
@@ -151,7 +162,9 @@ edges:
   - [web-editar, web-guardar]
   - [web-guardar, web-enviar]
   - [auto-llegada, auto-imprimir]
-  - [ug-abrir, ug-buscar]
+  # 查价/改价/锁定/商品诊断 se operan DENTRO del módulo Artículos (F3),
+  # así que cuelgan de él (petición del dueño, 23/07).
+  - [ug-articulos, ug-buscar]
   - [ug-abrir, ug-rellenar-pedido]
   - [ug-buscar, ug-leer-precio]
   - [ug-leer-precio, ug-cambiar-precio]

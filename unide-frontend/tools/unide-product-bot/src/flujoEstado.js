@@ -31,7 +31,9 @@ export async function abrirFlujoEstado(config, logger, opciones = {}) {
     iniciar(nodo) {
       if (nodo) corriendo.set(nodo, Date.now());
     },
-    terminar(nodo, { ok = true, detalle = '', captura = '' } = {}) {
+    // duracionMs explícito: para pasos cuya duración REAL viene medida de
+    // fuera (p. ej. la línea RESULT del PowerShell), no del reloj de aquí.
+    terminar(nodo, { ok = true, detalle = '', captura = '', duracionMs } = {}) {
       if (!nodo) return;
       const inicio = corriendo.get(nodo);
       corriendo.delete(nodo);
@@ -39,7 +41,7 @@ export async function abrirFlujoEstado(config, logger, opciones = {}) {
         nodo,
         estado: ok ? 'ok' : 'error',
         at: new Date().toISOString(),
-        duracionMs: inicio ? Date.now() - inicio : 0,
+        duracionMs: Number.isFinite(duracionMs) ? Math.round(duracionMs) : (inicio ? Date.now() - inicio : 0),
         detalle: String(detalle || '').slice(0, 500),
         // basename a mano: las capturas llegan con rutas Windows (\) y este
         // código también corre en desarrollo sobre Linux.
