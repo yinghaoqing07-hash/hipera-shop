@@ -81,4 +81,9 @@ test('el flujo.yaml real del repo carga sin errores', () => {
   assert.equal(arbol.nodoPorEtiqueta('打开 UnideGes'), 'ug-abrir');
   assert.equal(arbol.nodoPorEtiqueta('每日刷新促销'), 'web-promos');
   assert.equal(arbol.nodoPorEtiqueta('UnideGes → Artículos'), 'ug-articulos');
+  // el nodo raíz de la web existe y las operaciones web cuelgan de él
+  assert.equal(arbol.grupoDe('web-abrir'), '网页');
+  assert.equal(arbol.rutaHasta('web-promos')[0], '打开 Unide 网页');
+  assert.equal(arbol.rutaHasta('web-enviar')[0], '打开 Unide 网页');
+  assert.ok(arbol.grupoDe('web-promos').startsWith('网页'));
 });

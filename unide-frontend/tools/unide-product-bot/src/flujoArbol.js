@@ -125,6 +125,9 @@ function construirArbol(nodos, edges, error) {
     nodos,
     edges,
     error,
+    grupoDe(id) {
+      return nombreDe.has(id) ? (nodos.find((n) => n.id === id)?.grupo || '') : '';
+    },
     // Ruta raíz→nodo como lista de nombres (para anclar ideas al árbol).
     // null si el id no existe; con tope por si alguien edita un ciclo.
     rutaHasta(id) {
