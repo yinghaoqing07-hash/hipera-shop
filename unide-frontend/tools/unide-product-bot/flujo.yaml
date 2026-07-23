@@ -31,6 +31,22 @@ nodos:
     grupo: 桌面 UnideGes
     match: ["UnideGes → Fin de día"]
 
+  - id: ug-buscar
+    nombre: 查商品 (桌面)
+    grupo: 桌面 UnideGes
+  - id: ug-leer-precio
+    nombre: 读价格 (桌面)
+    grupo: 桌面 UnideGes
+  - id: ug-cambiar-precio
+    nombre: 改价 (桌面)
+    grupo: 桌面 UnideGes
+  - id: ug-bloq
+    nombre: 锁定商品 Bloq
+    grupo: 桌面 UnideGes
+  - id: ug-rellenar-pedido
+    nombre: 桌面填单
+    grupo: 桌面 UnideGes
+
   - id: web-promos
     nombre: 刷新促销
     grupo: 网页 · 查询分析
@@ -90,6 +106,23 @@ nodos:
     nombre: 定时任务
     grupo: 每日自动
 
+  - id: herr-tally
+    nombre: 叫货点货单
+    grupo: 工具
+  - id: herr-diag-productos
+    nombre: 商品诊断
+    grupo: 工具
+  - id: herr-update
+    nombre: 更新 BOT
+    grupo: 工具
+
+  - id: ai-router
+    nombre: AI 意图识别
+    grupo: AI 助手
+  - id: ai-responder
+    nombre: AI 组织回复
+    grupo: AI 助手
+
   - id: diag-evidencia
     nombre: 打包证据
     grupo: AI 修复
@@ -118,6 +151,15 @@ edges:
   - [web-editar, web-guardar]
   - [web-guardar, web-enviar]
   - [auto-llegada, auto-imprimir]
+  - [ug-abrir, ug-buscar]
+  - [ug-abrir, ug-rellenar-pedido]
+  - [ug-buscar, ug-leer-precio]
+  - [ug-leer-precio, ug-cambiar-precio]
+  - [ug-buscar, ug-bloq]
+  - [ug-buscar, herr-diag-productos]
+  - [herr-tally, web-rellenar]
+  - [herr-tally, ug-rellenar-pedido]
+  - [ai-router, ai-responder]
   - [diag-evidencia, diag-llm]
   - [diag-llm, diag-fix]
   - [diag-llm, diag-pr]
