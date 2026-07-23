@@ -10,6 +10,7 @@ import { fetchActivePromotions, formatPromotionsSummary } from './webPromotions.
 import { buildOrderAdvice, buildRelevanceSets, buildSavingsAdvice, findLatestPromotionsCsv, formatAdvice, formatAdviceDetail, formatOrderAdvice, formatOrderAdviceDetail, parsePromotionsCsv } from './promoAdvisor.js';
 import { llmComposeReply as llmComposeReplyRaw, llmConfigured, llmDiagnosticoRPA, llmExtractMemories, llmFriendlyError, llmKeyboardIntro, llmPickSimilarPromos, llmRetrospectivaPedido, llmRouteIntent as llmRouteIntentRaw, proveedorLlm } from './llm.js';
 import { MemoryStore, formatMemoryList, parseMemoryCommand, shouldConsiderForMemory } from './memoryStore.js';
+import { IdeaStore, formatIdeaList, matchIdeaNatural, parseIdeaCommand } from './ideas.js';
 import { OperationLedger, formatOperationHistory, parseOperationHistoryRequest } from './operationLedger.js';
 import { ScheduledTaskStore, formatScheduledTask, formatTaskList, parseLlmScheduleArgument, parseScheduleCommand } from './scheduledTasks.js';
 import { applyAutoTaskOverrides, listAutoTasks, setAutoTask } from './autoTasks.js';
@@ -67,6 +68,7 @@ try {
   if (personalidadGuardada) { config.llm = config.llm || {}; config.llm.personalidad = personalidadGuardada; }
 } catch { /* sin override guardado */ }
 const memoryStore = new MemoryStore(config.memory, logger);
+const ideaStore = new IdeaStore(config, logger);
 const operationLedger = new OperationLedger(config.operationLedger, logger);
 const scheduledTasks = new ScheduledTaskStore(config.scheduledTasks, logger);
 const activeConversations = new ActiveConversationStore(path.resolve(config.logsDir || '.', 'active-conversations.json'));
@@ -418,6 +420,13 @@ async function handleUpdate(update) {
     await handleRecentOrders(chatId, recentOrdersRequest);
     return;
   }
+  // Cuaderno de ideas: comando /idea(s) o frase natural 「记个想法：…」.
+  // Va ANTES del enrutador LLM para que guardar una idea nunca dependa
+  // de tener AI configurada.
+  const ideaCmd = parseIdeaCommand(text);
+  if (ideaCmd) { await handleIdeas(chatId, ideaCmd); return; }
+  const ideaNatural = matchIdeaNatural(text);
+  if (ideaNatural !== null) { await handleIdeas(chatId, { accion: 'agregar', texto: ideaNatural }); return; }
   if (text === '/start' || text === '/help' || /^\/(comandos|commands|menu)\b/i.test(text)) { await telegram.sendMessage(chatId, formatCommandList()); return; }
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
@@ -583,6 +592,67 @@ function inferExplicitMemoryCategory(text) {
 
 // Menú completo de comandos (/help, /comandos). Se mantiene A MANO: cuando
 // se añada o cambie un comando, tocar también esta lista.
+// --- Cuaderno de ideas (petición del dueño, 23/07) ---------------------
+
+async function handleIdeas(chatId, cmd) {
+  if (cmd.accion === 'agregar') {
+    if (!cmd.texto) {
+      await telegram.sendMessage(chatId, '想法内容跟在后面写就行，比如：\n/idea 流程图加个全屏按钮\n或者直接说「记个想法：促销到期前一天提醒我」。\n看已存的发 /ideas。', { __skipAI: true });
+      return;
+    }
+    const idea = ideaStore.agregar(cmd.texto);
+    notePanelActivity('💡 新想法 #' + idea.id);
+    await telegram.sendMessage(chatId, `记下了 #${idea.id}，想法本共 ${ideaStore.pendientes().length} 条待做。\n随时 /ideas 翻看，攒够了 /ideas_exportar 一键导出发给 Claude。`, { __skipAI: true });
+    return;
+  }
+  if (cmd.accion === 'listar') { await enviarListaIdeas(chatId); return; }
+  if (cmd.accion === 'exportar') { await exportarIdeas(chatId); return; }
+}
+
+async function enviarListaIdeas(chatId) {
+  // Botones solo para las 8 últimas pendientes: el límite de Telegram y de
+  // la vista; las más viejas siguen en el texto y se gestionan por id.
+  const pend = ideaStore.pendientes();
+  const botones = pend.slice(-8).map((i) => ([
+    { text: `✅ 完成 #${i.id}`, callback_data: `idea:done:${i.id}` },
+    { text: `🗑 删 #${i.id}`, callback_data: `idea:del:${i.id}` }
+  ]));
+  if (pend.length) botones.push([{ text: '📤 导出发给 Claude', callback_data: 'idea:exp' }]);
+  await telegram.sendMessage(chatId, formatIdeaList(ideaStore), {
+    __skipAI: true,
+    ...(botones.length ? { reply_markup: { inline_keyboard: botones } } : {})
+  });
+}
+
+async function exportarIdeas(chatId) {
+  const texto = ideaStore.exportarTexto();
+  if (!texto) {
+    await telegram.sendMessage(chatId, '想法本里没有待做的想法，先存几条再导出。', { __skipAI: true });
+    return;
+  }
+  const file = path.resolve(config.logsDir || '.', `ideas-para-claude-${todayString(config)}.txt`);
+  fs.writeFileSync(file, texto, 'utf8');
+  await telegram.sendDocument(chatId, file, `想法本 · ${ideaStore.pendientes().length} 条待做 — 转发给 Claude 就行`, { __autoAbrir: true });
+}
+
+async function handleIdeaCallback(chatId, callbackId, resto) {
+  if (resto === 'exp') { await telegram.answerCallbackQuery(callbackId, '导出'); await exportarIdeas(chatId); return; }
+  const [verbo, id] = resto.split(':');
+  if (verbo === 'done') {
+    const idea = ideaStore.marcarHecha(id);
+    await telegram.answerCallbackQuery(callbackId, idea ? '已完成' : '这条已经不在了');
+    if (idea) await telegram.sendMessage(chatId, `#${idea.id} 标成已完成 ✅（还剩 ${ideaStore.pendientes().length} 条）`, { __skipAI: true });
+    return;
+  }
+  if (verbo === 'del') {
+    const idea = ideaStore.borrar(id);
+    await telegram.answerCallbackQuery(callbackId, idea ? '已删除' : '这条已经不在了');
+    if (idea) await telegram.sendMessage(chatId, `#${idea.id} 删掉了（还剩 ${ideaStore.pendientes().length} 条）`, { __skipAI: true });
+    return;
+  }
+  await telegram.answerCallbackQuery(callbackId, '未知操作');
+}
+
 function formatCommandList() {
   return [
     '📋 我会的所有命令',
@@ -628,6 +698,11 @@ function formatCommandList() {
     '/memories — 查看记忆；后面可加关键词搜索',
     '/forget 12 — 删除编号 12 的记忆',
     '带“以后、默认、每次、规则、纠正”的话会自动判断是否值得记住',
+    '',
+    '【想法本】',
+    '/idea 内容 — 想到的新功能/改进先存着（也可以说「记个想法：…」）',
+    '/ideas — 看攒了哪些，按钮里可标完成/删除',
+    '/ideas_exportar — 打包成一个文件，转发给 Claude 让他做',
     '',
     '【其他】',
     '直接用中文说事也行，比如「帮我打一下152的清单」（需要配好 AI key）',
@@ -1078,6 +1153,7 @@ async function handleCallback(callback) {
   if (data.startsWith('osend:')) { await handleOrderSend(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('ug:')) { await handleUnidegesCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('dg:')) { await handleDiagCallback(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('idea:')) { await handleIdeaCallback(chatId, callback.id, data.slice(5)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
   if (data.startsWith('apply:')) { await handleApply(chatId, callback.id, data.slice(6)); return; }
