@@ -70,6 +70,21 @@ test('idea con ancla y nombre: se guardan y salen en lista y export', () => {
   assert.match(store.exportarTexto(), /搜完自动比价/);
 });
 
+test('crear vacía + editar (autoguardado del panel); las hechas no se editan', () => {
+  const store = tienda();
+  const vacia = store.crear({ ancla: 'ug-abrir' });
+  assert.equal(vacia.texto, '');
+  assert.equal(store.editar(vacia.id, { nombre: '一键重启' }).nombre, '一键重启');
+  assert.equal(store.editar(vacia.id, { texto: '失败两次自动重启' }).texto, '失败两次自动重启');
+  assert.equal(store.buscar(vacia.id).nombre, '一键重启'); // el otro campo no se toca
+  store.marcarHecha(vacia.id);
+  assert.equal(store.editar(vacia.id, { texto: 'x' }), null);
+  assert.equal(store.editar(999, { texto: 'x' }), null);
+  // export: las totalmente vacías no viajan
+  store.crear({ ancla: 'ug-abrir' });
+  assert.ok(!store.exportarTexto().includes('（只起了名字'));
+});
+
 test('exportarTexto lleva las pendientes numeradas', () => {
   const store = tienda();
   store.agregar('idea uno');

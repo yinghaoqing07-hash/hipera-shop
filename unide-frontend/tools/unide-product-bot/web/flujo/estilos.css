@@ -115,14 +115,17 @@ body {
   text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* el nodo EN BLANCO donde se escribe la idea nueva */
-.nodoBorrador {
-  width: 268px;
-  background: #131a23; border: 1.5px dashed #6f9cbd; border-radius: 9px;
-  padding: 10px 12px;
-  box-shadow: 0 0 0 3px rgba(111, 156, 189, .12);
+/* tarjeta pendiente EDITABLE: se escribe dentro, autoguardado */
+.nodoIdea.i-editable {
+  width: 268px; min-height: 178px;
+  border-style: dashed; cursor: default;
 }
-.borrTitulo { font-size: 11px; color: #6f9cbd; margin-bottom: 8px; letter-spacing: .04em; }
+.ideaBorrar {
+  background: none; border: none; cursor: pointer;
+  font-size: 11px; padding: 0 0 0 6px; opacity: .55;
+}
+.ideaBorrar:hover { opacity: 1; }
+.nodoIdea.i-editable .ideaCabecera { align-items: center; margin-bottom: 7px; }
 .borrNombre {
   width: 100%; box-sizing: border-box;
   background: #0d1117; border: 1px solid #2a3646; border-radius: 6px;
@@ -131,21 +134,11 @@ body {
 }
 .borrNombre:focus, .borrTexto:focus { border-color: #6f9cbd; }
 .borrTexto {
-  width: 100%; box-sizing: border-box; height: 88px; resize: vertical;
+  width: 100%; box-sizing: border-box; height: 84px; resize: vertical;
   background: #0d1117; border: 1px solid #2a3646; border-radius: 6px;
   color: #c9d4de; font-family: inherit; font-size: 12px; line-height: 1.5;
   padding: 6px 8px; margin-bottom: 8px; outline: none;
 }
-.borrBotones { display: flex; gap: 8px; }
-.borrBotones button {
-  background: none; border: 1px solid #2a5a3a; color: #6dbb8b;
-  font-family: inherit; font-size: 12px; padding: 5px 12px;
-  border-radius: 7px; cursor: pointer;
-}
-.borrBotones button:disabled { opacity: .4; cursor: default; }
-.borrBotones button:not(:disabled):hover { background: #101d16; }
-.borrBotones button.peligro { border-color: #3d4a5c; color: #8fa2b5; }
-.borrBotones button.peligro:hover { background: #1a2330; }
 
 .ideasVacio {
   height: 100%; display: flex; align-items: center; justify-content: center;

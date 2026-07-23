@@ -19,8 +19,8 @@ const IDEA_W = 240;
 const IDEA_H = 104;
 const GHOST_W = 132;
 const GHOST_H = 38;
-const BORR_W = 268;
-const BORR_H = 210;
+const IDEA_EDIT_W = 268;
+const IDEA_EDIT_H = 178;
 
 const embebido = window.self !== window.top;
 
@@ -84,53 +84,70 @@ function GhostNodo({ data }) {
   );
 }
 
+// Tarjeta de idea. Las HECHAS son de solo lectura; las PENDIENTES se
+// editan EN LA PROPIA tarjeta con autoguardado (petición del dueño,
+// 23/07: nada de botón de guardar — crear, teclear y listo).
 function IdeaNodo({ data }) {
-  const corto = data.texto.length > 90 ? data.texto.slice(0, 90) + '…' : data.texto;
+  const [nombre, setNombre] = useState(data.nombre || '');
+  const [texto, setTexto] = useState(data.texto || '');
+  const [marca, setMarca] = useState('');
+  const timer = useRef(null);
+  const limpiar = useRef(null);
+  useEffect(() => () => { clearTimeout(timer.current); clearTimeout(limpiar.current); }, []);
+
+  if (data.estado === 'hecha') {
+    const corto = (data.texto || '').length > 90 ? data.texto.slice(0, 90) + '…' : (data.texto || '');
+    return (
+      <div className="nodoIdea i-hecha">
+        <Handle type="target" position={Position.Left} className="asa" />
+        <div className="ideaCabecera">
+          <span>#{data.id} · {String(data.creado).slice(5, 10).replace('-', '/')}</span>
+          <span className="ideaEstado">✅ 已实现</span>
+        </div>
+        {data.nombre && <div className="ideaNombre">{data.nombre}</div>}
+        <div className="ideaTexto">{corto}</div>
+      </div>
+    );
+  }
+
+  const programar = (n, t) => {
+    setMarca('保存中…');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      const ok = await data.onEditar(data.id, n, t);
+      setMarca(ok ? '✓ 已保存' : '✗ 没存上');
+      clearTimeout(limpiar.current);
+      limpiar.current = setTimeout(() => setMarca(''), 2000);
+    }, 700);
+  };
+
   return (
-    <div className={`nodoIdea ${data.estado === 'hecha' ? 'i-hecha' : 'i-pendiente'}`}>
+    <div className="nodoIdea i-pendiente i-editable nodrag nowheel">
       <Handle type="target" position={Position.Left} className="asa" />
       <div className="ideaCabecera">
         <span>#{data.id} · {String(data.creado).slice(5, 10).replace('-', '/')}</span>
-        <span className="ideaEstado">{data.estado === 'hecha' ? '✅ 已实现' : '💡 待做'}</span>
+        <span className="ideaEstado">{marca || '💡 待做'}</span>
+        <button className="ideaBorrar" title="删除这条" onClick={(e) => { e.stopPropagation(); data.onBorrar(data.id); }}>🗑</button>
       </div>
-      {data.nombre && <div className="ideaNombre">{data.nombre}</div>}
-      <div className="ideaTexto">{corto}</div>
-    </div>
-  );
-}
-
-// El nodo EN BLANCO al final de la cadena: aquí escribe el dueño el nombre
-// y el prompt. Vive dentro del lienzo, como él lo describió.
-function BorradorNodo({ data }) {
-  const [nombre, setNombre] = useState('');
-  const [texto, setTexto] = useState('');
-  return (
-    <div className="nodoBorrador nodrag nowheel">
-      <Handle type="target" position={Position.Left} className="asa" />
-      <div className="borrTitulo">✏️ 新想法（挂在 {data.anclaNombre} 下）</div>
       <input
         className="borrNombre"
         placeholder="节点名字（短）"
         value={nombre}
         maxLength={60}
-        onChange={(e) => setNombre(e.target.value)}
-        autoFocus
+        autoFocus={data.autoFocus}
+        onChange={(e) => { setNombre(e.target.value); programar(e.target.value, texto); }}
       />
       <textarea
         className="borrTexto"
         placeholder="设计/实现 prompt：想让它做什么、怎么算做好了…"
         value={texto}
-        onChange={(e) => setTexto(e.target.value)}
+        onChange={(e) => { setTexto(e.target.value); programar(nombre, e.target.value); }}
       />
-      <div className="borrBotones">
-        <button onClick={() => data.onGuardar(nombre, texto)} disabled={!texto.trim()}>💾 存进想法本</button>
-        <button className="peligro" onClick={data.onCancelar}>取消</button>
-      </div>
     </div>
   );
 }
 
-const TIPOS = { paso: PasoNodo, idea: IdeaNodo, ghost: GhostNodo, borrador: BorradorNodo };
+const TIPOS = { paso: PasoNodo, idea: IdeaNodo, ghost: GhostNodo };
 
 // --- layouts ------------------------------------------------------------
 
@@ -152,9 +169,9 @@ function calcularPosiciones(nodos, edges) {
 const bordeGhost = { stroke: '#3d4a5c', strokeWidth: 1.2, strokeDasharray: '5 4' };
 
 // Vista 想法本: una FILA por idea pendiente — cadena de eslabones grises
-// (su ruta en el árbol) y la tarjeta al final; debajo, las hechas en
-// rejilla compacta. El borrador (si hay) ocupa la primera fila.
-function construirVistaIdeas(ideas, borrador, handlers) {
+// (su ruta en el árbol) y la tarjeta EDITABLE al final; debajo, las
+// hechas en rejilla compacta de solo lectura.
+function construirVistaIdeas(ideas, handlers, focoId) {
   const nodes = [];
   const edges = [];
   let y = 20;
@@ -190,27 +207,14 @@ function construirVistaIdeas(ideas, borrador, handlers) {
     y += finalH + 22;
   };
 
-  if (borrador) {
-    filaCadena(borrador.ruta, 'borr', {
-      id: 'borrador',
-      type: 'borrador',
-      data: {
-        anclaNombre: borrador.ruta[borrador.ruta.length - 1] || '?',
-        onGuardar: handlers.onGuardar,
-        onCancelar: handlers.onCancelar
-      },
-      draggable: false
-    }, BORR_W, BORR_H);
-  }
-
   const pend = ideas.filter((i) => i.estado === 'pendiente').slice().reverse();
   for (const idea of pend) {
     filaCadena(idea.ruta || [], `i${idea.id}`, {
       id: `idea-${idea.id}`,
       type: 'idea',
-      data: idea,
+      data: { ...idea, onEditar: handlers.onEditar, onBorrar: handlers.onBorrar, autoFocus: idea.id === focoId },
       draggable: false
-    }, IDEA_W, IDEA_H);
+    }, IDEA_EDIT_W, IDEA_EDIT_H);
   }
 
   const hechas = ideas.filter((i) => i.estado === 'hecha').slice().reverse();
@@ -329,7 +333,7 @@ function App() {
   const [ideas, setIdeas] = useState([]);
   const [sel, setSel] = useState('');
   const [detalle, setDetalle] = useState(null);
-  const [borrador, setBorrador] = useState(null);
+  const [focoId, setFocoId] = useState(0);
   const [aviso, setAviso] = useState('');
   const selRef = useRef('');
   const vistaRef = useRef('arbol');
@@ -386,35 +390,40 @@ function App() {
     return ruta;
   }, [nodos, edges]);
 
-  // Clic derecho en un nodo del árbol (o botón de la barra lateral):
-  // crear ahí una idea — salta a 想法本 con la cadena y el nodo en blanco.
-  const colgarIdea = useCallback((idNodo) => {
-    setBorrador({ ancla: idNodo, ruta: rutaDe(idNodo) });
-    setVista('ideas');
-    setSel('');
-    setDetalle(null);
-  }, [rutaDe]);
-
-  const guardarBorrador = useCallback(async (nombre, texto) => {
-    if (!borrador || !texto.trim()) return;
+  // Clic derecho en un nodo del árbol (o botón de la barra lateral): la
+  // idea se CREA en el acto (vacía, anclada ahí) y salta a 想法本 con el
+  // cursor en la tarjeta nueva; el contenido se autoguarda al teclear.
+  const colgarIdea = useCallback(async (idNodo) => {
     try {
       const r = await fetch('/api/flujo/idea', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ancla: borrador.ancla, nombre, texto })
+        body: JSON.stringify({ ancla: idNodo, nombre: '', texto: '' })
       });
       const j = await r.json();
-      if (j.ok) {
-        avisar(`已存 #${j.id}`);
-        setBorrador(null);
-        refrescar();
-      } else {
-        avisar(j.error || '没存上');
-      }
+      if (!j.ok) { avisar(j.error || '没建上'); return; }
+      setFocoId(j.id);
+      setVista('ideas');
+      setSel('');
+      setDetalle(null);
+      await refrescar();
     } catch {
-      avisar('没存上（bot 在重启？）');
+      avisar('没建上（bot 在重启？）');
     }
-  }, [borrador, avisar, refrescar]);
+  }, [avisar, refrescar]);
+
+  const editarIdea = useCallback(async (id, nombre, texto) => {
+    try {
+      const r = await fetch('/api/flujo/idea', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, nombre, texto })
+      });
+      return (await r.json()).ok === true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   // dagre solo cuando cambia la TOPOLOGÍA (ids/edges), no en cada poll.
   const claveTopo = useMemo(
@@ -438,13 +447,16 @@ function App() {
     markerEnd: { type: MarkerType.ArrowClosed, color: '#3d4a5c', width: 16, height: 16 }
   }));
 
+  const onBorrarIdea = useCallback((id) => accionIdea(`idea:del:${id}`), [accionIdea]);
   const vistaIdeas = useMemo(
-    () => construirVistaIdeas(ideas, borrador, { onGuardar: guardarBorrador, onCancelar: () => setBorrador(null) }),
-    [ideas, borrador, guardarBorrador]
+    () => construirVistaIdeas(ideas, { onEditar: editarIdea, onBorrar: onBorrarIdea }, focoId),
+    [ideas, editarIdea, onBorrarIdea, focoId]
   );
 
-  const abrirNodo = useCallback((_ev, nodo) => {
-    if (nodo.type === 'ghost' || nodo.type === 'borrador') return;
+  const abrirNodo = useCallback((ev, nodo) => {
+    if (nodo.type === 'ghost') return;
+    // Teclear en una tarjeta editable no debe abrir la barra lateral.
+    if (ev?.target?.closest && ev.target.closest('input, textarea, button')) return;
     setSel(nodo.id);
     if (vistaRef.current !== 'arbol') return;
     setDetalle(null);
@@ -511,7 +523,7 @@ function App() {
             <Background color="#1c2530" gap={22} />
             <Controls showInteractive={false} />
           </ReactFlow>
-        ) : ideas.length === 0 && !borrador ? (
+        ) : ideas.length === 0 ? (
           <div className="ideasVacio">
             想法本还是空的。<br />
             去「功能树」里右键一个节点挂想法，或者在 Jarvis 里说「记个想法：…」。

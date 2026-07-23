@@ -3552,14 +3552,18 @@ if (config.panel?.enabled !== false) {
         }))
       }),
       // Creación MANUAL desde el panel de flujo (clic derecho en un nodo
-      // del árbol): ancla + nombre + prompt. La vía de chat sigue viva.
+      // del árbol): la idea nace VACÍA en el acto y el contenido llega por
+      // autoguardado (editarIdea). La vía de chat sigue viva.
       crearIdea: ({ ancla, nombre, texto }) => {
         const anclaValida = ancla && flujoArbol.rutaHasta(String(ancla)) ? String(ancla) : '';
-        const idea = ideaStore.agregar(texto, { ancla: anclaValida, nombre });
-        if (!idea) return { ok: false, error: '想法内容是空的' };
+        const idea = ideaStore.crear({ texto, nombre, ancla: anclaValida });
         notePanelActivity('💡 新想法 #' + idea.id);
         logger.info('idea creada desde el panel de flujo', { id: idea.id, ancla: anclaValida });
         return { ok: true, id: idea.id };
+      },
+      editarIdea: ({ id, nombre, texto }) => {
+        const idea = ideaStore.editar(Number(id), { nombre, texto });
+        return idea ? { ok: true, id: idea.id } : { ok: false, error: '这条想法不存在或已完成' };
       },
       // Capturas del historial: SOLO basename y SOLO de la carpeta de
       // capturas (nada de rutas arbitrarias desde el navegador).

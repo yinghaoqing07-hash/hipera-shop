@@ -140,13 +140,17 @@ export function startPanel(config, logger, hooks) {
         return;
       }
       if (req.method === 'POST' && req.url === '/api/flujo/idea') {
-        // Crear idea desde la vista de flujo (clic derecho en el árbol).
+        // Con id = autoguardado de una idea existente; sin id = crearla
+        // (clic derecho en el árbol; nace vacía y se rellena tecleando).
         const body = await readBody(req);
         let datos = {};
         try { datos = JSON.parse(body || '{}'); } catch { /* json roto */ }
-        const r = hooks.flujo?.crearIdea
-          ? hooks.flujo.crearIdea({ ancla: String(datos.ancla || ''), nombre: String(datos.nombre || ''), texto: String(datos.texto || '') })
-          : { ok: false, error: 'no disponible' };
+        let r = { ok: false, error: 'no disponible' };
+        if (datos.id && hooks.flujo?.editarIdea) {
+          r = hooks.flujo.editarIdea({ id: datos.id, nombre: datos.nombre, texto: datos.texto });
+        } else if (!datos.id && hooks.flujo?.crearIdea) {
+          r = hooks.flujo.crearIdea({ ancla: String(datos.ancla || ''), nombre: String(datos.nombre || ''), texto: String(datos.texto || '') });
+        }
         res.writeHead(r.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(r));
         return;
