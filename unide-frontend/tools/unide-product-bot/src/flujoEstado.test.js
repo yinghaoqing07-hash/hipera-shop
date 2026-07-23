@@ -45,6 +45,21 @@ test('el ndjson persiste entre aperturas', async () => {
   assert.equal(dos.resumen().x.total, 1);
 });
 
+test('duracionMs explícito manda sobre el reloj', async () => {
+  const estado = await abrirFlujoEstado(configTemporal(), null, { motor: 'ndjson' });
+  estado.terminar('login', { ok: true, duracionMs: 4200 });
+  assert.equal(estado.historial('login', 1)[0].duracionMs, 4200);
+  assert.equal(estado.resumen().login.duracionMediaMs, 4200);
+});
+
+test('abandonar quita el corriendo sin escribir fila', async () => {
+  const estado = await abrirFlujoEstado(configTemporal(), null, { motor: 'ndjson' });
+  estado.iniciar('x');
+  estado.abandonar('x');
+  assert.deepEqual(estado.corriendo(), []);
+  assert.equal(estado.resumen().x, undefined);
+});
+
 test('terminar sin nodo o sin iniciar no revienta', async () => {
   const estado = await abrirFlujoEstado(configTemporal(), null, { motor: 'ndjson' });
   estado.terminar('', { ok: true });
