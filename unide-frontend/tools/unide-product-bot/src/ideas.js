@@ -18,6 +18,10 @@ export class IdeaStore {
     const data = readJsonSafe(this.file, null) || { seq: 0, ideas: [] };
     this.seq = Number(data.seq) || 0;
     this.ideas = Array.isArray(data.ideas) ? data.ideas : [];
+    // Purga de fantasmas: ideas creadas con el clic derecho y abandonadas
+    // sin escribir nada (ni nombre ni texto) durante más de 2 días.
+    const corte = Date.now() - 2 * 86400000;
+    this.ideas = this.ideas.filter((i) => !(i.estado === 'pendiente' && !i.texto && !i.nombre && new Date(i.creado).getTime() < corte));
   }
 
   guardar() {
@@ -28,18 +32,34 @@ export class IdeaStore {
     }
   }
 
-  // extra.ancla = id del nodo del árbol donde el dueño colgó la idea (al
-  // crearla con el clic derecho del panel de flujo); extra.nombre = el
-  // nombre corto del futuro nodo. Las ideas dictadas por chat van sin ancla.
-  agregar(texto, extra = {}) {
-    const limpio = String(texto || '').trim().slice(0, TOPE_TEXTO);
-    if (!limpio) return null;
+  // Crear SIN validar texto: el flujo del panel (v242) crea la idea vacía
+  // en el momento del clic derecho y el contenido llega después con el
+  // autoguardado. ancla = nodo del árbol; nombre = nombre corto del futuro
+  // nodo. Las abandonadas del todo vacías las purga el constructor.
+  crear({ texto = '', nombre = '', ancla = '' } = {}) {
     this.seq += 1;
-    const idea = { id: this.seq, texto: limpio, creado: new Date().toISOString(), estado: 'pendiente' };
-    if (extra.ancla) idea.ancla = String(extra.ancla).slice(0, 60);
-    if (extra.nombre) idea.nombre = String(extra.nombre).trim().slice(0, 60);
+    const idea = { id: this.seq, texto: String(texto).trim().slice(0, TOPE_TEXTO), creado: new Date().toISOString(), estado: 'pendiente' };
+    if (ancla) idea.ancla = String(ancla).slice(0, 60);
+    if (nombre) idea.nombre = String(nombre).trim().slice(0, 60);
     this.ideas.push(idea);
     if (this.ideas.length > TOPE_IDEAS) this.ideas = this.ideas.slice(-TOPE_IDEAS);
+    this.guardar();
+    return idea;
+  }
+
+  // Vía chat: aquí el texto sí es obligatorio (no hay autoguardado detrás).
+  agregar(texto, extra = {}) {
+    const limpio = String(texto || '').trim();
+    if (!limpio) return null;
+    return this.crear({ texto: limpio, nombre: extra.nombre, ancla: extra.ancla });
+  }
+
+  // Autoguardado del panel: solo pendientes; undefined = no tocar el campo.
+  editar(id, { nombre, texto } = {}) {
+    const idea = this.buscar(id);
+    if (!idea || idea.estado !== 'pendiente') return null;
+    if (nombre !== undefined) idea.nombre = String(nombre).trim().slice(0, 60);
+    if (texto !== undefined) idea.texto = String(texto).trim().slice(0, TOPE_TEXTO);
     this.guardar();
     return idea;
   }
@@ -83,16 +103,17 @@ export class IdeaStore {
       '老板攒的功能想法（从 Jarvis 想法本导出，按顺序做就行）：',
       ''
     ];
-    for (let i = 0; i < pend.length; i += 1) {
-      const idea = pend[i];
+    let n = 0;
+    for (const idea of pend) {
+      if (!idea.texto && !idea.nombre) continue; // vacías abandonadas: fuera
+      n += 1;
       const fecha = String(idea.creado).slice(0, 10);
-      const titulo = idea.nombre ? ` ${idea.nombre}` : '';
-      lineas.push(`${i + 1}. [#${idea.id} · ${fecha}]${titulo}`);
+      lineas.push(`${n}. [#${idea.id} · ${fecha}]${idea.nombre ? ` ${idea.nombre}` : ''}`);
       const ruta = idea.ancla && rutaPor ? rutaPor(idea.ancla) : null;
       if (ruta && ruta.length) lineas.push(`位置：${ruta.join(' → ')} → [新] ${idea.nombre || '(未命名)'}`);
-      lineas.push(idea.texto, '');
+      lineas.push(idea.texto || '（只起了名字，说明还没写）', '');
     }
-    return lineas.join('\n');
+    return n ? lineas.join('\n') : '';
   }
 }
 
@@ -132,7 +153,8 @@ export function formatIdeaList(store, rutaPor) {
     lineas.push(`#${idea.id} · ${fecha}${idea.nombre ? ` · ${idea.nombre}` : ''}`);
     const ruta = idea.ancla && rutaPor ? rutaPor(idea.ancla) : null;
     if (ruta && ruta.length) lineas.push(`位置：${ruta.join(' → ')}`);
-    lineas.push(idea.texto.length > 200 ? idea.texto.slice(0, 200) + '…' : idea.texto, '');
+    const cuerpo = idea.texto || '（还没写内容）';
+    lineas.push(cuerpo.length > 200 ? cuerpo.slice(0, 200) + '…' : cuerpo, '');
   }
   lineas.push('攒够了按「📤 导出发给 Claude」，一个文件全带走。');
   return lineas.join('\n');
