@@ -134,6 +134,34 @@ export function startPanel(config, logger, hooks) {
         fs.createReadStream(archivo).pipe(res);
         return;
       }
+      // --- PWA: manifiesto, service worker e iconos, para "añadir a la
+      // pantalla de inicio" del móvil (icono propio, pantalla completa). ---
+      if (req.method === 'GET' && req.url === '/manifest.webmanifest') {
+        res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8', 'cache-control': 'max-age=3600' });
+        res.end(JSON.stringify({
+          name: 'JARVIS 面板', short_name: 'JARVIS',
+          start_url: '/', scope: '/', display: 'standalone',
+          background_color: '#0d1117', theme_color: '#0d1117', lang: 'zh',
+          icons: [
+            { src: '/icons/jarvis-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: '/icons/jarvis-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+          ]
+        }));
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/sw.js') {
+        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(serviceWorkerJs());
+        return;
+      }
+      if (req.method === 'GET' && req.url.startsWith('/icons/')) {
+        const nombre = pathBasename(req.url.split('?')[0]);
+        const archivo = pathJoin(pathDirname(fileURLToPath(import.meta.url)), '..', 'web', 'icons', nombre);
+        if (!/^[\w.-]+\.png$/.test(nombre) || !fs.existsSync(archivo)) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=604800' });
+        fs.createReadStream(archivo).pipe(res);
+        return;
+      }
       if (req.method === 'GET' && req.url === '/api/flujo') {
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
         res.end(JSON.stringify(hooks.flujo ? hooks.flujo.grafo() : { nodos: [], edges: [] }));
@@ -324,4 +352,25 @@ function readBody(req) {
 
 function renderPage() {
   return renderPanelPage(VERSION);
+}
+
+// Service worker: SOLO para poder instalar el panel como app y tener un
+// caparazón offline. Es CONSERVADOR a propósito — todo lo dinámico (estado,
+// chat, comandos, flujo en vivo) va SIEMPRE a la red, nunca a caché, para
+// que el panel jamás muestre datos viejos. Solo cachea el caparazón estático
+// (página, bundle, iconos) como respaldo si no hay red.
+function serviceWorkerJs() {
+  return `const SHELL = 'jarvis-shell-v1';
+const ESTATICO = ['/', '/flujo', '/flujo.js', '/flujo.css', '/manifest.webmanifest', '/icons/jarvis-192.png', '/icons/jarvis-512.png'];
+self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(SHELL).then((c) => c.addAll(ESTATICO).catch(() => {}))); });
+self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== SHELL).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
+self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return; // POST y demás: red directa
+  const p = new URL(e.request.url).pathname;
+  // Nada dinámico se cachea NUNCA (no servir estado/chat/comandos viejos).
+  if (/^\\/(status|chat|callback|run|admin|comandos|detalle|file|vivo-foto|api|task|auto_tarea|subir)/.test(p)) return;
+  // Caparazón estático: red primero, caché solo de respaldo (offline).
+  e.respondWith(fetch(e.request).then((r) => { const c = r.clone(); caches.open(SHELL).then((ca) => ca.put(e.request, c)).catch(() => {}); return r; }).catch(() => caches.match(e.request)));
+});
+`;
 }
