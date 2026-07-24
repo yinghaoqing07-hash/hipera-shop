@@ -18,7 +18,7 @@ body {
 .titulo { color: #a8c3d6; }
 .pastilla {
   font-size: 11px; color: #6f9cbd; border: 1px solid #2a3646;
-  border-radius: 9px; padding: 1px 8px;
+  border-radius: 2px; padding: 1px 8px;
 }
 .leyenda { font-size: 11px; display: flex; align-items: center; gap: 6px; font-style: normal; }
 .lg { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 8px; }
@@ -37,15 +37,15 @@ body {
   font-family: inherit; font-size: 12px; letter-spacing: .06em;
   padding: 4px 14px; cursor: pointer;
 }
-.pestanas button:first-child { border-radius: 7px 0 0 7px; }
-.pestanas button:last-child { border-radius: 0 7px 7px 0; }
+.pestanas button:first-child { border-radius: 2px 0 0 2px; }
+.pestanas button:last-child { border-radius: 0 2px 2px 0; }
 .pestanas button.activa { background: #1a2330; color: #d5ecf8; border-color: #3d4a5c; }
 .pestanas button:hover { color: #d5ecf8; }
 
 .exportar {
   background: none; border: 1px solid #2a5a3a; color: #6dbb8b;
   font-family: inherit; font-size: 12px; padding: 4px 12px;
-  border-radius: 7px; cursor: pointer;
+  border-radius: 2px; cursor: pointer; letter-spacing: .06em;
 }
 .exportar:hover { background: #101d16; color: #8fe0ab; }
 
@@ -61,7 +61,7 @@ body {
 /* nodos */
 .nodoPaso {
   width: 192px; min-height: 64px;
-  background: #131a23; border: 1.5px solid #3d4a5c; border-radius: 9px;
+  background: #131a23; border: 1px solid #3d4a5c; border-radius: 3px;
   padding: 7px 11px; cursor: pointer;
   transition: border-color .25s, box-shadow .25s;
 }
@@ -87,7 +87,7 @@ body {
 /* tarjetas de idea (vista 想法本) */
 .nodoIdea {
   width: 240px; min-height: 104px;
-  background: #131a23; border: 1.5px solid #3a5f83; border-radius: 9px;
+  background: #131a23; border: 1px solid #3a5f83; border-radius: 3px;
   padding: 8px 12px; cursor: pointer;
   transition: border-color .25s, box-shadow .25s;
 }
@@ -110,7 +110,7 @@ body {
 /* eslabones grises: la ruta de la idea dentro del árbol */
 .nodoGhost {
   width: 132px; min-height: 38px;
-  background: #10151d; border: 1.2px dashed #333e4d; border-radius: 7px;
+  background: #10151d; border: 1px dashed #333e4d; border-radius: 3px;
   padding: 9px 10px; font-size: 11px; color: #6b7a8c;
   text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -133,14 +133,14 @@ body {
 .nodoIdea.i-editable .ideaCabecera { align-items: center; margin-bottom: 7px; }
 .borrNombre {
   width: 100%; box-sizing: border-box;
-  background: #0d1117; border: 1px solid #2a3646; border-radius: 6px;
+  background: #0d1117; border: 1px solid #2a3646; border-radius: 2px;
   color: #d5e2ec; font-family: inherit; font-size: 12px;
   padding: 6px 8px; margin-bottom: 7px; outline: none;
 }
 .borrNombre:focus, .borrTexto:focus { border-color: #6f9cbd; }
 .borrTexto {
   width: 100%; box-sizing: border-box; height: 84px; resize: vertical;
-  background: #0d1117; border: 1px solid #2a3646; border-radius: 6px;
+  background: #0d1117; border: 1px solid #2a3646; border-radius: 2px;
   color: #c9d4de; font-family: inherit; font-size: 12px; line-height: 1.5;
   padding: 6px 8px; margin-bottom: 8px; outline: none;
 }
@@ -152,7 +152,7 @@ body {
 
 .ideaCompleta {
   font-size: 12px; color: #c9d4de; background: #131a23;
-  border: 1px solid #2a3646; border-radius: 6px;
+  border: 1px solid #2a3646; border-radius: 2px;
   padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
   margin: 0; line-height: 1.5;
 }
@@ -160,7 +160,7 @@ body {
 .ideaBotones button {
   background: none; border: 1px solid #2a5a3a; color: #6dbb8b;
   font-family: inherit; font-size: 12px; padding: 5px 12px;
-  border-radius: 7px; cursor: pointer;
+  border-radius: 2px; cursor: pointer; letter-spacing: .06em;
 }
 .ideaBotones button:hover { background: #101d16; }
 .ideaBotones button.peligro { border-color: #5a2a2a; color: #e08a8a; }
@@ -197,7 +197,7 @@ body {
 
 .latError {
   font-size: 11px; color: #e0a3a3; background: #191014;
-  border: 1px solid #3a2020; border-radius: 6px;
+  border: 1px solid #3a2020; border-radius: 2px;
   padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
   max-height: 180px; overflow-y: auto; margin: 0;
 }
@@ -240,7 +240,7 @@ body {
   .lateral {
     top: auto; left: 0; right: 0; bottom: 0; width: auto;
     max-height: 62vh; border-left: none; border-top: 1px solid #1c2530;
-    border-radius: 14px 14px 0 0; box-shadow: 0 -8px 24px rgba(0,0,0,.45);
+    border-radius: 0; box-shadow: 0 -8px 24px rgba(0,0,0,.45);
     padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
   }
   .latCerrar { font-size: 20px; padding: 4px 10px; }
@@ -271,7 +271,7 @@ body {
 .rutaChip {
   display: inline-flex; align-items: center; gap: 3px;
   max-width: 150px; font-size: 10px; line-height: 1.5;
-  border: 1px solid #2a3646; border-radius: 10px; padding: 1px 4px 1px 8px;
+  border: 1px solid #2a3646; border-radius: 2px; padding: 1px 6px;
   color: #8fa2b5; background: #10151d;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -292,14 +292,15 @@ body {
 .conexionRuta b { color: #6dbb8b; font-weight: 600; margin-right: 4px; }
 .conexionParada {
   display: inline-block; margin-right: 4px; padding: 2px 9px;
-  border: 1px solid #2a5a3a; border-radius: 10px; color: #c9d4de; background: #0d1117;
+  border: 1px solid #2a5a3a; border-radius: 2px; color: #c9d4de; background: #0d1117;
 }
 .conexionParada + .conexionParada::before { content: ''; }
 .conexionPista { color: #5b6b7e; margin-left: 6px; }
 .conexionBotones { display: flex; gap: 8px; align-items: center; }
 .conexionBotones button {
   background: none; font-family: inherit; font-size: 13px;
-  border-radius: 7px; padding: 7px 14px; cursor: pointer;
+  border-radius: 2px; padding: 7px 14px; cursor: pointer;
+  letter-spacing: .06em;
 }
 .cbCrear { border: 1px solid #2a5a3a; color: #6dbb8b; }
 .cbCrear:hover { background: #0f2a1a; }
@@ -310,16 +311,16 @@ body {
 .rutaLinea { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .rutaCambiar {
   background: none; border: 1px solid #2a3646; color: #76879a;
-  border-radius: 7px; padding: 3px 9px; font-size: 10px; cursor: pointer; font-family: inherit;
+  border-radius: 2px; padding: 3px 9px; font-size: 10px; cursor: pointer; font-family: inherit;
 }
 .rutaCambiar:hover { color: #d5ecf8; border-color: #6f9cbd; }
 .rutaVacia { font-size: 10px; color: #5b6b7e; }
 
 /* tirador: de aquí sale la siguiente idea encadenada */
 .ideaTirador {
-  position: absolute; right: -13px; top: 50%; transform: translateY(-50%);
-  width: 26px; height: 26px; border-radius: 50%;
-  background: #131a23; border: 1.5px solid #3a5f83; color: #8fb4d0;
+  position: absolute; right: -12px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; border-radius: 2px;
+  background: #131a23; border: 1px solid #3a5f83; color: #8fb4d0;
   font-size: 15px; line-height: 1; cursor: pointer; font-family: inherit;
   display: flex; align-items: center; justify-content: center; padding: 0;
 }
@@ -331,7 +332,7 @@ body {
   .conexionRuta { font-size: 12.5px; width: 100%; }
   .conexionBotones { width: 100%; }
   .conexionBotones button { flex: 1; padding: 10px 8px; font-size: 13.5px; }
-  .ideaTirador { width: 32px; height: 32px; right: -16px; font-size: 18px; }
+  .ideaTirador { width: 30px; height: 30px; right: -15px; font-size: 17px; }
   .ideaAbrir, .ideaBorrar { font-size: 15px; padding: 0 6px; }
   .rutaCambiar { font-size: 12px; padding: 5px 11px; }
   /* acciones de la hoja inferior: objetivos de dedo de verdad */
