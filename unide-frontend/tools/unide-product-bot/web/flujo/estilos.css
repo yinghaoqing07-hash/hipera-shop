@@ -120,6 +120,11 @@ body {
   width: 268px; min-height: 300px;
   border-style: dashed; cursor: default;
 }
+.ideaAbrir {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 0 4px; color: #8fa2b5; opacity: .8; font-family: inherit;
+}
+.ideaAbrir:hover { opacity: 1; color: #d5ecf8; }
 .ideaBorrar {
   background: none; border: none; cursor: pointer;
   font-size: 11px; padding: 0 0 0 6px; opacity: .55;
@@ -241,7 +246,12 @@ body {
   .latCerrar { font-size: 20px; padding: 4px 10px; }
   .nodoIdea.i-editable { width: 258px; }
   .borrNombre, .borrTexto { font-size: 14px; padding: 8px 10px; } /* >=14px: sin zoom iOS */
-  .ideaBorrar { font-size: 15px; padding: 0 4px 0 8px; }
+  .ideaAbrir {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 0 4px; color: #8fa2b5; opacity: .8; font-family: inherit;
+}
+.ideaAbrir:hover { opacity: 1; color: #d5ecf8; }
+.ideaBorrar { font-size: 15px; padding: 0 4px 0 8px; }
   .react-flow__controls { transform: scale(1.35); transform-origin: bottom left; margin: 0 0 10px 10px; }
   .toast { width: 100%; order: 5; }
 }
@@ -267,34 +277,64 @@ body {
 }
 .rutaChip.t-idea { border-color: #3a5f83; color: #8fb4d0; }
 .rutaChip.t-libre { border-color: #4a4230; color: #b09a6a; }
-.rutaChip button {
-  background: none; border: none; cursor: pointer; padding: 0 2px;
-  color: inherit; opacity: .5; font-size: 10px; font-family: inherit;
-}
-.rutaChip button:hover { opacity: 1; }
-.rutaIns {
-  background: none; border: none; color: #3d4a5c; cursor: pointer;
-  padding: 0 1px; font-size: 12px; line-height: 1; font-family: inherit;
-}
-.rutaIns:hover { color: #6f9cbd; }
-.rutaIns.fin { border: 1px dashed #3d4a5c; border-radius: 10px; padding: 1px 7px; color: #76879a; }
-.rutaIns.fin:hover { color: #d5ecf8; border-color: #6f9cbd; }
-.rutaDonde { font-size: 9.5px; color: #6f9cbd; margin: 4px 0 3px; }
-.rutaAlta { margin-top: 5px; }
-.rutaInput {
-  width: 100%; box-sizing: border-box;
-  background: #0d1117; border: 1px solid #6f9cbd; border-radius: 6px;
-  color: #d5e2ec; font-family: inherit; font-size: 12px; padding: 5px 8px; outline: none;
-}
-.ideaHija {
-  width: 100%; margin-top: 8px;
-  background: none; border: 1px dashed #3d4a5c; color: #8fa2b5;
-  border-radius: 7px; padding: 6px; font-size: 11px; cursor: pointer; font-family: inherit;
-}
-.ideaHija:hover { color: #d5ecf8; border-color: #6f9cbd; background: rgba(111,156,189,.08); }
 @media (max-width: 720px) {
-  .rutaInput { font-size: 14px; padding: 7px 9px; }
-  .rutaIns { font-size: 15px; padding: 0 4px; } /* insertar en medio, al tacto */
+    .rutaIns { font-size: 15px; padding: 0 4px; } /* insertar en medio, al tacto */
   .rutaChip { font-size: 11px; max-width: 130px; }
-  .ideaHija { padding: 9px; font-size: 13px; }
+  }
+
+/* --- v253: la ruta se arma TOCANDO el árbol (barra de conexión), no con
+   fichitas dentro de la tarjeta (inusable con el dedo) --- */
+.conexionBarra {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 16px; background: #101d16; border-bottom: 1px solid #2a5a3a;
+}
+.conexionRuta { flex: 1; min-width: 0; font-size: 12px; color: #8fa2b5; line-height: 1.9; }
+.conexionRuta b { color: #6dbb8b; font-weight: 600; margin-right: 4px; }
+.conexionParada {
+  display: inline-block; margin-right: 4px; padding: 2px 9px;
+  border: 1px solid #2a5a3a; border-radius: 10px; color: #c9d4de; background: #0d1117;
+}
+.conexionParada + .conexionParada::before { content: ''; }
+.conexionPista { color: #5b6b7e; margin-left: 6px; }
+.conexionBotones { display: flex; gap: 8px; align-items: center; }
+.conexionBotones button {
+  background: none; font-family: inherit; font-size: 13px;
+  border-radius: 7px; padding: 7px 14px; cursor: pointer;
+}
+.cbCrear { border: 1px solid #2a5a3a; color: #6dbb8b; }
+.cbCrear:hover { background: #0f2a1a; }
+.cbDeshacer { border: 1px solid #3d4a5c; color: #8fa2b5; }
+.cbDeshacer:disabled { opacity: .35; cursor: default; }
+.cbCancelar { border: 1px solid #3d4a5c; color: #8fa2b5; padding: 7px 12px; }
+
+.rutaLinea { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rutaCambiar {
+  background: none; border: 1px solid #2a3646; color: #76879a;
+  border-radius: 7px; padding: 3px 9px; font-size: 10px; cursor: pointer; font-family: inherit;
+}
+.rutaCambiar:hover { color: #d5ecf8; border-color: #6f9cbd; }
+.rutaVacia { font-size: 10px; color: #5b6b7e; }
+
+/* tirador: de aquí sale la siguiente idea encadenada */
+.ideaTirador {
+  position: absolute; right: -13px; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 50%;
+  background: #131a23; border: 1.5px solid #3a5f83; color: #8fb4d0;
+  font-size: 15px; line-height: 1; cursor: pointer; font-family: inherit;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.ideaTirador:hover { background: #1a2837; color: #d5ecf8; border-color: #6f9cbd; }
+.nodoIdea.i-editable { position: relative; }
+
+@media (max-width: 720px) {
+  .conexionBarra { padding: 8px 12px; gap: 8px; }
+  .conexionRuta { font-size: 12.5px; width: 100%; }
+  .conexionBotones { width: 100%; }
+  .conexionBotones button { flex: 1; padding: 10px 8px; font-size: 13.5px; }
+  .ideaTirador { width: 32px; height: 32px; right: -16px; font-size: 18px; }
+  .ideaAbrir, .ideaBorrar { font-size: 15px; padding: 0 6px; }
+  .rutaCambiar { font-size: 12px; padding: 5px 11px; }
+  /* acciones de la hoja inferior: objetivos de dedo de verdad */
+  .ideaBotones { flex-wrap: wrap; }
+  .ideaBotones button { flex: 1; min-width: 44%; padding: 12px 10px; font-size: 13.5px; }
 }

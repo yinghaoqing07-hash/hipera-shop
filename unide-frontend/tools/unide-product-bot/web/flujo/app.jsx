@@ -125,7 +125,6 @@ function IdeaNodo({ data }) {
   const [nombre, setNombre] = useState(data.nombre || '');
   const [texto, setTexto] = useState(data.texto || '');
   const [marca, setMarca] = useState('');
-  const [anadiendo, setAnadiendo] = useState(null); // índice donde insertar
   const timer = useRef(null);
   const limpiar = useRef(null);
   useEffect(() => () => { clearTimeout(timer.current); clearTimeout(limpiar.current); }, []);
@@ -156,29 +155,10 @@ function IdeaNodo({ data }) {
     }, 700);
   };
 
-  // Ruta a medida: la cadena actual (venga de donde venga) se vuelve
-  // editable en cuanto se toca; se guarda al momento, sin debounce.
-  const guardarRuta = async (paradas) => {
-    setMarca('保存中…');
-    const ok = await data.onEditar(data.id, { ruta: paradas });
-    setMarca(ok ? '✓ 已保存' : '✗ 没存上');
-    clearTimeout(limpiar.current);
-    limpiar.current = setTimeout(() => setMarca(''), 2000);
-  };
+  // La ruta ya NO se edita con fichitas dentro de la tarjeta (imposible de
+  // usar con el dedo, 24/07): aquí solo se LEE, y se cambia volviendo al
+  // árbol en modo conexión, tocando los nodos de verdad.
   const cadena = data.cadena || [];
-  const paradasPlanas = () => cadena.map((p) => ({ nombre: p.nombre, id: p.id }));
-  const quitarParada = (i) => guardarRuta(paradasPlanas().filter((_, j) => j !== i));
-  // Se inserta EN LA POSICIÓN del ＋ que se pulsó (no solo al final): el
-  // dueño quería meter una parada en medio de la cadena.
-  const agregarParada = (valor) => {
-    const v = String(valor || '').trim();
-    if (!v) { setAnadiendo(null); return; }
-    const nodo = (data.nodosArbol || []).find((n) => n.nombre === v || n.id === v);
-    const paradas = paradasPlanas();
-    paradas.splice(anadiendo ?? paradas.length, 0, nodo ? { nombre: nodo.nombre, id: nodo.id } : { nombre: v });
-    guardarRuta(paradas);
-    setAnadiendo(null);
-  };
 
   return (
     <div className="nodoIdea i-pendiente i-editable nodrag nowheel">
@@ -186,6 +166,10 @@ function IdeaNodo({ data }) {
       <div className="ideaCabecera">
         <span>#{data.id} · {String(data.creado).slice(5, 10).replace('-', '/')}</span>
         <span className="ideaEstado">{marca || '💡 待做'}</span>
+        {/* Botón explícito: en táctil las tarjetas con 'nodrag' NO reciben
+            el clic de nodo de React Flow, así que las acciones se abren
+            desde aquí (un <button> sí recibe el toque). */}
+        <button className="ideaAbrir" title="操作" onClick={(e) => { e.stopPropagation(); data.onAbrir(data.id); }}>⋯</button>
         <button className="ideaBorrar" title="删除这条" onClick={(e) => { e.stopPropagation(); data.onBorrar(data.id); }}>🗑</button>
       </div>
       <input
@@ -203,43 +187,20 @@ function IdeaNodo({ data }) {
         onChange={(e) => { setTexto(e.target.value); programar(nombre, e.target.value); }}
       />
       <div className="rutaEditor">
-        <div className="rutaTitulo">路线{data.ruta ? '（自定义）' : ''}</div>
-        <div className="rutaChips">
-          {cadena.map((p, i) => (
-            <React.Fragment key={i}>
-              <button className="rutaIns" onClick={() => setAnadiendo(i)} title="在这里插一站">＋</button>
-              <span className={'rutaChip t-' + p.tipo} title={p.nombre}>
-                {p.nombre}
-                <button onClick={() => quitarParada(i)} title="从路线里去掉">✕</button>
-              </span>
-            </React.Fragment>
-          ))}
-          <button className="rutaIns fin" onClick={() => setAnadiendo(cadena.length)} title="在最后加一站">＋</button>
+        <div className="rutaLinea">
+          <span className="rutaTitulo">路线{data.ruta ? '（自定义）' : ''}</span>
+          <button className="rutaCambiar" onClick={() => data.onCambiarRuta(data.id)}>🔗 在树上改</button>
         </div>
-        {anadiendo !== null && (
-          <div className="rutaAlta">
-            <div className="rutaDonde">
-              插在：{anadiendo === 0 ? '最前面' : cadena[anadiendo - 1]?.nombre}
-              {anadiendo < cadena.length ? ` 和 ${cadena[anadiendo].nombre} 之间` : ' 后面'}
-            </div>
-            <input
-              list={`nodos-${data.id}`}
-              className="rutaInput"
-              placeholder="选一个节点，或直接打个新名字"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') agregarParada(e.currentTarget.value);
-                if (e.key === 'Escape') setAnadiendo(null);
-              }}
-              onBlur={(e) => (e.currentTarget.value.trim() ? agregarParada(e.currentTarget.value) : setAnadiendo(null))}
-            />
-            <datalist id={`nodos-${data.id}`}>
-              {(data.nodosArbol || []).map((n) => <option key={n.id} value={n.nombre}>{n.grupo}</option>)}
-            </datalist>
-          </div>
-        )}
+        <div className="rutaChips">
+          {cadena.length === 0 && <span className="rutaVacia">（没挂在树上）</span>}
+          {cadena.map((p, i) => (
+            <span key={i} className={'rutaChip t-' + p.tipo} title={p.nombre}>{p.nombre}</span>
+          ))}
+        </div>
       </div>
-      <button className="ideaHija" onClick={() => data.onColgarHija(data.id)}>＋ 在这条下面再加一条</button>
+      {/* Tirador de conexión: de aquí "sale" la siguiente idea encadenada,
+          en vez del botón ancho de antes (petición del dueño, 24/07). */}
+      <button className="ideaTirador" onClick={() => data.onColgarHija(data.id)} title="从这里拉出下一条想法">＋</button>
     </div>
   );
 }
@@ -416,6 +377,8 @@ function construirVistaIdeas(ideas, handlers, focoId) {
         onEditar: handlers.onEditar,
         onBorrar: handlers.onBorrar,
         onColgarHija: handlers.onColgarHija,
+        onCambiarRuta: handlers.onCambiarRuta,
+        onAbrir: handlers.onAbrir,
         autoFocus: idea.id === focoId
       },
       draggable: false
@@ -440,7 +403,7 @@ function construirVistaIdeas(ideas, handlers, focoId) {
 
 // --- barras laterales ---------------------------------------------------
 
-function Lateral({ nodo, detalle, onCerrar, onColgarIdea }) {
+function Lateral({ nodo, detalle, onCerrar, onColgarIdea, onConectarDesde }) {
   const historia = detalle?.historia || [];
   const ultimoError = historia.find((h) => h.estado === 'error');
   const capturas = [];
@@ -469,6 +432,7 @@ function Lateral({ nodo, detalle, onCerrar, onColgarIdea }) {
       )}
       <div className="latBloque ideaBotones">
         <button onClick={() => onColgarIdea(nodo.id)}>💡 在这里挂个想法</button>
+        <button onClick={() => onConectarDesde(nodo.id)}>🔗 从这里连线</button>
       </div>
       {capturas.length > 0 && (
         <div className="latBloque">
@@ -507,7 +471,7 @@ function Lateral({ nodo, detalle, onCerrar, onColgarIdea }) {
   );
 }
 
-function LateralIdea({ idea, onCerrar, onAccion }) {
+function LateralIdea({ idea, onCerrar, onAccion, onColgarHija, onCambiarRuta }) {
   return (
     <aside className="lateral">
       <div className="latCabecera">
@@ -525,6 +489,15 @@ function LateralIdea({ idea, onCerrar, onAccion }) {
       </div>
       {idea.estado === 'hecha' && idea.hecha && (
         <div className="latStats">完成于 {fmtHora(idea.hecha)}</div>
+      )}
+      {/* Las acciones viven TAMBIÉN aquí porque en el móvil el lienzo va
+          muy alejado y los tiradores de la tarjeta quedan diminutos; esta
+          hoja no depende del zoom. */}
+      {idea.estado === 'pendiente' && (
+        <div className="latBloque ideaBotones">
+          <button onClick={() => onColgarHija(idea.id)}>＋ 拉出下一条</button>
+          <button onClick={() => onCambiarRuta(idea.id)}>🔗 在树上改路线</button>
+        </div>
       )}
       <div className="latBloque ideaBotones">
         {idea.estado === 'pendiente' && (
@@ -547,10 +520,15 @@ function App() {
   const [detalle, setDetalle] = useState(null);
   const [focoId, setFocoId] = useState(0);
   const [aviso, setAviso] = useState('');
+  // { paradas: [{id, nombre}], ideaId } — ideaId 0 = se creará una idea
+  // nueva al terminar; >0 = se le cambia la ruta a esa idea.
+  const [conexion, setConexion] = useState(null);
   const selRef = useRef('');
   const vistaRef = useRef('arbol');
+  const conexionRef = useRef(null);
   selRef.current = sel;
   vistaRef.current = vista;
+  conexionRef.current = conexion;
 
   const refrescar = useCallback(async () => {
     try {
@@ -676,15 +654,75 @@ function App() {
   }));
 
   const onBorrarIdea = useCallback((id) => accionIdea(`idea:del:${id}`), [accionIdea]);
+
+  // --- modo conexión: armar la ruta tocando nodos del árbol -------------
+  // Arranca con la ruta raíz→nodo (el contexto que ya se daba solo) y a
+  // partir de ahí cada toque en un nodo añade una parada.
+  const conectarDesde = useCallback((idNodo) => {
+    const nombre = new Map(nodos.map((n) => [n.id, n.nombre]));
+    const paradas = rutaDe(idNodo).map((nom) => ({ nombre: nom, id: [...nombre].find(([, v]) => v === nom)?.[0] }));
+    setConexion({ paradas, ideaId: 0 });
+    setVista('arbol');
+    setSel('');
+    setDetalle(null);
+  }, [nodos, rutaDe]);
+
+  // Cambiar la ruta de una idea que ya existe: mismo modo, pero al terminar
+  // se GUARDA en esa idea en vez de crear una nueva.
+  const cambiarRutaDeIdea = useCallback((idIdea) => {
+    const idea = ideas.find((i) => i.id === idIdea);
+    setConexion({ paradas: (idea?.cadena || []).map((p) => ({ nombre: p.nombre, id: p.id })), ideaId: idIdea });
+    setVista('arbol');
+    setSel('');
+    setDetalle(null);
+  }, [ideas]);
+
+  const terminarConexion = useCallback(async () => {
+    const c = conexionRef.current;
+    if (!c) return;
+    const ruta = c.paradas.map((p) => ({ nombre: p.nombre, id: p.id }));
+    const ancla = [...c.paradas].reverse().find((p) => p.id && !String(p.id).startsWith('idea:'))?.id || '';
+    setConexion(null);
+    if (c.ideaId) {
+      await editarIdea(c.ideaId, { ruta });
+      setFocoId(c.ideaId);
+    } else {
+      try {
+        const r = await fetch('/api/flujo/idea', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ancla, ruta, nombre: '', texto: '' })
+        });
+        const j = await r.json();
+        if (!j.ok) { avisar(j.error || '没建上'); return; }
+        setFocoId(j.id);
+      } catch { avisar('没建上（bot 在重启？）'); return; }
+    }
+    setVista('ideas');
+    setSel('');
+    await refrescar();
+  }, [editarIdea, avisar, refrescar]);
+
   const vistaIdeas = useMemo(
-    () => construirVistaIdeas(ideas, { onEditar: editarIdea, onBorrar: onBorrarIdea, onColgarHija: colgarHija, nodosArbol }, focoId),
-    [ideas, editarIdea, onBorrarIdea, colgarHija, nodosArbol, focoId]
+    () => construirVistaIdeas(ideas, { onEditar: editarIdea, onBorrar: onBorrarIdea, onColgarHija: colgarHija, onCambiarRuta: cambiarRutaDeIdea, onAbrir: (id) => setSel(`idea-${id}`), nodosArbol }, focoId),
+    [ideas, editarIdea, onBorrarIdea, colgarHija, cambiarRutaDeIdea, nodosArbol, focoId]
   );
 
   const abrirNodo = useCallback((ev, nodo) => {
     if (nodo.type === 'ghost') return;
     // Teclear en una tarjeta editable no debe abrir la barra lateral.
     if (ev?.target?.closest && ev.target.closest('input, textarea, button')) return;
+    // MODO CONEXIÓN: tocar un nodo lo añade a la ruta que se está armando
+    // (objetivo del rediseño: construir la ruta tocando el árbol de verdad,
+    // con objetivos grandes, en vez de fichitas dentro de la tarjeta).
+    if (conexionRef.current && nodo.type === 'paso') {
+      setConexion((c) => {
+        if (!c) return c;
+        if (c.paradas.some((p) => p.id === nodo.id)) return c; // ya está
+        return { ...c, paradas: [...c.paradas, { id: nodo.id, nombre: nodo.data.nombre }] };
+      });
+      return;
+    }
     setSel(nodo.id);
     if (vistaRef.current !== 'arbol') return;
     setDetalle(null);
@@ -731,6 +769,28 @@ function App() {
         {!embebido && <a className="volver" href="/">[ 返回面板 ]</a>}
       </header>
       {grafo?.error && vista === 'arbol' && <div className="aviso">{grafo.error}</div>}
+      {conexion && (
+        <div className="conexionBarra">
+          <div className="conexionRuta">
+            <b>连线中：</b>
+            {conexion.paradas.map((p, i) => (
+              <span key={i} className="conexionParada">{p.nombre}</span>
+            ))}
+            <span className="conexionPista">{conexion.ideaId ? '（改这条想法的路线）' : ''} 点树上的节点继续接</span>
+          </div>
+          <div className="conexionBotones">
+            <button
+              className="cbDeshacer"
+              disabled={conexion.paradas.length <= 1}
+              onClick={() => setConexion((c) => ({ ...c, paradas: c.paradas.slice(0, -1) }))}
+            >↩ 退一站</button>
+            <button className="cbCrear" onClick={terminarConexion}>
+              {conexion.ideaId ? '✓ 用这条路线' : '✓ 在这里创建想法'}
+            </button>
+            <button className="cbCancelar" onClick={() => setConexion(null)}>✕</button>
+          </div>
+        </div>
+      )}
       <div className="lienzo">
         {vista === 'arbol' ? (
           <ReactFlow
@@ -775,8 +835,8 @@ function App() {
             <Controls showInteractive={false} />
           </ReactFlow>
         )}
-        {nodoSel && <Lateral nodo={nodoSel} detalle={detalle} onCerrar={() => setSel('')} onColgarIdea={colgarIdea} />}
-        {ideaSel && <LateralIdea idea={ideaSel} onCerrar={() => setSel('')} onAccion={accionIdea} />}
+        {nodoSel && <Lateral nodo={nodoSel} detalle={detalle} onCerrar={() => setSel('')} onColgarIdea={colgarIdea} onConectarDesde={conectarDesde} />}
+        {ideaSel && <LateralIdea idea={ideaSel} onCerrar={() => setSel('')} onAccion={accionIdea} onColgarHija={colgarHija} onCambiarRuta={cambiarRutaDeIdea} />}
       </div>
     </div>
   );

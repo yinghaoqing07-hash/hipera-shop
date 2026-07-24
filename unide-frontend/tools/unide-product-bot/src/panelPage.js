@@ -527,6 +527,16 @@ export function renderPanelPage(version) {
     #cajon .cab button, #lector .cab button { font-size: 26px; padding: 4px 12px; } /* cerrar: toque grande */
     #cajon .filaB button { padding: 15px 10px; font-size: 16px; }
     #lector pre { font-size: 13.5px; }
+    /* Capa del flujo a pantalla completa: la barra de estado del iPhone
+       tapaba 「关闭流程图」 y no se podía pulsar. Además, DENTRO de un
+       iframe iOS no expone env(safe-area-*) (siempre 0), así que el hueco
+       de arriba lo tiene que reservar esta capa, no la página de dentro. */
+    #capaFlujo { padding-top: env(safe-area-inset-top); }
+    #cerrarFlujo {
+      top: calc(6px + env(safe-area-inset-top)); right: 10px;
+      font-size: 15px; padding: 11px 12px;
+      background: rgba(13,17,23,.86); border-radius: 8px;
+    }
   }
 </style>
 </head>
