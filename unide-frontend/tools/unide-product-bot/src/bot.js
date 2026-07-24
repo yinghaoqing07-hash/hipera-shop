@@ -2578,6 +2578,12 @@ function tecladoUnideges() {
           { text: 'Utilidades 工具', callback_data: 'ug:utilidades' },
           { text: 'Inicio de día 开始营业', callback_data: 'ug:inicio' }
         ],
+        // Un escalón más adentro (24/07, primera versión): entran al módulo
+        // y de ahí al submenú donde el dueño trabaja de verdad.
+        [
+          { text: '电子货单 (F7→albarán elec.)', callback_data: 'ug:albaran_electronico' },
+          { text: 'LMANMA (F6→fichero)', callback_data: 'ug:lmanma' }
+        ],
         [{ text: '⚠ Fin de día 日结', callback_data: 'ug:ask:fin' }]
       ]
     }

@@ -46,6 +46,16 @@ nodos:
     nombre: 日结 (F12)
     grupo: 桌面 UnideGes
     match: ["UnideGes → Fin de día"]
+  - id: ug-albaran-electronico
+    nombre: 电子货单
+    grupo: 桌面 UnideGes
+    match: ["UnideGes → Albarán electrónico"]
+    desc: 进 收货单(F7) 再进 Albarán electrónico，那里是「运营信息传递」下载回来的 albaranes，等着处理。第一版只负责开到这儿并截图。
+  - id: ug-lmanma
+    nombre: LMANMA
+    grupo: 桌面 UnideGes
+    match: ["UnideGes → LMANMA"]
+    desc: 进 工具(F6) 再进 LMANMA，那里处理「运营信息传递」下载回来的 fichero。第一版只负责开到这儿并截图。
     desc: 进 Fin de día 做当天日结（关店关账），所以会先问你确认才进。
 
   - id: ug-buscar
@@ -204,6 +214,12 @@ edges:
   - [ug-abrir, ug-utilidades]
   - [ug-abrir, ug-albaranes]
   - [ug-abrir, ug-fin]
+  # Los dos submenus cuelgan de su modulo Y de donde salen los ficheros que
+  # tratan: 运营信息传递 los descarga, aqui se procesan (peticion del dueño).
+  - [ug-albaranes, ug-albaran-electronico]
+  - [web-mensajeria, ug-albaran-electronico]
+  - [ug-utilidades, ug-lmanma]
+  - [web-mensajeria, ug-lmanma]
   - [web-abrir, web-promos]
   - [web-abrir, web-listar]
   - [web-abrir, web-recientes]
