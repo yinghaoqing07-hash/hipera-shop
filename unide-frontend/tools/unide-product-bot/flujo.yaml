@@ -12,62 +12,49 @@ nodos:
   - id: ug-abrir-lanzar
     nombre: 启动程序
     grupo: 桌面 UnideGes
-    desc: 启动 UnideGes 桌面程序（MadisaNet）并等窗口出现；程序已经开着时这步自动跳过。
   - id: ug-abrir-login
     nombre: 自动登录
     grupo: 桌面 UnideGes
-    desc: 程序启动后自动填用户名并回车完成登录；之前已登录过则跳过。
   - id: ug-abrir
     nombre: 打开 UnideGes
     grupo: 桌面 UnideGes
     match: ["打开 UnideGes"]
-    desc: 打开 UnideGes 主窗口或把它带到前台，是所有桌面操作的总入口（/unideges abrir，或直接说「打开unideges」）。
   - id: ug-inicio
     nombre: 开始营业 (F1)
     grupo: 桌面 UnideGes
     match: ["UnideGes → Inicio de día"]
-    desc: 进 Inicio de día 模块做开店初始化，每天开门第一件事，不需要确认。
   - id: ug-articulos
     nombre: 商品 (F3)
     grupo: 桌面 UnideGes
     match: ["UnideGes → Artículos"]
-    desc: 进 Artículos（商品）模块；查价、改价、锁定、商品诊断都在它里面操作。
   - id: ug-utilidades
     nombre: 工具 (F6)
     grupo: 桌面 UnideGes
     match: ["UnideGes → Utilidades"]
-    desc: 进 Utilidades（工具）模块。
   - id: ug-albaranes
     nombre: 收货单 (F7)
     grupo: 桌面 UnideGes
     match: ["UnideGes → Albaranes"]
-    desc: 进 Albaranes（收货单）模块。
   - id: ug-fin
     nombre: 日结 (F12)
     grupo: 桌面 UnideGes
     match: ["UnideGes → Fin de día"]
-    desc: 进 Fin de día 做当天日结（关店关账），所以会先问你确认才进。
 
   - id: ug-buscar
     nombre: 查商品 (桌面)
     grupo: 桌面 UnideGes
-    desc: 在桌面 Artículos 里按编号或 EAN 搜商品，是查价、改价、锁定、商品诊断共同的第一步。
   - id: ug-leer-precio
     nombre: 读价格 (桌面)
     grupo: 桌面 UnideGes
-    desc: 读取当前打开商品的现价，改价之前先读一遍核对。
   - id: ug-cambiar-precio
     nombre: 改价 (桌面)
     grupo: 桌面 UnideGes
-    desc: 在桌面修改商品价格，/precio_fruta 水果改价走这里。
   - id: ug-bloq
     nombre: 锁定商品 Bloq
     grupo: 桌面 UnideGes
-    desc: 切换商品的 Bloq.Venta：停卖或恢复可卖（/bloq 命令）。
   - id: ug-rellenar-pedido
     nombre: 桌面填单
     grupo: 桌面 UnideGes
-    desc: 把订单草稿填进桌面 UnideGes 的 Pedidos 订单（桌面填单通道）。
 
   # Raíz de todo lo web: para tocar promociones/pedidos/hacer un pedido,
   # el Edge tiene que estar conectado a la web de UnideGes. Este nodo es
@@ -76,125 +63,94 @@ nodos:
   - id: web-abrir
     nombre: 打开 Unide 网页
     grupo: 网页
-    desc: Edge 浏览器连上 UnideGes 网页版的会话状态；任何网页操作跑通都说明它连着。
   - id: web-promos
     nombre: 刷新促销
     grupo: 网页 · 查询分析
     match: ["刷新促销", "每日刷新促销"]
-    desc: 抓当前未过期促销的商品明细并导出 CSV（/promociones，或每天早上自动跑）。
   - id: web-listar
     nombre: 读订单列表
     grupo: 网页 · 查询分析
     match: ["读订单列表"]
-    desc: 读取 Pedidos 订单列表页，每日自动任务靠它找新的 PDA 单。
   - id: web-recientes
     nombre: 查最近订单
     grupo: 网页 · 查询分析
     match: ["检查最近订单"]
-    desc: 只读翻看最近几张订单的完整明细（/pedidos 3），不会改任何东西。
   - id: web-buscar-pedido
     nombre: 按单名找单
     grupo: 网页 · 查询分析
     match: ["按单名找单"]
-    desc: 按订单名或编号筛选查找订单。
   - id: web-ahorro
     nombre: 订单省钱分析
     grupo: 网页 · 查询分析
     match: ["订单省钱分析"]
-    desc: 对照促销分析一张订单哪里能省钱（/ahorro_pedido）。
-
-  - id: web-mensajeria
-    nombre: 运营信息传递
-    grupo: 网页 · 查询分析
-    match: ["运营信息传递"]
-    desc: 抓 Mensajería operativa 里过去一周的 albaranes 和 ficheros，下载并转发给你；fruta 类 fichero 自动跳过（/mensajeria）。
 
   - id: web-buscar
     nombre: 搜商品
     grupo: 网页 · 下单
     match: ["搜商品"]
-    desc: 网页下单时按商品名搜索，把候选发给你点选（不知道代码的时候用）。
   - id: web-rellenar
     nombre: 填订单
     grupo: 网页 · 下单
     match: ["填订单"]
-    desc: 把点货单/草稿填进网页订单表单；只填，不会 Guardar 也不会 Enviar。
   - id: web-editar
     nombre: 改订单
     grupo: 网页 · 下单
     match: ["改订单"]
-    desc: 在网页订单里改数量、加行、删行（/pedido_editar，或直接说「把851040改成一箱」）。
   - id: web-guardar
     nombre: 保存订单
     grupo: 网页 · 下单
     match: ["保存订单"]
-    desc: 点 Guardar 保存网页订单，要你确认才执行。
   - id: web-enviar
     nombre: 发送订单
     grupo: 网页 · 下单
     match: ["发送订单"]
-    desc: 点 Enviar Pedido 把订单发出去，要你确认才执行。
 
   - id: auto-advisor
     nombre: 每日促销+新单分析
     grupo: 每日自动
-    desc: 每天早上的自动任务：先体检，再刷促销，然后找新 PDA 单并自动做省钱分析。
   - id: auto-llegada
     nombre: 到货清单抓取
     grupo: 每日自动
     match: ["到货清单抓取"]
-    desc: 抓今天到货订单的数据（网页只读），是打印到货清单的数据来源。
   - id: auto-imprimir
     nombre: 打印到货清单
     grupo: 每日自动
-    desc: 生成今天的到货核对清单并发给你（/llegada 走的也是这一步）。
   - id: auto-recordatorio
     nombre: 下单提醒
     grupo: 每日自动
-    desc: 叫货日（周日/一/三/四）到点自动发叫货提醒。
   - id: tarea-programada
     nombre: 定时任务
     grupo: 每日自动
-    desc: 你让 bot 记住的事（比如「明天早上提醒我…」），到点自动执行。
 
   - id: herr-tally
     nombre: 叫货点货单
     grupo: 工具
-    desc: /carne、/fruta 点货单：手机上点数量代替纸质表，点完生成订单草稿。
   - id: herr-diag-productos
     nombre: 商品诊断
     grupo: 工具
-    desc: /diagnostico_productos：发它 Excel/CSV 导出文件，逐件只读核对桌面商品并出诊断报告。
   - id: herr-update
     nombre: 更新 BOT
     grupo: 工具
-    desc: 收到更新包后下载并覆盖安装，会保留 .env 和 config.local.json。
 
   - id: ai-router
     nombre: AI 意图识别
     grupo: AI 助手
-    desc: 你说大白话时，由 AI 判断你其实想用哪个命令。
   - id: ai-responder
     nombre: AI 组织回复
     grupo: AI 助手
-    desc: 把执行结果或报错组织成看得懂的人话再回复你。
 
   - id: diag-evidencia
     nombre: 打包证据
     grupo: AI 修复
-    desc: UnideGes 桌面操作失败时自动触发：打包日志、截图、状态作为诊断证据。
   - id: diag-llm
     nombre: AI 诊断
     grupo: AI 修复
-    desc: AI 分析证据，判断故障原因并给出修复方案（最多自动试 2 轮）。
   - id: diag-fix
     nombre: 本地修复
     grupo: AI 修复
-    desc: 按诊断结论在本地自动修复，能修的直接修。
   - id: diag-pr
     nombre: 开 PR
     grupo: AI 修复
-    desc: 本地修不了的，把诊断结果和修复建议开成 GitHub PR。
 
 edges:
   - [ug-abrir-lanzar, ug-abrir-login]
@@ -209,8 +165,6 @@ edges:
   - [web-abrir, web-recientes]
   - [web-abrir, web-buscar-pedido]
   - [web-abrir, web-buscar]
-  - [web-abrir, web-editar]
-  - [web-abrir, web-mensajeria]
   - [web-promos, web-ahorro]
   - [web-listar, web-ahorro]
   - [web-promos, auto-advisor]
@@ -219,7 +173,6 @@ edges:
   - [web-rellenar, web-guardar]
   - [web-editar, web-guardar]
   - [web-guardar, web-enviar]
-  - [web-abrir, auto-llegada]
   - [auto-llegada, auto-imprimir]
   # 查价/改价/锁定/商品诊断 se operan DENTRO del módulo Artículos (F3),
   # así que cuelgan de él (petición del dueño, 23/07).

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Background, BaseEdge, Controls, Handle, MarkerType, Position, ReactFlow } from '@xyflow/react';
+import { Background, Controls, Handle, MarkerType, Position, ReactFlow } from '@xyflow/react';
 import dagre from '@dagrejs/dagre';
 import '@xyflow/react/dist/style.css';
 import './estilos.css';
@@ -59,9 +59,7 @@ async function mandarCallback(data) {
 function PasoNodo({ data }) {
   return (
     <div className={`nodoPaso e-${data.estado}`}>
-      {(data.tgt || []).map((h) => (
-        <Handle key={h.id} id={h.id} type="target" position={Position.Left} className="asa" style={{ top: `${h.top}%` }} />
-      ))}
+      <Handle type="target" position={Position.Left} className="asa" />
       <div className="nodoGrupo">{data.grupo}</div>
       <div className="nodoNombre">{data.nombre}</div>
       <div className="nodoStats">
@@ -69,41 +67,9 @@ function PasoNodo({ data }) {
           : data.total === 0 ? '还没跑过'
           : `成功率 ${data.exito}% · 平均 ${fmtDur(data.duracionMediaMs)}`}
       </div>
-      {(data.src || []).map((h) => (
-        <Handle key={h.id} id={h.id} type="source" position={Position.Right} className="asa" style={{ top: `${h.top}%` }} />
-      ))}
+      <Handle type="source" position={Position.Right} className="asa" />
     </div>
   );
-}
-
-// --- aristas --------------------------------------------------------------
-
-// Codo horizontal-vertical-horizontal con esquinas redondeadas. cx es el x
-// del tramo vertical (el "carril" de esta línea); rr se achica si los tramos
-// son cortos para que las curvas no se monten unas sobre otras.
-function codoPath(sx, sy, tx, ty, cx, r = 7) {
-  if (Math.abs(ty - sy) < 2) return `M ${sx},${sy} L ${tx},${ty}`;
-  const dy = Math.sign(ty - sy);
-  const rr = Math.max(1, Math.min(r, (Math.abs(ty - sy) - 1) / 2, (cx - sx) / 2, (tx - cx) / 2));
-  return [
-    `M ${sx},${sy}`,
-    `L ${cx - rr},${sy}`,
-    `Q ${cx},${sy} ${cx},${sy + rr * dy}`,
-    `L ${cx},${ty - rr * dy}`,
-    `Q ${cx},${ty} ${cx + rr},${ty}`,
-    `L ${tx},${ty}`
-  ].join(' ');
-}
-
-// Arista del árbol: cada línea baja por su propio carril (data.lane, viene
-// de asignarCarriles), así dos líneas cuyos tramos verticales se solapan
-// nunca comparten tramo. Tope: el carril no puede pegarse al nodo destino.
-function PasoArista({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, data }) {
-  const lane = Number(data?.lane) || 0;
-  let cx = sourceX + 18 + lane * 20;
-  cx = Math.min(cx, targetX - 28);
-  if (cx < sourceX + 8) cx = (sourceX + targetX) / 2;
-  return <BaseEdge id={id} path={codoPath(sourceX, sourceY, targetX, targetY, cx)} markerEnd={markerEnd} style={style} />;
 }
 
 // Eslabón gris de la cadena: un nodo del árbol REAL, repetido en la vista
@@ -182,122 +148,22 @@ function IdeaNodo({ data }) {
 }
 
 const TIPOS = { paso: PasoNodo, idea: IdeaNodo, ghost: GhostNodo };
-const TIPOS_ARISTA = { paso: PasoArista };
 
 // --- layouts ------------------------------------------------------------
 
 function calcularPosiciones(nodos, edges) {
-  // Componentes conexas (aristas tomadas como no dirigidas), en el orden en
-  // que aparecen los nodos en flujo.yaml.
-  const vecinos = new Map(nodos.map((n) => [n.id, []]));
-  for (const e of edges) {
-    vecinos.get(e.source)?.push(e.target);
-    vecinos.get(e.target)?.push(e.source);
-  }
-  const visto = new Set();
-  const componentes = [];
-  for (const n of nodos) {
-    if (visto.has(n.id)) continue;
-    const comp = [];
-    const cola = [n.id];
-    visto.add(n.id);
-    while (cola.length) {
-      const id = cola.shift();
-      comp.push(id);
-      for (const v of vecinos.get(id) || []) {
-        if (!visto.has(v)) { visto.add(v); cola.push(v); }
-      }
-    }
-    componentes.push(comp);
-  }
-  // Cada componente se maqueta con dagre POR SEPARADO y se apila debajo de
-  // la anterior (mismo orden que flujo.yaml): los grupos sueltos (AI 助手,
-  // AI 修复, 下单提醒…) quedan en su propia franja, nunca intercalados con
-  // el árbol principal (petición del dueño, 24/07).
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: 'LR', nodesep: 22, ranksep: 80, marginx: 20, marginy: 20 });
+  for (const n of nodos) g.setNode(n.id, { width: ANCHO, height: ALTO });
+  for (const e of edges) g.setEdge(e.source, e.target);
+  dagre.layout(g);
   const pos = {};
-  let yTope = 0;
-  for (const comp of componentes) {
-    const g = new dagre.graphlib.Graph();
-    g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'LR', nodesep: 22, ranksep: 170, marginx: 20, marginy: 20 });
-    for (const id of comp) g.setNode(id, { width: ANCHO, height: ALTO });
-    for (const e of edges) if (comp.includes(e.source)) g.setEdge(e.source, e.target);
-    dagre.layout(g);
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const id of comp) {
-      const p = g.node(id);
-      minY = Math.min(minY, p.y - ALTO / 2);
-      maxY = Math.max(maxY, p.y + ALTO / 2);
-    }
-    const desplaza = yTope - minY + (yTope > 0 ? 70 : 0);
-    for (const id of comp) {
-      const p = g.node(id);
-      pos[id] = { x: p.x - ANCHO / 2, y: p.y - ALTO / 2 + desplaza };
-    }
-    yTope = maxY + desplaza;
+  for (const n of nodos) {
+    const p = g.node(n.id);
+    pos[n.id] = { x: p.x - ANCHO / 2, y: p.y - ALTO / 2 };
   }
   return pos;
-}
-
-// Cada arista sale/entra por su PROPIO punto del borde del nodo (handles a
-// distinta altura). El orden sigue la Y del nodo del otro extremo.
-function asignarHandles(edges, pos) {
-  const porFuente = new Map();
-  const porDestino = new Map();
-  for (const e of edges) {
-    if (!porFuente.has(e.source)) porFuente.set(e.source, []);
-    porFuente.get(e.source).push(e);
-    if (!porDestino.has(e.target)) porDestino.set(e.target, []);
-    porDestino.get(e.target).push(e);
-  }
-  const src = new Map();
-  const tgt = new Map();
-  const deArista = new Map();
-  const repartir = (agrupado, otroCampo, coleccion, prefijo, clave) => {
-    for (const [id, lista] of agrupado) {
-      const orden = lista.slice().sort((a, b) => (pos[a[otroCampo]]?.y ?? 0) - (pos[b[otroCampo]]?.y ?? 0));
-      const handles = orden.map((e, i) => ({ id: `${prefijo}${i}`, top: ((i + 1) * 100) / (orden.length + 1) }));
-      coleccion.set(id, handles);
-      orden.forEach((e, i) => {
-        deArista.set(e.id, { ...(deArista.get(e.id) || {}), [clave]: handles[i].id });
-      });
-    }
-  };
-  repartir(porFuente, 'target', src, 's', 'sourceHandle');
-  repartir(porDestino, 'source', tgt, 't', 'targetHandle');
-  return { src, tgt, deArista };
-}
-
-// Carril vertical de cada arista, asignado por HUECO entre ranks (mismo x de
-// origen) con coloración de intervalos: si los tramos verticales de dos
-// aristas se solapan en Y, reciben carriles DISTINTOS; si no se solapan,
-// pueden reutilizar el mismo (así el hueco no necesita 13 carriles, solo el
-// máximo solape real). Devuelve Map edgeId → lane.
-function asignarCarriles(edges, pos) {
-  const grupos = new Map();
-  for (const e of edges) {
-    const ps = pos[e.source];
-    const pt = pos[e.target];
-    if (!ps || !pt) continue;
-    const gx = ps.x + ANCHO; // borde derecho del nodo origen
-    const y0 = Math.min(ps.y, pt.y);
-    const y1 = Math.max(ps.y, pt.y);
-    if (!grupos.has(gx)) grupos.set(gx, []);
-    grupos.get(gx).push({ e, y0, y1 });
-  }
-  const carriles = new Map();
-  for (const lista of grupos.values()) {
-    lista.sort((a, b) => a.y0 - b.y0 || a.y1 - b.y1);
-    const finDe = [];
-    for (const it of lista) {
-      let lane = finDe.findIndex((fin) => fin <= it.y0 - 4);
-      if (lane === -1) { lane = finDe.length; finDe.push(0); }
-      finDe[lane] = it.y1;
-      carriles.set(it.e.id, lane);
-    }
-  }
-  return carriles;
 }
 
 const bordeGhost = { stroke: '#3d4a5c', strokeWidth: 1.2, strokeDasharray: '5 4' };
@@ -323,7 +189,7 @@ function construirVistaIdeas(ideas, handlers, focoId) {
         draggable: false,
         selectable: false
       });
-      if (anterior) edges.push({ id: `${prefijo}-e${i}`, source: anterior, target: id, type: 'smoothstep', style: bordeGhost });
+      if (anterior) edges.push({ id: `${prefijo}-e${i}`, source: anterior, target: id, style: bordeGhost });
       anterior = id;
       x += GHOST_W + 26;
     });
@@ -334,7 +200,6 @@ function construirVistaIdeas(ideas, handlers, focoId) {
         id: `${prefijo}-efin`,
         source: anterior,
         target: finalNode.id,
-        type: 'smoothstep',
         style: bordeGhost,
         markerEnd: { type: MarkerType.ArrowClosed, color: '#3d4a5c', width: 14, height: 14 }
       });
@@ -391,12 +256,6 @@ function Lateral({ nodo, detalle, onCerrar, onColgarIdea }) {
         {nodo.total === 0 ? '这个步骤还没跑过。'
           : `共 ${nodo.total} 次 · 成功率 ${nodo.exito}% · 平均耗时 ${fmtDur(nodo.duracionMediaMs)}`}
       </div>
-      {nodo.desc && (
-        <div className="latBloque">
-          <div className="latTitulo">这个节点是干什么的</div>
-          <div className="latDesc">{nodo.desc}</div>
-        </div>
-      )}
       <div className="latBloque ideaBotones">
         <button onClick={() => onColgarIdea(nodo.id)}>💡 在这里挂个想法</button>
       </div>
@@ -572,23 +431,17 @@ function App() {
     [nodos, edges]
   );
   const posiciones = useMemo(() => calcularPosiciones(nodos, edges), [claveTopo]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handles = useMemo(() => asignarHandles(edges, posiciones), [edges, posiciones]);
-  const carriles = useMemo(() => asignarCarriles(edges, posiciones), [edges, posiciones]);
 
   const corriendo = new Set(nodos.filter((n) => n.estado === 'corriendo').map((n) => n.id));
   const rfNodosArbol = nodos.map((n) => ({
     id: n.id,
     type: 'paso',
     position: posiciones[n.id] || { x: 0, y: 0 },
-    data: { ...n, src: handles.src.get(n.id) || [], tgt: handles.tgt.get(n.id) || [] },
+    data: n,
     selected: sel === n.id
   }));
   const rfEdgesArbol = edges.map((e) => ({
     ...e,
-    type: 'paso',
-    sourceHandle: handles.deArista.get(e.id)?.sourceHandle,
-    targetHandle: handles.deArista.get(e.id)?.targetHandle,
-    data: { lane: carriles.get(e.id) || 0 },
     animated: corriendo.has(e.target) || corriendo.has(e.source),
     style: { stroke: '#3d4a5c', strokeWidth: 1.5 },
     markerEnd: { type: MarkerType.ArrowClosed, color: '#3d4a5c', width: 16, height: 16 }
@@ -656,7 +509,6 @@ function App() {
             nodes={rfNodosArbol}
             edges={rfEdgesArbol}
             nodeTypes={TIPOS}
-            edgeTypes={TIPOS_ARISTA}
             onNodeClick={abrirNodo}
             onNodeContextMenu={menuNodo}
             onPaneClick={() => setSel('')}

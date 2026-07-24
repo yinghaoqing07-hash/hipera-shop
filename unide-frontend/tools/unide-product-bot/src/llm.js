@@ -555,22 +555,7 @@ Procede en este orden:
 
 Responde EN CHINO (el bloque de codigo va tal cual), con esta estructura: 【出错步骤】 【根因判断】 【修复方案】 y despues el bloque <<<ARCHIVO:...>>> si aplica.`;
 
-// Variante WEB (24/07, cobertura ampliada): los flujos web de UnideGes
-// (XAF/DevExpress Blazor conducidos con puppeteer-core vía CDP). La "caja
-// negra" aquí es la línea de estado (setLive), más escasa que la traza paso
-// a paso del PS — el prompt lo sabe y pide más observación en vez de
-// inventar selectores a ciegas.
-const DIAG_WEB_SYSTEM = `Eres un ingeniero experto en automatizacion web con puppeteer-core (CDP) sobre aplicaciones DevExpress XAF/Blazor (grids dxbl, paginadores dxbl-pager, toolbars, treeviews). Te llega la evidencia de una ejecucion FALLIDA de un flujo web de UnideGes: la linea de estado del flujo (escasa, cronologica), capturas de pantalla si las hay, el codigo fuente JavaScript (ESM) del modulo que conduce el flujo y, si existe, el log de la ultima ejecucion EXITOSA del mismo paso.
-
-Procede en este orden:
-1. Diagnostica la CAUSA RAIZ (selector que no casa / pagina distinta a la esperada / paginacion / timing del render Blazor / descarga que no llega), comparando exito vs fallo si tienes ambos.
-2. Propon una correccion concreta.
-3. SOLO si hace falta cambiar codigo: entrega el archivo fuente COMPLETO y corregido entre las marcas <<<ARCHIVO:nombre.js>>> y <<<FIN>>>, sin markdown dentro. El nombre tiene que ser EXACTAMENTE uno de los que aparecen en la evidencia; respeta su estilo (ESM, sin dependencias nuevas, comentarios en espanol) y NO quites exports existentes.
-4. Si la evidencia NO basta (la linea de estado es escasa o falta el dump del DOM), dilo claramente y lista que datos de observacion faltan (p. ej. "volcar el HTML de la pagina"). PROHIBIDO inventar selectores o correcciones sin evidencia.
-
-Responde EN CHINO (el bloque de codigo va tal cual), con esta estructura: 【出错步骤】 【根因判断】 【修复方案】 y despues el bloque <<<ARCHIVO:...>>> si aplica.`;
-
-export async function llmDiagnosticoRPA(evidencia, imagenes, config, logger, tipo = 'desktop') {
+export async function llmDiagnosticoRPA(evidencia, imagenes, config, logger) {
   const fs = await import('node:fs');
   const content = [];
   for (const ruta of (imagenes || []).slice(0, 2)) {
@@ -582,7 +567,7 @@ export async function llmDiagnosticoRPA(evidencia, imagenes, config, logger, tip
   }
   content.push({ type: 'text', text: String(evidencia || '').slice(0, 120000) });
   const { texto, usage } = await pedirModelo(config, logger, {
-    system: tipo === 'web' ? DIAG_WEB_SYSTEM : DIAG_RPA_SYSTEM,
+    system: DIAG_RPA_SYSTEM,
     vision: content.length > 1,
     maxTokens: 8000,
     timeoutMs: 240000,

@@ -97,7 +97,7 @@ export function cargarArbol(config, logger) {
       continue;
     }
     vistos.add(n.id);
-    nodos.push({ id: String(n.id), nombre: String(n.nombre), grupo: String(n.grupo || ''), match: Array.isArray(n.match) ? n.match.map(String) : [], desc: String(n.desc || '') });
+    nodos.push({ id: String(n.id), nombre: String(n.nombre), grupo: String(n.grupo || ''), match: Array.isArray(n.match) ? n.match.map(String) : [] });
   }
   const edges = crudo.edges.filter(([a, b]) => {
     const ok = vistos.has(a) && vistos.has(b);

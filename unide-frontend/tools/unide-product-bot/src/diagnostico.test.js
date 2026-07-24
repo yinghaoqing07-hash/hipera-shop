@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { aplicarFix, empaquetarEvidencia, esArchivoJs, esSoloPr, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, validarPropuesta } from './diagnostico.js';
+import { aplicarFix, empaquetarEvidencia, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo } from './diagnostico.js';
 
 function entorno() {
   const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'diag-'));
@@ -87,53 +87,4 @@ test('empaquetarEvidencia junta caja, exito previo, codigo y capturas', () => {
   assert.ok(paquete.texto.includes('param('));
   assert.equal(paquete.imagenes.length, 1);
   assert.ok(fs.existsSync(path.join(paquete.carpeta, 'evidencia.txt')));
-});
-
-// --- parches JS (24/07): node --check + import real + exports intactos ---
-
-const JS_BASE = 'export function fetchCosa() { return 1; }\nexport const VERSION = 3;\n';
-
-function entornoJs() {
-  const { config } = entorno();
-  const destino = path.resolve(config.__toolRoot, 'src/webMensajeria.js');
-  fs.mkdirSync(path.dirname(destino), { recursive: true });
-  fs.writeFileSync(destino, JS_BASE, 'utf8');
-  return { config };
-}
-
-test('validarPropuesta js: acepta parche que conserva exports y carga', () => {
-  const { config } = entornoJs();
-  const v = validarPropuesta(config, { archivo: 'src/webMensajeria.js', contenido: JS_BASE + 'export function extra() { return 2; }\n' });
-  assert.equal(v.ok, true, v.motivo);
-  assert.ok(v.temp.endsWith('.js'));
-});
-
-test('validarPropuesta js: rechaza sintaxis rota, top-level que lanza y exports borrados', () => {
-  const { config } = entornoJs();
-  const sintaxis = validarPropuesta(config, { archivo: 'src/webMensajeria.js', contenido: JS_BASE + 'export function rota( {\n' });
-  assert.equal(sintaxis.ok, false);
-  assert.match(sintaxis.motivo, /import 失败/);
-
-  const lanza = validarPropuesta(config, { archivo: 'src/webMensajeria.js', contenido: 'throw new Error("boom");\n' + JS_BASE });
-  assert.equal(lanza.ok, false);
-  assert.match(lanza.motivo, /import 失败/);
-
-  const borrado = validarPropuesta(config, { archivo: 'src/webMensajeria.js', contenido: 'export function fetchCosa() { return 1; }\n' });
-  assert.equal(borrado.ok, false);
-  assert.match(borrado.motivo, /export/);
-});
-
-test('esSoloPr y esArchivoJs distinguen los niveles de riesgo', () => {
-  assert.equal(esSoloPr('src/webBrowser.js'), true);
-  assert.equal(esSoloPr('src/webOrder.js'), false);
-  assert.equal(esArchivoJs('src/webOrder.js'), true);
-  assert.equal(esArchivoJs('desktop/unideges-menu.ps1'), false);
-});
-
-test('aplicarFix js: marca esJs para avisar del reinicio', () => {
-  const { config } = entornoJs();
-  const r = aplicarFix(config, { archivo: 'src/webMensajeria.js', contenido: JS_BASE + '// mejora\n' });
-  assert.equal(r.ok, true, r.motivo);
-  assert.equal(r.esJs, true);
-  assert.ok(fs.existsSync(r.backup));
 });
