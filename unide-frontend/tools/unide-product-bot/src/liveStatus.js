@@ -31,13 +31,6 @@ export function getLiveLog(limit = 250) {
   return HISTORY.slice(-limit);
 }
 
-// Líneas del historial a partir de un instante (t en ms): la "traza" de una
-// ejecución web para la caja negra y la evidencia de diagnóstico.
-export function getLiveSince(ts) {
-  const desde = Number(ts) || 0;
-  return HISTORY.filter((h) => h.t >= desde).map((h) => h.line);
-}
-
 export function setLive(text) {
   LINE = String(text || '').slice(0, 160);
   AT = Date.now();

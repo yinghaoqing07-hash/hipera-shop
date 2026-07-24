@@ -27,8 +27,21 @@ try {
 // distancia con estado, no un segundo canal de salida. Sin dependencias:
 // node:http y una página autocontenida. panel.cmd lo abre en el navegador.
 
+// Puerta de acceso remoto. Cloudflare Access inyecta esta cabecera con el
+// correo YA autenticado; el navegador local (directo a 127.0.0.1) nunca la
+// trae. Regla: sin cabecera = acceso local del propio PC = permitido (como
+// siempre); con cabecera = vino por el túnel = el correo tiene que estar en
+// la lista. Lista vacía = puerta apagada (todo local, sin cambios).
+export function accesoPermitido(headers, emails) {
+  const correo = String(headers?.['cf-access-authenticated-user-email'] || '').trim().toLowerCase();
+  if (!correo) return true; // acceso local directo (el puerto es solo loopback)
+  if (!Array.isArray(emails) || !emails.length) return false; // llegó por Access pero no hay lista → fuera
+  return emails.map((e) => String(e).trim().toLowerCase()).includes(correo);
+}
+
 export function startPanel(config, logger, hooks) {
   const port = Number(config.panel?.port) || 8765;
+  const remotoEmails = Array.isArray(config.panel?.remotoEmails) ? config.panel.remotoEmails : [];
   // Cerrar la ventana del panel (la X) apaga también el bot: la página manda
   // un beacon 'adios' al cerrarse y aquí se programa el apagado con un margen
   // de gracia — si solo era una recarga, la página vuelve a pedir / o /chat
@@ -43,6 +56,15 @@ export function startPanel(config, logger, hooks) {
   };
   const server = http.createServer(async (req, res) => {
     try {
+      // Puerta remota: si vino por el túnel (trae cabecera de Access) el
+      // correo tiene que estar autorizado. El acceso local no lleva cabecera
+      // y pasa siempre. Se registra el rechazo para detectar accesos raros.
+      if (!accesoPermitido(req.headers, remotoEmails)) {
+        logger?.warn('panel acceso remoto denegado', { correo: req.headers['cf-access-authenticated-user-email'], url: req.url });
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('no autorizado');
+        return;
+      }
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html' || req.url.startsWith('/chat'))) cancelarCierre();
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
         // no-store: que el navegador NUNCA sirva una página vieja de caché
