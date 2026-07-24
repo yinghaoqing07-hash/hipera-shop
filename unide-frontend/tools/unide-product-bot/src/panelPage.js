@@ -8,8 +8,15 @@ export function renderPanelPage(version) {
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>JARVIS</title>
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/jarvis-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
 <style>
   :root {
     --motion-fast: 180ms;
@@ -445,6 +452,40 @@ export function renderPanelPage(version) {
     45% { opacity: 1; filter: brightness(1.45); }
     100% { opacity: 1; filter: brightness(1); }
   }
+  /* ---- Móvil: usar TODO el panel desde el teléfono (Tailscale/Cloudflare).
+     Las 3 columnas se apilan en una sola con scroll; el cajón de teclados y
+     el lector de informes pasan a pantalla completa. ---- */
+  @media (max-width: 820px) {
+    header { padding: 10px 14px; }
+    #estado { gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+    #vivoEsc { max-width: 56vw; }
+    #zonaPrincipal { padding: 0 12px 14px; }
+    /* grid de 3 columnas → columna única, con scroll. Orden útil al pulgar:
+       primero el centro (reloj + caja de comandos + tarjetas de acción),
+       luego las tarjetas de estado, y al final la actividad. */
+    #zona { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    #centro, #lateral, #ladoDerecho { grid-column: auto; grid-row: auto; width: 100%; max-width: none; min-height: 0; }
+    #centro { order: 0; }
+    #lateral { order: 1; overflow: visible; }
+    #ladoDerecho { order: 2; min-height: 220px; }
+    #tarjetas { grid-template-columns: 1fr; }
+    #linea { width: 100%; }
+    #libre { font-size: 16px; } /* >=16px: iOS no hace zoom al enfocar */
+    #reloj { font-size: 30px; }
+    #saludo { margin-bottom: 16px; }
+    .pill { font-size: 16px; padding: 9px 5px; } /* [ 操作台 ] [ 流程图 ] al tacto */
+    /* cajón (teclados interactivos) y lector (informes largos): a pantalla
+       completa por encima de todo cuando se abren. */
+    #cajon.abierto, #lector.abierto {
+      position: fixed; inset: 0; z-index: 55; background: #0d1117;
+      padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+      transform: none; overflow-y: auto; max-width: none;
+    }
+    #cajon .cab, #lector .cab { position: sticky; top: 0; background: #0d1117; padding-top: 6px; z-index: 1; }
+    #cajon .cab button, #lector .cab button { font-size: 26px; padding: 4px 12px; } /* cerrar: toque grande */
+    #cajon .filaB button { padding: 15px 10px; font-size: 16px; }
+    #lector pre { font-size: 13.5px; }
+  }
 </style>
 </head>
 <body>
@@ -525,6 +566,9 @@ export function renderPanelPage(version) {
   <iframe id="marcoFlujo" title="流程图"></iframe>
 </div>
 <script>
+// PWA: registra el service worker (para instalar como app + caparazón
+// offline). Silencioso: si falla, el panel funciona igual.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 const libre = document.getElementById('libre');
 
 // --- sugerencias de comandos al teclear "/" ----------------------------

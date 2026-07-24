@@ -219,3 +219,33 @@ body {
 .react-flow__controls button:hover { background: #1a2330; }
 .react-flow__attribution { background: transparent; color: #333e4d; }
 .react-flow__attribution a { color: #333e4d; }
+
+/* ---- Móvil: la 流程图 servida desde el teléfono. React Flow ya hace
+   pan/zoom con el dedo; aquí se arregla la cabecera, la barra lateral
+   (pasa a hoja inferior) y los toques. ---- */
+@media (max-width: 720px) {
+  .barra { flex-wrap: wrap; gap: 8px 10px; padding: 9px 12px; font-size: 12px; }
+  .titulo { width: 100%; font-size: 13px; }
+  .leyenda { display: none; }
+  .pestanas button { padding: 6px 16px; font-size: 13px; }
+  .exportar { padding: 6px 12px; font-size: 12px; }
+  .volver { display: none; }
+  /* barra lateral → hoja inferior a media pantalla, cómoda con el pulgar */
+  .lateral {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto;
+    max-height: 62vh; border-left: none; border-top: 1px solid #1c2530;
+    border-radius: 14px 14px 0 0; box-shadow: 0 -8px 24px rgba(0,0,0,.45);
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  }
+  .latCerrar { font-size: 20px; padding: 4px 10px; }
+  .nodoIdea.i-editable { width: 258px; }
+  .borrNombre, .borrTexto { font-size: 14px; padding: 8px 10px; } /* >=14px: sin zoom iOS */
+  .ideaBorrar { font-size: 15px; padding: 0 4px 0 8px; }
+  .react-flow__controls { transform: scale(1.35); transform-origin: bottom left; margin: 0 0 10px 10px; }
+  .toast { width: 100%; order: 5; }
+}
+@media (max-width: 420px) {
+  .pestanas { flex: 1; }
+  .pestanas button { flex: 1; }
+  .pastilla { display: none; }
+}
