@@ -15,7 +15,7 @@ export function renderPanelPage(version) {
 <link rel="apple-touch-icon" href="/icons/jarvis-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="JARVIS">
 <style>
   :root {
@@ -45,6 +45,24 @@ export function renderPanelPage(version) {
   #btnCajon::before, #btnFlujo::before { content: '[ '; color: #46556a; }
   #btnCajon::after, #btnFlujo::after { content: ' ]'; color: #46556a; }
   #btnCajon:hover, #btnFlujo:hover { color: #d5ecf8; }
+  /* 信息: solo existe en móvil (en el PC las tarjetas están siempre a la
+     vista en la columna izquierda, así que sobra el botón y el cajón). */
+  #btnInfo {
+    display: none;
+    background: none; border: none; color: #8fa2b5;
+    padding: 5px 2px; font-size: 12px; letter-spacing: .08em;
+    cursor: pointer; font-family: inherit;
+  }
+  #btnInfo::before { content: '[ '; color: #46556a; }
+  #btnInfo::after { content: ' ]'; color: #46556a; }
+  #btnInfo:hover { color: #d5ecf8; }
+  #cerrarInfo {
+    display: none; background: none; border: none; color: #76879a;
+    font-size: 26px; cursor: pointer; padding: 2px 10px; margin-left: auto;
+    font-family: inherit;
+  }
+  #fondoInfo { display: none; }
+  @media (max-width: 820px) { #fondoInfo { display: block; } }
   /* Panel de flujo EMBEBIDO: capa a pantalla completa dentro de la misma
      ventana de JARVIS (nada de abrir otra pestaña). El iframe carga /flujo
      la primera vez que se abre, no al arrancar el panel. */
@@ -456,18 +474,42 @@ export function renderPanelPage(version) {
      Las 3 columnas se apilan en una sola con scroll; el cajón de teclados y
      el lector de informes pasan a pantalla completa. ---- */
   @media (max-width: 820px) {
-    header { padding: 10px 14px; }
+    /* La barra de estado del iPhone tapaba los botones cuando la app está
+       en pantalla completa: se respeta el área segura de arriba. */
+    header {
+      padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+      position: sticky; top: 0; z-index: 40; background: #0d1117;
+    }
     #estado { gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
-    #vivoEsc { max-width: 56vw; }
-    #zonaPrincipal { padding: 0 12px 14px; }
-    /* grid de 3 columnas → columna única, con scroll. Orden útil al pulgar:
-       primero el centro (reloj + caja de comandos + tarjetas de acción),
-       luego las tarjetas de estado, y al final la actividad. */
+    #vivoEsc { max-width: 46vw; }
+    #zonaPrincipal { padding: 0 12px calc(14px + env(safe-area-inset-bottom)); }
+    /* grid de 3 columnas → columna única con scroll. La portada del móvil se
+       queda LIMPIA (reloj + caja de comandos + actividad): las tarjetas de
+       estado se van al cajón lateral 「信息」 (petición del dueño, 24/07). */
     #zona { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    #centro, #lateral, #ladoDerecho { grid-column: auto; grid-row: auto; width: 100%; max-width: none; min-height: 0; }
+    #centro, #ladoDerecho { grid-column: auto; grid-row: auto; width: 100%; max-width: none; min-height: 0; }
     #centro { order: 0; }
-    #lateral { order: 1; overflow: visible; }
-    #ladoDerecho { order: 2; min-height: 220px; }
+    #ladoDerecho { order: 1; min-height: 220px; }
+    /* 信息: cajón deslizante desde la derecha con 今日/促销/定时任务/更新BOT */
+    #btnInfo { display: inline-block; }
+    #lateral {
+      position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
+      width: min(88vw, 400px); max-width: none; grid-column: auto; grid-row: auto;
+      background: #0d1117; border-left: 1px solid rgba(200,211,220,.14);
+      padding: calc(14px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+      overflow-y: auto; transform: translateX(101%);
+      transition: transform var(--motion-base) var(--motion-ease);
+      box-shadow: -10px 0 26px rgba(0,0,0,.5);
+    }
+    #lateral.abiertoMovil { transform: translateX(0); }
+    #cerrarInfo { display: block; }
+    #fondoInfo {
+      position: fixed; inset: 0; z-index: 59; background: rgba(0,0,0,.5);
+      opacity: 0; visibility: hidden; transition: opacity var(--motion-base) var(--motion-ease);
+    }
+    #fondoInfo.abiertoMovil { opacity: 1; visibility: visible; }
+    /* el cajón de teclados ya no debe esconder la columna (ahora es cajón) */
+    #cajon.abierto ~ #lateral { display: block; }
     #tarjetas { grid-template-columns: 1fr; }
     #linea { width: 100%; }
     #libre { font-size: 16px; } /* >=16px: iOS no hace zoom al enfocar */
@@ -490,7 +532,7 @@ export function renderPanelPage(version) {
 </head>
 <body>
 <header>
-  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><button id="btnFlujo" onclick="abrirFlujo()">流 程 图</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
+  <span id="estado"><button id="btnCajon" onclick="abrirCajonInicio()">操 作 台</button><button id="btnFlujo" onclick="abrirFlujo()">流 程 图</button><button id="btnInfo" onclick="toggleInfoMovil()">信 息</button><span><span id="punto"></span><span id="txtEstado">连接中</span><span id="vivoEsc"></span></span></span>
 </header>
 <main>
   <div id="zona">
@@ -507,7 +549,9 @@ export function renderPanelPage(version) {
     </div>
   </div>
     </div>
+    <div id="fondoInfo" onclick="cerrarInfoMovil()"></div>
     <div id="lateral">
+      <button id="cerrarInfo" onclick="cerrarInfoMovil()" title="关闭">✕</button>
       <div id="tarjetas">
         <div class="tarjeta clicable" onclick="abrirDetalle('hoy')" title="点开看今天到货明细">
           <div class="titulo">今日</div>
@@ -987,6 +1031,17 @@ function cerrarCajon() {
 // Flujo embebido: la capa vive dentro de la ventana de JARVIS. El iframe
 // se carga la primera vez (362KB que no hace falta pagar al arrancar) y
 // se queda vivo entre aperturas para no re-renderizar el grafo.
+// 信息 (solo móvil): cajón lateral con 今日/促销/定时任务/更新BOT, para que
+// la portada del teléfono quede despejada. En el PC no existe.
+function toggleInfoMovil() {
+  const abierto = document.getElementById('lateral').classList.toggle('abiertoMovil');
+  document.getElementById('fondoInfo').classList.toggle('abiertoMovil', abierto);
+}
+function cerrarInfoMovil() {
+  document.getElementById('lateral').classList.remove('abiertoMovil');
+  document.getElementById('fondoInfo').classList.remove('abiertoMovil');
+}
+
 function abrirFlujo() {
   var marco = document.getElementById('marcoFlujo');
   if (!marco.getAttribute('src')) marco.setAttribute('src', '/flujo');
@@ -996,7 +1051,7 @@ function cerrarFlujo() {
   document.getElementById('capaFlujo').classList.remove('abierta');
 }
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') cerrarFlujo();
+  if (e.key === 'Escape') { cerrarFlujo(); cerrarInfoMovil(); }
 });
 
 function abrirCajonInicio() {

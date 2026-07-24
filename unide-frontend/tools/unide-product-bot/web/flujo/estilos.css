@@ -224,7 +224,8 @@ body {
    pan/zoom con el dedo; aquí se arregla la cabecera, la barra lateral
    (pasa a hoja inferior) y los toques. ---- */
 @media (max-width: 720px) {
-  .barra { flex-wrap: wrap; gap: 8px 10px; padding: 9px 12px; font-size: 12px; }
+  /* respeta la barra de estado del iPhone en pantalla completa */
+  .barra { flex-wrap: wrap; gap: 8px 10px; padding: calc(9px + env(safe-area-inset-top)) 12px 9px; font-size: 12px; }
   .titulo { width: 100%; font-size: 13px; }
   .leyenda { display: none; }
   .pestanas button { padding: 6px 16px; font-size: 13px; }
