@@ -20,17 +20,19 @@ import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop as applyBloqDesktopRaw, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
-import { getLive, getLiveLog, getLiveShot, noteLive, setLive } from './liveStatus.js';
+import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
 import { limpiarArchivosViejos } from './housekeeping.js';
-import { aplicarFix, empaquetarEvidencia, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, rutaEnRepo, validarPropuesta } from './diagnostico.js';
+import { aplicarFix, empaquetarEvidencia, esArchivoJs, esSoloPr, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, rutaEnRepo, validarPropuesta } from './diagnostico.js';
+import { chatIdActual, conChat } from './chatContexto.js';
 import { abrirPrConArchivo, githubConfigured } from './github.js';
 import { MODULOS_UNIDEGES, accionUnideges, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
 import { cargarArbol } from './flujoArbol.js';
 import { abrirFlujoEstado } from './flujoEstado.js';
 import { renderFlujoPage } from './flujoPage.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
+import { fetchMensajeriaOperativa, formatMensajeriaSummary } from './webMensajeria.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -262,19 +264,90 @@ const autoAdvisor = new AutoAdvisorScheduler(config, logger);
 const flujoArbol = cargarArbol(config, logger);
 const flujoEstado = await abrirFlujoEstado(config, logger);
 
+// Paso del árbol → { archivo fuente, tipo de diagnóstico, escritura }:
+// qué código ve la IA en la evidencia y si el paso puede reintentarse solo
+// (solo lectura) o jamás se relanza solo (escritura). Sin entrada aquí, el
+// paso no dispara diagnóstico (no hay código reparable que proponer).
+const DIAG_PASO = {
+  'ug-abrir': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  'ug-inicio': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  'ug-articulos': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  'ug-utilidades': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  'ug-albaranes': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  'ug-fin': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  'ug-buscar': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop' },
+  'ug-leer-precio': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop' },
+  'ug-cambiar-precio': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop', escritura: true },
+  'ug-bloq': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop', escritura: true },
+  'ug-rellenar-pedido': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop', escritura: true },
+  'herr-diag-productos': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop' },
+  'web-promos': { archivo: 'src/webPromotions.js', tipo: 'web' },
+  'web-mensajeria': { archivo: 'src/webMensajeria.js', tipo: 'web' },
+  'web-listar': { archivo: 'src/webOrder.js', tipo: 'web' },
+  'web-recientes': { archivo: 'src/webOrder.js', tipo: 'web' },
+  'web-buscar-pedido': { archivo: 'src/webOrder.js', tipo: 'web' },
+  'web-ahorro': { archivo: 'src/webOrder.js', tipo: 'web' },
+  'web-buscar': { archivo: 'src/webOrder.js', tipo: 'web' },
+  'web-rellenar': { archivo: 'src/webOrder.js', tipo: 'web', escritura: true },
+  'web-editar': { archivo: 'src/webOrder.js', tipo: 'web', escritura: true },
+  'web-guardar': { archivo: 'src/webOrder.js', tipo: 'web', escritura: true },
+  'web-enviar': { archivo: 'src/webOrder.js', tipo: 'web', escritura: true },
+  'auto-llegada': { archivo: 'src/webOrder.js', tipo: 'web' }
+};
+
+// Salida común de TODA ejecución automatizada (web por conNavegador y
+// escritorio por conSondaFlujo): escribe la caja negra y, si ha ido mal,
+// decide si toca diagnóstico IA. Nunca lanza: es adorno, no flujo.
+async function salidaFlujo({ chatId, etiqueta, nodo, res, t0, reintentar }) {
+  try {
+    registrarCajaNegra(etiqueta, res, t0);
+    const ok = esResultadoFlujoOk(res);
+    const ficha = nodo ? DIAG_PASO[nodo] : null;
+    if (ok) {
+      // Referencia éxito-vs-fallo del paso y reset de sus ciclos de reparación.
+      if (ficha) {
+        guardarExitoPaso(config, nodo, Array.isArray(res?.trace) && res.trace.length ? res.trace : getLiveSince(t0));
+        diagCiclos.delete(nodo);
+      }
+      return;
+    }
+    if (res && (res.status === 'disabled' || res.status === 'skipped')) return;
+    if (esFalloConexion(res)) return; // Edge caído: avisa el propio flujo; la IA no arregla eso
+    if (!ficha) return; // sin fuente reparable: el aviso normal ya salió
+    let chatEfectivo = chatId ?? chatIdActual();
+    if (!chatEfectivo && config.diagnostico?.autoTareas === true) chatEfectivo = arrivalChatIds()[0] || null;
+    if (!chatEfectivo) {
+      notePanelActivity(`失败（自动任务，未诊断）：${etiqueta}`);
+      return;
+    }
+    if (config.diagnostico?.enabled === false || !llmConfigured(config)) return;
+    lanzarDiagnostico(chatEfectivo, { etiqueta, step: nodo, res, ficha, reintentar }).catch((error) => {
+      logger.warn('diagnostico automatico fallo', { error: error.message });
+      telegram.sendMessage(chatEfectivo, `自动诊断没跑成：${String(error.message || '').slice(0, 150)}`, { __skipAI: true }).catch(() => {});
+    });
+  } catch (error) {
+    logger.warn('salidaFlujo fallo', { error: error.message });
+  }
+}
+
 // Sonda genérica para pasos que NO pasan por conNavegador (RPA de
 // escritorio, llamadas al LLM): misma semántica que la sonda de
-// conNavegador. Los resultados 'disabled'/'skipped' no cuentan como
-// ejecución; `cuando` (opcional) apaga la sonda sin tocar la función.
+// conNavegador, más caja negra y diagnóstico vía salidaFlujo (el chatId se
+// lee del contexto async: ni un solo punto de llamada cambia). Los
+// resultados 'disabled'/'skipped' no cuentan como ejecución.
 function conSondaFlujo(nodo, fn, cuando) {
   return async (...args) => {
     if (cuando && !cuando()) return fn(...args);
     flujoEstado.iniciar(nodo);
+    const t0 = Date.now();
+    const etiqueta = flujoArbol.nodos.find((n) => n.id === nodo)?.nombre || nodo;
+    const reintentar = () => conSondaFlujo(nodo, fn, cuando)(...args);
     let res;
     try {
       res = await fn(...args);
     } catch (error) {
       flujoEstado.terminar(nodo, { ok: false, detalle: error.message });
+      await salidaFlujo({ chatId: null, etiqueta, nodo, res: { ok: false, error: error.message }, t0, reintentar });
       throw error;
     }
     if (res && (res.status === 'disabled' || res.status === 'skipped')) {
@@ -282,6 +355,7 @@ function conSondaFlujo(nodo, fn, cuando) {
       return res;
     }
     flujoEstado.terminar(nodo, { ok: esResultadoFlujoOk(res), detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
+    await salidaFlujo({ chatId: null, etiqueta, nodo, res, t0, reintentar });
     return res;
   };
 }
@@ -301,24 +375,28 @@ logger.info('unide product bot started', { desktopEnabled: config.desktop.enable
 // Si hay que esperar, se le dice al dueño qué está corriendo y que su
 // tarea arranca sola al terminar. chatId null = tarea automática, sin aviso.
 function conNavegador(chatId, etiqueta, fn) {
-  // Sonda del panel de flujo: si la etiqueta corresponde a un nodo del
-  // árbol, se registra inicio/fin/duración/captura. iniciar() va DENTRO
-  // del candado: mientras espera cola el nodo no debe salir "corriendo".
+  // Sonda del panel de flujo + caja negra + diagnóstico (salidaFlujo).
+  // iniciar() va DENTRO del candado: mientras espera cola el nodo no debe
+  // salir "corriendo".
   const nodo = flujoArbol.nodoPorEtiqueta(etiqueta);
   // Toda operación del grupo 网页 pasa por aquí y prueba (o no) que el Edge
   // estaba conectado a la web: eso alimenta el nodo raíz "打开 Unide 网页".
   const esWeb = nodo && flujoArbol.grupoDe(nodo).startsWith('网页');
-  const fnConSonda = !nodo ? fn : async () => {
-    flujoEstado.iniciar(nodo);
+  const fnConSonda = async () => {
+    const t0 = Date.now();
+    if (nodo) flujoEstado.iniciar(nodo);
+    const reintentar = () => conNavegador(chatId, etiqueta, fn);
     try {
       const res = await fn();
       const ok = esResultadoFlujoOk(res);
-      flujoEstado.terminar(nodo, { ok, detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
+      if (nodo) flujoEstado.terminar(nodo, { ok, detalle: detalleResultadoFlujo(res), captura: res?.screenshot || '' });
       if (esWeb) marcarAperturaWeb(ok || !esFalloConexion(res), etiqueta);
+      await salidaFlujo({ chatId, etiqueta, nodo, res, t0, reintentar });
       return res;
     } catch (error) {
-      flujoEstado.terminar(nodo, { ok: false, detalle: error.message });
+      if (nodo) flujoEstado.terminar(nodo, { ok: false, detalle: error.message });
       if (esWeb) marcarAperturaWeb(!esFalloConexion(error), etiqueta);
+      await salidaFlujo({ chatId, etiqueta, nodo, res: { ok: false, error: error.message }, t0, reintentar });
       throw error;
     }
   };
@@ -406,7 +484,15 @@ function maybeHousekeeping() {
   }
 }
 
+// Punto ÚNICO donde el chatId entra en contexto async (chatContexto.js):
+// cualquier capa profunda (conSondaFlujo, salidaFlujo) lo lee sin que haya
+// que pasarlo por todos los parámetros (patrón del candado de webLock).
 async function handleUpdate(update) {
+  const chatIdCtx = update.callback_query?.message?.chat?.id ?? update.message?.chat?.id ?? null;
+  return conChat(chatIdCtx, () => handleUpdateConChat(update));
+}
+
+async function handleUpdateConChat(update) {
   if (update.callback_query) { await handleCallback(update.callback_query); return; }
   const message = update.message;
   if (!message?.chat?.id) return;
@@ -470,6 +556,7 @@ async function handleUpdate(update) {
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(fruta|verdura|fruta_verdura|pedido_fruta|pedido_verdura)\b/i.test(text)) { await startTally(chatId, 'fruta'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
+  if (/^\/(mensajeria|descargas|albaranes)(?:@\w+)?(?:\s|$)/i.test(text)) { await handleMensajeria(chatId, text); return; }
   if (/^\/ahorro_pedido\b/i.test(text)) { await handleAhorroPedido(chatId, text); return; }
   if (/^\/(ahorro|estrategia)\b/i.test(text)) { await handleAhorro(chatId); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
@@ -691,6 +778,7 @@ function formatCommandList() {
     '',
     '【促销 / 省钱】',
     '/promociones — 去网页抓最新促销（CSV）',
+    '/mensajeria — 抓 Mensajería 过去一周，勾选该下载的（测试模式不真下；bajar=真下载）',
     '/ahorro — 所有促销的省钱策略',
     '/ahorro_pedido — 最新 PDA 单逐行对照促销，AI 挑可替换的促销品',
     '/ahorro_pedido 153 — 指定看哪张单',
@@ -1698,6 +1786,7 @@ async function handleAhorroPedido(chatId, text) {
   let similarViaLlm = false;
   if (llmConfigured(config) && orderAdvice.noPromo.length) {
     await telegram.sendMessage(chatId, '🤖 正在让 AI 对比正常价的行和整张促销清单，挑真正能换着叫的…');
+    const t0Match = Date.now();
     try {
       const inOrder0 = new Set([...orderAdvice.onPromo, ...orderAdvice.noPromo].map((l) => l.code));
       const candidates = [...orderAdvice.promoByCode.entries()]
@@ -1718,6 +1807,10 @@ async function handleAhorroPedido(chatId, text) {
       similarViaLlm = true;
     } catch (error) {
       logger.warn('llm similar failed, using keyword fallback', { error: error.message });
+      // El fallback por palabras disimula el fallo en el chat; que al menos
+      // quede en la caja negra (el 24/07 «This operation was aborted» no
+      // apareció en ningún sitio visible).
+      registrarCajaNegra('订单省钱分析 · AI 匹配', { ok: false, mensaje: error.message }, t0Match);
       await telegram.sendMessage(chatId, `AI 匹配没成功（${error.message.slice(0, 120)}），这次先用关键词匹配。`);
     }
   }
@@ -2019,6 +2112,45 @@ async function handlePromotions(chatId, text = '') {
   if (result.listMaybeTruncated && result.listDumpFile) {
     await telegram.sendMessage(chatId, `外层只读到 ${result.totalRows} 个促销、且都未过期，可能没翻到有过期项的后续分页。附上列表页结构，发给 Claude 修外层翻页：`);
     try { await telegram.sendDocument(chatId, result.listDumpFile, 'Promociones 列表页结构（发给 Claude）'); } catch { /* noop */ }
+  }
+}
+
+// /mensajeria (alias /descargas, /albaranes) — Mensajería operativa: lee la
+// última semana y MARCA las líneas descargables (los ficheros de fruta se
+// saltan, regla del dueño 24/07). Por defecto MODO PRUEBA: solo marcar, sin
+// bajar — bajar cambia el estado en el servidor y en la tienda estorba. Con
+// "/mensajeria bajar" sí descarga y reenvía por Telegram.
+async function handleMensajeria(chatId, text = '') {
+  if (config.webOrder?.enabled === false) {
+    await telegram.sendMessage(chatId, '网页功能没有启用，先在 config.local.json 里打开 webOrder.enabled。');
+    return;
+  }
+  const bajar = /bajar|descargar|真下/.test(String(text || '').toLowerCase());
+  await telegram.sendMessage(
+    chatId,
+    bajar
+      ? '正在打开 Mensajería operativa，抓过去一周并下载附件（Edge 要开着）…'
+      : '测试模式：抓过去一周，把该下载的勾选上，不真下载（要真下载发 /mensajeria bajar）…',
+    { __skipAI: true }
+  );
+  const result = await conNavegador(chatId, '运营信息传递', () => fetchMensajeriaOperativa(config, logger, { soloMarcar: !bajar }));
+  if (!result.ok) {
+    await sendWithOptionalScreenshot(chatId, result, await humanizarError('运营信息传递', `Mensajería 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`));
+    if (result.dumpFile) { try { await telegram.sendDocument(chatId, result.dumpFile, 'Mensajería 页面结构（发给 Claude）'); } catch { /* noop */ } }
+    return;
+  }
+  await sendWithOptionalScreenshot(chatId, result, formatMensajeriaSummary(result));
+  const maxEnviar = 10;
+  for (const item of result.descargados.filter((d) => d.file).slice(0, maxEnviar)) {
+    try {
+      await telegram.sendDocument(chatId, item.file, item.caption || `${item.tipo === 'albaran' ? 'Albarán' : 'Fichero'} · ${item.fechaIso || 'sin fecha'}`);
+    } catch (error) {
+      logger.warn('mensajeria document send failed', { file: item.file, error: error.message });
+    }
+  }
+  const conArchivo = result.descargados.filter((d) => d.file).length;
+  if (conArchivo > maxEnviar) {
+    await telegram.sendMessage(chatId, `（还有 ${conArchivo - maxEnviar} 个文件在 ${result.dir}，没逐个发）`, { __skipAI: true });
   }
 }
 
@@ -2456,8 +2588,7 @@ const diagPendientes = new Map();
 const diagCiclos = new Map();
 let diagSeq = 1;
 
-async function lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res) {
-  const step = moduloId ? `modulo-${MODULOS_UNIDEGES[moduloId]?.tecla || moduloId}` : accion;
+async function lanzarDiagnostico(chatId, { etiqueta, step, res, ficha, reintentar }) {
   const maxCiclos = Number(config.diagnostico?.maxCiclos) || 2;
   const ciclo = (diagCiclos.get(step) || 0) + 1;
   if (ciclo > maxCiclos) {
@@ -2468,12 +2599,12 @@ async function lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res
   notePanelActivity('AI 诊断：' + etiqueta);
   await telegram.sendMessage(chatId, `正在打包证据给 AI 诊断（第 ${ciclo}/${maxCiclos} 轮，需要一两分钟）…`, { __skipAI: true });
   flujoEstado.iniciar('diag-evidencia');
-  const paquete = empaquetarEvidencia(config, { etiqueta, step, res });
+  const paquete = empaquetarEvidencia(config, { etiqueta, step, res, archivoFuente: ficha.archivo });
   flujoEstado.terminar('diag-evidencia', { ok: true, detalle: etiqueta });
   flujoEstado.iniciar('diag-llm');
   let respuesta;
   try {
-    respuesta = await llmDiagnosticoRPA(paquete.texto, paquete.imagenes, config, logger);
+    respuesta = await llmDiagnosticoRPA(paquete.texto, paquete.imagenes, config, logger, ficha.tipo);
   } catch (error) {
     flujoEstado.terminar('diag-llm', { ok: false, detalle: error.message });
     throw error;
@@ -2482,16 +2613,21 @@ async function lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res
   const fix = extraerArchivoCorregido(respuesta);
   const resumen = resumenSinCodigo(respuesta).slice(0, 3000);
   const id = String(diagSeq++);
-  diagPendientes.set(id, { fix: fix && fix.contenido ? fix : null, resumen, accion, moduloId, chatId, etiqueta });
+  const fixJs = fix?.archivo ? esArchivoJs(fix.archivo) : false;
+  diagPendientes.set(id, { fix: fix && fix.contenido ? fix : null, resumen, chatId, etiqueta, reintentar, esJs: fixJs, esEscritura: Boolean(ficha.escritura) });
   const botones = [];
-  if (fix?.contenido) botones.push({ text: '✅ 本地应用并重试', callback_data: `dg:fix:${id}` });
-  // Con GitHub configurado, la reparacion tambien puede llegar como PR
-  // revisable (main queda intacto; el merge lo decides tu).
+  // Parche local: ps1 siempre; js solo si diagnostico.permitirFixJsLocal;
+  // webBrowser.js NUNCA (soloPr). El PR sigue disponible en todos los casos.
+  const permiteLocal = Boolean(fix?.contenido) && !esSoloPr(fix.archivo) && (!fixJs || config.diagnostico?.permitirFixJsLocal === true);
+  if (fix?.contenido && permiteLocal) botones.push({ text: '✅ 本地应用并重试', callback_data: `dg:fix:${id}` });
   if (fix?.contenido && githubConfigured(config)) botones.push({ text: '📤 提交成 PR（你审核）', callback_data: `dg:pr:${id}` });
-  botones.push({ text: '🔁 只重试一次', callback_data: `dg:retry:${id}` });
+  if (!ficha.escritura) botones.push({ text: '🔁 只重试一次', callback_data: `dg:retry:${id}` });
   botones.push({ text: '忽略', callback_data: `dg:no:${id}` });
   const notaRechazo = fix?.rechazo ? `\n\n⚠ ${fix.rechazo}` : '';
-  await telegram.sendMessage(chatId, `🩺 AI 诊断（${etiqueta}，第 ${ciclo}/${maxCiclos} 轮）：\n${resumen}${notaRechazo}`, {
+  let notaJs = '';
+  if (fix?.contenido && esSoloPr(fix.archivo)) notaJs = '\n\n（webBrowser.js 是共享核心，只走 PR 审核，不提供本地应用）';
+  else if (fix?.contenido && fixJs && !permiteLocal) notaJs = '\n\n（JS 本地应用默认关：走 PR 审核；要开在 config.local.json 设 diagnostico.permitirFixJsLocal = true）';
+  await telegram.sendMessage(chatId, `🩺 AI 诊断（${etiqueta}，第 ${ciclo}/${maxCiclos} 轮）：\n${resumen}${notaRechazo}${notaJs}`, {
     __skipAI: true,
     reply_markup: { inline_keyboard: [botones] }
   });
@@ -2510,14 +2646,14 @@ async function handleDiagCallback(chatId, callbackId, resto) {
   if (verbo === 'retry') {
     diagPendientes.delete(id);
     await telegram.answerCallbackQuery(callbackId, '重试');
-    await ejecutarUnideges(chatId, pend.accion, pend.moduloId);
+    if (typeof pend.reintentar === 'function') await pend.reintentar();
     return;
   }
   if (verbo === 'fix') {
     await telegram.answerCallbackQuery(callbackId, '应用中');
     if (!pend.fix) { await telegram.sendMessage(chatId, '这条诊断没有附带可应用的代码。', { __skipAI: true }); return; }
-    // Valvulas dentro de aplicarFix: lista blanca, cordura, validacion con
-    // el PowerShell REAL de esta maquina y backup con marca de tiempo.
+    // Valvulas dentro de aplicarFix: lista blanca, cordura, validación real
+    // (parser PowerShell / node --check + import + exports) y backup.
     flujoEstado.iniciar('diag-fix');
     const resultado = aplicarFix(config, pend.fix);
     flujoEstado.terminar('diag-fix', { ok: resultado.ok, detalle: resultado.ok ? pend.etiqueta : resultado.motivo });
@@ -2528,8 +2664,18 @@ async function handleDiagCallback(chatId, callbackId, resto) {
     diagPendientes.delete(id);
     notePanelActivity('已应用 AI 修复');
     logger.info('diagnostico fix aplicado', { backup: resultado.backup });
+    if (resultado.esJs) {
+      // Un .js no surte efecto hasta reiniciar el bot: avisar claro y dar la
+      // vuelta atrás a mano. No se reintenta (correría el código viejo).
+      await telegram.sendMessage(chatId, `修复已应用，旧文件备份在：\n${resultado.backup}\n\nJS 改动要重启 bot 才生效：stop-bot.cmd 关掉再双击 start-bot.cmd。起不来的话，把备份文件拷回原路径就复原。`, { __skipAI: true });
+      return;
+    }
+    if (pend.esEscritura) {
+      await telegram.sendMessage(chatId, `修复已应用（备份在 ${resultado.backup}）。这是写操作，不自动重跑——你核实后手动重发命令。`, { __skipAI: true });
+      return;
+    }
     await telegram.sendMessage(chatId, '修复已应用（旧文件已备份在 logs/diagnosticos）。自动重试一次…', { __skipAI: true });
-    await ejecutarUnideges(chatId, pend.accion, pend.moduloId);
+    if (typeof pend.reintentar === 'function') await pend.reintentar();
     return;
   }
   if (verbo === 'pr') {
@@ -2585,10 +2731,10 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     // chat (peticion del dueño): el detalle vive en la caja negra del
     // panel (columna derecha, encima del registro) y en el log.
     logger.warn('unideges action failed', { accion, modulo: moduloId || '', error: String(res.mensaje || '').slice(0, 500) });
-    registrarCajaNegra(etiqueta, res);
     await telegram.sendMessage(chatId, `${etiqueta}失败：${String(res.mensaje || '未知错误').split('\n')[0].slice(0, 160)}\n完整过程在面板右边的黑匣子里（日志上面那栏）。`, { __skipAI: true });
-    // Paquete de diagnóstico automático: la caja negra viaja como ARCHIVO
-    // (el chat queda limpio, pero desde casa se ve todo sin tocar el PC).
+    // La caja negra y el diagnóstico IA los dispara ya salidaFlujo (está en
+    // conNavegador); aquí solo viaja la caja como ARCHIVO para verla desde
+    // casa sin tocar el PC.
     try {
       const cajaFile = path.resolve(config.logsDir || '.', CAJA_NEGRA);
       if (fs.existsSync(cajaFile)) await telegram.sendDocument(chatId, cajaFile, 'UnideGes 黑匣子记录（转发给 Claude 就能定位）');
@@ -2596,20 +2742,8 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
     if (res.screenshot && fs.existsSync(res.screenshot)) {
       try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
     }
-    if (config.diagnostico?.enabled !== false && llmConfigured(config)) {
-      lanzarDiagnosticoUnideges(chatId, etiqueta, accion, moduloId, res).catch((error) => {
-        logger.warn('diagnostico automatico fallo', { error: error.message });
-        telegram.sendMessage(chatId, `自动诊断没跑成：${String(error.message || '').slice(0, 150)}`, { __skipAI: true }).catch(() => {});
-      });
-    }
     return;
   }
-  registrarCajaNegra(etiqueta, res);
-  // Referencia de EXITO del paso (comparar exito-vs-fallo es el camino mas
-  // corto al diagnostico) y reset del contador de ciclos de reparacion.
-  const stepDiag = moduloId ? `modulo-${MODULOS_UNIDEGES[moduloId]?.tecla || moduloId}` : accion;
-  guardarExitoPaso(config, stepDiag, res.trace || []);
-  diagCiclos.delete(stepDiag);
   const msg = accion === 'abrir'
     ? (String(res.mensaje || '').includes('ya estaba') ? 'UnideGes 本来就开着，已经带到前台了 ✅' : 'UnideGes 打开了 ✅')
     : `已按 ${MODULOS_UNIDEGES[moduloId].tecla}，${MODULOS_UNIDEGES[moduloId].nombre} 应该开了 ✅ 看截图确认${res.ventana ? `（当前窗口：${res.ventana}）` : ''}`;
@@ -3553,6 +3687,7 @@ if (config.panel?.enabled !== false) {
               id: n.id,
               nombre: n.nombre,
               grupo: n.grupo,
+              desc: n.desc || '',
               estado: activos.has(n.id) ? 'corriendo' : (s ? (s.ultimoEstado === 'ok' ? 'ok' : 'error') : 'nunca'),
               exito: s && s.total ? Math.round((100 * s.exitos) / s.total) : null,
               duracionMediaMs: s ? s.duracionMediaMs : 0,
@@ -3725,17 +3860,32 @@ const UPDATE_ESTADO = 'update-estado.txt';
 const DESKTOP_ESTADO = 'desktop-estado.txt';
 const CAJA_NEGRA = 'caja-negra.txt';
 
-// Caja negra de la automatización de escritorio, para la columna derecha
-// del panel (encima del registro). El PS la va escribiendo EN VIVO línea a
-// línea; al terminar, aquí se reescribe con la verdad final (si el PS
-// murió sin escribir nada — error de parseo — al menos queda el mensaje).
-function registrarCajaNegra(etiqueta, res) {
+// Caja negra de TODA automatización (antes solo UnideGes, 24/07 ampliado):
+// la traza del PS de escritorio si la hay (res.trace) o las líneas setLive
+// de esta ejecución (web). El panel la enseña en la columna derecha y el
+// diagnóstico la empaqueta como evidencia.
+function registrarCajaNegra(etiqueta, res, t0) {
   try {
     const file = path.resolve(config.logsDir || '.', CAJA_NEGRA);
+    const ok = esResultadoFlujoOk(res);
+    const traza = Array.isArray(res?.trace) && res.trace.length ? res.trace : getLiveSince(t0);
+    const detalle = String(res?.mensaje || res?.error || detalleResultadoFlujo(res) || '').split('\n').join(' · ').slice(0, 400);
+    if (ok) {
+      // Un éxito SIN traza ni detalle no cuenta nada y solo tapa lo que
+      // había (el 24/07 el «AI 组织回复 · 完成» vacío de la sonda
+      // ai-responder pisaba la caja entera: cada respuesta pasa por ahí).
+      if (!traza.length && !detalle) return;
+      // Y un éxito jamás pisa un fallo fresco (misma ventana de 15 min que
+      // le da leerCajaNegra): la caja existe sobre todo para ver qué se rompió.
+      try {
+        const st = fs.statSync(file);
+        if (Date.now() - st.mtimeMs < 15 * 60000 && fs.readFileSync(file, 'utf8').includes('= 失败：')) return;
+      } catch { /* sin caja previa: se escribe */ }
+    }
     const hora = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
     const lineas = [`· ${etiqueta} · ${hora} ·`];
-    if (Array.isArray(res.trace) && res.trace.length) lineas.push(...res.trace);
-    lineas.push(`= ${res.status === 'ok' ? '完成' : '失败'}：${String(res.mensaje || '').split('\n').join(' · ').slice(0, 400)}`);
+    lineas.push(...traza.slice(-40));
+    lineas.push(`= ${ok ? '完成' : '失败'}：${detalle}`);
     fs.writeFileSync(file, lineas.join('\n'), 'utf8');
   } catch { /* la caja negra es una mejora, no un requisito */ }
 }

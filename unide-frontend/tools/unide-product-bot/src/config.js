@@ -164,15 +164,7 @@ const defaultConfig = {
   // acciones diarias. panel.cmd la abre en el navegador del PC de la tienda.
   panel: {
     enabled: true,
-    port: 8765,
-    // Acceso remoto (móvil) vía Cloudflare Tunnel + Access. El panel SIGUE
-    // atado a 127.0.0.1; cloudflared corre en el mismo PC y lo saca fuera,
-    // con Cloudflare Access de portero. Cuando 'remotoEmails' tiene correos,
-    // toda petición que llegue con la cabecera de Access
-    // (Cf-Access-Authenticated-User-Email, que Cloudflare inyecta y el
-    // navegador local NUNCA trae) debe pertenecer a esa lista; si no, 403.
-    // Vacío = comportamiento de siempre (solo local, sin puerta).
-    remotoEmails: []
+    port: 8765
   },
   // Tarea diaria automática: a esta hora el bot refresca las promociones y
   // busca pedidos PDA nuevos; si hay, corre /ahorro_pedido solo y manda el
