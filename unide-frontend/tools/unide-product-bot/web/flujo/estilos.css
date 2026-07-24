@@ -272,11 +272,14 @@ body {
   color: inherit; opacity: .5; font-size: 10px; font-family: inherit;
 }
 .rutaChip button:hover { opacity: 1; }
-.rutaMas {
-  background: none; border: 1px dashed #3d4a5c; color: #76879a;
-  border-radius: 10px; padding: 1px 8px; font-size: 11px; cursor: pointer; font-family: inherit;
+.rutaIns {
+  background: none; border: none; color: #3d4a5c; cursor: pointer;
+  padding: 0 1px; font-size: 12px; line-height: 1; font-family: inherit;
 }
-.rutaMas:hover { color: #d5ecf8; border-color: #6f9cbd; }
+.rutaIns:hover { color: #6f9cbd; }
+.rutaIns.fin { border: 1px dashed #3d4a5c; border-radius: 10px; padding: 1px 7px; color: #76879a; }
+.rutaIns.fin:hover { color: #d5ecf8; border-color: #6f9cbd; }
+.rutaDonde { font-size: 9.5px; color: #6f9cbd; margin: 4px 0 3px; }
 .rutaAlta { margin-top: 5px; }
 .rutaInput {
   width: 100%; box-sizing: border-box;
@@ -291,6 +294,7 @@ body {
 .ideaHija:hover { color: #d5ecf8; border-color: #6f9cbd; background: rgba(111,156,189,.08); }
 @media (max-width: 720px) {
   .rutaInput { font-size: 14px; padding: 7px 9px; }
+  .rutaIns { font-size: 15px; padding: 0 4px; } /* insertar en medio, al tacto */
   .rutaChip { font-size: 11px; max-width: 130px; }
   .ideaHija { padding: 9px; font-size: 13px; }
 }
