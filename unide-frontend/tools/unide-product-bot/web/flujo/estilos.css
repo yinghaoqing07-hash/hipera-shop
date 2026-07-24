@@ -180,6 +180,7 @@ body {
 .latTitulo { font-size: 11px; color: #6f9cbd; letter-spacing: .08em; margin-bottom: 6px; }
 .latTitulo.err { color: #e08a8a; }
 .latVacio { font-size: 11px; color: #5b6b7e; }
+.latDesc { font-size: 12.5px; color: #c2cfdd; line-height: 1.6; white-space: pre-wrap; }
 
 .latFotos { display: flex; gap: 8px; flex-wrap: wrap; }
 .latFotos a { display: block; width: 104px; text-decoration: none; }
