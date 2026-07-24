@@ -1786,6 +1786,7 @@ async function handleAhorroPedido(chatId, text) {
   let similarViaLlm = false;
   if (llmConfigured(config) && orderAdvice.noPromo.length) {
     await telegram.sendMessage(chatId, '🤖 正在让 AI 对比正常价的行和整张促销清单，挑真正能换着叫的…');
+    const t0Match = Date.now();
     try {
       const inOrder0 = new Set([...orderAdvice.onPromo, ...orderAdvice.noPromo].map((l) => l.code));
       const candidates = [...orderAdvice.promoByCode.entries()]
@@ -1806,6 +1807,10 @@ async function handleAhorroPedido(chatId, text) {
       similarViaLlm = true;
     } catch (error) {
       logger.warn('llm similar failed, using keyword fallback', { error: error.message });
+      // El fallback por palabras disimula el fallo en el chat; que al menos
+      // quede en la caja negra (el 24/07 «This operation was aborted» no
+      // apareció en ningún sitio visible).
+      registrarCajaNegra('订单省钱分析 · AI 匹配', { ok: false, mensaje: error.message }, t0Match);
       await telegram.sendMessage(chatId, `AI 匹配没成功（${error.message.slice(0, 120)}），这次先用关键词匹配。`);
     }
   }
@@ -3862,12 +3867,25 @@ const CAJA_NEGRA = 'caja-negra.txt';
 function registrarCajaNegra(etiqueta, res, t0) {
   try {
     const file = path.resolve(config.logsDir || '.', CAJA_NEGRA);
+    const ok = esResultadoFlujoOk(res);
+    const traza = Array.isArray(res?.trace) && res.trace.length ? res.trace : getLiveSince(t0);
+    const detalle = String(res?.mensaje || res?.error || detalleResultadoFlujo(res) || '').split('\n').join(' · ').slice(0, 400);
+    if (ok) {
+      // Un éxito SIN traza ni detalle no cuenta nada y solo tapa lo que
+      // había (el 24/07 el «AI 组织回复 · 完成» vacío de la sonda
+      // ai-responder pisaba la caja entera: cada respuesta pasa por ahí).
+      if (!traza.length && !detalle) return;
+      // Y un éxito jamás pisa un fallo fresco (misma ventana de 15 min que
+      // le da leerCajaNegra): la caja existe sobre todo para ver qué se rompió.
+      try {
+        const st = fs.statSync(file);
+        if (Date.now() - st.mtimeMs < 15 * 60000 && fs.readFileSync(file, 'utf8').includes('= 失败：')) return;
+      } catch { /* sin caja previa: se escribe */ }
+    }
     const hora = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
     const lineas = [`· ${etiqueta} · ${hora} ·`];
-    const traza = Array.isArray(res?.trace) && res.trace.length ? res.trace : getLiveSince(t0);
     lineas.push(...traza.slice(-40));
-    const detalle = String(res?.mensaje || res?.error || detalleResultadoFlujo(res) || '').split('\n').join(' · ').slice(0, 400);
-    lineas.push(`= ${esResultadoFlujoOk(res) ? '完成' : '失败'}：${detalle}`);
+    lineas.push(`= ${ok ? '完成' : '失败'}：${detalle}`);
     fs.writeFileSync(file, lineas.join('\n'), 'utf8');
   } catch { /* la caja negra es una mejora, no un requisito */ }
 }
