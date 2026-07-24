@@ -31,6 +31,7 @@ import { cargarArbol } from './flujoArbol.js';
 import { abrirFlujoEstado } from './flujoEstado.js';
 import { renderFlujoPage } from './flujoPage.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
+import { fetchMensajeriaOperativa, formatMensajeriaSummary } from './webMensajeria.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -470,6 +471,7 @@ async function handleUpdate(update) {
   if (/^\/(carne|pedido_carne)\b/i.test(text)) { await startTally(chatId, 'carne'); return; }
   if (/^\/(fruta|verdura|fruta_verdura|pedido_fruta|pedido_verdura)\b/i.test(text)) { await startTally(chatId, 'fruta'); return; }
   if (/^\/(promociones|promo)(?:@\w+)?(?:\s|$)/i.test(text)) { await handlePromotions(chatId, text); return; }
+  if (/^\/(mensajeria|descargas|albaranes)(?:@\w+)?(?:\s|$)/i.test(text)) { await handleMensajeria(chatId, text); return; }
   if (/^\/ahorro_pedido\b/i.test(text)) { await handleAhorroPedido(chatId, text); return; }
   if (/^\/(ahorro|estrategia)\b/i.test(text)) { await handleAhorro(chatId); return; }
   if (text === '/pedido_web_form' || text === '/pedido_form') { await handlePedidoWebForm(chatId); return; }
@@ -691,6 +693,7 @@ function formatCommandList() {
     '',
     '【促销 / 省钱】',
     '/promociones — 去网页抓最新促销（CSV）',
+    '/mensajeria — 抓 Mensajería 过去一周，勾选该下载的（测试模式不真下；bajar=真下载）',
     '/ahorro — 所有促销的省钱策略',
     '/ahorro_pedido — 最新 PDA 单逐行对照促销，AI 挑可替换的促销品',
     '/ahorro_pedido 153 — 指定看哪张单',
@@ -2019,6 +2022,45 @@ async function handlePromotions(chatId, text = '') {
   if (result.listMaybeTruncated && result.listDumpFile) {
     await telegram.sendMessage(chatId, `外层只读到 ${result.totalRows} 个促销、且都未过期，可能没翻到有过期项的后续分页。附上列表页结构，发给 Claude 修外层翻页：`);
     try { await telegram.sendDocument(chatId, result.listDumpFile, 'Promociones 列表页结构（发给 Claude）'); } catch { /* noop */ }
+  }
+}
+
+// /mensajeria (alias /descargas, /albaranes) — Mensajería operativa: lee la
+// última semana y MARCA las líneas descargables (los ficheros de fruta se
+// saltan, regla del dueño 24/07). Por defecto MODO PRUEBA: solo marcar, sin
+// bajar — bajar cambia el estado en el servidor y en la tienda estorba. Con
+// "/mensajeria bajar" sí descarga y reenvía por Telegram.
+async function handleMensajeria(chatId, text = '') {
+  if (config.webOrder?.enabled === false) {
+    await telegram.sendMessage(chatId, '网页功能没有启用，先在 config.local.json 里打开 webOrder.enabled。');
+    return;
+  }
+  const bajar = /bajar|descargar|真下/.test(String(text || '').toLowerCase());
+  await telegram.sendMessage(
+    chatId,
+    bajar
+      ? '正在打开 Mensajería operativa，抓过去一周并下载附件（Edge 要开着）…'
+      : '测试模式：抓过去一周，把该下载的勾选上，不真下载（要真下载发 /mensajeria bajar）…',
+    { __skipAI: true }
+  );
+  const result = await conNavegador(chatId, '运营信息传递', () => fetchMensajeriaOperativa(config, logger, { soloMarcar: !bajar }));
+  if (!result.ok) {
+    await sendWithOptionalScreenshot(chatId, result, await humanizarError('运营信息传递', `Mensajería 抓取失败（${result.stage || '?'}）：\n${result.error || '未知错误'}`));
+    if (result.dumpFile) { try { await telegram.sendDocument(chatId, result.dumpFile, 'Mensajería 页面结构（发给 Claude）'); } catch { /* noop */ } }
+    return;
+  }
+  await sendWithOptionalScreenshot(chatId, result, formatMensajeriaSummary(result));
+  const maxEnviar = 10;
+  for (const item of result.descargados.filter((d) => d.file).slice(0, maxEnviar)) {
+    try {
+      await telegram.sendDocument(chatId, item.file, item.caption || `${item.tipo === 'albaran' ? 'Albarán' : 'Fichero'} · ${item.fechaIso || 'sin fecha'}`);
+    } catch (error) {
+      logger.warn('mensajeria document send failed', { file: item.file, error: error.message });
+    }
+  }
+  const conArchivo = result.descargados.filter((d) => d.file).length;
+  if (conArchivo > maxEnviar) {
+    await telegram.sendMessage(chatId, `（还有 ${conArchivo - maxEnviar} 个文件在 ${result.dir}，没逐个发）`, { __skipAI: true });
   }
 }
 
