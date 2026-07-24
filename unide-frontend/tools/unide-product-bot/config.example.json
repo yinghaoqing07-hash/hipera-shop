@@ -71,6 +71,16 @@
     "detailRowsTimeoutMs": 9000,
     "outputDir": "promotions"
   },
+  "mensajeria": {
+    "listUrl": "",
+    "candidatePaths": [],
+    "diasVentana": 7,
+    "maxDescargas": 30,
+    "maxPages": 20,
+    "downloadDir": "descargas",
+    "downloadTimeoutMs": 30000,
+    "soloMarcar": true
+  },
   "autoAdvisor": {
     "enabled": true,
     "time": "07:15",

@@ -103,6 +103,12 @@ nodos:
     match: ["订单省钱分析"]
     desc: 对照促销分析一张订单哪里能省钱（/ahorro_pedido）。
 
+  - id: web-mensajeria
+    nombre: 运营信息传递
+    grupo: 网页 · 查询分析
+    match: ["运营信息传递"]
+    desc: 抓 Mensajería operativa 里过去一周的 albaranes 和 ficheros，下载并转发给你；fruta 类 fichero 自动跳过（/mensajeria）。
+
   - id: web-buscar
     nombre: 搜商品
     grupo: 网页 · 下单
@@ -204,6 +210,7 @@ edges:
   - [web-abrir, web-buscar-pedido]
   - [web-abrir, web-buscar]
   - [web-abrir, web-editar]
+  - [web-abrir, web-mensajeria]
   - [web-promos, web-ahorro]
   - [web-listar, web-ahorro]
   - [web-promos, auto-advisor]
