@@ -20,7 +20,7 @@ const IDEA_H = 104;
 const GHOST_W = 132;
 const GHOST_H = 38;
 const IDEA_EDIT_W = 268;
-const IDEA_EDIT_H = 178;
+const IDEA_EDIT_H = 300; // nombre + prompt + editor de ruta + botón de hija
 
 const embebido = window.self !== window.top;
 
@@ -110,7 +110,7 @@ function PasoArista({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, 
 // de ideas solo como contexto ("de dónde cuelga esto").
 function GhostNodo({ data }) {
   return (
-    <div className="nodoGhost">
+    <div className={'nodoGhost g-' + (data.tipo || 'nodo')} title={data.nombre}>
       <Handle type="target" position={Position.Left} className="asa" />
       {data.nombre}
       <Handle type="source" position={Position.Right} className="asa" />
@@ -125,6 +125,7 @@ function IdeaNodo({ data }) {
   const [nombre, setNombre] = useState(data.nombre || '');
   const [texto, setTexto] = useState(data.texto || '');
   const [marca, setMarca] = useState('');
+  const [anadiendo, setAnadiendo] = useState(false);
   const timer = useRef(null);
   const limpiar = useRef(null);
   useEffect(() => () => { clearTimeout(timer.current); clearTimeout(limpiar.current); }, []);
@@ -148,11 +149,30 @@ function IdeaNodo({ data }) {
     setMarca('保存中…');
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
-      const ok = await data.onEditar(data.id, n, t);
+      const ok = await data.onEditar(data.id, { nombre: n, texto: t });
       setMarca(ok ? '✓ 已保存' : '✗ 没存上');
       clearTimeout(limpiar.current);
       limpiar.current = setTimeout(() => setMarca(''), 2000);
     }, 700);
+  };
+
+  // Ruta a medida: la cadena actual (venga de donde venga) se vuelve
+  // editable en cuanto se toca; se guarda al momento, sin debounce.
+  const guardarRuta = async (paradas) => {
+    setMarca('保存中…');
+    const ok = await data.onEditar(data.id, { ruta: paradas });
+    setMarca(ok ? '✓ 已保存' : '✗ 没存上');
+    clearTimeout(limpiar.current);
+    limpiar.current = setTimeout(() => setMarca(''), 2000);
+  };
+  const cadena = data.cadena || [];
+  const quitarParada = (i) => guardarRuta(cadena.filter((_, j) => j !== i).map((p) => ({ nombre: p.nombre, id: p.id })));
+  const agregarParada = (valor) => {
+    const v = String(valor || '').trim();
+    if (!v) return;
+    const nodo = (data.nodosArbol || []).find((n) => n.nombre === v || n.id === v);
+    guardarRuta([...cadena.map((p) => ({ nombre: p.nombre, id: p.id })), nodo ? { nombre: nodo.nombre, id: nodo.id } : { nombre: v }]);
+    setAnadiendo(false);
   };
 
   return (
@@ -177,6 +197,37 @@ function IdeaNodo({ data }) {
         value={texto}
         onChange={(e) => { setTexto(e.target.value); programar(nombre, e.target.value); }}
       />
+      <div className="rutaEditor">
+        <div className="rutaTitulo">路线{data.ruta ? '（自定义）' : ''}</div>
+        <div className="rutaChips">
+          {cadena.map((p, i) => (
+            <span key={i} className={'rutaChip t-' + p.tipo} title={p.nombre}>
+              {p.nombre}
+              <button onClick={() => quitarParada(i)} title="从路线里去掉">✕</button>
+            </span>
+          ))}
+          {!anadiendo && <button className="rutaMas" onClick={() => setAnadiendo(true)} title="加一站">＋</button>}
+        </div>
+        {anadiendo && (
+          <div className="rutaAlta">
+            <input
+              list={`nodos-${data.id}`}
+              className="rutaInput"
+              placeholder="选一个节点，或直接打个新名字"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') agregarParada(e.currentTarget.value);
+                if (e.key === 'Escape') setAnadiendo(false);
+              }}
+              onBlur={(e) => (e.currentTarget.value.trim() ? agregarParada(e.currentTarget.value) : setAnadiendo(false))}
+            />
+            <datalist id={`nodos-${data.id}`}>
+              {(data.nodosArbol || []).map((n) => <option key={n.id} value={n.nombre}>{n.grupo}</option>)}
+            </datalist>
+          </div>
+        )}
+      </div>
+      <button className="ideaHija" onClick={() => data.onColgarHija(data.id)}>＋ 在这条下面再加一条</button>
     </div>
   );
 }
@@ -310,16 +361,16 @@ function construirVistaIdeas(ideas, handlers, focoId) {
   const edges = [];
   let y = 20;
 
-  const filaCadena = (ruta, prefijo, finalNode, finalW, finalH) => {
+  const filaCadena = (cadena, prefijo, finalNode, finalW, finalH) => {
     let x = 20;
     let anterior = null;
-    ruta.forEach((nombre, i) => {
+    cadena.forEach((parada, i) => {
       const id = `${prefijo}-g${i}`;
       nodes.push({
         id,
         type: 'ghost',
         position: { x, y: y + (finalH - GHOST_H) / 2 },
-        data: { nombre },
+        data: { nombre: parada.nombre, tipo: parada.tipo },
         draggable: false,
         selectable: false
       });
@@ -344,10 +395,17 @@ function construirVistaIdeas(ideas, handlers, focoId) {
 
   const pend = ideas.filter((i) => i.estado === 'pendiente').slice().reverse();
   for (const idea of pend) {
-    filaCadena(idea.ruta || [], `i${idea.id}`, {
+    filaCadena(idea.cadena || [], `i${idea.id}`, {
       id: `idea-${idea.id}`,
       type: 'idea',
-      data: { ...idea, onEditar: handlers.onEditar, onBorrar: handlers.onBorrar, autoFocus: idea.id === focoId },
+      data: {
+        ...idea,
+        nodosArbol: handlers.nodosArbol,
+        onEditar: handlers.onEditar,
+        onBorrar: handlers.onBorrar,
+        onColgarHija: handlers.onColgarHija,
+        autoFocus: idea.id === focoId
+      },
       draggable: false
     }, IDEA_EDIT_W, IDEA_EDIT_H);
   }
@@ -447,8 +505,8 @@ function LateralIdea({ idea, onCerrar, onAccion }) {
         </div>
         <button className="latCerrar" onClick={onCerrar}>✕</button>
       </div>
-      {idea.ruta?.length > 0 && (
-        <div className="latStats">位置：{idea.ruta.join(' → ')} → <b>[新] {idea.nombre || '(未命名)'}</b></div>
+      {idea.cadena?.length > 0 && (
+        <div className="latStats">位置：{idea.cadena.map((p) => p.nombre).join(' → ')} → <b>[新] {idea.nombre || '(未命名)'}</b></div>
       )}
       <div className="latBloque">
         <pre className="ideaCompleta">{idea.texto}</pre>
@@ -472,6 +530,7 @@ function App() {
   const [vista, setVista] = useState('arbol');
   const [grafo, setGrafo] = useState(null);
   const [ideas, setIdeas] = useState([]);
+  const [nodosArbol, setNodosArbol] = useState([]);
   const [sel, setSel] = useState('');
   const [detalle, setDetalle] = useState(null);
   const [focoId, setFocoId] = useState(0);
@@ -486,7 +545,11 @@ function App() {
       const r = await fetch('/api/flujo');
       if (r.ok) setGrafo(await r.json());
       const ri = await fetch('/api/flujo/ideas');
-      if (ri.ok) setIdeas((await ri.json()).ideas || []);
+      if (ri.ok) {
+        const j = await ri.json();
+        setIdeas(j.ideas || []);
+        if (j.nodosArbol) setNodosArbol(j.nodosArbol);
+      }
       const id = selRef.current;
       if (id && vistaRef.current === 'arbol') {
         const d = await fetch(`/api/flujo/paso?id=${encodeURIComponent(id)}`);
@@ -553,14 +616,20 @@ function App() {
     }
   }, [avisar, refrescar]);
 
-  const editarIdea = useCallback(async (id, nombre, texto) => {
+  // Colgar una idea de OTRA idea: mismo camino, ancla 'idea:<id>'.
+  const colgarHija = useCallback((idIdea) => colgarIdea(`idea:${idIdea}`), [colgarIdea]);
+
+  // campos = { nombre?, texto?, ruta? } — solo se manda lo que cambia.
+  const editarIdea = useCallback(async (id, campos) => {
     try {
       const r = await fetch('/api/flujo/idea', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id, nombre, texto })
+        body: JSON.stringify({ id, ...campos })
       });
-      return (await r.json()).ok === true;
+      const ok = (await r.json()).ok === true;
+      if (ok && campos.ruta !== undefined) refrescar(); // la cadena la repinta el servidor
+      return ok;
     } catch {
       return false;
     }
@@ -596,8 +665,8 @@ function App() {
 
   const onBorrarIdea = useCallback((id) => accionIdea(`idea:del:${id}`), [accionIdea]);
   const vistaIdeas = useMemo(
-    () => construirVistaIdeas(ideas, { onEditar: editarIdea, onBorrar: onBorrarIdea }, focoId),
-    [ideas, editarIdea, onBorrarIdea, focoId]
+    () => construirVistaIdeas(ideas, { onEditar: editarIdea, onBorrar: onBorrarIdea, onColgarHija: colgarHija, nodosArbol }, focoId),
+    [ideas, editarIdea, onBorrarIdea, colgarHija, nodosArbol, focoId]
   );
 
   const abrirNodo = useCallback((ev, nodo) => {

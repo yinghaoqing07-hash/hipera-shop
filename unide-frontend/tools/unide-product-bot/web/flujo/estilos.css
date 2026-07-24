@@ -117,7 +117,7 @@ body {
 
 /* tarjeta pendiente EDITABLE: se escribe dentro, autoguardado */
 .nodoIdea.i-editable {
-  width: 268px; min-height: 178px;
+  width: 268px; min-height: 300px;
   border-style: dashed; cursor: default;
 }
 .ideaBorrar {
@@ -249,4 +249,48 @@ body {
   .pestanas { flex: 1; }
   .pestanas button { flex: 1; }
   .pastilla { display: none; }
+}
+
+/* --- v251: editor de ruta a medida + ideas colgadas de ideas --- */
+.nodoGhost.g-idea { border-style: solid; border-color: #3a5f83; color: #8fb4d0; }
+.nodoGhost.g-libre { border-color: #4a4230; color: #b09a6a; }
+
+.rutaEditor { border-top: 1px dashed #2a3646; margin-top: 2px; padding-top: 7px; }
+.rutaTitulo { font-size: 9px; color: #5b6b7e; letter-spacing: .08em; margin-bottom: 5px; }
+.rutaChips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.rutaChip {
+  display: inline-flex; align-items: center; gap: 3px;
+  max-width: 150px; font-size: 10px; line-height: 1.5;
+  border: 1px solid #2a3646; border-radius: 10px; padding: 1px 4px 1px 8px;
+  color: #8fa2b5; background: #10151d;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rutaChip.t-idea { border-color: #3a5f83; color: #8fb4d0; }
+.rutaChip.t-libre { border-color: #4a4230; color: #b09a6a; }
+.rutaChip button {
+  background: none; border: none; cursor: pointer; padding: 0 2px;
+  color: inherit; opacity: .5; font-size: 10px; font-family: inherit;
+}
+.rutaChip button:hover { opacity: 1; }
+.rutaMas {
+  background: none; border: 1px dashed #3d4a5c; color: #76879a;
+  border-radius: 10px; padding: 1px 8px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.rutaMas:hover { color: #d5ecf8; border-color: #6f9cbd; }
+.rutaAlta { margin-top: 5px; }
+.rutaInput {
+  width: 100%; box-sizing: border-box;
+  background: #0d1117; border: 1px solid #6f9cbd; border-radius: 6px;
+  color: #d5e2ec; font-family: inherit; font-size: 12px; padding: 5px 8px; outline: none;
+}
+.ideaHija {
+  width: 100%; margin-top: 8px;
+  background: none; border: 1px dashed #3d4a5c; color: #8fa2b5;
+  border-radius: 7px; padding: 6px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.ideaHija:hover { color: #d5ecf8; border-color: #6f9cbd; background: rgba(111,156,189,.08); }
+@media (max-width: 720px) {
+  .rutaInput { font-size: 14px; padding: 7px 9px; }
+  .rutaChip { font-size: 11px; max-width: 130px; }
+  .ideaHija { padding: 9px; font-size: 13px; }
 }

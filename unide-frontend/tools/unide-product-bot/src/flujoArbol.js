@@ -131,11 +131,17 @@ function construirArbol(nodos, edges, error) {
     // Ruta raíz→nodo como lista de nombres (para anclar ideas al árbol).
     // null si el id no existe; con tope por si alguien edita un ciclo.
     rutaHasta(id) {
+      const detallada = this.rutaDetallada(id);
+      return detallada ? detallada.map((p) => p.nombre) : null;
+    },
+    // Igual pero con el id de cada parada: lo necesita el editor de rutas a
+    // medida, para saber cuáles son nodos DE VERDAD y cuáles texto libre.
+    rutaDetallada(id) {
       if (!nombreDe.has(id)) return null;
       const ruta = [];
       let actual = id;
       for (let i = 0; i < 12 && actual; i += 1) {
-        ruta.unshift(nombreDe.get(actual));
+        ruta.unshift({ id: actual, nombre: nombreDe.get(actual) });
         actual = padreDe.get(actual);
       }
       return ruta;

@@ -707,6 +707,40 @@ function inferExplicitMemoryCategory(text) {
 // se añada o cambie un comando, tocar también esta lista.
 // --- Cuaderno de ideas (petición del dueño, 23/07) ---------------------
 
+// Un ancla vale si es un nodo del árbol o una idea existente ('idea:<id>').
+function anclaValida(ancla) {
+  const a = String(ancla || '').trim();
+  if (!a) return '';
+  if (a.startsWith('idea:')) return ideaStore.buscar(Number(a.slice(5))) ? a : '';
+  return flujoArbol.rutaHasta(a) ? a : '';
+}
+
+// Cadena de una idea = las paradas que se pintan antes de su tarjeta.
+// Prioridad: ruta a medida > idea madre (recursivo) > ruta del árbol.
+// Devuelve [{ nombre, tipo: 'nodo'|'idea'|'libre' }]. Tope de profundidad
+// por si alguien encadena ideas en círculo.
+function cadenaDeIdea(idea, profundidad = 0) {
+  if (!idea || profundidad > 6) return [];
+  // Cada parada lleva su id (si lo tiene): así el editor del panel puede
+  // convertir una ruta automática en una a medida SIN perder los nodos.
+  if (Array.isArray(idea.ruta) && idea.ruta.length) {
+    return idea.ruta.map((p) => ({ nombre: p.nombre, id: p.id, tipo: p.id ? 'nodo' : 'libre' }));
+  }
+  const ancla = String(idea.ancla || '');
+  if (!ancla) return [];
+  if (ancla.startsWith('idea:')) {
+    const madre = ideaStore.buscar(Number(ancla.slice(5)));
+    if (!madre) return [];
+    return [...cadenaDeIdea(madre, profundidad + 1), { nombre: madre.nombre || `想法#${madre.id}`, id: ancla, tipo: 'idea' }];
+  }
+  return (flujoArbol.rutaDetallada(ancla) || []).map((p) => ({ ...p, tipo: 'nodo' }));
+}
+
+// Para el chat (/ideas y export): solo los nombres de la cadena.
+function cadenaNombres(idea) {
+  return cadenaDeIdea(idea).map((p) => p.nombre);
+}
+
 async function handleIdeas(chatId, cmd) {
   if (cmd.accion === 'agregar') {
     if (!cmd.texto) {
@@ -731,14 +765,14 @@ async function enviarListaIdeas(chatId) {
     { text: `🗑 删 #${i.id}`, callback_data: `idea:del:${i.id}` }
   ]));
   if (pend.length) botones.push([{ text: '📤 导出发给 Claude', callback_data: 'idea:exp' }]);
-  await telegram.sendMessage(chatId, formatIdeaList(ideaStore, (ancla) => flujoArbol.rutaHasta(ancla)), {
+  await telegram.sendMessage(chatId, formatIdeaList(ideaStore, cadenaNombres), {
     __skipAI: true,
     ...(botones.length ? { reply_markup: { inline_keyboard: botones } } : {})
   });
 }
 
 async function exportarIdeas(chatId) {
-  const texto = ideaStore.exportarTexto((ancla) => flujoArbol.rutaHasta(ancla));
+  const texto = ideaStore.exportarTexto(cadenaNombres);
   if (!texto) {
     await telegram.sendMessage(chatId, '想法本里没有待做的想法，先存几条再导出。', { __skipAI: true });
     return;
@@ -3707,23 +3741,22 @@ if (config.panel?.enabled !== false) {
       // "ganas de optimizar" del dueño, separadas del árbol real). Cada
       // idea viaja con su ruta en el árbol para que se dibuje la cadena.
       ideas: () => ({
-        ideas: ideaStore.ideas.map((i) => ({
-          ...i,
-          ruta: i.ancla ? (flujoArbol.rutaHasta(i.ancla) || []) : []
-        }))
+        // cadena = paradas ya resueltas para pintar; nodosArbol = catálogo
+        // para el selector de paradas de la ruta a medida.
+        ideas: ideaStore.ideas.map((i) => ({ ...i, cadena: cadenaDeIdea(i) })),
+        nodosArbol: flujoArbol.nodos.map((n) => ({ id: n.id, nombre: n.nombre, grupo: n.grupo }))
       }),
       // Creación MANUAL desde el panel de flujo (clic derecho en un nodo
-      // del árbol): la idea nace VACÍA en el acto y el contenido llega por
-      // autoguardado (editarIdea). La vía de chat sigue viva.
-      crearIdea: ({ ancla, nombre, texto }) => {
-        const anclaValida = ancla && flujoArbol.rutaHasta(String(ancla)) ? String(ancla) : '';
-        const idea = ideaStore.crear({ texto, nombre, ancla: anclaValida });
+      // del árbol, o «colgar de otra idea»): nace VACÍA en el acto y el
+      // contenido llega por autoguardado. La vía de chat sigue viva.
+      crearIdea: ({ ancla, nombre, texto, ruta }) => {
+        const idea = ideaStore.crear({ texto, nombre, ancla: anclaValida(ancla), ruta });
         notePanelActivity('💡 新想法 #' + idea.id);
-        logger.info('idea creada desde el panel de flujo', { id: idea.id, ancla: anclaValida });
+        logger.info('idea creada desde el panel de flujo', { id: idea.id, ancla: idea.ancla || '' });
         return { ok: true, id: idea.id };
       },
-      editarIdea: ({ id, nombre, texto }) => {
-        const idea = ideaStore.editar(Number(id), { nombre, texto });
+      editarIdea: ({ id, nombre, texto, ruta }) => {
+        const idea = ideaStore.editar(Number(id), { nombre, texto, ruta });
         return idea ? { ok: true, id: idea.id } : { ok: false, error: '这条想法不存在或已完成' };
       },
       // Capturas del historial: SOLO basename y SOLO de la carpeta de

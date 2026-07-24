@@ -10,6 +10,25 @@ import { readJsonSafe, writeJsonAtomic } from './safeJson.js';
 
 const TOPE_IDEAS = 300;
 const TOPE_TEXTO = 2000;
+const TOPE_ESTACIONES = 10; // paradas de una ruta a medida
+
+// Ruta a medida (v251, "越自由越好"): lista de paradas, cada una o bien un
+// nodo del árbol { id, nombre } o bien texto libre { nombre } para algo que
+// todavía NO existe en el árbol. Si una idea la tiene, MANDA sobre la ruta
+// automática que se deduce del ancla.
+function limpiarRuta(ruta) {
+  if (!Array.isArray(ruta)) return undefined;
+  const salida = [];
+  for (const p of ruta.slice(0, TOPE_ESTACIONES)) {
+    const nombre = String(p?.nombre ?? p ?? '').trim().slice(0, 40);
+    if (!nombre) continue;
+    const parada = { nombre };
+    const id = String(p?.id || '').trim().slice(0, 60);
+    if (id) parada.id = id;
+    salida.push(parada);
+  }
+  return salida;
+}
 
 export class IdeaStore {
   constructor(config, logger) {
@@ -36,11 +55,15 @@ export class IdeaStore {
   // en el momento del clic derecho y el contenido llega después con el
   // autoguardado. ancla = nodo del árbol; nombre = nombre corto del futuro
   // nodo. Las abandonadas del todo vacías las purga el constructor.
-  crear({ texto = '', nombre = '', ancla = '' } = {}) {
+  // ancla: id de un nodo del árbol, o 'idea:<id>' para colgar una idea de
+  // OTRA idea (así un功能 grande se parte en sub-ideas). ruta: a medida.
+  crear({ texto = '', nombre = '', ancla = '', ruta } = {}) {
     this.seq += 1;
     const idea = { id: this.seq, texto: String(texto).trim().slice(0, TOPE_TEXTO), creado: new Date().toISOString(), estado: 'pendiente' };
     if (ancla) idea.ancla = String(ancla).slice(0, 60);
     if (nombre) idea.nombre = String(nombre).trim().slice(0, 60);
+    const limpia = limpiarRuta(ruta);
+    if (limpia?.length) idea.ruta = limpia;
     this.ideas.push(idea);
     if (this.ideas.length > TOPE_IDEAS) this.ideas = this.ideas.slice(-TOPE_IDEAS);
     this.guardar();
@@ -55,13 +78,24 @@ export class IdeaStore {
   }
 
   // Autoguardado del panel: solo pendientes; undefined = no tocar el campo.
-  editar(id, { nombre, texto } = {}) {
+  // ruta: [] borra la ruta a medida (vuelve a la automática del ancla).
+  editar(id, { nombre, texto, ruta } = {}) {
     const idea = this.buscar(id);
     if (!idea || idea.estado !== 'pendiente') return null;
     if (nombre !== undefined) idea.nombre = String(nombre).trim().slice(0, 60);
     if (texto !== undefined) idea.texto = String(texto).trim().slice(0, TOPE_TEXTO);
+    if (ruta !== undefined) {
+      const limpia = limpiarRuta(ruta);
+      if (limpia?.length) idea.ruta = limpia;
+      else delete idea.ruta;
+    }
     this.guardar();
     return idea;
+  }
+
+  // Ideas colgadas de esta (para borrar en cascada y para no dejar huérfanas).
+  hijas(id) {
+    return this.ideas.filter((i) => i.ancla === `idea:${Number(id)}`);
   }
 
   pendientes() {
@@ -85,18 +119,24 @@ export class IdeaStore {
     return idea;
   }
 
+  // Al borrar una idea con hijas, las hijas NO se pierden: heredan el ancla
+  // de la madre (suben un escalón), que es lo menos sorprendente.
   borrar(id) {
     const idea = this.buscar(id);
     if (!idea) return null;
+    for (const hija of this.hijas(idea.id)) {
+      if (idea.ancla) hija.ancla = idea.ancla;
+      else delete hija.ancla;
+    }
     this.ideas = this.ideas.filter((i) => i.id !== idea.id);
     this.guardar();
     return idea;
   }
 
   // Documento para reenviar a Claude: las pendientes numeradas, con fecha,
-  // nombre y su ruta en el árbol de funciones (rutaPor: ancla → [nombres],
-  // la aporta bot.js desde flujoArbol). El encabezado ya es la petición.
-  exportarTexto(rutaPor) {
+  // nombre y su cadena (cadenaPor: idea → [nombres], la aporta bot.js, que
+  // sabe resolver ruta a medida / ancla de árbol / idea madre).
+  exportarTexto(cadenaPor) {
     const pend = this.pendientes();
     if (!pend.length) return '';
     const lineas = [
@@ -109,7 +149,7 @@ export class IdeaStore {
       n += 1;
       const fecha = String(idea.creado).slice(0, 10);
       lineas.push(`${n}. [#${idea.id} · ${fecha}]${idea.nombre ? ` ${idea.nombre}` : ''}`);
-      const ruta = idea.ancla && rutaPor ? rutaPor(idea.ancla) : null;
+      const ruta = cadenaPor ? cadenaPor(idea) : null;
       if (ruta && ruta.length) lineas.push(`位置：${ruta.join(' → ')} → [新] ${idea.nombre || '(未命名)'}`);
       lineas.push(idea.texto || '（只起了名字，说明还没写）', '');
     }
@@ -139,7 +179,7 @@ export function matchIdeaNatural(text) {
   return null;
 }
 
-export function formatIdeaList(store, rutaPor) {
+export function formatIdeaList(store, cadenaPor) {
   const pend = store.pendientes();
   const hechas = store.hechas().length;
   if (!pend.length) {
@@ -151,7 +191,7 @@ export function formatIdeaList(store, rutaPor) {
   for (const idea of pend) {
     const fecha = String(idea.creado).slice(5, 10).replace('-', '/');
     lineas.push(`#${idea.id} · ${fecha}${idea.nombre ? ` · ${idea.nombre}` : ''}`);
-    const ruta = idea.ancla && rutaPor ? rutaPor(idea.ancla) : null;
+    const ruta = cadenaPor ? cadenaPor(idea) : null;
     if (ruta && ruta.length) lineas.push(`位置：${ruta.join(' → ')}`);
     const cuerpo = idea.texto || '（还没写内容）';
     lineas.push(cuerpo.length > 200 ? cuerpo.slice(0, 200) + '…' : cuerpo, '');

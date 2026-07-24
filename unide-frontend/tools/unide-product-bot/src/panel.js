@@ -175,9 +175,9 @@ export function startPanel(config, logger, hooks) {
         try { datos = JSON.parse(body || '{}'); } catch { /* json roto */ }
         let r = { ok: false, error: 'no disponible' };
         if (datos.id && hooks.flujo?.editarIdea) {
-          r = hooks.flujo.editarIdea({ id: datos.id, nombre: datos.nombre, texto: datos.texto });
+          r = hooks.flujo.editarIdea({ id: datos.id, nombre: datos.nombre, texto: datos.texto, ruta: datos.ruta });
         } else if (!datos.id && hooks.flujo?.crearIdea) {
-          r = hooks.flujo.crearIdea({ ancla: String(datos.ancla || ''), nombre: String(datos.nombre || ''), texto: String(datos.texto || '') });
+          r = hooks.flujo.crearIdea({ ancla: String(datos.ancla || ''), nombre: String(datos.nombre || ''), texto: String(datos.texto || ''), ruta: datos.ruta });
         }
         res.writeHead(r.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(r));
