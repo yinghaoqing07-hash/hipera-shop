@@ -1,6 +1,7 @@
 ﻿param(
   [Parameter(Mandatory = $true)][string]$Accion,   # estado | abrir | modulo
   [string]$Tecla = "",                              # F1 F3 F6 F7 F12 (solo Accion=modulo)
+  [string]$Submenu = "",                            # patron del submenu a abrir DENTRO del modulo
   [string]$OutDir = "screenshots",
   [string]$ExePath = "",                            # exe o .lnk configurado; '' = buscar acceso directo
   [string]$TitleRegex = "^MadisaNet",
@@ -262,6 +263,91 @@ function Take-MenuShot([string]$Etiqueta) {
 # acceso directo (.lnk) del Escritorio / Menu Inicio. Se puntuan TODOS los
 # candidatos ('unideges' > 'madisa' > 'unide' a secas) y se excluyen los
 # del propio bot y herramientas (JARVIS, panel, edge debug, updater...).
+# Dentro de un modulo ya abierto: vuelca los nombres de lo que hay (a la
+# caja negra) y activa el primero que case con el patron. Devuelve $true
+# si lo activo. Primera version a ciegas (24/07): el VOLCADO es la parte
+# importante, porque es lo que nos dice que hay dentro sin estar alli.
+function Entrar-Submenu([string]$Patron) {
+  try {
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+  } catch {
+    Traza "submenu: no pude cargar UIAutomation"
+    return $false
+  }
+  $fg = [W32Menu]::GetForegroundWindow()
+  if ($fg -eq [IntPtr]::Zero) { Traza "submenu: sin ventana en primer plano"; return $false }
+  $raiz = $null
+  try { $raiz = [System.Windows.Automation.AutomationElement]::FromHandle($fg) } catch { $raiz = $null }
+  if (-not $raiz) { Traza "submenu: no pude leer la ventana con UIA"; return $false }
+
+  $todos = $null
+  try {
+    $todos = $raiz.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  } catch {
+    Traza "submenu: UIA no pudo listar los hijos"
+    return $false
+  }
+  $cuantos = $todos.Count
+  Traza "submenu: la ventana tiene $cuantos elementos; los que tienen nombre:"
+
+  $objetivo = $null
+  $vistos = 0
+  foreach ($el in $todos) {
+    $nombre = ""
+    $tipo = ""
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+    try { $tipo = [string]$el.Current.ControlType.ProgrammaticName } catch { $tipo = "" }
+    if ($nombre -eq "") { continue }
+    $tipoCorto = $tipo -replace "ControlType\.", ""
+    if ($vistos -lt 60) {
+      $linea = "  - [" + $tipoCorto + "] " + $nombre
+      Traza $linea
+      $vistos = $vistos + 1
+    }
+    if (-not $objetivo -and $nombre -match $Patron) { $objetivo = $el }
+  }
+  if (-not $objetivo) { Traza "submenu: nada casa con '$Patron'"; return $false }
+
+  $nombreObj = ""
+  try { $nombreObj = [string]$objetivo.Current.Name } catch { $nombreObj = "?" }
+  Traza "submenu: encontrado '$nombreObj', intento activarlo"
+
+  # 1) Invoke (botones y entradas de menu normales)
+  try {
+    $inv = $objetivo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $inv.Invoke()
+    Traza "submenu: activado con Invoke"
+    return $true
+  } catch { }
+  # 2) SelectionItem (listas)
+  try {
+    $sel = $objetivo.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $sel.Select()
+    Traza "submenu: seleccionado con SelectionItem"
+    return $true
+  } catch { }
+  # 3) Doble clic en su centro (lo ultimo que queda)
+  try {
+    $r = $objetivo.Current.BoundingRectangle
+    $cx = [int]($r.X + $r.Width / 2)
+    $cy = [int]($r.Y + $r.Height / 2)
+    [W32Menu]::SetCursorPos($cx, $cy) | Out-Null
+    Start-Sleep -Milliseconds 120
+    [W32Menu]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [W32Menu]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 90
+    [W32Menu]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [W32Menu]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Traza "submenu: doble clic en ${cx},${cy}"
+    return $true
+  } catch {
+    $porQue = $_.Exception.Message
+    Traza "submenu: no pude activarlo - $porQue"
+    return $false
+  }
+}
+
 function Find-Launcher {
   if ($ExePath -and (Test-Path -LiteralPath $ExePath)) { return $ExePath }
   $carpetas = @(
@@ -580,10 +666,29 @@ try {
     Start-Sleep -Milliseconds 2500
     $foco = Get-FocusInfo
     Traza "tras la tecla ${Tecla}: $foco"
+
+    # Un escalon mas adentro: dentro del modulo hay submenus (Albaran
+    # electronico dentro de F7, LMANMA dentro de F6). Si viene -Submenu, se
+    # busca por nombre y se activa. PRIMERA VERSION A CIEGAS: pase lo que
+    # pase se VUELCAN los nombres de lo que hay dentro, que es lo que nos
+    # dira que apuntar la proxima vez.
+    $msgSub = ""
+    if ($Submenu -ne "") {
+      $encontrado = Entrar-Submenu $Submenu
+      if ($encontrado) {
+        Start-Sleep -Milliseconds 2000
+        $focoSub = Get-FocusInfo
+        Traza "tras el submenu: $focoSub"
+        $msgSub = " + submenu '$Submenu'"
+      } else {
+        $msgSub = " (el submenu '$Submenu' no se encontro; mira la lista de la caja negra)"
+      }
+    }
+
     $shot = Take-MenuShot "modulo-$Tecla"
     $fg = [W32Menu]::GetForegroundWindow()
     $tituloFinal = Titulo-De $fg
-    Emit 'ok' "tecla $Tecla enviada" $tituloFinal $shot
+    Emit 'ok' "tecla $Tecla enviada$msgSub" $tituloFinal $shot
     exit 0
   }
 

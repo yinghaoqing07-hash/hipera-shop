@@ -15,7 +15,25 @@ export const MODULOS_UNIDEGES = {
   articulos: { tecla: 'F3', nombre: 'Artículos', peligro: false },
   utilidades: { tecla: 'F6', nombre: 'Utilidades', peligro: false },
   albaranes: { tecla: 'F7', nombre: 'Albaranes', peligro: false },
-  fin: { tecla: 'F12', nombre: 'Fin de día', peligro: true }
+  fin: { tecla: 'F12', nombre: 'Fin de día', peligro: true },
+  // Un escalón más adentro (24/07): lo que el dueño hace DESPUÉS de entrar
+  // al módulo. Primera versión a ciegas — el PS entra al módulo, vuelca a
+  // la caja negra todo lo que ve dentro y activa lo que case con el patrón;
+  // la captura final dice si acertó. El patrón es configurable
+  // (config.unideges.submenus.<id>) para poder afinarlo en la tienda sin
+  // esperar a una versión nueva.
+  albaran_electronico: {
+    tecla: 'F7',
+    nombre: 'Albarán electrónico',
+    peligro: false,
+    submenu: 'albar.n +electr.nico|electr.nico'
+  },
+  lmanma: {
+    tecla: 'F6',
+    nombre: 'LMANMA (procesar fichero)',
+    peligro: false,
+    submenu: 'LMANMA'
+  }
 };
 
 const ALIAS = {
@@ -24,7 +42,10 @@ const ALIAS = {
   articulos: 'articulos', artículos: 'articulos', 商品: 'articulos',
   utilidades: 'utilidades', 工具: 'utilidades',
   albaranes: 'albaranes', 收货单: 'albaranes', 收货: 'albaranes',
-  fin: 'fin', fin_dia: 'fin', 日结: 'fin', 关店: 'fin'
+  fin: 'fin', fin_dia: 'fin', 日结: 'fin', 关店: 'fin',
+  albaran_electronico: 'albaran_electronico', electronico: 'albaran_electronico',
+  电子货单: 'albaran_electronico', 电子单: 'albaran_electronico',
+  lmanma: 'lmanma', fichero: 'lmanma', 文件处理: 'lmanma'
 };
 
 // '/unideges' → menú de botones; '/unideges abrir' → abrir; '/unideges
@@ -72,6 +93,9 @@ export async function accionUnideges(config, logger, accion, moduloId) {
     const modulo = MODULOS_UNIDEGES[moduloId];
     if (!modulo) return { status: 'error', mensaje: `没有这个模块：${moduloId}` };
     args.push('-Tecla', modulo.tecla);
+    // El patrón del submenú se puede afinar desde config sin tocar código.
+    const patron = ug.submenus?.[moduloId] || modulo.submenu; // '' en config = usar el del código
+    if (patron) args.push('-Submenu', String(patron));
   }
   logger?.info('unideges menu action', { accion, modulo: moduloId || '' });
   // El PS puede esperar hasta 90 s a que aparezca la ventana al abrir la

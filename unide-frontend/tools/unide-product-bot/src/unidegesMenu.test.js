@@ -33,3 +33,23 @@ test('matchAbrirUnideges: solo con mencion explicita de la app', () => {
   assert.equal(matchAbrirUnideges('叫肉'), false);
   assert.equal(matchAbrirUnideges('unideges的图存哪了'), false);
 });
+
+test('submenus: alias, tecla del modulo padre y patron de busqueda', () => {
+  assert.deepEqual(parseUnidegesCommand('/unideges 电子货单'), { accion: 'modulo', modulo: 'albaran_electronico' });
+  assert.deepEqual(parseUnidegesCommand('/ug albaran_electronico'), { accion: 'modulo', modulo: 'albaran_electronico' });
+  assert.deepEqual(parseUnidegesCommand('/ug lmanma'), { accion: 'modulo', modulo: 'lmanma' });
+  assert.deepEqual(parseUnidegesCommand('/unideges fichero'), { accion: 'modulo', modulo: 'lmanma' });
+
+  // el submenú se abre DENTRO de su módulo: hereda su tecla F
+  assert.equal(MODULOS_UNIDEGES.albaran_electronico.tecla, MODULOS_UNIDEGES.albaranes.tecla); // F7
+  assert.equal(MODULOS_UNIDEGES.lmanma.tecla, MODULOS_UNIDEGES.utilidades.tecla);             // F6
+  // ninguno es peligroso: solo navegan y hacen captura
+  assert.equal(MODULOS_UNIDEGES.albaran_electronico.peligro, false);
+  assert.equal(MODULOS_UNIDEGES.lmanma.peligro, false);
+
+  // el patrón tolera acentos escritos de cualquier forma (el PS lo usa como regex)
+  const pat = new RegExp(MODULOS_UNIDEGES.albaran_electronico.submenu, 'i');
+  assert.ok(pat.test('Albarán electrónico'));
+  assert.ok(pat.test('Albaran electronico'));
+  assert.ok(new RegExp(MODULOS_UNIDEGES.lmanma.submenu, 'i').test('LMANMA'));
+});

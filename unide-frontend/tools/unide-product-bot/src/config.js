@@ -158,7 +158,15 @@ const defaultConfig = {
     menuTitleRegex: '^MadisaNet',
     exePath: '',
     shortcutRegex: 'madisa|unide',
-    loginUser: '1'             // diálogo de acceso: usuario + Enter x2; '' = no auto-login
+    loginUser: '1',            // diálogo de acceso: usuario + Enter x2; '' = no auto-login
+    // Submenús DENTRO de un módulo (24/07). El PS entra al módulo, vuelca a
+    // la caja negra todo lo que ve y activa lo primero que case con este
+    // patrón (regex, sin acentos por si el nombre real los lleva). Editable
+    // aquí para poder afinarlo en la tienda sin esperar versión nueva.
+    submenus: {
+      albaran_electronico: '',  // '' = usa el patrón por defecto del código
+      lmanma: ''
+    }
   },
   // Panel de escritorio: mini web SOLO en 127.0.0.1 con botones para las
   // acciones diarias. panel.cmd la abre en el navegador del PC de la tienda.
