@@ -125,7 +125,7 @@ function IdeaNodo({ data }) {
   const [nombre, setNombre] = useState(data.nombre || '');
   const [texto, setTexto] = useState(data.texto || '');
   const [marca, setMarca] = useState('');
-  const [anadiendo, setAnadiendo] = useState(false);
+  const [anadiendo, setAnadiendo] = useState(null); // índice donde insertar
   const timer = useRef(null);
   const limpiar = useRef(null);
   useEffect(() => () => { clearTimeout(timer.current); clearTimeout(limpiar.current); }, []);
@@ -166,13 +166,18 @@ function IdeaNodo({ data }) {
     limpiar.current = setTimeout(() => setMarca(''), 2000);
   };
   const cadena = data.cadena || [];
-  const quitarParada = (i) => guardarRuta(cadena.filter((_, j) => j !== i).map((p) => ({ nombre: p.nombre, id: p.id })));
+  const paradasPlanas = () => cadena.map((p) => ({ nombre: p.nombre, id: p.id }));
+  const quitarParada = (i) => guardarRuta(paradasPlanas().filter((_, j) => j !== i));
+  // Se inserta EN LA POSICIÓN del ＋ que se pulsó (no solo al final): el
+  // dueño quería meter una parada en medio de la cadena.
   const agregarParada = (valor) => {
     const v = String(valor || '').trim();
-    if (!v) return;
+    if (!v) { setAnadiendo(null); return; }
     const nodo = (data.nodosArbol || []).find((n) => n.nombre === v || n.id === v);
-    guardarRuta([...cadena.map((p) => ({ nombre: p.nombre, id: p.id })), nodo ? { nombre: nodo.nombre, id: nodo.id } : { nombre: v }]);
-    setAnadiendo(false);
+    const paradas = paradasPlanas();
+    paradas.splice(anadiendo ?? paradas.length, 0, nodo ? { nombre: nodo.nombre, id: nodo.id } : { nombre: v });
+    guardarRuta(paradas);
+    setAnadiendo(null);
   };
 
   return (
@@ -201,15 +206,22 @@ function IdeaNodo({ data }) {
         <div className="rutaTitulo">路线{data.ruta ? '（自定义）' : ''}</div>
         <div className="rutaChips">
           {cadena.map((p, i) => (
-            <span key={i} className={'rutaChip t-' + p.tipo} title={p.nombre}>
-              {p.nombre}
-              <button onClick={() => quitarParada(i)} title="从路线里去掉">✕</button>
-            </span>
+            <React.Fragment key={i}>
+              <button className="rutaIns" onClick={() => setAnadiendo(i)} title="在这里插一站">＋</button>
+              <span className={'rutaChip t-' + p.tipo} title={p.nombre}>
+                {p.nombre}
+                <button onClick={() => quitarParada(i)} title="从路线里去掉">✕</button>
+              </span>
+            </React.Fragment>
           ))}
-          {!anadiendo && <button className="rutaMas" onClick={() => setAnadiendo(true)} title="加一站">＋</button>}
+          <button className="rutaIns fin" onClick={() => setAnadiendo(cadena.length)} title="在最后加一站">＋</button>
         </div>
-        {anadiendo && (
+        {anadiendo !== null && (
           <div className="rutaAlta">
+            <div className="rutaDonde">
+              插在：{anadiendo === 0 ? '最前面' : cadena[anadiendo - 1]?.nombre}
+              {anadiendo < cadena.length ? ` 和 ${cadena[anadiendo].nombre} 之间` : ' 后面'}
+            </div>
             <input
               list={`nodos-${data.id}`}
               className="rutaInput"
@@ -217,9 +229,9 @@ function IdeaNodo({ data }) {
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') agregarParada(e.currentTarget.value);
-                if (e.key === 'Escape') setAnadiendo(false);
+                if (e.key === 'Escape') setAnadiendo(null);
               }}
-              onBlur={(e) => (e.currentTarget.value.trim() ? agregarParada(e.currentTarget.value) : setAnadiendo(false))}
+              onBlur={(e) => (e.currentTarget.value.trim() ? agregarParada(e.currentTarget.value) : setAnadiendo(null))}
             />
             <datalist id={`nodos-${data.id}`}>
               {(data.nodosArbol || []).map((n) => <option key={n.id} value={n.nombre}>{n.grupo}</option>)}
