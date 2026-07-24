@@ -16,7 +16,7 @@ export function renderFlujoPage(version) {
 <link rel="apple-touch-icon" href="/icons/jarvis-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="JARVIS">
 <link rel="stylesheet" href="/flujo.css?v=${v}">
 <style>
