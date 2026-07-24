@@ -60,7 +60,9 @@ test('idea con ancla y nombre: se guardan y salen en lista y export', () => {
   const idea = store.agregar('搜完自动比价', { ancla: 'ug-buscar', nombre: '促销比价' });
   assert.equal(idea.ancla, 'ug-buscar');
   assert.equal(idea.nombre, '促销比价');
-  const rutaPor = (ancla) => (ancla === 'ug-buscar' ? ['打开 UnideGes', '商品 (F3)', '查商品'] : null);
+  // cadenaPor recibe la IDEA entera (v251): la resuelve bot.js, que sabe de
+  // rutas a medida, anclas de árbol e ideas madre.
+  const rutaPor = (i) => (i.ancla === 'ug-buscar' ? ['打开 UnideGes', '商品 (F3)', '查商品'] : null);
   const lista = formatIdeaList(store, rutaPor);
   assert.match(lista, /促销比价/);
   assert.match(lista, /位置：打开 UnideGes → 商品 \(F3\) → 查商品/);
@@ -83,6 +85,40 @@ test('crear vacía + editar (autoguardado del panel); las hechas no se editan', 
   // export: las totalmente vacías no viajan
   store.crear({ ancla: 'ug-abrir' });
   assert.ok(!store.exportarTexto().includes('（只起了名字'));
+});
+
+test('ruta a medida: paradas de árbol y libres, y se puede borrar', () => {
+  const store = tienda();
+  const idea = store.crear({ ancla: 'ug-utilidades', nombre: 'x' });
+  assert.equal(idea.ruta, undefined); // sin ruta a medida = automática
+
+  store.editar(idea.id, { ruta: [
+    { id: 'ug-utilidades', nombre: '工具 (F6)' },
+    { nombre: '运营信息传递' },
+    { nombre: '  ' },                       // vacía: se descarta
+    { nombre: 'x'.repeat(80), id: 'y' }     // se recorta a 40
+  ] });
+  const r = store.buscar(idea.id).ruta;
+  assert.equal(r.length, 3);
+  assert.deepEqual(r[0], { nombre: '工具 (F6)', id: 'ug-utilidades' });
+  assert.deepEqual(r[1], { nombre: '运营信息传递' }); // libre, sin id
+  assert.equal(r[2].nombre.length, 40);
+
+  store.editar(idea.id, { ruta: [] }); // vaciar = volver a la automática
+  assert.equal(store.buscar(idea.id).ruta, undefined);
+});
+
+test('ideas colgadas de ideas: hijas() y herencia al borrar la madre', () => {
+  const store = tienda();
+  const madre = store.crear({ ancla: 'ug-utilidades', nombre: '大功能' });
+  const hija = store.crear({ ancla: `idea:${madre.id}`, nombre: '子功能' });
+  const nieta = store.crear({ ancla: `idea:${hija.id}`, nombre: '孙功能' });
+  assert.deepEqual(store.hijas(madre.id).map((i) => i.id), [hija.id]);
+
+  // al borrar la madre, la hija sube un escalón (hereda su ancla)
+  store.borrar(madre.id);
+  assert.equal(store.buscar(hija.id).ancla, 'ug-utilidades');
+  assert.equal(store.buscar(nieta.id).ancla, `idea:${hija.id}`); // la nieta no se toca
 });
 
 test('exportarTexto lleva las pendientes numeradas', () => {
