@@ -451,6 +451,78 @@ function Vigilar-Dialogos([long]$ProcId, [int]$Segundos) {
   }
 }
 
+# Vigilancia CON reglas para el procesado de albaranes: los dialogos que
+# YA conocemos se atienden solos, el resto solo se apunta (como siempre).
+# Regla del dueno (25/07): 'Codigos desconocidos' (el fichero trae lineas
+# con codigo desconocido) -> se pulsa Aceptar tal cual y el procesado
+# sigue. Puede salir una vez POR FICHERO: se atiende cada aparicion y el
+# plazo se estira tras cada una. Tope de seguridad por si Aceptar no
+# cerrara el dialogo: 3 intentos seguidos sin exito y se deja en paz.
+function Atender-DialogosAlbaran([long]$ProcId, [int]$Segundos) {
+  $vistos = @{}
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    $clave = [string]$par[0]
+    $vistos[$clave] = $true
+  }
+  $atendidos = 0
+  $volcados = @{}
+  $fallosSeguidos = 0
+  $tope = [DateTime]::Now.AddSeconds($Segundos)
+  while ([DateTime]::Now -lt $tope) {
+    Start-Sleep -Milliseconds 800
+    # 1) el dialogo CONOCIDO se busca siempre (puede reaparecer con el
+    #    mismo handle para el fichero siguiente).
+    $dial = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
+    if ($dial -and $fallosSeguidos -lt 3 -and $atendidos -lt 15) {
+      $tituloD = $dial.Title
+      $claveD = [string]([long]$dial.Handle)
+      if (-not $volcados.ContainsKey($claveD)) {
+        $volcados[$claveD] = $true
+        $rD = Uia-Raiz $dial.Handle
+        if ($rD) {
+          $todosD = Uia-Hijos $rD
+          Volcar-Elementos $todosD "dialogo '$tituloD'" 20
+        }
+      }
+      Traza "dialogo conocido: '$tituloD' -> Aceptar (regla del dueno)"
+      $rD2 = Uia-Raiz $dial.Handle
+      $okAce = $false
+      if ($rD2) { $okAce = Activar-PorNombre $rD2 '^\s*Aceptar\s*$' 'codigos desconocidos' }
+      Start-Sleep -Milliseconds 1500
+      $sigue = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
+      if ($okAce -and (-not $sigue -or [long]$sigue.Handle -ne [long]$dial.Handle)) {
+        $atendidos = $atendidos + 1
+        $fallosSeguidos = 0
+        $volcados.Remove($claveD)
+        $nuevoTope = [DateTime]::Now.AddSeconds(15)
+        if ($nuevoTope -gt $tope) { $tope = $nuevoTope }
+      } else {
+        $fallosSeguidos = $fallosSeguidos + 1
+        Traza "el dialogo sigue abierto tras Aceptar (intento $fallosSeguidos de 3)"
+      }
+      continue
+    }
+    # 2) cualquier otra ventana nueva del proceso: apuntar sin tocar.
+    foreach ($par in [W32Menu]::VisibleWindows()) {
+      if ([long]$par[1] -ne $ProcId) { continue }
+      $clave = [string]$par[0]
+      if ($vistos.ContainsKey($clave)) { continue }
+      $vistos[$clave] = $true
+      $h = [IntPtr]$par[0]
+      $t = Titulo-De $h
+      if (-not $t) { continue }
+      if ($t -match 'C.digos desconocidos') { continue }
+      Traza "dialogo nuevo: '$t' (no lo toco, solo lo apunto)"
+      $r2 = Uia-Raiz $h
+      if ($r2) {
+        $todos2 = Uia-Hijos $r2
+        Volcar-Elementos $todos2 "dialogo '$t'" 20
+      }
+    }
+  }
+  return $atendidos
+}
+
 # Escribe la ruta del fichero en el dialogo 'Abrir' de Windows: primero el
 # Edit que se llame como el campo de nombre; si no, el primer Edit que
 # acepte ValuePattern (el de busqueda de arriba no suele aceptar SetValue
@@ -1031,10 +1103,10 @@ try {
     Start-Sleep -Milliseconds 900
     $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
     if (-not $okProc) { throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
-    Traza "albaran: Procesar pulsado; vigilo 20 s por si salen dialogos"
-    Vigilar-Dialogos $vent.ProcId 20
+    Traza "albaran: Procesar pulsado; vigilo los dialogos (los conocidos se atienden solos)"
+    $desconocidosOk = Atender-DialogosAlbaran $vent.ProcId 25
     $shot = Take-MenuShot 'albaran-procesar'
-    Emit 'ok' "Marcar todos + Procesar pulsados; filas=$filas; revisa la captura y la caja negra" $tituloVent $shot
+    Emit 'ok' "Marcar todos + Procesar pulsados; filas=$filas; desconocidos=$desconocidosOk; revisa la captura y la caja negra" $tituloVent $shot
     exit 0
   }
 
