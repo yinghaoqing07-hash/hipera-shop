@@ -3006,13 +3006,18 @@ async function handleProcesarAlbaranes(chatId) {
   // dueño — el botón de procesar se ofrece siempre, con el texto honesto.
   const filas = filasDeRespuesta(res);
   const fels = ficherosDeRespuesta(res);
-  const texto = filas > 0
-    ? `列表里有 ${filas} 行${fels.length ? `：${fels.join('、')}` : ''}。看好截图再点：有红色行（店号不符）就先别处理，红色的怎么办咱们还没规矩。`
-    : '我从程序里数不出行数（这界面不太让读）。以截图为准：列表里有货单就点处理，空的就点算了。';
+  const cuantos = filas > 0
+    ? `列表里有 ${filas} 行${fels.length ? `：${fels.join('、')}` : ''}。`
+    : '我从程序里数不出行数（这界面不太让读），以截图为准。';
+  const texto = [
+    cuantos,
+    '点确认后我会一路走完：全选 → Procesar → 未知代码 Aceptar → 价格变更全接受 → Confirmar → Sí（这步不可逆）→ 关掉标签窗口。',
+    '有红色行（店号不符）就先别处理，红色的怎么办咱们还没规矩。'
+  ].join('\n');
   const opciones = {
     __skipAI: true,
     reply_markup: { inline_keyboard: [[
-      { text: filas > 0 ? `✅ 全选并 Procesar（${filas} 行）` : '✅ 全选并 Procesar', callback_data: 'alb:go' },
+      { text: filas > 0 ? `✅ 处理这 ${filas} 张` : '✅ 处理', callback_data: 'alb:go' },
       { text: '算了', callback_data: 'alb:no' }
     ]] }
   };
@@ -3031,14 +3036,24 @@ async function handleAlbaranCallback(chatId, callbackId, verbo) {
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'procesar' }));
   if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-procesar', trace: res.trace });
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
-  // Diálogos tras Procesar: los CONOCIDOS se atienden solos en el PS
-  // ('Códigos desconocidos' → Aceptar, regla del dueño 25/07) y se
-  // cuentan; los desconocidos de verdad quedan en la caja negra.
-  const desconocidos = Number((String(res.mensaje || '').match(/desconocidos=(\d+)/) || [])[1] || 0);
-  const huboDialogos = (res.trace || []).some((l) => /dialogo nuevo/.test(String(l)));
-  const partes = ['处理按钮按完了 ✅ 看截图确认列表清掉没有（Procesado 一列应该变了）。'];
-  if (desconocidos > 0) partes.push(`过程中弹了 ${desconocidos} 次「未知代码 Códigos desconocidos」，按你的规矩都点了 Aceptar。`);
-  if (huboDialogos) partes.push('还弹了没见过的窗口（我没敢碰，都记在黑匣子里了）。看截图把情况告诉我，下一版就知道怎么接。');
+  // El PS corre YA el ciclo entero (reglas del dueño del 25/07, sacadas de
+  // sus vídeos): Códigos desconocidos → Aceptar; revisión de precios →
+  // Aceptar Todos Cambio + Confirmar → Sí; ventana de etiquetas → cerrar.
+  // Aquí solo se traduce el recuento a algo legible.
+  const num = (clave) => Number((String(res.mensaje || '').match(new RegExp(`${clave}=(\\d+)`)) || [])[1] || 0);
+  const desconocidos = num('desconocidos');
+  const confirmados = num('confirmados');
+  const etiquetas = num('etiquetas');
+  const atascado = num('atascado');
+  const huboDialogos = (res.trace || []).some((l) => /ventana nueva/.test(String(l)));
+  const partes = [];
+  partes.push(confirmados > 0
+    ? `货单处理完了 ✅ 确认了 ${confirmados} 张（价格变更全接受 + Confirmar + Sí，按你定的规矩）。`
+    : '按钮都按下去了，但没等到「确认不可逆」那一步。看截图确认走到哪儿了。');
+  if (desconocidos > 0) partes.push(`「未知代码」弹窗 ${desconocidos} 次，都点了 Aceptar。`);
+  if (etiquetas > 0) partes.push(`标签打印窗口关掉了 ${etiquetas} 个——要打价签你自己去打。`);
+  if (atascado) partes.push('⚠ 中间卡住了（有个按钮点不动或者超时），剩下的可能要你手动收尾。');
+  if (huboDialogos) partes.push('还弹了没见过的窗口（我没敢碰，都记在黑匣子里了）。把情况告诉我，下一版就知道怎么接。');
   const msg = partes.join('\n');
   if (res.screenshot && fs.existsSync(res.screenshot)) {
     try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
@@ -3092,7 +3107,7 @@ async function handleLmanmaCallback(chatId, callbackId, resto) {
   if (!file) { await telegram.answerCallbackQuery(callbackId, '没找到这个文件'); return; }
   if (verbo === 'pick') {
     await telegram.answerCallbackQuery(callbackId, file.slice(0, 40));
-    await telegram.sendMessage(chatId, `确认处理「${file}」？生效日期=今天。这会真的改价格/毛利。`, {
+    await telegram.sendMessage(chatId, `确认处理「${file}」？生效日期=今天，我会按「Procesar normal」（不是 con costes）。这会真的改价格/毛利。`, {
       __skipAI: true,
       reply_markup: { inline_keyboard: [[
         { text: '✅ 确定处理', callback_data: `lmp:go:${id}:${idx}` },
@@ -3114,10 +3129,17 @@ async function handleLmanmaCallback(chatId, callbackId, resto) {
   // señal de éxito que tenemos sin conocer aún los diálogos de después.
   let desaparecido = false;
   try { desaparecido = !fs.existsSync(ruta); } catch { /* se queda en duda */ }
-  const huboDialogos = (res.trace || []).some((l) => /dialogo nuevo/.test(String(l)));
+  const numLm = (clave) => Number((String(res.mensaje || '').match(new RegExp(`${clave}=(\\d+)`)) || [])[1] || 0);
+  const errores = numLm('errores');
+  const procesado = numLm('procesar');
+  const ventanaAbierta = numLm('ventanaAbierta');
+  const huboDialogos = (res.trace || []).some((l) => /ventana nueva/.test(String(l)));
   const partes = [];
-  partes.push(desaparecido ? '文件已经从 entradas 里消失了——按你说的，这一般就是处理完了 ✅' : '文件还在 entradas 里，可能没处理完或者还在跑，看截图。');
-  if (huboDialogos) partes.push('过程中弹了新窗口（我没碰，都记在黑匣子里了），把截图里的情况告诉我。');
+  if (procesado > 0) partes.push('按了「Procesar normal」（按你说的那个按钮）。');
+  partes.push(desaparecido ? '文件已经从 entradas 里消失了——按你说的，这就是处理完了 ✅' : '文件还在 entradas 里，可能没处理完，看截图。');
+  if (errores > 0) partes.push(`UnideGes 报了「文件里有几行不对」，我点了 Aceptar（它自己说会跳过那些行继续）。`);
+  if (ventanaAbierta) partes.push('⚠ 处理窗口还开着，「Procesar normal」像是灰的——多半是这个文件里的行 UnideGes 认不了。');
+  if (huboDialogos) partes.push('还弹了没见过的窗口（我没碰，都记在黑匣子里了），把截图里的情况告诉我。');
   const msg = partes.join('\n');
   if (res.screenshot && fs.existsSync(res.screenshot)) {
     try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }

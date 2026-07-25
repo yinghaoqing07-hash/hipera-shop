@@ -420,107 +420,243 @@ function Wait-VentanaTitulo([string]$Regex, [int]$Segundos, [long]$PidFiltro) {
   return $null
 }
 
-# Tras pulsar Procesar (o mandar el fichero a LMMAMA) pueden salir dialogos
-# que NO conocemos: se vigilan N segundos, se vuelca su contenido a la caja
-# negra y NO SE TOCA NADA. La captura final + esta lista son el material
-# para ensenarle al bot el paso siguiente.
-function Vigilar-Dialogos([long]$ProcId, [int]$Segundos) {
-  $conocidas = @{}
+# Ventana top-level del proceso que CONTIENE un elemento con ese nombre.
+# Mas fiable que el titulo: la pantalla de revision de precios del albaran
+# y la de etiquetas no tienen titulo estable, pero sus botones si.
+function Find-VentanaConElemento([string]$Patron, [long]$ProcId) {
   foreach ($par in [W32Menu]::VisibleWindows()) {
     if ([long]$par[1] -ne $ProcId) { continue }
-    $t = Titulo-De ([IntPtr]$par[0])
-    if ($t) { $conocidas[$t] = $true }
-  }
-  $tope = [DateTime]::Now.AddSeconds($Segundos)
-  while ([DateTime]::Now -lt $tope) {
-    Start-Sleep -Milliseconds 800
-    foreach ($par in [W32Menu]::VisibleWindows()) {
-      if ([long]$par[1] -ne $ProcId) { continue }
-      $h = [IntPtr]$par[0]
-      $t = Titulo-De $h
-      if (-not $t) { continue }
-      if ($conocidas.ContainsKey($t)) { continue }
-      $conocidas[$t] = $true
-      Traza "dialogo nuevo: '$t' (no lo toco, solo lo apunto)"
-      $r = Uia-Raiz $h
-      if ($r) {
-        $todosD = Uia-Hijos $r
-        Volcar-Elementos $todosD "dialogo '$t'" 20
+    $h = [IntPtr]$par[0]
+    $r = Uia-Raiz $h
+    if (-not $r) { continue }
+    $todos = Uia-Hijos $r
+    if (-not $todos) { continue }
+    foreach ($el in $todos) {
+      $nombre = ""
+      try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+      if ($nombre -eq "") { continue }
+      if ($nombre -match $Patron) {
+        $t = Titulo-De $h
+        return @{ Handle = $h; Title = $t; ProcId = [long]$par[1] }
       }
+    }
+  }
+  return $null
+}
+
+# Ventanas nuevas que NO conocemos: volcado a la caja negra sin tocarlas.
+# Es el mecanismo que nos ha ido ensenando el flujo real paso a paso.
+function Apuntar-VentanasNuevas([long]$ProcId, $Vistos, [string]$Excluir) {
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    if ([long]$par[1] -ne $ProcId) { continue }
+    $clave = [string]$par[0]
+    if ($Vistos.ContainsKey($clave)) { continue }
+    $Vistos[$clave] = $true
+    $h = [IntPtr]$par[0]
+    $t = Titulo-De $h
+    if (-not $t) { continue }
+    if ($Excluir -ne "" -and $t -match $Excluir) { continue }
+    Traza "ventana nueva: '$t' (no la toco, solo la apunto)"
+    $r = Uia-Raiz $h
+    if ($r) {
+      $todos = Uia-Hijos $r
+      Volcar-Elementos $todos "ventana '$t'" 20
     }
   }
 }
 
-# Vigilancia CON reglas para el procesado de albaranes: los dialogos que
-# YA conocemos se atienden solos, el resto solo se apunta (como siempre).
-# Regla del dueno (25/07): 'Codigos desconocidos' (el fichero trae lineas
-# con codigo desconocido) -> se pulsa Aceptar tal cual y el procesado
-# sigue. Puede salir una vez POR FICHERO: se atiende cada aparicion y el
-# plazo se estira tras cada una. Tope de seguridad por si Aceptar no
-# cerrara el dialogo: 3 intentos seguidos sin exito y se deja en paz.
-function Atender-DialogosAlbaran([long]$ProcId, [int]$Segundos) {
+# CICLO COMPLETO del procesado de albaranes. Reglas dictadas por el dueno
+# el 25/07 despues de ver sus videos del proceso a mano:
+#   - 'Codigos desconocidos'          -> Aceptar
+#   - pantalla de revision de precios -> 'Aceptar Todos Cambio' + 'Confirmar'
+#   - 'confirmacion irreversible'     -> Si
+#   - ventana de etiquetas MADISA     -> cerrar (el las imprime a mano)
+#   - cualquier otra ventana          -> caja negra, sin tocarla
+# El ciclo se repite mientras haya novedades (varios ficheros seguidos) y
+# para cuando pasan $SegundosIdle sin que aparezca nada nuevo.
+function Ciclo-Albaran([long]$ProcId, [int]$SegundosIdle, [int]$TopeTotal) {
+  $res = @{ desconocidos = 0; confirmados = 0; etiquetas = 0; atascado = 0 }
+  $inicio = [DateTime]::Now
+  $ultima = [DateTime]::Now
   $vistos = @{}
-  foreach ($par in [W32Menu]::VisibleWindows()) {
-    $clave = [string]$par[0]
-    $vistos[$clave] = $true
-  }
-  $atendidos = 0
-  $volcados = @{}
-  $fallosSeguidos = 0
-  $tope = [DateTime]::Now.AddSeconds($Segundos)
-  while ([DateTime]::Now -lt $tope) {
-    Start-Sleep -Milliseconds 800
-    # 1) el dialogo CONOCIDO se busca siempre (puede reaparecer con el
-    #    mismo handle para el fichero siguiente).
-    $dial = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
-    if ($dial -and $fallosSeguidos -lt 3 -and $atendidos -lt 15) {
-      $tituloD = $dial.Title
-      $claveD = [string]([long]$dial.Handle)
-      if (-not $volcados.ContainsKey($claveD)) {
-        $volcados[$claveD] = $true
-        $rD = Uia-Raiz $dial.Handle
-        if ($rD) {
-          $todosD = Uia-Hijos $rD
-          Volcar-Elementos $todosD "dialogo '$tituloD'" 20
-        }
-      }
-      Traza "dialogo conocido: '$tituloD' -> Aceptar (regla del dueno)"
-      $rD2 = Uia-Raiz $dial.Handle
-      $okAce = $false
-      if ($rD2) { $okAce = Activar-PorNombre $rD2 '^\s*Aceptar\s*$' 'codigos desconocidos' }
-      Start-Sleep -Milliseconds 1500
-      $sigue = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
-      if ($okAce -and (-not $sigue -or [long]$sigue.Handle -ne [long]$dial.Handle)) {
-        $atendidos = $atendidos + 1
-        $fallosSeguidos = 0
-        $volcados.Remove($claveD)
-        $nuevoTope = [DateTime]::Now.AddSeconds(15)
-        if ($nuevoTope -gt $tope) { $tope = $nuevoTope }
-      } else {
-        $fallosSeguidos = $fallosSeguidos + 1
-        Traza "el dialogo sigue abierto tras Aceptar (intento $fallosSeguidos de 3)"
-      }
+  $intentosConfirmar = 0
+  $intentosDesconocidos = 0
+  $intentosEtiquetas = @{}
+  foreach ($par in [W32Menu]::VisibleWindows()) { $vistos[[string]$par[0]] = $true }
+  while ($true) {
+    $sinNovedad = ([DateTime]::Now - $ultima).TotalSeconds
+    $total = ([DateTime]::Now - $inicio).TotalSeconds
+    if ($sinNovedad -ge $SegundosIdle) { break }
+    if ($total -ge $TopeTotal) { Traza "ciclo albaran: tope de tiempo, lo dejo aqui"; $res.atascado = 1; break }
+    Start-Sleep -Milliseconds 700
+
+    # 1) El dialogo modal manda: mientras este abierto no se puede nada mas.
+    $dlg = Find-VentanaConElemento 'irreversible' $ProcId
+    if ($dlg) {
+      Traza "ciclo: 'la confirmacion es irreversible' -> Si (regla del dueno)"
+      $rd = Uia-Raiz $dlg.Handle
+      # 'Si' con y sin tilde. La tilde va como escape backslash-u00ed de la regex
+      # .NET para NO meter un byte no ASCII en este fichero (la regla de
+      # la casa que ya nos costo v220-v223).
+      if ($rd) { Activar-PorNombre $rd '^\s*S(i|\u00ed)\s*$' 'confirmar irreversible' | Out-Null }
+      Start-Sleep -Milliseconds 1800
+      $res.confirmados = $res.confirmados + 1
+      $intentosConfirmar = 0
+      $ultima = [DateTime]::Now
       continue
     }
-    # 2) cualquier otra ventana nueva del proceso: apuntar sin tocar.
-    foreach ($par in [W32Menu]::VisibleWindows()) {
-      if ([long]$par[1] -ne $ProcId) { continue }
-      $clave = [string]$par[0]
-      if ($vistos.ContainsKey($clave)) { continue }
-      $vistos[$clave] = $true
-      $h = [IntPtr]$par[0]
-      $t = Titulo-De $h
-      if (-not $t) { continue }
-      if ($t -match 'C.digos desconocidos') { continue }
-      Traza "dialogo nuevo: '$t' (no lo toco, solo lo apunto)"
-      $r2 = Uia-Raiz $h
-      if ($r2) {
-        $todos2 = Uia-Hijos $r2
-        Volcar-Elementos $todos2 "dialogo '$t'" 20
+
+    # 2) Codigos desconocidos -> Aceptar (puede salir uno por fichero).
+    $des = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
+    if ($des -and $intentosDesconocidos -lt 3 -and $res.desconocidos -lt 15) {
+      $tituloD = $des.Title
+      $rD = Uia-Raiz $des.Handle
+      if ($rD) {
+        $todosD = Uia-Hijos $rD
+        Volcar-Elementos $todosD "dialogo '$tituloD'" 15
+      }
+      Traza "ciclo: 'Codigos desconocidos' -> Aceptar (regla del dueno)"
+      $okAce = $false
+      $rD2 = Uia-Raiz $des.Handle
+      if ($rD2) { $okAce = Activar-PorNombre $rD2 '^\s*Aceptar\s*$' 'codigos desconocidos' }
+      Start-Sleep -Milliseconds 1800
+      $sigue = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
+      if ($okAce -and (-not $sigue -or [long]$sigue.Handle -ne [long]$des.Handle)) {
+        $res.desconocidos = $res.desconocidos + 1
+        $intentosDesconocidos = 0
+      } else {
+        $intentosDesconocidos = $intentosDesconocidos + 1
+        Traza "sigue abierto tras Aceptar (intento $intentosDesconocidos de 3)"
+      }
+      $ultima = [DateTime]::Now
+      continue
+    }
+
+    # 3) Ventana de etiquetas MADISA -> cerrarla (WM_CLOSE, sin clicar nada).
+    $etq = Find-VentanaConElemento 'Imprimir\s+Etiquetas' $ProcId
+    if ($etq) {
+      $claveE = [string]([long]$etq.Handle)
+      $yaVa = 0
+      if ($intentosEtiquetas.ContainsKey($claveE)) { $yaVa = [int]$intentosEtiquetas[$claveE] }
+      if ($yaVa -lt 2) {
+        $intentosEtiquetas[$claveE] = $yaVa + 1
+        Traza "ciclo: ventana de etiquetas -> la cierro (el dueno las imprime a mano si hacen falta)"
+        [W32Menu]::SendMessage($etq.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        Start-Sleep -Milliseconds 1500
+        $res.etiquetas = $res.etiquetas + 1
+        $ultima = [DateTime]::Now
+        continue
       }
     }
+
+    # 4) Pantalla de revision de precios: aceptar TODOS los cambios y
+    #    confirmar (regla del dueno: siempre se aceptan todos).
+    $rev = Find-VentanaConElemento 'Aceptar\s+Todos|Descartar\s+Todos' $ProcId
+    if ($rev -and $intentosConfirmar -lt 3) {
+      $rr = Uia-Raiz $rev.Handle
+      if ($rr) {
+        $todosR = Uia-Hijos $rr
+        $hayAceptar = $false
+        foreach ($el in $todosR) {
+          $nom = ""
+          try { $nom = [string]$el.Current.Name } catch { $nom = "" }
+          if ($nom -match 'Aceptar\s+Todos') { $hayAceptar = $true; break }
+        }
+        if ($hayAceptar) {
+          Traza "ciclo: pantalla de revision -> 'Aceptar Todos Cambio'"
+          Activar-PorNombre $rr 'Aceptar\s+Todos' 'aceptar todos los cambios' | Out-Null
+          Start-Sleep -Milliseconds 1800
+        } else {
+          Traza "ciclo: pantalla de revision con los cambios ya aceptados"
+        }
+        $rr2 = Uia-Raiz $rev.Handle
+        if ($rr2) {
+          Traza "ciclo: pulso 'Confirmar'"
+          Activar-PorNombre $rr2 '^\s*Confirmar\s*$' 'confirmar albaran' | Out-Null
+        }
+        $intentosConfirmar = $intentosConfirmar + 1
+        $ultima = [DateTime]::Now
+        continue
+      }
+    }
+    if ($rev -and $intentosConfirmar -ge 3) {
+      Traza "ciclo: 'Confirmar' no responde tras 3 intentos; lo dejo para el dueno"
+      $res.atascado = 1
+      break
+    }
+
+    # 5) Lo que no conocemos: a la caja negra, sin tocarlo.
+    Apuntar-VentanasNuevas $ProcId $vistos 'C.digos desconocidos'
   }
-  return $atendidos
+  return $res
+}
+
+# CICLO del procesado LMANMA. Reglas del dueno (25/07, video):
+#   - 'Errores: alguna linea del fichero era incorrecta' -> Aceptar (el
+#     propio aviso dice que despues el proceso continua)
+#   - ventana 'Proceso fichero LMmama' -> boton 'Procesar normal'
+#   - lo demas: caja negra sin tocar
+function Ciclo-Lmanma([long]$ProcId, [int]$SegundosIdle, [int]$TopeTotal) {
+  $res = @{ errores = 0; procesado = 0; ventanaAbierta = 0 }
+  $inicio = [DateTime]::Now
+  $ultima = [DateTime]::Now
+  $vistos = @{}
+  $intentosProcesar = @{}
+  $intentosErrores = 0
+  foreach ($par in [W32Menu]::VisibleWindows()) { $vistos[[string]$par[0]] = $true }
+  while ($true) {
+    $sinNovedad = ([DateTime]::Now - $ultima).TotalSeconds
+    $total = ([DateTime]::Now - $inicio).TotalSeconds
+    if ($sinNovedad -ge $SegundosIdle) { break }
+    if ($total -ge $TopeTotal) { Traza "ciclo lmanma: tope de tiempo, lo dejo aqui"; break }
+    Start-Sleep -Milliseconds 700
+
+    # 1) Aviso de lineas incorrectas -> Aceptar y seguir.
+    $err = Find-VentanaConElemento 'l.nea del fichero era incorrecta' $ProcId
+    if ($err -and $intentosErrores -lt 3) {
+      Traza "ciclo lmanma: aviso de lineas incorrectas -> Aceptar (el proceso sigue)"
+      $re = Uia-Raiz $err.Handle
+      $okE = $false
+      if ($re) {
+        $todosE = Uia-Hijos $re
+        Volcar-Elementos $todosE 'aviso de errores' 15
+        $okE = Activar-PorNombre $re '^\s*Aceptar\s*$' 'aviso de errores'
+      }
+      Start-Sleep -Milliseconds 1500
+      if ($okE) { $res.errores = $res.errores + 1 } else { $intentosErrores = $intentosErrores + 1 }
+      $ultima = [DateTime]::Now
+      continue
+    }
+
+    # 2) Ventana de proceso del fichero -> 'Procesar normal'.
+    $proc = Find-VentanaConElemento 'Procesar\s+normal' $ProcId
+    if ($proc) {
+      $claveP = [string]([long]$proc.Handle)
+      $yaVa = 0
+      if ($intentosProcesar.ContainsKey($claveP)) { $yaVa = [int]$intentosProcesar[$claveP] }
+      if ($yaVa -lt 2) {
+        $intentosProcesar[$claveP] = $yaVa + 1
+        $rp = Uia-Raiz $proc.Handle
+        if ($rp) {
+          $todosP = Uia-Hijos $rp
+          Volcar-Elementos $todosP 'proceso del fichero LMmama' 40
+          Traza "ciclo lmanma: pulso 'Procesar normal' (regla del dueno)"
+          Activar-PorNombre $rp 'Procesar\s+normal' 'procesar normal' | Out-Null
+          $res.procesado = $res.procesado + 1
+        }
+        Start-Sleep -Milliseconds 2500
+        $ultima = [DateTime]::Now
+        continue
+      }
+      # Sigue ahi tras pulsarlo: casi seguro el boton estaba en gris
+      # (fichero con lineas invalidas, p. ej. un .FEL de albaran).
+      $res.ventanaAbierta = 1
+    }
+
+    # 3) Lo desconocido: caja negra.
+    Apuntar-VentanasNuevas $ProcId $vistos ''
+  }
+  return $res
 }
 
 # Escribe la ruta del fichero en el dialogo 'Abrir' de Windows: primero el
@@ -1103,10 +1239,14 @@ try {
     Start-Sleep -Milliseconds 900
     $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
     if (-not $okProc) { throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
-    Traza "albaran: Procesar pulsado; vigilo los dialogos (los conocidos se atienden solos)"
-    $desconocidosOk = Atender-DialogosAlbaran $vent.ProcId 25
+    Traza "albaran: Procesar pulsado; entro en el ciclo completo del proceso"
+    $ciclo = Ciclo-Albaran $vent.ProcId 25 170
+    $nDes = $ciclo.desconocidos
+    $nConf = $ciclo.confirmados
+    $nEtq = $ciclo.etiquetas
+    $atasco = $ciclo.atascado
     $shot = Take-MenuShot 'albaran-procesar'
-    Emit 'ok' "Marcar todos + Procesar pulsados; filas=$filas; desconocidos=$desconocidosOk; revisa la captura y la caja negra" $tituloVent $shot
+    Emit 'ok' "Procesar completo; filas=$filas; desconocidos=$nDes; confirmados=$nConf; etiquetas=$nEtq; atascado=$atasco" $tituloVent $shot
     exit 0
   }
 
@@ -1144,10 +1284,13 @@ try {
       Traza "lmanma: boton Abrir no encontrado; mando ENTER"
       [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
     }
-    Traza "lmanma: fichero enviado; vigilo 25 s por si salen dialogos"
-    Vigilar-Dialogos $win.ProcId 25
+    Traza "lmanma: fichero enviado; entro en el ciclo del proceso"
+    $cl = Ciclo-Lmanma $win.ProcId 25 120
+    $nErr = $cl.errores
+    $nProc = $cl.procesado
+    $abierta = $cl.ventanaAbierta
     $shot = Take-MenuShot 'lmanma-procesar'
-    Emit 'ok' "fichero '$nombreFichero' mandado a LMMAMA (fecha de hoy); revisa la captura y la caja negra" '' $shot
+    Emit 'ok' "fichero '$nombreFichero' procesado en LMMAMA (fecha de hoy); errores=$nErr; procesar=$nProc; ventanaAbierta=$abierta" '' $shot
     exit 0
   }
 
