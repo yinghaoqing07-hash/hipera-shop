@@ -2988,6 +2988,11 @@ function filasDeRespuesta(res) {
   return m ? Number(m[1]) : null;
 }
 
+function ficherosDeRespuesta(res) {
+  const m = String(res?.mensaje || '').match(/ficheros=(.+)$/);
+  return m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : [];
+}
+
 async function handleProcesarAlbaranes(chatId) {
   if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用，处理不了。'); return; }
   notePanelActivity('/procesar_albaranes');
@@ -2996,18 +3001,18 @@ async function handleProcesarAlbaranes(chatId) {
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'leer' }));
   if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-leer', trace: res.trace });
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
+  // El conteo UIA puede fallar con la lista LLENA (25/07 20:16: 3 filas a
+  // la vista, conteo 0): la verdad es la CAPTURA y quien decide es el
+  // dueño — el botón de procesar se ofrece siempre, con el texto honesto.
   const filas = filasDeRespuesta(res);
-  if (filas === 0) {
-    const msg = '电子货单列表是空的——没有待处理的货单。要有新的，先 /mensajeria bajar 下载。';
-    if (res.screenshot && fs.existsSync(res.screenshot)) { try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ } }
-    await telegram.sendMessage(chatId, msg, { __skipAI: true });
-    return;
-  }
-  const texto = `列表里有 ${filas ?? '?'} 行。看好截图再点：有红色行（店号不符）就先别处理，红色的怎么办咱们还没规矩。`;
+  const fels = ficherosDeRespuesta(res);
+  const texto = filas > 0
+    ? `列表里有 ${filas} 行${fels.length ? `：${fels.join('、')}` : ''}。看好截图再点：有红色行（店号不符）就先别处理，红色的怎么办咱们还没规矩。`
+    : '我从程序里数不出行数（这界面不太让读）。以截图为准：列表里有货单就点处理，空的就点算了。';
   const opciones = {
     __skipAI: true,
     reply_markup: { inline_keyboard: [[
-      { text: `✅ 全选并 Procesar（${filas ?? '?'} 行）`, callback_data: 'alb:go' },
+      { text: filas > 0 ? `✅ 全选并 Procesar（${filas} 行）` : '✅ 全选并 Procesar', callback_data: 'alb:go' },
       { text: '算了', callback_data: 'alb:no' }
     ]] }
   };
