@@ -32,7 +32,11 @@ export const MODULOS_UNIDEGES = {
     tecla: 'F6',
     nombre: 'LMANMA (procesar fichero)',
     peligro: false,
-    submenu: 'LMANMA'
+    // La prueba a ciegas del 25/07 enseñó que el botón real se llama
+    // "LMMAMA" (no LMANMA, como los ficheros de la mensajería — UnideGes
+    // no se pone de acuerdo consigo mismo). ANCLADO al nombre entero:
+    // "Act. márgenes LMmama" también anda por ese menú y no es el objetivo.
+    submenu: '^\\s*LM(AN|MA)MA\\s*$'
   }
 };
 

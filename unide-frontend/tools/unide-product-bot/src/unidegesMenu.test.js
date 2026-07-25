@@ -51,5 +51,13 @@ test('submenus: alias, tecla del modulo padre y patron de busqueda', () => {
   const pat = new RegExp(MODULOS_UNIDEGES.albaran_electronico.submenu, 'i');
   assert.ok(pat.test('Albarán electrónico'));
   assert.ok(pat.test('Albaran electronico'));
-  assert.ok(new RegExp(MODULOS_UNIDEGES.lmanma.submenu, 'i').test('LMANMA'));
+  // El botón REAL se llama "LMMAMA" (visto en la tienda, 25/07); el patrón
+  // acepta las dos grafías pero ANCLADO: "Act. márgenes LMmama" está en el
+  // mismo menú y no debe casar.
+  const patLm = new RegExp(MODULOS_UNIDEGES.lmanma.submenu, 'i');
+  assert.ok(patLm.test('LMMAMA'));
+  assert.ok(patLm.test('LMANMA'));
+  assert.ok(patLm.test(' LMMAMA ')); // con espacios sueltos, como 'Inventariable '
+  assert.ok(!patLm.test('Act. márgenes LMmama'));
+  assert.ok(!patLm.test('Act. margenes LMmama'));
 });
