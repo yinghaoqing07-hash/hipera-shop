@@ -406,115 +406,167 @@ async function recorrerYDescargar(page, config, { hoyIso, dias, dir, maxDescarga
   out.vacioExplicito = espera.vacioExplicito && !espera.filas;
   logger?.info('mensajeria grid wait', { filas: espera.filas, vacioExplicito: espera.vacioExplicito, esperaMs: espera.esperaMs });
   let prevSig = '';
+  // AUTOCURACIÓN (fallo real 25/07 por la tarde): en esta instalación la
+  // fila entera es clicable (abre la ficha del mensaje) y el circuito Blazor
+  // puede refrescar la página él solo. Si la página salta a mitad de una
+  // pasada, se deshacen los contadores de ESA pasada, se vuelve a la lista y
+  // se reintenta, en vez de reventar el flujo entero. Lo ya conseguido
+  // (descargados) se conserva y yaProcesadas evita repetirlo.
+  let recuperaciones = 0;
+  const yaProcesadas = new Set();
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     setLive('[mensajeria] 读消息列表第 ' + (pageIndex + 1) + ' 页…');
-    const rows = await scrapeMensajesPage(page);
-    const sig = rows.map((r) => (r.cells || []).join('|')).join('||');
-    if (pageIndex > 0 && (!rows.length || sig === prevSig)) break;
-    prevSig = sig;
-    out.total += rows.length;
+    const foto = {
+      total: out.total, sinFecha: out.sinFecha, fueraDeVentana: out.fueraDeVentana,
+      omitidos: out.omitidosFruta.length, fallidos: out.fallidos.length,
+      excedente: out.excedente, prevSig
+    };
+    try {
+      const rows = await scrapeMensajesPage(page);
+      const sig = rows.map((r) => (r.cells || []).join('|')).join('||');
+      if (pageIndex > 0 && (!rows.length || sig === prevSig)) break;
+      prevSig = sig;
+      out.total += rows.length;
 
-    const f = filtrarMensajes(rows, { hoyIso, dias });
-    out.omitidosFruta.push(...f.omitidosFruta);
-    out.sinFecha += f.sinFecha.length;
-    out.fueraDeVentana += f.fueraDeVentana;
+      const f = filtrarMensajes(rows, { hoyIso, dias });
+      out.omitidosFruta.push(...f.omitidosFruta);
+      out.sinFecha += f.sinFecha.length;
+      out.fueraDeVentana += f.fueraDeVentana;
 
-    let aBajar = f.seleccionados;
-    const cupo = maxDescargas - out.descargados.length;
-    if (aBajar.length > cupo) {
-      out.excedente += aBajar.length - Math.max(0, cupo);
-      aBajar = aBajar.slice(0, Math.max(0, cupo));
-    }
-    if (!aBajar.length) {
+      let aBajar = f.seleccionados.filter((m) => !yaProcesadas.has(m.texto));
+      const cupo = maxDescargas - out.descargados.length;
+      if (aBajar.length > cupo) {
+        out.excedente += aBajar.length - Math.max(0, cupo);
+        aBajar = aBajar.slice(0, Math.max(0, cupo));
+      }
+      if (!aBajar.length) {
+        const moved = await clickNextPage(page);
+        if (!moved) break;
+        await esperarPaginaNueva(page, sig, 8000);
+        continue;
+      }
+
+      if (soloMarcar) {
+        // MODO PRUEBA: marcar y DEJAR MARCADO (nada de Descargar ni de
+        // desmarcar), para que en la tienda se revisen esas mismas líneas.
+        setLive(`[mensajeria] 测试模式：勾选 ${aBajar.length} 条（不下载）…`);
+        const { marcados, sinEntrada } = await marcarFilas(page, aBajar);
+        for (const msg of marcados) { out.descargados.push({ ...msg, marcado: true }); yaProcesadas.add(msg.texto); }
+        for (const msg of sinEntrada) out.fallidos.push({ msg, error: '没勾上' });
+      } else {
+        setLive(`[mensajeria] 勾选 ${aBajar.length} 条，点工具栏 Descargar…`);
+        const { files, sinEntrada } = await descargarSeleccion(page, aBajar, dir, config);
+        if (files.length === aBajar.length) {
+          aBajar.forEach((msg, i) => { out.descargados.push({ ...msg, file: files[i], bytes: fs.statSync(files[i]).size }); yaProcesadas.add(msg.texto); });
+        } else if (files.length === 1 && aBajar.length > 1) {
+          // Un solo archivo para varios mensajes: la web los ha empaquetado (zip).
+          out.descargados.push({ tipo: 'lote', texto: `${aBajar.length} 个打包`, fechaIso: hoyIso, caption: `打包下载 · ${aBajar.length} 个文件`, file: files[0], bytes: fs.statSync(files[0]).size });
+          for (const msg of aBajar) yaProcesadas.add(msg.texto);
+        } else {
+          files.forEach((file, i) => { out.descargados.push({ ...aBajar[i], file, bytes: fs.statSync(file).size }); yaProcesadas.add(aBajar[i].texto); });
+          for (const msg of aBajar.slice(files.length)) out.fallidos.push({ msg, error: '工具栏 Descargar 没产出它的文件' });
+        }
+        for (const msg of sinEntrada) out.fallidos.push({ msg, error: '没勾上或页面没有工具栏 Descargar 按钮' });
+      }
+
       const moved = await clickNextPage(page);
       if (!moved) break;
       await esperarPaginaNueva(page, sig, 8000);
+    } catch (error) {
+      if (!esErrorDeNavegacion(error) || recuperaciones >= 3) {
+        if (esErrorDeNavegacion(error)) {
+          error.message = `Mensajería 列表页反复自己跳走/刷新，回去重试了 ${recuperaciones} 次都没稳住：${error.message}`;
+        }
+        throw error;
+      }
+      recuperaciones += 1;
+      out.total = foto.total;
+      out.sinFecha = foto.sinFecha;
+      out.fueraDeVentana = foto.fueraDeVentana;
+      out.omitidosFruta.length = foto.omitidos;
+      out.fallidos.length = foto.fallidos;
+      out.excedente = foto.excedente;
+      prevSig = foto.prevSig;
+      setLive('[mensajeria] 页面中途跳走了，回列表重试（第 ' + recuperaciones + ' 次）…');
+      logger?.warn?.('mensajeria pagina salto, recuperando', { intento: recuperaciones, error: String(error.message).slice(0, 200) });
+      await recuperarLista(page, config);
+      pageIndex -= 1;
       continue;
     }
-
-    if (soloMarcar) {
-      // MODO PRUEBA: marcar y DEJAR MARCADO (nada de Descargar ni de
-      // desmarcar), para que en la tienda se revisen esas mismas líneas.
-      setLive(`[mensajeria] 测试模式：勾选 ${aBajar.length} 条（不下载）…`);
-      const { marcados, sinEntrada } = await marcarFilas(page, aBajar);
-      for (const msg of marcados) out.descargados.push({ ...msg, marcado: true });
-      for (const msg of sinEntrada) out.fallidos.push({ msg, error: '没勾上' });
-    } else {
-      setLive(`[mensajeria] 勾选 ${aBajar.length} 条，点工具栏 Descargar…`);
-      const { files, sinEntrada } = await descargarSeleccion(page, aBajar, dir, config);
-      if (files.length === aBajar.length) {
-        aBajar.forEach((msg, i) => out.descargados.push({ ...msg, file: files[i], bytes: fs.statSync(files[i]).size }));
-      } else if (files.length === 1 && aBajar.length > 1) {
-        // Un solo archivo para varios mensajes: la web los ha empaquetado (zip).
-        out.descargados.push({ tipo: 'lote', texto: `${aBajar.length} 个打包`, fechaIso: hoyIso, caption: `打包下载 · ${aBajar.length} 个文件`, file: files[0], bytes: fs.statSync(files[0]).size });
-      } else {
-        files.forEach((file, i) => out.descargados.push({ ...aBajar[i], file, bytes: fs.statSync(file).size }));
-        for (const msg of aBajar.slice(files.length)) out.fallidos.push({ msg, error: '工具栏 Descargar 没产出它的文件' });
-      }
-      for (const msg of sinEntrada) out.fallidos.push({ msg, error: '没勾上或页面没有工具栏 Descargar 按钮' });
-    }
-
-    const moved = await clickNextPage(page);
-    if (!moved) break;
-    await esperarPaginaNueva(page, sig, 8000);
   }
-  logger?.info('mensajeria rows read', { filas: out.total });
+  logger?.info('mensajeria rows read', { filas: out.total, recuperaciones });
   return out;
+}
+
+// ¿El error huele a "la página saltó/se refrescó a mitad de la operación"?
+// Solo esos se reintentan con recuperación; cualquier otro sube tal cual.
+// (Es puro y exportado para poder testearlo sin navegador.)
+export function esErrorDeNavegacion(error) {
+  return /context was destroyed|cannot find context|execution context|frame got detached|detached frame|node is detached|most likely because of a navigation/i
+    .test(String(error?.message || error || ''));
+}
+
+// Vuelve a la lista tras un salto inesperado: si la página actual ya no es
+// la lista (p.ej. se abrió la ficha de un mensaje), primero atrás en el
+// historial; luego la maquinaria normal de ensureMensajeriaPage (menú
+// lateral / URLs candidatas) y la espera de filas de siempre.
+async function recuperarLista(page, config) {
+  try {
+    const st = await getMensajeriaState(page);
+    if (!st.isMensajeriaList) await page.goBack({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+  } catch { await sleep(1500); }
+  try { await ensureMensajeriaPage(page, config); } catch { /* la pasada siguiente decidirá */ }
+  await esperarFilasGrid(page, Number(config.mensajeria?.gridTimeoutMs) || 25000);
 }
 
 // Marca las casillas de las filas indicadas y VERIFICA que el estado ha
 // cambiado de verdad (contar clics sin más mentía: el 24/07 reportaba
-// "已勾选 4 个" con la lista vacía de marcas). DevExpress Blazor <dxbl-check>:
-// el estado vive en la CLASE del contenedor ('unchecked' contiene la
-// subcadena 'checked': classList siempre). Se intenta primero el input y, a
-// las que fallen, el contenedor; lo que no cambie de clase va a sinEntrada.
+// "已勾选 4 个" con la lista vacía de marcas).
+//
+// CLIC DE RATÓN REAL, no click() sintético (fallo real 25/07 por la tarde):
+// input.click() solo dispara el evento 'click' — sin eventos de puntero, el
+// manejador de DevExpress no corre (la casilla no se marca, el 24/07) y el
+// 'click' burbujea hasta la FILA, que en esta instalación es clicable entera
+// (cursor-pointer) y abre la ficha del mensaje: la página salta a mitad de
+// marcado (el 25/07). Un clic de ratón de verdad hace lo mismo que el dueño:
+// pointerdown → DevExpress lo captura, marca la casilla y frena el clic de
+// fila. Estado en la CLASE del contenedor <dxbl-check> ('unchecked' contiene
+// 'checked': classList siempre, nunca substring).
 async function marcarFilas(page, msgs) {
-  const idxs = msgs.map((m) => m.idx);
-  const clicInput = (idxList) => page.evaluate((lista) => {
-    for (const idx of lista) {
-      const tr = document.querySelector(`[data-mensajeria-idx="${idx}"]`);
-      if (!tr) continue;
-      const wrap = tr.querySelector('dxbl-check');
-      const input = wrap ? wrap.querySelector('input[type="checkbox"]') : tr.querySelector('input[type="checkbox"]');
-      if (wrap && input) { if (!wrap.classList.contains('dxbl-checkbox-checked')) input.click(); continue; }
-      if (input) { if (!input.checked) input.click(); continue; }
-      const celda = tr.querySelector('td');
-      if (celda) celda.click();
-    }
-  }, idxList);
-  const clicContenedor = (idxList) => page.evaluate((lista) => {
-    for (const idx of lista) {
-      const tr = document.querySelector(`[data-mensajeria-idx="${idx}"]`);
-      const wrap = tr?.querySelector('dxbl-check');
-      if (wrap && !wrap.classList.contains('dxbl-checkbox-checked')) {
-        (wrap.querySelector('.dxbl-checkbox-check-element') || wrap).click();
-      }
-    }
-  }, idxList);
-  const verificados = (idxList) => page.evaluate((lista) => {
-    const ok = [];
-    for (const idx of lista) {
-      const tr = document.querySelector(`[data-mensajeria-idx="${idx}"]`);
-      const wrap = tr?.querySelector('dxbl-check');
-      const input = wrap ? wrap.querySelector('input[type="checkbox"]') : tr?.querySelector('input[type="checkbox"]');
-      if (wrap?.classList.contains('dxbl-checkbox-checked') || input?.checked) ok.push(idx);
-    }
-    return ok;
-  }, idxList);
+  // Posición y estado de la casilla de UNA fila (centrándola en pantalla
+  // para que las coordenadas sirvan para el clic de ratón).
+  const estadoCasilla = (idx) => page.evaluate((i) => {
+    const tr = document.querySelector(`[data-mensajeria-idx="${i}"]`);
+    if (!tr) return null;
+    const wrap = tr.querySelector('dxbl-check');
+    const input = wrap ? wrap.querySelector('input[type="checkbox"]') : tr.querySelector('input[type="checkbox"]');
+    const el = wrap || input;
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect();
+    return {
+      x: r.x + r.width / 2,
+      y: r.y + r.height / 2,
+      marcado: Boolean(wrap?.classList.contains('dxbl-checkbox-checked') || input?.checked)
+    };
+  }, idx);
 
-  await clicInput(idxs);
-  await sleep(600);
-  let marcados = await verificados(idxs);
-  const faltan = idxs.filter((i) => !marcados.includes(i));
-  if (faltan.length) {
-    await clicContenedor(faltan);
-    await sleep(600);
-    marcados = await verificados(idxs);
+  const marcados = [];
+  const sinEntrada = [];
+  for (const msg of msgs) {
+    let ok = false;
+    for (let intento = 0; intento < 3 && !ok; intento += 1) {
+      const antes = await estadoCasilla(msg.idx);
+      if (!antes) break;
+      if (antes.marcado) { ok = true; break; }
+      await page.mouse.click(antes.x, antes.y);
+      await sleep(500); // ida y vuelta al servidor Blazor
+      const despues = await estadoCasilla(msg.idx);
+      ok = Boolean(despues?.marcado);
+    }
+    (ok ? marcados : sinEntrada).push(msg);
   }
-  return {
-    marcados: msgs.filter((m) => marcados.includes(m.idx)),
-    sinEntrada: msgs.filter((m) => !marcados.includes(m.idx))
-  };
+  return { marcados, sinEntrada };
 }
 
 // Lee la tabla principal de la página y ETIQUETA cada fila con
@@ -659,18 +711,26 @@ async function descargarSeleccion(page, msgs, dir, config) {
 
 // Deja las casillas como estaban: la selección persiste entre páginas en
 // algunos grids y ensuciaría el lote de la página siguiente. Mismo cuidado
-// con 'unchecked'/'checked': classList, no substring; y no tocar dos veces
-// la misma casilla (el input vive dentro del dxbl-check).
+// que en marcarFilas: clic de RATÓN, no click() sintético (el sintético
+// burbujea a la fila clicable y abre la ficha). Una casilla por vuelta,
+// re-consultando el DOM: tras cada clic Blazor repinta el grid.
 async function desmarcarTodo(page) {
   try {
-    await page.evaluate(() => {
-      for (const wrap of Array.from(document.querySelectorAll('dxbl-check.dxbl-checkbox-checked'))) {
-        (wrap.querySelector('.dxbl-checkbox-check-element') || wrap).click();
-      }
-      for (const box of Array.from(document.querySelectorAll('tr[role="row"] input[type="checkbox"]:checked, tbody tr input[type="checkbox"]:checked'))) {
-        if (!box.closest('dxbl-check')) box.click();
-      }
-    });
+    for (let i = 0; i < 60; i += 1) {
+      const punto = await page.evaluate(() => {
+        const el = document.querySelector('tr[role="row"] dxbl-check.dxbl-checkbox-checked, tbody tr dxbl-check.dxbl-checkbox-checked')
+          || Array.from(document.querySelectorAll('tr[role="row"] input[type="checkbox"]:checked, tbody tr input[type="checkbox"]:checked'))
+            .find((b) => !b.closest('dxbl-check'))
+          || null;
+        if (!el) return null;
+        el.scrollIntoView({ block: 'center' });
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      });
+      if (!punto) return;
+      await page.mouse.click(punto.x, punto.y);
+      await sleep(400);
+    }
   } catch { /* noop */ }
 }
 
