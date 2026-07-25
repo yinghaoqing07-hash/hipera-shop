@@ -33,6 +33,7 @@ import { abrirFlujoEstado } from './flujoEstado.js';
 import { renderFlujoPage } from './flujoPage.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { fetchMensajeriaOperativa, formatMensajeriaSummary } from './webMensajeria.js';
+import { esConflictoTelegram, guardarLinea, leerLinea, nombreInstancia } from './lineaTelegram.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
 import { formatProductResponse } from './formatResponse.js';
@@ -442,6 +443,14 @@ function esFalloConexion(x) {
   return /无法连接到 *Edge|调试端口|ECONNREFUSED|127\.0\.0\.1:9222|:9222/i.test(msg);
 }
 
+// La "línea" de Telegram: dos instalaciones (tienda y casa) comparten el
+// token y solo una debe hacer getUpdates. En espera (standby) esta máquina
+// NO toca Telegram NI corre las tareas automáticas diarias (si no, las dos
+// imprimirían la lista de llegada). El estado persiste en logs/ y se
+// retoma desde el panel de ESTA máquina (botón "接管 Telegram").
+let lineaEnEspera = false;
+let ultimoConflictoAt = 0; // último "Conflict" visto: otra instalación viva
+
 // OJO: el bucle de polling se ARRANCA AL FINAL del fichero (mainLoop()).
 // Antes era un `while (true)` aquí en medio: como no termina nunca, los
 // const/let declarados más abajo (LABEL_STEPS, fruitBatchRunning, …)
@@ -449,6 +458,7 @@ function esFalloConexion(x) {
 // "Cannot access ... before initialization".
 async function mainLoop() {
   while (true) {
+    if (lineaEnEspera) { await sleep(1500); continue; }
     try {
       const updates = await telegram.getUpdates({ offset, timeout: config.telegram.pollTimeoutSeconds });
       for (const update of updates) {
@@ -464,7 +474,22 @@ async function mainLoop() {
       await maybeRunAutoAdvisor();
       await maybeRunScheduledTasks();
       maybeHousekeeping();
-    } catch (error) { logger.error('polling error', { error: error.message }); await sleep(3000); }
+    } catch (error) {
+      if (esConflictoTelegram(error)) {
+        // Otra instalación está peleando por el mismo token: apuntarlo (lo
+        // enseñan /donde y el panel) y reintentar sin ensuciar el log.
+        const primero = !ultimoConflictoAt || Date.now() - ultimoConflictoAt > 600000;
+        ultimoConflictoAt = Date.now();
+        if (primero) {
+          logger.warn('telegram conflict: otra instancia usando el token');
+          notePanelActivity('另一台电脑也在抢 Telegram 线');
+        }
+        await sleep(3000);
+        continue;
+      }
+      logger.error('polling error', { error: error.message });
+      await sleep(3000);
+    }
   }
 }
 
@@ -543,6 +568,10 @@ async function handleUpdateConChat(update) {
   if (/^\/plantillas?\b/i.test(text)) { await telegram.sendMessage(chatId, formatTemplateHelp()); return; }
   if (text === '/pedido_web_test' || text === '/pedido_test') { await handlePedidoWebTest(chatId); return; }
   if (text === '/salud' || text === '/health') { await handleSalud(chatId); return; }
+  // ¿Qué máquina está al aparato? (tienda vs casa comparten token). Quien
+  // conteste ES la que tiene la línea; /linea la cambia de manos o apaga.
+  if (/^\/(donde|dónde|quien|quién|谁在跑)\b/i.test(text) || /^(哪台|谁)在(跑|运行|接|当班)/.test(text)) { await handleDonde(chatId); return; }
+  if (/^\/(linea|línea|apagar|cambio)\b/i.test(text)) { await handleLinea(chatId, text); return; }
   if (/^\/estilo\b/i.test(text)) { await handleEstilo(chatId, text.replace(/^\/estilo\s*/i, '')); return; }
   const ugCmd = parseUnidegesCommand(text);
   if (ugCmd) { await handleUnideges(chatId, ugCmd); return; }
@@ -813,6 +842,8 @@ function formatCommandList() {
     '【促销 / 省钱】',
     '/promociones — 去网页抓最新促销（CSV）',
     '/mensajeria — 抓 Mensajería 过去一周，勾选该下载的（测试模式不真下；bajar=真下载）',
+    '/donde — 看现在是哪台电脑在接消息（店里/家里共用一个号）',
+    '/linea — 两台电脑换班：这台退线让另一台接，或远程关掉这台',
     '/ahorro — 所有促销的省钱策略',
     '/ahorro_pedido — 最新 PDA 单逐行对照促销，AI 挑可替换的促销品',
     '/ahorro_pedido 153 — 指定看哪张单',
@@ -1301,6 +1332,7 @@ async function handleCallback(callback) {
   if (data.startsWith('osend:')) { await handleOrderSend(chatId, callback.id, data.slice(6)); return; }
   if (data.startsWith('ug:')) { await handleUnidegesCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('dg:')) { await handleDiagCallback(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('ln:')) { await handleLineaCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('idea:')) { await handleIdeaCallback(chatId, callback.id, data.slice(5)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
@@ -2185,6 +2217,83 @@ async function handleMensajeria(chatId, text = '') {
   const conArchivo = result.descargados.filter((d) => d.file).length;
   if (conArchivo > maxEnviar) {
     await telegram.sendMessage(chatId, `（还有 ${conArchivo - maxEnviar} 个文件在 ${result.dir}，没逐个发）`, { __skipAI: true });
+  }
+}
+
+// --- ¿qué máquina lleva la línea de Telegram? (tienda vs casa) ------------
+// Las dos instalaciones comparten token: quien contesta /donde ES la que
+// tiene la línea. /linea la suelta (standby) o apaga esta máquina; la
+// máquina en espera se retoma desde SU panel (botón "接管 Telegram").
+
+function versionBot() {
+  try { return fs.readFileSync(path.join(config.__toolRoot, 'version.txt'), 'utf8').trim(); } catch { return ''; }
+}
+
+async function handleDonde(chatId) {
+  const nombre = nombreInstancia(config);
+  const ver = versionBot();
+  const lineas = [];
+  if (lineaEnEspera) {
+    lineas.push(`这台是「${nombre}」，Telegram 待机中（这条是面板消息）。线在另一台手上。`);
+  } else {
+    lineas.push(`现在接你消息的是「${nombre}」这台电脑${ver ? `（v${ver}）` : ''}，已在线 ${humanUptime(process.uptime())}。`);
+  }
+  if (ultimoConflictoAt && Date.now() - ultimoConflictoAt < 600000) {
+    const min = Math.max(1, Math.round((Date.now() - ultimoConflictoAt) / 60000));
+    lineas.push(`⚠ ${min} 分钟内另一台电脑也在抢线——两台同时开会丢消息，发 /linea 让一台退下。`);
+  } else if (!lineaEnEspera) {
+    lineas.push('最近 10 分钟没发现别的电脑抢线。');
+  }
+  lineas.push('换班或关机：/linea');
+  await telegram.sendMessage(chatId, lineas.join('\n'), { __skipAI: true });
+}
+
+async function handleLinea(chatId, text = '') {
+  const nombre = nombreInstancia(config);
+  const arg = String(text || '').replace(/^\/\S+\s*/, '').trim().toLowerCase();
+  if (/^\/apagar/i.test(text) || /apagar|关机|关掉/.test(arg)) { await pedirApagar(chatId); return; }
+  if (/soltar|退线|让/.test(arg)) { await lineaSoltar(chatId); return; }
+  await telegram.sendMessage(chatId, `这条消息是「${nombre}」接的，线在它手上。要怎么安排？`, {
+    __skipAI: true,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '这台退线，让另一台接', callback_data: 'ln:soltar' }],
+        [{ text: '关掉这台的 bot', callback_data: 'ln:apagar' }, { text: '不动', callback_data: 'ln:no' }]
+      ]
+    }
+  });
+}
+
+async function lineaSoltar(chatId) {
+  const nombre = nombreInstancia(config);
+  // Avisar ANTES de soltar: mandar mensajes sigue funcionando en espera,
+  // pero así el orden en el chat queda natural.
+  await telegram.sendMessage(chatId, `好，「${nombre}」退线了，不再接 Telegram 消息（这台的面板照常能用）。另一台开着的话十几秒内自己接上，发个 /donde 确认是谁。想让这台回来：开这台的面板点「接管 Telegram」。`, { __skipAI: true });
+  guardarLinea(config, { standby: true, motivo: 'telegram /linea' });
+  lineaEnEspera = true;
+  notePanelActivity('Telegram 已退线（待机）');
+  logger.info('linea telegram: standby por orden del dueño');
+}
+
+async function pedirApagar(chatId) {
+  const nombre = nombreInstancia(config);
+  await telegram.sendMessage(chatId, `确定关掉「${nombre}」这台的 bot？关了以后这台的面板也会停，重开要到那台电脑上双击 panel.cmd（或 start-bot.cmd）。`, {
+    __skipAI: true,
+    reply_markup: { inline_keyboard: [[{ text: '确定关机', callback_data: 'ln:apagar2' }, { text: '取消', callback_data: 'ln:no' }]] }
+  });
+}
+
+async function handleLineaCallback(chatId, callbackId, verbo) {
+  if (verbo === 'no') { await telegram.answerCallbackQuery(callbackId, '不动'); return; }
+  if (verbo === 'soltar') { await telegram.answerCallbackQuery(callbackId, '退线'); await lineaSoltar(chatId); return; }
+  if (verbo === 'apagar') { await telegram.answerCallbackQuery(callbackId, '再确认一下'); await pedirApagar(chatId); return; }
+  if (verbo === 'apagar2') {
+    await telegram.answerCallbackQuery(callbackId, '关机');
+    const nombre = nombreInstancia(config);
+    await telegram.sendMessage(chatId, `「${nombre}」关了。另一台开着的话会自动接上线（发 /donde 确认）。`, { __skipAI: true });
+    logger.info('linea telegram: apagado por orden del dueño');
+    // Código 0: el vigilante de start-bot.cmd NO lo relanza (parada limpia).
+    setTimeout(() => process.exit(0), 800);
   }
 }
 
@@ -3693,6 +3802,11 @@ if (config.panel?.enabled !== false) {
         boot: START_TIME,
         updateLine: lastUpdateLogLine(),
         uptime: humanUptime(process.uptime()),
+        // La "línea" de Telegram: qué máquina es esta, si está al aparato o
+        // en espera, y si otra instalación anda peleando por el token.
+        instancia: nombreInstancia(config),
+        lineaTelegram: lineaEnEspera ? 'espera' : 'activa',
+        conflictoHaceSeg: ultimoConflictoAt ? Math.round((Date.now() - ultimoConflictoAt) / 1000) : null,
         promoCsv,
         promoStats: promoStatsForPanel(),
         arrivingToday,
@@ -3837,6 +3951,22 @@ if (config.panel?.enabled !== false) {
     // Mantenimiento desde el propio panel: como el bot ya corre elevado,
     // puede lanzar el updater o pararse a si mismo sin UAC ni ventanas.
     admin: async (accion) => {
+      // Cambio de manos de la línea de Telegram desde el panel: es la ÚNICA
+      // forma de despertar a la máquina en espera (su Telegram está sordo).
+      if (accion === 'linea_tomar') {
+        guardarLinea(config, { standby: false, motivo: 'panel' });
+        lineaEnEspera = false;
+        notePanelActivity('这台接管 Telegram');
+        logger.info('linea telegram: tomada desde el panel');
+        return `「${nombreInstancia(config)}」开始接管 Telegram。另一台还开着的话会互相抢线，先去那边发 /linea 让它退线，或直接关掉它。`;
+      }
+      if (accion === 'linea_soltar') {
+        guardarLinea(config, { standby: true, motivo: 'panel' });
+        lineaEnEspera = true;
+        notePanelActivity('Telegram 已退线（待机）');
+        logger.info('linea telegram: standby desde el panel');
+        return `「${nombreInstancia(config)}」退线了：Telegram 交给另一台，这台的面板照常能用。`;
+      }
       if (accion === 'stop') {
         logger.info('panel admin: stop');
         setTimeout(() => process.exit(0), 400);
@@ -3979,4 +4109,14 @@ function humanUptime(seconds) {
   return h ? `${h}h${m}m` : `${m}m`;
 }
 
+// Si esta máquina quedó EN ESPERA (retirada de la línea de Telegram), se
+// arranca así también tras un reinicio: solo el panel; getUpdates ni tocarlo.
+{
+  const linea = leerLinea(config);
+  if (linea.standby) {
+    lineaEnEspera = true;
+    logger.info('telegram en espera al arrancar', { desde: linea.desde, motivo: linea.motivo });
+    notePanelActivity('Telegram 待机中（这台不接消息）');
+  }
+}
 await mainLoop();

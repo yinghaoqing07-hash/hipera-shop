@@ -31,6 +31,12 @@ const defaultConfig = {
     pollTimeoutSeconds: 25,
     maxItemsPerMessage: 5
   },
+  // Nombre de ESTA instalación del bot ("店里" / "家里"): lo usa /donde y
+  // el panel para distinguir las dos máquinas que comparten el token de
+  // Telegram. '' = usar el nombre de la máquina de Windows.
+  instancia: {
+    nombre: ''
+  },
   supplierCsv: 'data/supplier_products_clean.csv',
   storeCsv: 'data/store_products_clean.csv',
   logsDir: 'logs',

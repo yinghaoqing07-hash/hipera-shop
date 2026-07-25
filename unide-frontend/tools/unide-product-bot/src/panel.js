@@ -252,7 +252,7 @@ export function startPanel(config, logger, hooks) {
         const body = await readBody(req);
         let accion = '';
         try { accion = String(JSON.parse(body || '{}').accion || '').trim(); } catch { /* json roto */ }
-        if (accion !== 'stop' && accion !== 'update' && accion !== 'adios') { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
+        if (!['stop', 'update', 'adios', 'linea_tomar', 'linea_soltar'].includes(accion)) { res.writeHead(400, { 'content-type': 'application/json' }); res.end('{"ok":false}'); return; }
         if (accion === 'adios') {
           if (!cierrePendiente && hooks.admin) {
             logger?.info('panel window closed, bot stops in 3s unless the page returns');
