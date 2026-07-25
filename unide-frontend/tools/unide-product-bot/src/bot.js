@@ -3031,12 +3031,15 @@ async function handleAlbaranCallback(chatId, callbackId, verbo) {
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'procesar' }));
   if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-procesar', trace: res.trace });
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
-  // Los diálogos que hayan salido tras Procesar están en la caja negra: si
-  // los hubo, es la primera vez que los vemos — pedir la foto de vuelta.
+  // Diálogos tras Procesar: los CONOCIDOS se atienden solos en el PS
+  // ('Códigos desconocidos' → Aceptar, regla del dueño 25/07) y se
+  // cuentan; los desconocidos de verdad quedan en la caja negra.
+  const desconocidos = Number((String(res.mensaje || '').match(/desconocidos=(\d+)/) || [])[1] || 0);
   const huboDialogos = (res.trace || []).some((l) => /dialogo nuevo/.test(String(l)));
-  const msg = huboDialogos
-    ? '按下去了，但跑的过程中弹了新窗口（我没敢碰，都记在黑匣子里了）。看截图确认到哪一步了，把情况告诉我，下一版就知道怎么接。'
-    : '处理按钮按完了 ✅ 看截图确认列表清掉没有（Procesado 一列应该变了）。';
+  const partes = ['处理按钮按完了 ✅ 看截图确认列表清掉没有（Procesado 一列应该变了）。'];
+  if (desconocidos > 0) partes.push(`过程中弹了 ${desconocidos} 次「未知代码 Códigos desconocidos」，按你的规矩都点了 Aceptar。`);
+  if (huboDialogos) partes.push('还弹了没见过的窗口（我没敢碰，都记在黑匣子里了）。看截图把情况告诉我，下一版就知道怎么接。');
+  const msg = partes.join('\n');
   if (res.screenshot && fs.existsSync(res.screenshot)) {
     try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
   }
