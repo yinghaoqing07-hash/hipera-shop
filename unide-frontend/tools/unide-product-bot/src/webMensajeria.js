@@ -57,13 +57,25 @@ export async function fetchMensajeriaOperativa(config, logger, opciones = {}) {
     // real pulsa además el "Descargar" de la BARRA de la página (visto en la
     // instalación del dueño, 24/07: la lista no tiene botón por fila).
     const r = await recorrerYDescargar(page, config, { hoyIso, dias, dir, maxDescargas, soloMarcar, logger });
+    if (!r.total && r.vacioExplicito) {
+      // El grid dijo EXPLÍCITAMENTE que no hay datos: eso no es un fallo de
+      // identificación, es una lista vacía de verdad. Se reporta como éxito.
+      const screenshotPath = await screenshot(page, config, 'vacia');
+      setLive('[mensajeria] listo (lista vacía)');
+      return {
+        ok: true, dir, hoyIso, dias, soloMarcar,
+        total: 0, descargados: [], omitidosFruta: [], sinFecha: 0,
+        fueraDeVentana: 0, fallidos: [], excedente: 0,
+        screenshot: screenshotPath, elapsedMs: Date.now() - startedAt
+      };
+    }
     if (!r.total) {
       const screenshotPath = await screenshot(page, config, 'vacia');
       const dumpFile = await dumpHtml(page, config, 'mensajeria-page-dump.html');
       return {
         ok: false,
         stage: 'scrape',
-        error: 'Mensajería 页面打开了，但没有识别到消息列表。已保存页面结构，方便继续调选择器。',
+        error: 'Mensajería 页面打开了，但等了半分钟列表还是没加载出来（也没显示"空列表"）。已保存页面结构和截图，可能是网页当时特别慢，稍后再试一次 /mensajeria。',
         screenshot: screenshotPath,
         dumpFile
       };
@@ -332,6 +344,50 @@ async function getMensajeriaState(page) {
   });
 }
 
+// El "¿ya está la página?" de arriba (getMensajeriaState) solo comprueba que
+// EXISTE una tabla, porque tiene que valer también para detectar la página
+// antes de navegar. Pero para LEER hace falta más: filas con celdas con
+// texto. Esta espera sondea hasta que las haya, o hasta que el grid diga
+// explícitamente que no hay datos (área de vacío de DevExpress o su texto).
+async function esperarFilasGrid(page, timeoutMs) {
+  const start = Date.now();
+  let last = { filas: 0, vacioExplicito: false, esperaMs: 0 };
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const estado = await page.evaluate(() => {
+        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+        const isVisible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const filas = Array.from(document.querySelectorAll('table tr'))
+          .filter(isVisible)
+          .filter((tr) => Array.from(tr.querySelectorAll('td')).some((td) => clean(td.innerText || td.textContent)))
+          .length;
+        const vacioExplicito = document.querySelector('.dxbl-grid-empty-data-area, .dxbl-grid-empty, .dx-empty') != null
+          || /no hay datos|sin datos que mostrar|no data to display/i.test(clean(document.body?.innerText || '').slice(0, 4000));
+        return { filas, vacioExplicito };
+      });
+      last = { ...estado, esperaMs: Date.now() - start };
+      if (estado.filas > 0 || estado.vacioExplicito) return last;
+    } catch { /* Blazor re-renderizando: reintentar */ }
+    await sleep(400);
+  }
+  return last;
+}
+
+// Tras pasar de página, Blazor tarda un poco en repintar: si se lee muy
+// pronto se ven las filas VIEJAS (misma firma) y el bucle cortaría creyendo
+// que no hay más páginas. Esperar a que la firma cambie o rendirse y seguir.
+async function esperarPaginaNueva(page, firmaAnterior, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await sleep(500);
+    try {
+      const rows = await scrapeMensajesPage(page);
+      const sig = rows.map((r) => (r.cells || []).join('|')).join('||');
+      if (rows.length && sig !== firmaAnterior) return;
+    } catch { /* re-render en curso */ }
+  }
+}
+
 // Recorre las páginas del grid (leer, firmar, pasar de página, parar cuando
 // la firma se repite) y, EN CADA PÁGINA, marca lo seleccionado; en modo real
 // además lo descarga. Las etiquetas data-mensajeria-idx solo existen en la
@@ -339,7 +395,16 @@ async function getMensajeriaState(page) {
 // más de una página.
 async function recorrerYDescargar(page, config, { hoyIso, dias, dir, maxDescargas, soloMarcar, logger }) {
   const maxPages = Number(config.mensajeria?.maxPages) || 20;
-  const out = { total: 0, descargados: [], omitidosFruta: [], sinFecha: 0, fueraDeVentana: 0, fallidos: [], excedente: 0 };
+  const out = { total: 0, descargados: [], omitidosFruta: [], sinFecha: 0, fueraDeVentana: 0, fallidos: [], excedente: 0, vacioExplicito: false };
+  // El grid es Blazor: la <table> existe ANTES de que lleguen sus filas
+  // (fallo real en tienda, 25/07 — el dump del dueño tenía las 12 filas
+  // perfectamente legibles, pero el scrape corrió antes de que se pintaran
+  // y reportó "no reconozco la lista"). Esperar filas con datos, o a que el
+  // grid diga explícitamente que está vacío, antes de leer nada.
+  setLive('[mensajeria] 等消息列表加载出来…');
+  const espera = await esperarFilasGrid(page, Number(config.mensajeria?.gridTimeoutMs) || 25000);
+  out.vacioExplicito = espera.vacioExplicito && !espera.filas;
+  logger?.info('mensajeria grid wait', { filas: espera.filas, vacioExplicito: espera.vacioExplicito, esperaMs: espera.esperaMs });
   let prevSig = '';
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     setLive('[mensajeria] 读消息列表第 ' + (pageIndex + 1) + ' 页…');
@@ -363,7 +428,7 @@ async function recorrerYDescargar(page, config, { hoyIso, dias, dir, maxDescarga
     if (!aBajar.length) {
       const moved = await clickNextPage(page);
       if (!moved) break;
-      await sleep(900);
+      await esperarPaginaNueva(page, sig, 8000);
       continue;
     }
 
@@ -391,7 +456,7 @@ async function recorrerYDescargar(page, config, { hoyIso, dias, dir, maxDescarga
 
     const moved = await clickNextPage(page);
     if (!moved) break;
-    await sleep(900);
+    await esperarPaginaNueva(page, sig, 8000);
   }
   logger?.info('mensajeria rows read', { filas: out.total });
   return out;
