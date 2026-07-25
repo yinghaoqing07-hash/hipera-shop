@@ -449,16 +449,41 @@ function Poner-NombreFichero($Raiz, [string]$Ruta) {
   return $false
 }
 
+# Dialogos SUELTOS de una corrida anterior ('Abrir' de LMMAMA, 'Seleccione
+# fecha'): abiertos roban el foco y las teclas. Se cierran con Cancelar
+# (que no procesa nada) o, si no hay boton, con ESC. Solo esos titulos:
+# jamas se cierra nada mas.
+function Cerrar-DialogosSueltos([long]$ProcId) {
+  foreach ($patron in @('^Abrir$', 'Seleccione fecha')) {
+    $v = Find-VentanaTitulo $patron $ProcId
+    if (-not $v) { continue }
+    $tituloV = $v.Title
+    Traza "dialogo suelto de antes: '$tituloV' - lo cierro con Cancelar"
+    $r = Uia-Raiz $v.Handle
+    $cerrado = $false
+    if ($r) { $cerrado = Activar-PorNombre $r '^\s*Cancelar\s*$' 'limpiar dialogo' }
+    if (-not $cerrado) {
+      [W32Menu]::SetForegroundWindow($v.Handle) | Out-Null
+      Start-Sleep -Milliseconds 300
+      [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+      Traza "limpiar dialogo: mando ESC"
+    }
+    Start-Sleep -Milliseconds 600
+  }
+}
+
 # Navegacion comun de los procesados: menu delante + tecla F + submenu.
+# Antes de nada se limpian dialogos sueltos de corridas anteriores.
 function Entrar-ModuloYSubmenu([string]$TeclaF, [string]$PatronSub) {
   $win = Find-MenuWindow
   if (-not $win) { Traza "menu no encontrado: abro la app primero"; $win = Open-UnidegesAndWait }
+  Cerrar-DialogosSueltos $win.ProcId
   Focus-MenuWindow $win
   $tituloMenu = $win.Title
   Traza "menu delante ('$tituloMenu') - mando la tecla $TeclaF"
   [System.Windows.Forms.SendKeys]::SendWait("{$TeclaF}")
   Start-Sleep -Milliseconds 2500
-  $okSub = Entrar-Submenu $PatronSub
+  $okSub = Entrar-Submenu $PatronSub $win
   if (-not $okSub) { throw "no encontre el submenu (patron '$PatronSub'); mira la lista de la caja negra" }
   return $win
 }
@@ -471,7 +496,7 @@ function Entrar-ModuloYSubmenu([string]$TeclaF, [string]$PatronSub) {
 # caja negra) y activa el primero que case con el patron. Devuelve $true
 # si lo activo. Primera version a ciegas (24/07): el VOLCADO es la parte
 # importante, porque es lo que nos dice que hay dentro sin estar alli.
-function Entrar-Submenu([string]$Patron) {
+function Entrar-Submenu([string]$Patron, $Win = $null) {
   try {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
@@ -481,6 +506,28 @@ function Entrar-Submenu([string]$Patron) {
   }
   $fg = [W32Menu]::GetForegroundWindow()
   if ($fg -eq [IntPtr]::Zero) { Traza "submenu: sin ventana en primer plano"; return $false }
+  # Fallo real 25/07 20:06: el foco estaba en OTRO programa (un dialogo
+  # Abrir suelto / un Explorer con la carpeta entradas) y el volcado listo
+  # ficheros MoveFELLog en vez del menu de UnideGes. Si sabemos de que
+  # proceso debe ser la ventana, se comprueba el pid y, si no casa, se
+  # vuelve a traer UnideGes al frente antes de buscar nada.
+  if ($Win) {
+    $pidFg = [uint32]0
+    [W32Menu]::GetWindowThreadProcessId($fg, [ref]$pidFg) | Out-Null
+    if ([long]$pidFg -ne [long]$Win.ProcId) {
+      $tituloIntruso = Titulo-De $fg
+      Traza "submenu: el foco esta en otro programa ('$tituloIntruso'); vuelvo a poner UnideGes delante"
+      [W32Menu]::SetForegroundWindow($Win.Handle) | Out-Null
+      Start-Sleep -Milliseconds 600
+      $fg = [W32Menu]::GetForegroundWindow()
+      $pidFg2 = [uint32]0
+      [W32Menu]::GetWindowThreadProcessId($fg, [ref]$pidFg2) | Out-Null
+      if ([long]$pidFg2 -ne [long]$Win.ProcId) {
+        Traza "submenu: el foco sigue fuera; uso la ventana del menu directamente"
+        $fg = [IntPtr]$Win.Handle
+      }
+    }
+  }
   $raiz = $null
   try { $raiz = [System.Windows.Automation.AutomationElement]::FromHandle($fg) } catch { $raiz = $null }
   if (-not $raiz) { Traza "submenu: no pude leer la ventana con UIA"; return $false }
@@ -878,7 +925,7 @@ try {
     # dira que apuntar la proxima vez.
     $msgSub = ""
     if ($Submenu -ne "") {
-      $encontrado = Entrar-Submenu $Submenu
+      $encontrado = Entrar-Submenu $Submenu $win
       if ($encontrado) {
         Start-Sleep -Milliseconds 2000
         $focoSub = Get-FocusInfo
@@ -903,14 +950,23 @@ try {
   # dialogos que salgan (sin tocarlos: cada uno queda en la caja negra).
   if ($Accion -eq 'albaran') {
     Traza "accion albaran fase '$Fase'"
-    $win = Entrar-ModuloYSubmenu 'F7' $Submenu
-    $vent = Wait-VentanaTitulo '^Ficheros albar' 15 $win.ProcId
-    if (-not $vent) {
-      # Algunas instalaciones la abren como hija del mismo titulo raro:
-      # probar sin pid antes de rendirse.
-      $vent = Wait-VentanaTitulo '^Ficheros albar' 5 0
+    # Si la ventana YA esta abierta (la dejo la fase 'leer', o el dueño la
+    # abrio a mano) se REUTILIZA: navegar otra vez con ella abierta era el
+    # fallo del 25/07 por la noche. Si no, navegacion normal.
+    $vent = Find-VentanaTitulo '^Ficheros albar' 0
+    if ($vent) {
+      $tituloYa = $vent.Title
+      Traza "la ventana '$tituloYa' ya estaba abierta: la reutilizo sin navegar"
+    } else {
+      $win = Entrar-ModuloYSubmenu 'F7' $Submenu
+      $vent = Wait-VentanaTitulo '^Ficheros albar' 15 $win.ProcId
+      if (-not $vent) {
+        # Algunas instalaciones la abren como hija del mismo titulo raro:
+        # probar sin pid antes de rendirse.
+        $vent = Wait-VentanaTitulo '^Ficheros albar' 5 0
+      }
+      if (-not $vent) { throw "el submenu se activo pero la ventana 'Ficheros albaran electronico' no aparecio en 20 s" }
     }
-    if (-not $vent) { throw "el submenu se activo pero la ventana 'Ficheros albaran electronico' no aparecio en 20 s" }
     $tituloVent = $vent.Title
     Traza "ventana de albaranes delante: '$tituloVent'"
     [W32Menu]::SetForegroundWindow($vent.Handle) | Out-Null
@@ -936,7 +992,7 @@ try {
     $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
     if (-not $okProc) { throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
     Traza "albaran: Procesar pulsado; vigilo 20 s por si salen dialogos"
-    Vigilar-Dialogos $win.ProcId 20
+    Vigilar-Dialogos $vent.ProcId 20
     $shot = Take-MenuShot 'albaran-procesar'
     Emit 'ok' "Marcar todos + Procesar pulsados; filas=$filas; revisa la captura y la caja negra" $tituloVent $shot
     exit 0
