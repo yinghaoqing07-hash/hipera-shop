@@ -1,7 +1,9 @@
 ﻿param(
-  [Parameter(Mandatory = $true)][string]$Accion,   # estado | abrir | modulo
-  [string]$Tecla = "",                              # F1 F3 F6 F7 F12 (solo Accion=modulo)
+  [Parameter(Mandatory = $true)][string]$Accion,   # estado | abrir | modulo | albaran | lmanma
+  [string]$Tecla = "",                              # F1 F3 F6 F7 F12 (modulo/albaran/lmanma)
   [string]$Submenu = "",                            # patron del submenu a abrir DENTRO del modulo
+  [string]$Fase = "",                               # albaran: 'leer' (solo mirar) | 'procesar'
+  [string]$Archivo = "",                            # lmanma: ruta completa del fichero a procesar
   [string]$OutDir = "screenshots",
   [string]$ExePath = "",                            # exe o .lnk configurado; '' = buscar acceso directo
   [string]$TitleRegex = "^MadisaNet",
@@ -257,6 +259,208 @@ function Take-MenuShot([string]$Etiqueta) {
     Aviso "Screenshot failed: $motivo"
     return $null
   }
+}
+
+# --- PROCESADO (v261): utilidades UIA genericas -----------------------
+# El procesado de albaranes y LMANMA trabaja sobre VENTANAS NUEVAS que
+# abre UnideGes (la lista 'Ficheros albaran electronico', el dialogo
+# 'Seleccione fecha', el 'Abrir' de Windows). Estas utilidades las
+# localizan por titulo+pid, listan su contenido a la caja negra y pulsan
+# botones por nombre. Regla de la casa: TODO se vuelca a la caja negra,
+# porque cada instalacion de UnideGes es una caja de sorpresas.
+
+function Uia-Raiz([IntPtr]$Handle) {
+  try {
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+  } catch { return $null }
+  try { return [System.Windows.Automation.AutomationElement]::FromHandle($Handle) } catch { return $null }
+}
+
+function Uia-Hijos($Raiz) {
+  if (-not $Raiz) { return $null }
+  try { return $Raiz.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) } catch { return $null }
+}
+
+function Volcar-Elementos($Todos, [string]$Etiqueta, [int]$Max) {
+  if (-not $Todos) { Traza "$Etiqueta : UIA no dio elementos"; return }
+  $n = $Todos.Count
+  Traza "$Etiqueta : $n elementos; con nombre:"
+  $vistos = 0
+  foreach ($el in $Todos) {
+    if ($vistos -ge $Max) { break }
+    $nombre = ""
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+    if ($nombre -eq "") { continue }
+    $tipo = ""
+    try { $tipo = [string]$el.Current.ControlType.ProgrammaticName } catch { $tipo = "" }
+    $tipoCorto = $tipo -replace "ControlType\.", ""
+    $linea = "  - [" + $tipoCorto + "] " + $nombre
+    Traza $linea
+    $vistos = $vistos + 1
+  }
+}
+
+# Filas de datos de una lista (ListView/DataGrid): lo mas parecido a
+# "cuantos albaranes hay pendientes" sin conocer el control exacto.
+function Contar-Filas($Todos) {
+  if (-not $Todos) { return 0 }
+  $filas = 0
+  foreach ($el in $Todos) {
+    $tipo = ""
+    try { $tipo = [string]$el.Current.ControlType.ProgrammaticName } catch { $tipo = "" }
+    if ($tipo -match 'DataItem|ListItem') { $filas = $filas + 1 }
+  }
+  return $filas
+}
+
+# Pulsa el primer elemento cuyo nombre case el patron (Invoke →
+# SelectionItem → clic real en el centro, igual que Entrar-Submenu).
+function Activar-PorNombre($Raiz, [string]$Patron, [string]$Etiqueta) {
+  $todos = Uia-Hijos $Raiz
+  if (-not $todos) { Traza "$Etiqueta : sin elementos UIA"; return $false }
+  $objetivo = $null
+  foreach ($el in $todos) {
+    $nombre = ""
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+    if ($nombre -eq "") { continue }
+    $tipo = ""
+    try { $tipo = [string]$el.Current.ControlType.ProgrammaticName } catch { $tipo = "" }
+    if ($tipo -match 'Window|TitleBar') { continue }
+    if ($nombre -match $Patron) { $objetivo = $el; break }
+  }
+  if (-not $objetivo) { Traza "$Etiqueta : nada casa con '$Patron'"; return $false }
+  $nombreObj = ""
+  try { $nombreObj = [string]$objetivo.Current.Name } catch { $nombreObj = "?" }
+  Traza "$Etiqueta : encontrado '$nombreObj', lo pulso"
+  try {
+    $inv = $objetivo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $inv.Invoke()
+    Traza "$Etiqueta : pulsado con Invoke"
+    return $true
+  } catch { }
+  try {
+    $sel = $objetivo.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $sel.Select()
+    Traza "$Etiqueta : seleccionado con SelectionItem"
+    return $true
+  } catch { }
+  try {
+    $r = $objetivo.Current.BoundingRectangle
+    $cx = [int]($r.X + $r.Width / 2)
+    $cy = [int]($r.Y + $r.Height / 2)
+    [W32Menu]::SetCursorPos($cx, $cy) | Out-Null
+    Start-Sleep -Milliseconds 120
+    [W32Menu]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [W32Menu]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Traza "$Etiqueta : clic en ${cx},${cy}"
+    return $true
+  } catch {
+    $porQue = $_.Exception.Message
+    Traza "$Etiqueta : no pude pulsarlo - $porQue"
+    return $false
+  }
+}
+
+# Ventana top-level por titulo (y pid si se pasa >0), excluyendo navegadores.
+function Find-VentanaTitulo([string]$Regex, [long]$PidFiltro) {
+  $porPid = @{}
+  foreach ($proc in Get-Process) { $porPid[[long]$proc.Id] = $proc.ProcessName.ToLowerInvariant() }
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    if ($PidFiltro -gt 0 -and [long]$par[1] -ne $PidFiltro) { continue }
+    $nombreProc = $porPid[[long]$par[1]]
+    if ($nombreProc -and ($procesosExcluidos -contains $nombreProc)) { continue }
+    $handle = [IntPtr]$par[0]
+    $titulo = Titulo-De $handle
+    if ($titulo -and $titulo -match $Regex) { return @{ Handle = $handle; Title = $titulo; ProcId = [long]$par[1] } }
+  }
+  return $null
+}
+
+function Wait-VentanaTitulo([string]$Regex, [int]$Segundos, [long]$PidFiltro) {
+  $tope = [DateTime]::Now.AddSeconds($Segundos)
+  while ([DateTime]::Now -lt $tope) {
+    $v = Find-VentanaTitulo $Regex $PidFiltro
+    if ($v) { return $v }
+    Start-Sleep -Milliseconds 400
+  }
+  return $null
+}
+
+# Tras pulsar Procesar (o mandar el fichero a LMMAMA) pueden salir dialogos
+# que NO conocemos: se vigilan N segundos, se vuelca su contenido a la caja
+# negra y NO SE TOCA NADA. La captura final + esta lista son el material
+# para ensenarle al bot el paso siguiente.
+function Vigilar-Dialogos([long]$ProcId, [int]$Segundos) {
+  $conocidas = @{}
+  foreach ($par in [W32Menu]::VisibleWindows()) {
+    if ([long]$par[1] -ne $ProcId) { continue }
+    $t = Titulo-De ([IntPtr]$par[0])
+    if ($t) { $conocidas[$t] = $true }
+  }
+  $tope = [DateTime]::Now.AddSeconds($Segundos)
+  while ([DateTime]::Now -lt $tope) {
+    Start-Sleep -Milliseconds 800
+    foreach ($par in [W32Menu]::VisibleWindows()) {
+      if ([long]$par[1] -ne $ProcId) { continue }
+      $h = [IntPtr]$par[0]
+      $t = Titulo-De $h
+      if (-not $t) { continue }
+      if ($conocidas.ContainsKey($t)) { continue }
+      $conocidas[$t] = $true
+      Traza "dialogo nuevo: '$t' (no lo toco, solo lo apunto)"
+      $r = Uia-Raiz $h
+      if ($r) {
+        $todosD = Uia-Hijos $r
+        Volcar-Elementos $todosD "dialogo '$t'" 20
+      }
+    }
+  }
+}
+
+# Escribe la ruta del fichero en el dialogo 'Abrir' de Windows: primero el
+# Edit que se llame como el campo de nombre; si no, el primer Edit que
+# acepte ValuePattern (el de busqueda de arriba no suele aceptar SetValue
+# con una ruta, y aunque la tome, el boton Abrir no haria nada malo).
+function Poner-NombreFichero($Raiz, [string]$Ruta) {
+  $todos = Uia-Hijos $Raiz
+  if (-not $todos) { return $false }
+  $porNombre = $null
+  $primero = $null
+  foreach ($el in $todos) {
+    $tipo = ""
+    try { $tipo = [string]$el.Current.ControlType.ProgrammaticName } catch { $tipo = "" }
+    if ($tipo -notmatch 'Edit|ComboBox') { continue }
+    $nombre = ""
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+    if (-not $primero) { $primero = $el }
+    if ($nombre -match 'nombre|file name|archivo') { $porNombre = $el; break }
+  }
+  foreach ($candidato in @($porNombre, $primero)) {
+    if (-not $candidato) { continue }
+    try {
+      $vp = $candidato.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      $vp.SetValue($Ruta)
+      Traza "abrir: ruta escrita en el campo del nombre"
+      return $true
+    } catch { }
+  }
+  Traza "abrir: ningun campo acepto la ruta"
+  return $false
+}
+
+# Navegacion comun de los procesados: menu delante + tecla F + submenu.
+function Entrar-ModuloYSubmenu([string]$TeclaF, [string]$PatronSub) {
+  $win = Find-MenuWindow
+  if (-not $win) { Traza "menu no encontrado: abro la app primero"; $win = Open-UnidegesAndWait }
+  Focus-MenuWindow $win
+  $tituloMenu = $win.Title
+  Traza "menu delante ('$tituloMenu') - mando la tecla $TeclaF"
+  [System.Windows.Forms.SendKeys]::SendWait("{$TeclaF}")
+  Start-Sleep -Milliseconds 2500
+  $okSub = Entrar-Submenu $PatronSub
+  if (-not $okSub) { throw "no encontre el submenu (patron '$PatronSub'); mira la lista de la caja negra" }
+  return $win
 }
 
 # Localiza con que abrir UnideGes: el ExePath configurado o, si no hay, un
@@ -692,7 +896,94 @@ try {
     exit 0
   }
 
-  throw "Accion desconocida: $Accion (validas: estado, abrir, modulo)"
+  # --- PROCESADO albaran electronico (v261) ---------------------------
+  # Fase 'leer': abrir la ventana, volcar su contenido, contar filas y
+  # captura — SIN tocar nada (el bot ensena la foto y pide confirmacion).
+  # Fase 'procesar': ademas pulsa 'Marcar todos' y 'Procesar' y vigila los
+  # dialogos que salgan (sin tocarlos: cada uno queda en la caja negra).
+  if ($Accion -eq 'albaran') {
+    Traza "accion albaran fase '$Fase'"
+    $win = Entrar-ModuloYSubmenu 'F7' $Submenu
+    $vent = Wait-VentanaTitulo '^Ficheros albar' 15 $win.ProcId
+    if (-not $vent) {
+      # Algunas instalaciones la abren como hija del mismo titulo raro:
+      # probar sin pid antes de rendirse.
+      $vent = Wait-VentanaTitulo '^Ficheros albar' 5 0
+    }
+    if (-not $vent) { throw "el submenu se activo pero la ventana 'Ficheros albaran electronico' no aparecio en 20 s" }
+    $tituloVent = $vent.Title
+    Traza "ventana de albaranes delante: '$tituloVent'"
+    [W32Menu]::SetForegroundWindow($vent.Handle) | Out-Null
+    Start-Sleep -Milliseconds 400
+    $raiz = Uia-Raiz $vent.Handle
+    $todos = Uia-Hijos $raiz
+    Volcar-Elementos $todos 'albaran: contenido' 80
+    $filas = Contar-Filas $todos
+    Traza "albaran: $filas filas de datos en la lista"
+    if ($Fase -ne 'procesar') {
+      $shot = Take-MenuShot 'albaran-leer'
+      Emit 'ok' "ventana abierta; filas=$filas" $tituloVent $shot
+      exit 0
+    }
+    if ($filas -eq 0) {
+      $shot = Take-MenuShot 'albaran-vacio'
+      Emit 'ok' "la lista esta vacia; filas=0 (nada que procesar)" $tituloVent $shot
+      exit 0
+    }
+    $okMarcar = Activar-PorNombre $raiz '^\s*Marcar todos\s*$' 'albaran: Marcar todos'
+    if (-not $okMarcar) { throw "no encontre el boton 'Marcar todos' (mira la caja negra)" }
+    Start-Sleep -Milliseconds 900
+    $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
+    if (-not $okProc) { throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
+    Traza "albaran: Procesar pulsado; vigilo 20 s por si salen dialogos"
+    Vigilar-Dialogos $win.ProcId 20
+    $shot = Take-MenuShot 'albaran-procesar'
+    Emit 'ok' "Marcar todos + Procesar pulsados; filas=$filas; revisa la captura y la caja negra" $tituloVent $shot
+    exit 0
+  }
+
+  # --- PROCESADO LMANMA / LMMAMA (v261) --------------------------------
+  # Camino visto en la tienda (25/07): LMMAMA → dialogo 'Seleccione fecha'
+  # (se acepta la fecha por defecto = hoy) → dialogo 'Abrir' → se escribe
+  # la ruta del fichero y se pulsa Abrir. Despues, vigilar sin tocar.
+  if ($Accion -eq 'lmanma') {
+    if ($Archivo -eq "") { throw "falta -Archivo (la ruta del fichero LMANMA)" }
+    if (-not (Test-Path -LiteralPath $Archivo)) { throw "el fichero no existe: $Archivo" }
+    $nombreFichero = [System.IO.Path]::GetFileName($Archivo)
+    Traza "accion lmanma con fichero '$nombreFichero'"
+    $win = Entrar-ModuloYSubmenu 'F6' $Submenu
+    $fecha = Wait-VentanaTitulo 'Seleccione fecha' 15 $win.ProcId
+    if (-not $fecha) { $fecha = Wait-VentanaTitulo 'Seleccione fecha' 5 0 }
+    if (-not $fecha) { throw "no aparecio el dialogo 'Seleccione fecha' en 20 s" }
+    Traza "dialogo de fecha delante (fecha por defecto = hoy)"
+    $raizF = Uia-Raiz $fecha.Handle
+    $todosF = Uia-Hijos $raizF
+    Volcar-Elementos $todosF 'lmanma: dialogo fecha' 20
+    $okFecha = Activar-PorNombre $raizF '^\s*Aceptar\s*$' 'lmanma: Aceptar fecha'
+    if (-not $okFecha) { throw "no pude pulsar Aceptar en 'Seleccione fecha'" }
+    $abrir = Wait-VentanaTitulo '^Abrir$' 15 $win.ProcId
+    if (-not $abrir) { $abrir = Wait-VentanaTitulo '^Abrir$' 5 0 }
+    if (-not $abrir) { throw "acepte la fecha pero no aparecio el dialogo 'Abrir'" }
+    Traza "dialogo Abrir delante; escribo la ruta del fichero"
+    [W32Menu]::SetForegroundWindow($abrir.Handle) | Out-Null
+    Start-Sleep -Milliseconds 300
+    $raizA = Uia-Raiz $abrir.Handle
+    $okNombre = Poner-NombreFichero $raizA $Archivo
+    if (-not $okNombre) { throw "no pude escribir la ruta en el dialogo Abrir (mira la caja negra)" }
+    Start-Sleep -Milliseconds 400
+    $okAbrir = Activar-PorNombre $raizA '^\s*Abrir\s*$' 'lmanma: boton Abrir'
+    if (-not $okAbrir) {
+      Traza "lmanma: boton Abrir no encontrado; mando ENTER"
+      [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    }
+    Traza "lmanma: fichero enviado; vigilo 25 s por si salen dialogos"
+    Vigilar-Dialogos $win.ProcId 25
+    $shot = Take-MenuShot 'lmanma-procesar'
+    Emit 'ok' "fichero '$nombreFichero' mandado a LMMAMA (fecha de hoy); revisa la captura y la caja negra" '' $shot
+    exit 0
+  }
+
+  throw "Accion desconocida: $Accion (validas: estado, abrir, modulo, albaran, lmanma)"
 } catch {
   $motivo = $_.Exception.Message
   Traza "ERROR: $motivo"

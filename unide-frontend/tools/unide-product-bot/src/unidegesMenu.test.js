@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MODULOS_UNIDEGES, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
+import { MODULOS_UNIDEGES, argumentosUnideges, esFicheroLmanma, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
 
 test('parseUnidegesCommand: menu, abrir y modulos con alias', () => {
   assert.deepEqual(parseUnidegesCommand('/unideges'), { accion: 'menu' });
@@ -60,4 +60,35 @@ test('submenus: alias, tecla del modulo padre y patron de busqueda', () => {
   assert.ok(patLm.test(' LMMAMA ')); // con espacios sueltos, como 'Inventariable '
   assert.ok(!patLm.test('Act. márgenes LMmama'));
   assert.ok(!patLm.test('Act. margenes LMmama'));
+});
+
+test('argumentosUnideges: fases de albaran y fichero de lmanma', () => {
+  const config = { unideges: {}, desktop: { screenshotDir: 'shots' }, logsDir: 'logs' };
+  const leer = argumentosUnideges(config, 'albaran', 'albaran_electronico', { fase: 'leer' }).args;
+  assert.ok(leer.includes('-Fase') && leer.includes('leer'));
+  assert.ok(leer.includes('F7'));
+  const proc = argumentosUnideges(config, 'albaran', 'albaran_electronico', { fase: 'procesar' }).args;
+  assert.ok(proc.includes('procesar'));
+  // cualquier otra fase cae a 'leer' (mirar es gratis, procesar jamás por defecto)
+  const rara = argumentosUnideges(config, 'albaran', 'albaran_electronico', { fase: 'x' }).args;
+  assert.ok(rara.includes('leer') && !rara.includes('procesar'));
+
+  const lm = argumentosUnideges(config, 'lmanma', 'lmanma', { archivo: 'C:\\Autocomm\\entradas\\Lmanma 1.txt' });
+  assert.ok(lm.args.includes('-Archivo'));
+  assert.ok(lm.args.includes('C:\\Autocomm\\entradas\\Lmanma 1.txt'));
+  assert.ok(lm.args.includes('F6'));
+  // sin archivo no hay acción: nunca se abre el diálogo a ciegas
+  assert.ok(argumentosUnideges(config, 'lmanma', 'lmanma', {}).error);
+  // el patrón de config manda sobre el del código
+  const cfg2 = { unideges: { submenus: { lmanma: 'OTRO' } }, desktop: {}, logsDir: '' };
+  assert.ok(argumentosUnideges(cfg2, 'lmanma', 'lmanma', { archivo: 'x.txt' }).args.includes('OTRO'));
+});
+
+test('esFicheroLmanma reconoce las grafías reales de la tienda', () => {
+  assert.ok(esFicheroLmanma('LMANMA FRUTA S25 US A 2026.txt'));
+  assert.ok(esFicheroLmanma('Lmanma%20%20Cambios%20de%20Precios.txt'));
+  assert.ok(esFicheroLmanma('LMMAMA algo.txt'));
+  assert.ok(!esFicheroLmanma('Ferrer%20T1'));
+  assert.ok(!esFicheroLmanma('2026_07_25_01_50_32_MoveFELLog'));
+  assert.ok(!esFicheroLmanma(''));
 });

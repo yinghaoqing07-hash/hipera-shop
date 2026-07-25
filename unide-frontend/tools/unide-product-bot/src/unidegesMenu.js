@@ -73,14 +73,21 @@ export function matchAbrirUnideges(text) {
   return /打开|开一下|启动|abre|abrir|arranca/i.test(t) || /^\s*(?:unide\s*ges|madisa)\s*$/i.test(t);
 }
 
-export async function accionUnideges(config, logger, accion, moduloId) {
+// ¿El nombre de fichero es de LMANMA? (los de la mensajería vienen como
+// "LMANMA FRUTA S25...", "Lmanma%20%20Cambios%20de%20Precios..." según los
+// bajara el bot o un navegador). Puro y exportado para /procesar_lmanma.
+export function esFicheroLmanma(nombre) {
+  return /lman?ma|lmman?ma/i.test(String(nombre || ''));
+}
+
+// Construye los argumentos del PS (puro, testeable). Devuelve { error } si
+// la petición no es válida. Las acciones de PROCESADO de v261:
+//  - albaran + fase 'leer'      → abre la ventana y cuenta filas (solo mirar)
+//  - albaran + fase 'procesar'  → Marcar todos + Procesar (escritura real)
+//  - lmanma  + archivo          → fecha de hoy + elegir ese fichero (escritura)
+export function argumentosUnideges(config, accion, moduloId, extra = {}) {
   const ug = config.unideges || {};
-  const script = ug.script || '';
-  if (!fs.existsSync(script)) {
-    return { status: 'error', mensaje: `没找到脚本 ${path.basename(script || 'unideges-menu.ps1')}，先更新 BOT` };
-  }
   const args = [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
     '-Accion', accion === 'modulo' ? 'modulo' : accion,
     '-OutDir', config.desktop?.screenshotDir || 'screenshots',
     '-ExePath', String(ug.exePath || ''),
@@ -95,16 +102,39 @@ export async function accionUnideges(config, logger, accion, moduloId) {
   ];
   if (accion === 'modulo') {
     const modulo = MODULOS_UNIDEGES[moduloId];
-    if (!modulo) return { status: 'error', mensaje: `没有这个模块：${moduloId}` };
+    if (!modulo) return { error: `没有这个模块：${moduloId}` };
     args.push('-Tecla', modulo.tecla);
     // El patrón del submenú se puede afinar desde config sin tocar código.
     const patron = ug.submenus?.[moduloId] || modulo.submenu; // '' en config = usar el del código
     if (patron) args.push('-Submenu', String(patron));
   }
-  logger?.info('unideges menu action', { accion, modulo: moduloId || '' });
+  if (accion === 'albaran') {
+    const patron = ug.submenus?.albaran_electronico || MODULOS_UNIDEGES.albaran_electronico.submenu;
+    args.push('-Tecla', 'F7', '-Submenu', String(patron), '-Fase', extra.fase === 'procesar' ? 'procesar' : 'leer');
+  }
+  if (accion === 'lmanma') {
+    if (!extra.archivo) return { error: '没有指定要处理的 LMANMA 文件' };
+    const patron = ug.submenus?.lmanma || MODULOS_UNIDEGES.lmanma.submenu;
+    args.push('-Tecla', 'F6', '-Submenu', String(patron), '-Archivo', String(extra.archivo));
+  }
+  return { args };
+}
+
+export async function accionUnideges(config, logger, accion, moduloId, extra = {}) {
+  const ug = config.unideges || {};
+  const script = ug.script || '';
+  if (!fs.existsSync(script)) {
+    return { status: 'error', mensaje: `没找到脚本 ${path.basename(script || 'unideges-menu.ps1')}，先更新 BOT` };
+  }
+  const construidos = argumentosUnideges(config, accion, moduloId, extra);
+  if (construidos.error) return { status: 'error', mensaje: construidos.error };
+  const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...construidos.args];
+  logger?.info('unideges menu action', { accion, modulo: moduloId || '', fase: extra.fase || '', archivo: extra.archivo ? path.basename(String(extra.archivo)) : '' });
   // El PS puede esperar hasta 90 s a que aparezca la ventana al abrir la
-  // app: el tope de Node tiene que ser mayor para no matarlo a mitad.
-  const res = await run('powershell.exe', args, { timeoutMs: 150000 });
+  // app: el tope de Node tiene que ser mayor para no matarlo a mitad. Las
+  // acciones de procesado además vigilan diálogos: tope aún más ancho.
+  const timeoutMs = (accion === 'albaran' || accion === 'lmanma') ? 240000 : 150000;
+  const res = await run('powershell.exe', args, { timeoutMs });
   const parsed = parseLastJson(res.stdout);
   if (!parsed) {
     const crudo = `${res.stderr || ''}\n${res.stdout || ''}`.trim().slice(0, 600);

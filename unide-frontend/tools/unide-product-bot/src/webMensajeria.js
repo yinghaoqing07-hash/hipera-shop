@@ -46,17 +46,40 @@ export async function fetchMensajeriaOperativa(config, logger, opciones = {}) {
     const dir = path.resolve(config.__toolRoot || '.', config.mensajeria?.downloadDir || 'descargas', `mensajeria-${hoyIso}`);
     fs.mkdirSync(dir, { recursive: true });
 
+    // A DÓNDE bajar (dato del dueño, 25/07): UnideGes recoge los ficheros
+    // de C:\Autocomm\entradas — lo que cae ahí aparece solo en la ventana
+    // de "Albarán electrónico" y es lo que LMMAMA deja elegir. Si esa
+    // carpeta existe (o sea, en el PC de la tienda), se baja DIRECTO ahí;
+    // si no (PC de casa, pruebas), a la carpeta de siempre.
+    const entradas = String(config.mensajeria?.entradasDir ?? 'C:\\Autocomm\\entradas');
+    const usarEntradas = !soloMarcar && entradas !== '' && fs.existsSync(entradas);
+    const dirDescargas = usarEntradas ? entradas : dir;
+
     if (!soloMarcar) {
       // Las descargas del navegador caen en ESTA carpeta (no en la del perfil
       // de Edge): así cada ejecución deja su lote junto y ordenado.
-      await prepararDescargas(page, dir);
+      await prepararDescargas(page, dirDescargas);
     }
 
     // Recorre las páginas y, EN CADA UNA, marca las filas elegidas. En modo
     // prueba se queda ahí (casillas marcadas, sin tocar nada más); en modo
     // real pulsa además el "Descargar" de la BARRA de la página (visto en la
     // instalación del dueño, 24/07: la lista no tiene botón por fila).
-    const r = await recorrerYDescargar(page, config, { hoyIso, dias, dir, maxDescargas, soloMarcar, logger });
+    const r = await recorrerYDescargar(page, config, { hoyIso, dias, dir: dirDescargas, maxDescargas, soloMarcar, logger });
+    if (usarEntradas) {
+      // Para reenviar por Telegram y dejar registro se COPIA cada fichero a
+      // la carpeta fechada del bot; el ORIGINAL se queda en entradas para
+      // que UnideGes lo procese (si la copia falla, se manda el original).
+      for (const d of r.descargados) {
+        if (!d.file) continue;
+        try {
+          const destino = path.join(dir, path.basename(d.file));
+          fs.copyFileSync(d.file, destino);
+          d.enEntradas = d.file;
+          d.file = destino;
+        } catch { d.enEntradas = d.file; }
+      }
+    }
     if (!r.total && r.vacioExplicito) {
       // El grid dijo EXPLÍCITAMENTE que no hay datos: eso no es un fallo de
       // identificación, es una lista vacía de verdad. Se reporta como éxito.
@@ -94,6 +117,7 @@ export async function fetchMensajeriaOperativa(config, logger, opciones = {}) {
     return {
       ok: true,
       dir,
+      entradasDir: usarEntradas ? entradas : '',
       hoyIso,
       dias,
       soloMarcar,
@@ -140,7 +164,11 @@ export function formatMensajeriaSummary(result) {
   if (prueba) {
     lines.push('', '勾上的就留在网页里，店里核实没问题再点 Descargar。想让 bot 直接下：发 /mensajeria bajar。');
   } else if (result.descargados.some((d) => d.file)) {
-    lines.push('', `文件已逐个发上来；电脑里也存在：${result.dir}`);
+    if (result.entradasDir) {
+      lines.push('', `文件已直接下到 ${result.entradasDir}——UnideGes 那边能直接看到。接着可以发 /procesar_albaranes 处理货单、/procesar_lmanma 处理文件。`);
+    } else {
+      lines.push('', `文件已逐个发上来；电脑里也存在：${result.dir}`);
+    }
   } else {
     lines.push('', '这一周没有可下载的 albarán / fichero。');
   }

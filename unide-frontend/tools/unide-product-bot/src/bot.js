@@ -27,7 +27,7 @@ import { limpiarArchivosViejos } from './housekeeping.js';
 import { aplicarFix, empaquetarEvidencia, esArchivoJs, esSoloPr, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, rutaEnRepo, validarPropuesta } from './diagnostico.js';
 import { chatIdActual, conChat } from './chatContexto.js';
 import { abrirPrConArchivo, githubConfigured } from './github.js';
-import { MODULOS_UNIDEGES, accionUnideges, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
+import { MODULOS_UNIDEGES, accionUnideges, esFicheroLmanma, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
 import { cargarArbol } from './flujoArbol.js';
 import { abrirFlujoEstado } from './flujoEstado.js';
 import { renderFlujoPage } from './flujoPage.js';
@@ -276,6 +276,10 @@ const DIAG_PASO = {
   'ug-utilidades': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
   'ug-albaranes': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
   'ug-fin': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop' },
+  // Procesado real (v261): Marcar todos+Procesar / mandar fichero a LMMAMA.
+  // escritura:true = el diagnóstico IA nunca ofrece el reintento automático.
+  'ug-albaran-electronico': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop', escritura: true },
+  'ug-lmanma': { archivo: 'desktop/unideges-menu.ps1', tipo: 'desktop', escritura: true },
   'ug-buscar': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop' },
   'ug-leer-precio': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop' },
   'ug-cambiar-precio': { archivo: 'desktop/unideges-search.ps1', tipo: 'desktop', escritura: true },
@@ -575,6 +579,9 @@ async function handleUpdateConChat(update) {
   if (/^\/estilo\b/i.test(text)) { await handleEstilo(chatId, text.replace(/^\/estilo\s*/i, '')); return; }
   const ugCmd = parseUnidegesCommand(text);
   if (ugCmd) { await handleUnideges(chatId, ugCmd); return; }
+  // Procesado real (v261): siempre con confirmación por botón.
+  if (/^\/(procesar_albaranes|albaran_procesar)\b/i.test(text) || /^处理(电子)?货单$/.test(text)) { await handleProcesarAlbaranes(chatId); return; }
+  if (/^\/(procesar_lmanma|lmanma_procesar)\b/i.test(text) || /^处理(lmanma|文件)$/i.test(text)) { await handleProcesarLmanma(chatId); return; }
   if (text === '/llegada' || text === '/llegada_hoy' || /^\/llegada\s+/.test(text)) { await handleArrivalChecklist(chatId, text); return; }
   if (/^\/precios_fruta\b/i.test(text) || (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text) && text.includes('\n'))) { await handleFruitPriceBatch(chatId, text); return; }
   if (/^\/(precio_fruta|fruta_precio|precio_verdura)\b/i.test(text)) { await handleFruitPrice(chatId, text); return; }
@@ -842,6 +849,8 @@ function formatCommandList() {
     '【促销 / 省钱】',
     '/promociones — 去网页抓最新促销（CSV）',
     '/mensajeria — 抓 Mensajería 过去一周，勾选该下载的（测试模式不真下；bajar=真下载）',
+    '/procesar_albaranes — 电子货单：先看列表截图，确认后全选+Procesar',
+    '/procesar_lmanma — LMANMA：选文件、今天生效（真的会改价，要确认）',
     '/donde — 看现在是哪台电脑在接消息（店里/家里共用一个号）',
     '/linea — 两台电脑换班：这台退线让另一台接，或远程关掉这台',
     '/ahorro — 所有促销的省钱策略',
@@ -1333,6 +1342,8 @@ async function handleCallback(callback) {
   if (data.startsWith('ug:')) { await handleUnidegesCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('dg:')) { await handleDiagCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('ln:')) { await handleLineaCallback(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('alb:')) { await handleAlbaranCallback(chatId, callback.id, data.slice(4)); return; }
+  if (data.startsWith('lmp:')) { await handleLmanmaCallback(chatId, callback.id, data.slice(4)); return; }
   if (data.startsWith('idea:')) { await handleIdeaCallback(chatId, callback.id, data.slice(5)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }
   if (data.startsWith('process:')) { await handleProcess(chatId, callback.id, data.slice(8)); return; }
@@ -2693,6 +2704,11 @@ function tecladoUnideges() {
           { text: '电子货单 (F7→albarán elec.)', callback_data: 'ug:albaran_electronico' },
           { text: 'LMANMA (F6→fichero)', callback_data: 'ug:lmanma' }
         ],
+        // Procesado de verdad (v261): con confirmación antes de tocar nada.
+        [
+          { text: '处理电子货单', callback_data: 'ug:albaran_proc' },
+          { text: '处理 LMANMA 文件', callback_data: 'ug:lmanma_proc' }
+        ],
         [{ text: '⚠ Fin de día 日结', callback_data: 'ug:ask:fin' }]
       ]
     }
@@ -2930,6 +2946,8 @@ async function handleUnidegesCallback(chatId, callbackId, resto) {
   if (!config.desktop?.enabled) { await telegram.answerCallbackQuery(callbackId, '桌面自动化没启用'); return; }
   if (resto === 'no') { await telegram.answerCallbackQuery(callbackId, '已取消'); await telegram.sendMessage(chatId, '好，不进了。', { __skipAI: true }); return; }
   if (resto === 'abrir') { await telegram.answerCallbackQuery(callbackId, '打开中'); await ejecutarUnideges(chatId, 'abrir'); return; }
+  if (resto === 'albaran_proc') { await telegram.answerCallbackQuery(callbackId, '处理电子货单'); await handleProcesarAlbaranes(chatId); return; }
+  if (resto === 'lmanma_proc') { await telegram.answerCallbackQuery(callbackId, '处理 LMANMA'); await handleProcesarLmanma(chatId); return; }
   if (resto.startsWith('ask:')) { await telegram.answerCallbackQuery(callbackId); await pedirConfirmacionUnideges(chatId, resto.slice(4)); return; }
   if (resto.startsWith('go:')) { await telegram.answerCallbackQuery(callbackId, '开工'); await ejecutarUnideges(chatId, 'modulo', resto.slice(3)); return; }
   if (MODULOS_UNIDEGES[resto]) {
@@ -2939,6 +2957,164 @@ async function handleUnidegesCallback(chatId, callbackId, resto) {
     return;
   }
   await telegram.answerCallbackQuery(callbackId, '未知操作');
+}
+
+// --- procesado real de 电子货单 y LMANMA (v261) ---------------------------
+// Regla de oro: MIRAR → CONFIRMAR → TOCAR. La fase de mirar es gratis (solo
+// abre y cuenta); lo que escribe (Procesar / mandar el fichero) siempre pasa
+// por un botón de confirmación del dueño, y NUNCA entra en tareas automáticas
+// (petición explícita del dueño, 25/07: "还不稳定，会真的改价格").
+
+function dirEntradas() {
+  return String(config.mensajeria?.entradasDir ?? 'C:\\Autocomm\\entradas');
+}
+
+// Informe de fallo estilo ejecutarUnideges: primera línea + caja negra como
+// documento + captura del momento del error.
+async function avisarFalloUnideges(chatId, etiqueta, res) {
+  logger.warn('unideges proceso failed', { etiqueta, error: String(res.mensaje || '').slice(0, 500) });
+  await telegram.sendMessage(chatId, `${etiqueta}失败：${String(res.mensaje || '未知错误').split('\n')[0].slice(0, 160)}\n完整过程在面板右边的黑匣子里。`, { __skipAI: true });
+  try {
+    const cajaFile = path.resolve(config.logsDir || '.', CAJA_NEGRA);
+    if (fs.existsSync(cajaFile)) await telegram.sendDocument(chatId, cajaFile, 'UnideGes 黑匣子记录（转发给 Claude 就能定位）');
+  } catch { /* sin red o sin archivo */ }
+  if (res.screenshot && fs.existsSync(res.screenshot)) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, '出错时的屏幕', { __skipAI: true }); } catch { /* sin foto */ }
+  }
+}
+
+function filasDeRespuesta(res) {
+  const m = String(res?.mensaje || '').match(/filas=(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+async function handleProcesarAlbaranes(chatId) {
+  if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用，处理不了。'); return; }
+  notePanelActivity('/procesar_albaranes');
+  await telegram.sendMessage(chatId, '先开进电子货单看一眼有什么要处理的…（这几秒别动店里电脑）', { __skipAI: true });
+  const etiqueta = 'UnideGes → Albarán electrónico';
+  const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'leer' }));
+  if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-leer', trace: res.trace });
+  if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
+  const filas = filasDeRespuesta(res);
+  if (filas === 0) {
+    const msg = '电子货单列表是空的——没有待处理的货单。要有新的，先 /mensajeria bajar 下载。';
+    if (res.screenshot && fs.existsSync(res.screenshot)) { try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ } }
+    await telegram.sendMessage(chatId, msg, { __skipAI: true });
+    return;
+  }
+  const texto = `列表里有 ${filas ?? '?'} 行。看好截图再点：有红色行（店号不符）就先别处理，红色的怎么办咱们还没规矩。`;
+  const opciones = {
+    __skipAI: true,
+    reply_markup: { inline_keyboard: [[
+      { text: `✅ 全选并 Procesar（${filas ?? '?'} 行）`, callback_data: 'alb:go' },
+      { text: '算了', callback_data: 'alb:no' }
+    ]] }
+  };
+  if (res.screenshot && fs.existsSync(res.screenshot)) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, texto, opciones); return; } catch { /* sin foto */ }
+  }
+  await telegram.sendMessage(chatId, texto, opciones);
+}
+
+async function handleAlbaranCallback(chatId, callbackId, verbo) {
+  if (verbo === 'no') { await telegram.answerCallbackQuery(callbackId, '不动'); await telegram.sendMessage(chatId, '好，先不处理。', { __skipAI: true }); return; }
+  if (verbo !== 'go') { await telegram.answerCallbackQuery(callbackId, '未知操作'); return; }
+  await telegram.answerCallbackQuery(callbackId, '开始处理');
+  await telegram.sendMessage(chatId, '开始处理：全选 + Procesar。全程别动店里电脑，跑完发结果。', { __skipAI: true });
+  const etiqueta = 'UnideGes → Albarán electrónico';
+  const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'procesar' }));
+  if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-procesar', trace: res.trace });
+  if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
+  // Los diálogos que hayan salido tras Procesar están en la caja negra: si
+  // los hubo, es la primera vez que los vemos — pedir la foto de vuelta.
+  const huboDialogos = (res.trace || []).some((l) => /dialogo nuevo/.test(String(l)));
+  const msg = huboDialogos
+    ? '按下去了，但跑的过程中弹了新窗口（我没敢碰，都记在黑匣子里了）。看截图确认到哪一步了，把情况告诉我，下一版就知道怎么接。'
+    : '处理按钮按完了 ✅ 看截图确认列表清掉没有（Procesado 一列应该变了）。';
+  if (res.screenshot && fs.existsSync(res.screenshot)) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
+  }
+  await telegram.sendMessage(chatId, msg, { __skipAI: true });
+}
+
+// LMANMA: elegir fichero (los recientes de C:\Autocomm\entradas) →
+// confirmar → fecha de hoy + Abrir. El fichero desaparece al procesarse
+// (dato del dueño): se comprueba y se cuenta en el resultado.
+const lmanmaPend = new Map();
+let lmanmaSeq = 1;
+
+async function handleProcesarLmanma(chatId) {
+  if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用，处理不了。'); return; }
+  notePanelActivity('/procesar_lmanma');
+  const dir = dirEntradas();
+  let candidatos = [];
+  try {
+    candidatos = fs.readdirSync(dir)
+      .filter((f) => esFicheroLmanma(f))
+      .map((f) => { try { const st = fs.statSync(path.join(dir, f)); return st.isFile() ? { f, m: st.mtimeMs } : null; } catch { return null; } })
+      .filter(Boolean)
+      .sort((a, b) => b.m - a.m)
+      .slice(0, 5)
+      .map((x) => x.f);
+  } catch (error) {
+    await telegram.sendMessage(chatId, `打不开 ${dir}（${error.message}）。这个功能要在店里那台电脑上用。`, { __skipAI: true });
+    return;
+  }
+  if (!candidatos.length) {
+    await telegram.sendMessage(chatId, `${dir} 里没有 LMANMA 文件。先用 /mensajeria bajar 把这周的下载下来。`, { __skipAI: true });
+    return;
+  }
+  const id = String(lmanmaSeq++);
+  lmanmaPend.set(id, { dir, files: candidatos });
+  const botones = candidatos.map((f, i) => [{ text: f.slice(0, 44), callback_data: `lmp:pick:${id}:${i}` }]);
+  botones.push([{ text: '算了', callback_data: 'lmp:no' }]);
+  await telegram.sendMessage(chatId, '要处理哪个 LMANMA 文件？（最新的在最上面；生效日期用今天。注意老文件是以前没处理的，按你说的先别碰）', {
+    __skipAI: true,
+    reply_markup: { inline_keyboard: botones }
+  });
+}
+
+async function handleLmanmaCallback(chatId, callbackId, resto) {
+  if (resto === 'no') { await telegram.answerCallbackQuery(callbackId, '不动'); await telegram.sendMessage(chatId, '好，先不处理。', { __skipAI: true }); return; }
+  const [verbo, id, idx] = resto.split(':');
+  const pend = lmanmaPend.get(id);
+  if (!pend) { await telegram.answerCallbackQuery(callbackId, '这条已过期，重新发 /procesar_lmanma'); return; }
+  const file = pend.files[Number(idx)];
+  if (!file) { await telegram.answerCallbackQuery(callbackId, '没找到这个文件'); return; }
+  if (verbo === 'pick') {
+    await telegram.answerCallbackQuery(callbackId, file.slice(0, 40));
+    await telegram.sendMessage(chatId, `确认处理「${file}」？生效日期=今天。这会真的改价格/毛利。`, {
+      __skipAI: true,
+      reply_markup: { inline_keyboard: [[
+        { text: '✅ 确定处理', callback_data: `lmp:go:${id}:${idx}` },
+        { text: '算了', callback_data: 'lmp:no' }
+      ]] }
+    });
+    return;
+  }
+  if (verbo !== 'go') { await telegram.answerCallbackQuery(callbackId, '未知操作'); return; }
+  await telegram.answerCallbackQuery(callbackId, '开工');
+  lmanmaPend.delete(id);
+  const ruta = path.join(pend.dir, file);
+  await telegram.sendMessage(chatId, `开始处理「${file}」：LMMAMA → 今天生效 → 选这个文件。全程别动店里电脑。`, { __skipAI: true });
+  const etiqueta = 'UnideGes → LMANMA';
+  const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'lmanma', 'lmanma', { archivo: ruta }));
+  if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'lmanma-procesar', trace: res.trace });
+  if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
+  // El dueño dijo que el fichero DESAPARECE al procesarse: es la mejor
+  // señal de éxito que tenemos sin conocer aún los diálogos de después.
+  let desaparecido = false;
+  try { desaparecido = !fs.existsSync(ruta); } catch { /* se queda en duda */ }
+  const huboDialogos = (res.trace || []).some((l) => /dialogo nuevo/.test(String(l)));
+  const partes = [];
+  partes.push(desaparecido ? '文件已经从 entradas 里消失了——按你说的，这一般就是处理完了 ✅' : '文件还在 entradas 里，可能没处理完或者还在跑，看截图。');
+  if (huboDialogos) partes.push('过程中弹了新窗口（我没碰，都记在黑匣子里了），把截图里的情况告诉我。');
+  const msg = partes.join('\n');
+  if (res.screenshot && fs.existsSync(res.screenshot)) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
+  }
+  await telegram.sendMessage(chatId, msg, { __skipAI: true });
 }
 
 // /pedido_web_test — diagnóstico de la automatización web: conecta al
