@@ -303,15 +303,48 @@ function Volcar-Elementos($Todos, [string]$Etiqueta, [int]$Max) {
 
 # Filas de datos de una lista (ListView/DataGrid): lo mas parecido a
 # "cuantos albaranes hay pendientes" sin conocer el control exacto.
+# Fallo real 25/07 20:16: la ventana tenia 3 filas A LA VISTA y el conteo
+# por DataItem/ListItem dio 0 (el control no expone filas estandar). Tres
+# senales y gana la mayor: items estandar, nombres que acaban en .FEL
+# (sin duplicados) y casillas de fila.
 function Contar-Filas($Todos) {
   if (-not $Todos) { return 0 }
-  $filas = 0
+  $items = 0
+  $checks = 0
+  $felVistos = @{}
   foreach ($el in $Todos) {
     $tipo = ""
     try { $tipo = [string]$el.Current.ControlType.ProgrammaticName } catch { $tipo = "" }
-    if ($tipo -match 'DataItem|ListItem') { $filas = $filas + 1 }
+    if ($tipo -match 'DataItem|ListItem') { $items = $items + 1 }
+    if ($tipo -match 'CheckBox') { $checks = $checks + 1 }
+    $nombre = ""
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+    if ($nombre -match '\.FEL\s*$') { $felVistos[$nombre] = $true }
   }
-  return $filas
+  $fel = $felVistos.Count
+  $n = $items
+  if ($fel -gt $n) { $n = $fel }
+  if ($checks -gt $n) { $n = $checks }
+  Traza "contar filas: items=$items fel=$fel casillas=$checks -> $n"
+  return $n
+}
+
+# Nombres de fichero .FEL visibles (hasta 10, sin duplicados): para que el
+# bot pueda decirle al dueno QUE hay en la lista, no solo cuantos.
+function Listar-Fel($Todos) {
+  $vistos = @{}
+  $lista = New-Object System.Collections.Generic.List[string]
+  if (-not $Todos) { return $lista }
+  foreach ($el in $Todos) {
+    if ($lista.Count -ge 10) { break }
+    $nombre = ""
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = "" }
+    if ($nombre -notmatch '\.FEL\s*$') { continue }
+    if ($vistos.ContainsKey($nombre)) { continue }
+    $vistos[$nombre] = $true
+    $lista.Add($nombre) | Out-Null
+  }
+  return $lista
 }
 
 # Pulsa el primer elemento cuyo nombre case el patron (Invoke →
@@ -976,15 +1009,22 @@ try {
     Volcar-Elementos $todos 'albaran: contenido' 80
     $filas = Contar-Filas $todos
     Traza "albaran: $filas filas de datos en la lista"
+    $fels = Listar-Fel $todos
+    $msgFel = ""
+    if ($fels.Count -gt 0) {
+      $listaFel = $fels -join ', '
+      $msgFel = "; ficheros=$listaFel"
+    }
     if ($Fase -ne 'procesar') {
       $shot = Take-MenuShot 'albaran-leer'
-      Emit 'ok' "ventana abierta; filas=$filas" $tituloVent $shot
+      Emit 'ok' "ventana abierta; filas=$filas$msgFel" $tituloVent $shot
       exit 0
     }
     if ($filas -eq 0) {
-      $shot = Take-MenuShot 'albaran-vacio'
-      Emit 'ok' "la lista esta vacia; filas=0 (nada que procesar)" $tituloVent $shot
-      exit 0
+      # NO se corta aqui: el conteo puede fallar con la lista llena (fallo
+      # del 25/07 a la noche). El dueno ya confirmo con la captura delante;
+      # con la lista de verdad vacia, Marcar todos + Procesar no hacen nada.
+      Traza "albaran: conteo en 0 (lista vacia o control que no se deja leer); sigo, el dueno confirmo con la captura"
     }
     $okMarcar = Activar-PorNombre $raiz '^\s*Marcar todos\s*$' 'albaran: Marcar todos'
     if (-not $okMarcar) { throw "no encontre el boton 'Marcar todos' (mira la caja negra)" }
