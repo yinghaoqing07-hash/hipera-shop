@@ -177,7 +177,10 @@ export function renderPanelPage(version) {
     scrollbar-width: thin; scrollbar-color: rgba(168,195,214,.2) transparent;
   }
   #tActividad .hora { color: #566b80; margin-right: 8px; font-variant-numeric: tabular-nums; }
-  #mantenimiento { margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; }
+  #mantenimiento { margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(200,211,220,.12); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  /* Qué máquina es esta y quién lleva la línea de Telegram (店里/家里). */
+  #lineaTg { flex-basis: 100%; color: #7d94a9; font-size: 12px; }
+  #lineaTg .avisoLinea { color: #eab308; }
   /* Columna lateral FIJA (petición del dueño): las tarjetas de estado y el
      botón de actualizar viven aquí SIEMPRE, no dentro del 操作台. El cajón,
      al abrirse en la misma columna, la tapa temporalmente. */
@@ -577,7 +580,9 @@ export function renderPanelPage(version) {
         </div>
       </div>
       <div id="mantenimiento">
+        <div id="lineaTg"></div>
         <button class="pill" onclick="admin('update')">更新 BOT</button>
+        <button class="pill" id="btnLinea" style="display:none" onclick="lineaTelegram()"></button>
       </div>
     </div>
     <div id="centro">
@@ -1092,6 +1097,36 @@ async function admin(accion) {
     if (accion === 'update') { actualizando = Date.now(); vioCaida = false; hechoVisto = 0; caidaDesde = 0; refrescar(); }
   } catch { aviso('连不上 BOT'); }
 }
+// La "línea" de Telegram: esta máquina (店里/家里) puede estar al aparato o
+// en espera. El botón cambia según el estado; tomar la línea desde AQUÍ es
+// la única forma de despertar a una máquina en espera (su Telegram no oye).
+function pintarLineaTg(s) {
+  const div = document.getElementById('lineaTg');
+  const btn = document.getElementById('btnLinea');
+  if (!div || !btn || !s.instancia) return;
+  const enEspera = s.lineaTelegram === 'espera';
+  let html = '这台：' + s.instancia + '　·　Telegram ' + (enEspera ? '待机（另一台在接）' : '接管中');
+  if (!enEspera && s.conflictoHaceSeg != null && s.conflictoHaceSeg < 600) {
+    html += '　·　<span class="avisoLinea">⚠ 另一台也在抢线</span>';
+  }
+  div.innerHTML = html;
+  btn.style.display = '';
+  btn.textContent = enEspera ? '接管 Telegram' : '让出 Telegram';
+  btn.dataset.accion = enEspera ? 'linea_tomar' : 'linea_soltar';
+}
+async function lineaTelegram() {
+  const btn = document.getElementById('btnLinea');
+  const accion = btn.dataset.accion || 'linea_tomar';
+  const msg = accion === 'linea_tomar'
+    ? '让这台电脑接管 Telegram？另一台还开着的话先让它退线或关机，不然两台会抢消息。'
+    : '让这台退线？之后 Telegram 消息由另一台接，这台的面板照常能用。';
+  if (!confirm(msg)) return;
+  try {
+    const r = await (await fetch('/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accion }) })).json();
+    if (r.toast) aviso(r.toast);
+    setTimeout(refrescar, 600);
+  } catch { aviso('连不上 BOT'); }
+}
 // La X de la ventana apaga el bot: beacon de despedida al cerrarse la página.
 // Una recarga también lo manda, pero la página vuelve al instante y el bot
 // cancela el apagado (margen de 3 s en el servidor).
@@ -1397,6 +1432,7 @@ async function refrescar() {
     if (actualizando) partes.unshift('正在更新：' + (s.updateLine || '启动更新器…'));
     txt.textContent = partes.join('　·　');
     pintarTarjetas(s);
+    pintarLineaTg(s);
   } catch {
     punto.classList.add('rojo');
     if (!caidaDesde) caidaDesde = Date.now();
