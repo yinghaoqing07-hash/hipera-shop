@@ -5,7 +5,8 @@ import {
   debeOmitirPorFruta,
   dentroDeVentana,
   parseFechaMensaje,
-  filtrarMensajes
+  filtrarMensajes,
+  esErrorDeNavegacion
 } from './webMensajeria.js';
 
 test('tipoMensaje distingue albarán, fichero y otros', () => {
@@ -57,4 +58,14 @@ test('filtrarMensajes aplica todas las reglas a la vez y ordena por fecha', () =
   assert.match(r.omitidosFruta[0].texto, /FRUTA/i);
   assert.equal(r.sinFecha.length, 1);
   assert.equal(r.fueraDeVentana, 1);
+});
+
+test('esErrorDeNavegacion reconoce los saltos de página y deja pasar el resto', () => {
+  assert.equal(esErrorDeNavegacion(new Error('Execution context was destroyed, most likely because of a navigation.')), true);
+  assert.equal(esErrorDeNavegacion(new Error('Cannot find context with specified id')), true);
+  assert.equal(esErrorDeNavegacion(new Error('Node is detached from document')), true);
+  assert.equal(esErrorDeNavegacion(new Error('navigating frame was detached Frame')), true);
+  assert.equal(esErrorDeNavegacion(new Error('Timeout esperando descargas')), false);
+  assert.equal(esErrorDeNavegacion(new Error('ENOENT: no such file')), false);
+  assert.equal(esErrorDeNavegacion(null), false);
 });
