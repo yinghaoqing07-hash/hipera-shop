@@ -73,6 +73,21 @@ export function matchAbrirUnideges(text) {
   return /打开|开一下|启动|abre|abrir|arranca/i.test(t) || /^\s*(?:unide\s*ges|madisa)\s*$/i.test(t);
 }
 
+// Marcas de paso fino que el PS deja en la traza (v266, petición del
+// dueño: poder ver EN QUÉ paso exacto falló). Formato:
+//   "+12.3s PASO: alb-guardar1 ok "      → { id, ok: true,  detalle: '' }
+//   "+12.3s PASO: alb-guardar1 fail ..." → { id, ok: false, detalle: '...' }
+// El prefijo de tiempo lo pone Traza; por eso el patrón no va anclado.
+export function parsePasos(trace) {
+  const out = [];
+  for (const linea of Array.isArray(trace) ? trace : []) {
+    const m = String(linea).match(/PASO:\s+(\S+)\s+(ok|fail)(?:\s+(.*))?$/);
+    if (!m) continue;
+    out.push({ id: m[1], ok: m[2] === 'ok', detalle: String(m[3] || '').trim() });
+  }
+  return out;
+}
+
 // ¿El nombre de fichero es de LMANMA? (los de la mensajería vienen como
 // "LMANMA FRUTA S25...", "Lmanma%20%20Cambios%20de%20Precios..." según los
 // bajara el bot o un navegador). Puro y exportado para /procesar_lmanma.
@@ -110,7 +125,10 @@ export function argumentosUnideges(config, accion, moduloId, extra = {}) {
   }
   if (accion === 'albaran') {
     const patron = ug.submenus?.albaran_electronico || MODULOS_UNIDEGES.albaran_electronico.submenu;
-    args.push('-Tecla', 'F7', '-Submenu', String(patron), '-Fase', extra.fase === 'procesar' ? 'procesar' : 'leer');
+    // Solo estas tres fases; cualquier otra cosa cae en 'leer', que es la
+    // unica que no toca nada (mirar es gratis, escribir jamas por defecto).
+    const fase = ['procesar', 'confirmar'].includes(extra.fase) ? extra.fase : 'leer';
+    args.push('-Tecla', 'F7', '-Submenu', String(patron), '-Fase', fase);
   }
   if (accion === 'lmanma') {
     if (!extra.archivo) return { error: '没有指定要处理的 LMANMA 文件' };

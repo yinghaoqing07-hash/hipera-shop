@@ -27,7 +27,7 @@ import { limpiarArchivosViejos } from './housekeeping.js';
 import { aplicarFix, empaquetarEvidencia, esArchivoJs, esSoloPr, extraerArchivoCorregido, guardarExitoPaso, resumenSinCodigo, rutaEnRepo, validarPropuesta } from './diagnostico.js';
 import { chatIdActual, conChat } from './chatContexto.js';
 import { abrirPrConArchivo, githubConfigured } from './github.js';
-import { MODULOS_UNIDEGES, accionUnideges, esFicheroLmanma, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
+import { MODULOS_UNIDEGES, accionUnideges, esFicheroLmanma, matchAbrirUnideges, parsePasos, parseUnidegesCommand } from './unidegesMenu.js';
 import { cargarArbol } from './flujoArbol.js';
 import { abrirFlujoEstado } from './flujoEstado.js';
 import { renderFlujoPage } from './flujoPage.js';
@@ -2923,7 +2923,22 @@ async function ejecutarUnideges(chatId, accion, moduloId) {
 // la línea "RESULT: step=login" trae estado, intentos y duración medida.
 // Si la app ya estaba abierta no hay ni lanzamiento ni login, y no se
 // registra nada (por eso no usan iniciar(): son eventos reconstruidos).
+// El PS marca cada paso fino con "PASO: <id> ok|fail <detalle>" (v266,
+// petición del dueño: "越细越好，这样哪里出错了我可以更容易知道是哪一步").
+// Aquí se encienden esos nodos del árbol de flujo. Solo ids conocidos: una
+// marca con un id que no exista en flujo.yaml se ignora sin ruido.
+function registrarPasosFinos(res) {
+  try {
+    for (const paso of parsePasos(res?.trace)) {
+      if (!flujoArbol.nodos.some((n) => n.id === paso.id)) continue;
+      flujoEstado.iniciar(paso.id);
+      flujoEstado.terminar(paso.id, { ok: paso.ok, detalle: paso.detalle.slice(0, 120), duracionMs: 0 });
+    }
+  } catch { /* la sonda nunca debe romper el flujo real */ }
+}
+
 function registrarSubpasosUnideges(res) {
+  registrarPasosFinos(res);
   try {
     const texto = (res?.trace || []).join('\n');
     if (!texto) return;
@@ -2999,6 +3014,7 @@ async function handleProcesarAlbaranes(chatId) {
   await telegram.sendMessage(chatId, '先开进电子货单看一眼有什么要处理的…（这几秒别动店里电脑）', { __skipAI: true });
   const etiqueta = 'UnideGes → Albarán electrónico';
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'leer' }));
+  registrarSubpasosUnideges(res);
   if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-leer', trace: res.trace });
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
   // El conteo UIA puede fallar con la lista LLENA (25/07 20:16: 3 filas a
@@ -3008,57 +3024,107 @@ async function handleProcesarAlbaranes(chatId) {
   const fels = ficherosDeRespuesta(res);
   const cuantos = filas > 0
     ? `列表里有 ${filas} 行${fels.length ? `：${fels.join('、')}` : ''}。`
-    : '我从程序里数不出行数（这界面不太让读），以截图为准。';
+    : '我从程序里数不出行数（这界面不太让读），以截图为准——空的就点算了。';
   const texto = [
     cuantos,
-    '点确认后我会一路走完：全选 → Procesar → 未知代码 Aceptar → 价格变更全接受 → Confirmar → Sí（这步不可逆）→ 关掉标签窗口。',
+    '点确认我先走第一段：全选 → Procesar →（未知代码 Aceptar）→ Guardar → 取消全部变更 → 找蓝色行。',
+    '然后停下来给你看蓝色行，等你处理完再走第二段（Confirmar 那步不可逆）。',
     '有红色行（店号不符）就先别处理，红色的怎么办咱们还没规矩。'
   ].join('\n');
   const opciones = {
     __skipAI: true,
     reply_markup: { inline_keyboard: [[
-      { text: filas > 0 ? `✅ 处理这 ${filas} 张` : '✅ 处理', callback_data: 'alb:go' },
+      { text: filas > 0 ? `✅ 开始处理（${filas} 行）` : '✅ 开始处理', callback_data: 'alb:go' },
       { text: '算了', callback_data: 'alb:no' }
     ]] }
   };
-  if (res.screenshot && fs.existsSync(res.screenshot)) {
-    try { await telegram.sendPhoto(chatId, res.screenshot, texto, opciones); return; } catch { /* sin foto */ }
-  }
-  await telegram.sendMessage(chatId, texto, opciones);
+  await enviarConFoto(chatId, res, texto, opciones);
+}
+
+// Lee "clave=N" de la línea de resultado del PS.
+function numDeRespuesta(res, clave) {
+  return Number((String(res?.mensaje || '').match(new RegExp(`${clave}=(\\d+)`)) || [])[1] || 0);
 }
 
 async function handleAlbaranCallback(chatId, callbackId, verbo) {
   if (verbo === 'no') { await telegram.answerCallbackQuery(callbackId, '不动'); await telegram.sendMessage(chatId, '好，先不处理。', { __skipAI: true }); return; }
-  if (verbo !== 'go') { await telegram.answerCallbackQuery(callbackId, '未知操作'); return; }
-  await telegram.answerCallbackQuery(callbackId, '开始处理');
-  await telegram.sendMessage(chatId, '开始处理：全选 + Procesar。全程别动店里电脑，跑完发结果。', { __skipAI: true });
+  if (verbo === 'go') { await telegram.answerCallbackQuery(callbackId, '开始处理'); await albaranFaseProcesar(chatId); return; }
+  if (verbo === 'conf') { await telegram.answerCallbackQuery(callbackId, '接受并确认'); await albaranFaseConfirmar(chatId); return; }
+  await telegram.answerCallbackQuery(callbackId, '未知操作');
+}
+
+// FASE 1: Procesar → (Códigos desconocidos) → Guardar → Descartar todos
+// los cambios → buscar filas AZULES. Se PARA ahí: las azules son artículos
+// con problemas y hay que mirarlos antes de aceptar nada (orden del dueño).
+async function albaranFaseProcesar(chatId) {
+  await telegram.sendMessage(chatId, '开工：全选 → Procesar → Guardar → 取消全部变更 → 找蓝色行。全程别动店里电脑。', { __skipAI: true });
   const etiqueta = 'UnideGes → Albarán electrónico';
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'procesar' }));
+  registrarSubpasosUnideges(res);
   if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-procesar', trace: res.trace });
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
-  // El PS corre YA el ciclo entero (reglas del dueño del 25/07, sacadas de
-  // sus vídeos): Códigos desconocidos → Aceptar; revisión de precios →
-  // Aceptar Todos Cambio + Confirmar → Sí; ventana de etiquetas → cerrar.
-  // Aquí solo se traduce el recuento a algo legible.
-  const num = (clave) => Number((String(res.mensaje || '').match(new RegExp(`${clave}=(\\d+)`)) || [])[1] || 0);
-  const desconocidos = num('desconocidos');
-  const confirmados = num('confirmados');
-  const etiquetas = num('etiquetas');
-  const atascado = num('atascado');
+
+  const desconocidos = numDeRespuesta(res, 'desconocidos');
+  const hayRevision = numDeRespuesta(res, 'revision') > 0;
+  const azules = numDeRespuesta(res, 'azules');
   const huboDialogos = (res.trace || []).some((l) => /ventana nueva/.test(String(l)));
-  const partes = [];
-  partes.push(confirmados > 0
-    ? `货单处理完了 ✅ 确认了 ${confirmados} 张（价格变更全接受 + Confirmar + Sí，按你定的规矩）。`
-    : '按钮都按下去了，但没等到「确认不可逆」那一步。看截图确认走到哪儿了。');
-  if (desconocidos > 0) partes.push(`「未知代码」弹窗 ${desconocidos} 次，都点了 Aceptar。`);
-  if (etiquetas > 0) partes.push(`标签打印窗口关掉了 ${etiquetas} 个——要打价签你自己去打。`);
-  if (atascado) partes.push('⚠ 中间卡住了（有个按钮点不动或者超时），剩下的可能要你手动收尾。');
-  if (huboDialogos) partes.push('还弹了没见过的窗口（我没敢碰，都记在黑匣子里了）。把情况告诉我，下一版就知道怎么接。');
-  const msg = partes.join('\n');
-  if (res.screenshot && fs.existsSync(res.screenshot)) {
-    try { await telegram.sendPhoto(chatId, res.screenshot, msg, { __skipAI: true }); return; } catch { /* sin foto */ }
+
+  if (!hayRevision) {
+    const partes = ['Procesar 按下去了，但没等到价格复核表出现。看截图确认是不是卡在别的地方了。'];
+    if (desconocidos > 0) partes.push(`（中间「未知代码」弹了 ${desconocidos} 次，都点了 Aceptar）`);
+    if (huboDialogos) partes.push('弹了没见过的窗口，都记在黑匣子里了。');
+    await enviarConFoto(chatId, res, partes.join('\n'));
+    return;
   }
-  await telegram.sendMessage(chatId, msg, { __skipAI: true });
+
+  const partes = ['复核表打开了，已经 Guardar + 取消全部变更 ✅'];
+  if (desconocidos > 0) partes.push(`「未知代码」弹窗 ${desconocidos} 次，都点了 Aceptar。`);
+  if (azules > 0) {
+    partes.push('', `⚠ 我数出 ${azules} 行像是蓝色的（有问题的商品）。这些我还不会自己点开——你在店里电脑上点它按 F5 看问题，处理完再回来点下面的按钮。`);
+  } else {
+    partes.push('', '没找到蓝色行。对着截图核一下：确实没有蓝的，就可以接受全部变更并确认了。');
+  }
+  partes.push('', '点「接受全部并确认」我就走：Aceptar todos → Guardar → Confirmar → Sí（不可逆）→ 关标签窗口 → 关货单窗口。');
+  if (huboDialogos) partes.push('（过程中弹了没见过的窗口，记在黑匣子里了）');
+  const opciones = {
+    __skipAI: true,
+    reply_markup: { inline_keyboard: [[
+      { text: azules > 0 ? '蓝色行处理好了，接受全部并确认' : '✅ 接受全部并确认', callback_data: 'alb:conf' },
+      { text: '先停这儿', callback_data: 'alb:no' }
+    ]] }
+  };
+  await enviarConFoto(chatId, res, partes.join('\n'), opciones);
+}
+
+// FASE 2: Aceptar todos los cambios → Guardar → Confirmar → Sí → cerrar
+// la ventana de etiquetas → cerrar la del albarán ya procesado.
+async function albaranFaseConfirmar(chatId) {
+  await telegram.sendMessage(chatId, '接受全部变更 → Guardar → Confirmar → Sí → 关窗口。别动电脑。', { __skipAI: true });
+  const etiqueta = 'UnideGes → Albarán electrónico';
+  const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'albaran', 'albaran_electronico', { fase: 'confirmar' }));
+  registrarSubpasosUnideges(res);
+  if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'albaran-confirmar', trace: res.trace });
+  if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
+
+  const si = numDeRespuesta(res, 'si');
+  const etiquetas = numDeRespuesta(res, 'etiquetas');
+  const cerradas = numDeRespuesta(res, 'cerradas');
+  const partes = [];
+  partes.push(si > 0
+    ? '这张货单确认完了 ✅（Aceptar todos → Guardar → Confirmar → Sí）'
+    : '⚠ 按了 Confirmar，但没等到「不可逆」那个确认框。看截图确认到底提交了没有。');
+  if (etiquetas > 0) partes.push(`标签窗口关了 ${etiquetas} 个——要打价签自己去打。`);
+  if (cerradas > 0) partes.push(`货单窗口关了 ${cerradas} 个。`);
+  partes.push('', '还有下一张的话，再发一次 /procesar_albaranes。');
+  await enviarConFoto(chatId, res, partes.join('\n'));
+}
+
+// Manda el mensaje con la captura si la hay; si falla la foto, solo texto.
+async function enviarConFoto(chatId, res, texto, opciones = { __skipAI: true }) {
+  if (res.screenshot && fs.existsSync(res.screenshot)) {
+    try { await telegram.sendPhoto(chatId, res.screenshot, texto, opciones); return; } catch { /* sin foto */ }
+  }
+  await telegram.sendMessage(chatId, texto, opciones);
 }
 
 // LMANMA: elegir fichero (los recientes de C:\Autocomm\entradas) →
@@ -3123,6 +3189,7 @@ async function handleLmanmaCallback(chatId, callbackId, resto) {
   await telegram.sendMessage(chatId, `开始处理「${file}」：LMMAMA → 今天生效 → 选这个文件。全程别动店里电脑。`, { __skipAI: true });
   const etiqueta = 'UnideGes → LMANMA';
   const res = await conNavegador(chatId, etiqueta, () => accionUnideges(config, logger, 'lmanma', 'lmanma', { archivo: ruta }));
+  registrarSubpasosUnideges(res);
   if (Array.isArray(res.trace) && res.trace.length) logger.info('unideges trace', { accion: 'lmanma-procesar', trace: res.trace });
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
   // El dueño dijo que el fichero DESAPARECE al procesarse: es la mejor
