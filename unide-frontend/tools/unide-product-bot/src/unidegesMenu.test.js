@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MODULOS_UNIDEGES, argumentosUnideges, esFicheroLmanma, matchAbrirUnideges, parseUnidegesCommand } from './unidegesMenu.js';
+import { MODULOS_UNIDEGES, argumentosUnideges, esFicheroLmanma, matchAbrirUnideges, parsePasos, parseUnidegesCommand } from './unidegesMenu.js';
 
 test('parseUnidegesCommand: menu, abrir y modulos con alias', () => {
   assert.deepEqual(parseUnidegesCommand('/unideges'), { accion: 'menu' });
@@ -91,4 +91,27 @@ test('esFicheroLmanma reconoce las grafías reales de la tienda', () => {
   assert.ok(!esFicheroLmanma('Ferrer%20T1'));
   assert.ok(!esFicheroLmanma('2026_07_25_01_50_32_MoveFELLog'));
   assert.ok(!esFicheroLmanma(''));
+});
+
+test('parsePasos lee las marcas de paso fino de la traza del PS', () => {
+  const trace = [
+    '+0s accion albaran fase procesar',
+    '+1.2s PASO: alb-marcar ok ',
+    '+2.4s PASO: alb-procesar ok',
+    "+9.1s preparar: 'Codigos desconocidos' -> Aceptar (regla del dueno)",
+    '+11s PASO: alb-desconocidos ok ',
+    '+14.5s PASO: alb-guardar1 fail no encontre Guardar',
+    '+20s PASO: alb-azules ok 3',
+    'RESULT: step=albaran-F7 status=ok intentos=1 duration=22.5s msg=revision lista'
+  ];
+  const pasos = parsePasos(trace);
+  assert.equal(pasos.length, 5);
+  assert.deepEqual(pasos[0], { id: 'alb-marcar', ok: true, detalle: '' });
+  assert.deepEqual(pasos[1], { id: 'alb-procesar', ok: true, detalle: '' });
+  assert.deepEqual(pasos[3], { id: 'alb-guardar1', ok: false, detalle: 'no encontre Guardar' });
+  assert.deepEqual(pasos[4], { id: 'alb-azules', ok: true, detalle: '3' });
+  // ni la linea RESULT ni el texto normal se cuelan
+  assert.ok(!pasos.some((p) => /RESULT|preparar/.test(p.id)));
+  assert.deepEqual(parsePasos(null), []);
+  assert.deepEqual(parsePasos(['PASO: sin-estado raro']), []);
 });

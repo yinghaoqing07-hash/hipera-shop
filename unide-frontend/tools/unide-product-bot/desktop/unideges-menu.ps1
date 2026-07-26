@@ -420,6 +420,141 @@ function Wait-VentanaTitulo([string]$Regex, [int]$Segundos, [long]$PidFiltro) {
   return $null
 }
 
+# Marca de PASO para el arbol de flujo del panel: el bot las lee de la
+# traza y enciende el nodo correspondiente. Formato fijo y sin acentos,
+# que lo parsea una expresion regular:  PASO: <id> <ok|fail> <detalle>
+function Paso([string]$Id, [string]$Estado, [string]$Detalle) {
+  Traza "PASO: $Id $Estado $Detalle"
+}
+
+# --- FILAS AZULES de la pantalla de revision (peticion del dueno, 25/07)
+# Las filas AZULES son articulos con problemas: hay que abrirlos con F5 y
+# mirar que les pasa ANTES de aceptar los cambios. El grid es de dibujo
+# propio (el volcado UIA de la ventana de albaranes no expone ni una fila),
+# asi que se detectan MIRANDO LOS PIXELES de la ventana: se muestrean
+# varias X por cada linea de altura y se busca el azul (B claramente por
+# encima de R y G). Ademas se vuelca un histograma de colores de fondo a
+# la caja negra, que es lo que permitira afinar el umbral con datos reales.
+function Analizar-FilasAzules([IntPtr]$Handle) {
+  $salida = @{ bandas = New-Object System.Collections.Generic.List[object]; resumen = ''; alto = 0; ancho = 0 }
+  $rect = New-Object W32Menu+RECT
+  $okRect = [W32Menu]::GetWindowRect($Handle, [ref]$rect)
+  if (-not $okRect) { $salida.resumen = 'no pude medir la ventana'; return $salida }
+  $ancho = $rect.Right - $rect.Left
+  $alto = $rect.Bottom - $rect.Top
+  $salida.ancho = $ancho
+  $salida.alto = $alto
+  if ($ancho -le 20 -or $alto -le 20) { $salida.resumen = 'ventana demasiado pequena'; return $salida }
+  $bmp = $null
+  $g = $null
+  try {
+    $bmp = New-Object System.Drawing.Bitmap $ancho, $alto
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $origen = New-Object System.Drawing.Point $rect.Left, $rect.Top
+    $tam = New-Object System.Drawing.Size $ancho, $alto
+    $g.CopyFromScreen($origen, [System.Drawing.Point]::Empty, $tam)
+  } catch {
+    $porQue = $_.Exception.Message
+    $salida.resumen = "no pude capturar la ventana - $porQue"
+    if ($g) { $g.Dispose() }
+    if ($bmp) { $bmp.Dispose() }
+    return $salida
+  }
+  # X de muestreo: repartidas por la mitad izquierda, que es donde estan
+  # las columnas de datos (a la derecha suele haber zona vacia).
+  $xs = New-Object System.Collections.Generic.List[int]
+  foreach ($frac in @(0.06, 0.12, 0.20, 0.28, 0.36, 0.44)) {
+    $x = [int]($ancho * $frac)
+    if ($x -ge 0 -and $x -lt $ancho) { $xs.Add($x) | Out-Null }
+  }
+  $histograma = @{}
+  $yAzules = New-Object System.Collections.Generic.List[int]
+  for ($y = 0; $y -lt $alto; $y = $y + 2) {
+    $azules = 0
+    $clave = ''
+    foreach ($x in $xs) {
+      $c = $bmp.GetPixel($x, $y)
+      $rr = [int]$c.R
+      $gg = [int]$c.G
+      $bb = [int]$c.B
+      if ($bb -gt ($rr + 30) -and $bb -gt ($gg + 30) -and $bb -gt 90) { $azules = $azules + 1 }
+      if ($clave -eq '') { $clave = "$rr,$gg,$bb" }
+    }
+    if ($histograma.ContainsKey($clave)) { $histograma[$clave] = [int]$histograma[$clave] + 1 } else { $histograma[$clave] = 1 }
+    # Mayoria de las muestras en azul = linea de una fila azul (no un
+    # icono ni un borde suelto).
+    if ($azules -ge ([int]($xs.Count / 2) + 1)) { $yAzules.Add($y) | Out-Null }
+  }
+  $g.Dispose()
+  $bmp.Dispose()
+
+  # Agrupar las lineas azules contiguas en BANDAS (cada banda = una fila).
+  $bandaIni = -1
+  $bandaFin = -1
+  foreach ($y in $yAzules) {
+    if ($bandaIni -lt 0) { $bandaIni = $y; $bandaFin = $y; continue }
+    if (($y - $bandaFin) -le 4) { $bandaFin = $y; continue }
+    $altoBanda = $bandaFin - $bandaIni
+    if ($altoBanda -ge 6) { $salida.bandas.Add(@{ Y = $rect.Top + [int](($bandaIni + $bandaFin) / 2); Alto = $altoBanda }) | Out-Null }
+    $bandaIni = $y
+    $bandaFin = $y
+  }
+  if ($bandaIni -ge 0) {
+    $altoBanda = $bandaFin - $bandaIni
+    if ($altoBanda -ge 6) { $salida.bandas.Add(@{ Y = $rect.Top + [int](($bandaIni + $bandaFin) / 2); Alto = $altoBanda }) | Out-Null }
+  }
+
+  # Histograma a la caja negra: con esto se calibra el umbral de verdad.
+  $top = $histograma.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 8
+  $trozos = New-Object System.Collections.Generic.List[string]
+  foreach ($par in $top) {
+    $col = $par.Key
+    $veces = $par.Value
+    $trozos.Add("$col x$veces") | Out-Null
+  }
+  $salida.resumen = $trozos -join ' | '
+  return $salida
+}
+
+# El boton de cambios ALTERNA su texto segun el estado: 'Aceptar Todos
+# Cambio' cuando pulsarlo aceptaria todo, 'Descartar Todos Cambio' cuando
+# pulsarlo lo descartaria. Devuelve 'aceptar', 'descartar' o ''.
+function Estado-BotonCambios($Raiz) {
+  $todos = Uia-Hijos $Raiz
+  if (-not $todos) { return '' }
+  foreach ($el in $todos) {
+    $nombre = ''
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = '' }
+    if ($nombre -eq '') { continue }
+    if ($nombre -match 'Descartar\s+Todos') { return 'descartar' }
+    if ($nombre -match 'Aceptar\s+Todos') { return 'aceptar' }
+  }
+  return ''
+}
+
+# Deja TODOS los cambios aceptados ($Aceptar = $true) o TODOS descartados.
+# Como el boton alterna, se pulsa hasta que su texto dice lo contrario de
+# lo que acabamos de hacer (aceptado todo => el boton ofrece 'Descartar').
+function Poner-Cambios([IntPtr]$Handle, [bool]$Aceptar) {
+  $meta = 'aceptar'
+  if ($Aceptar) { $meta = 'descartar' }
+  for ($i = 0; $i -lt 3; $i = $i + 1) {
+    $raiz = Uia-Raiz $Handle
+    if (-not $raiz) { return $false }
+    $estado = Estado-BotonCambios $raiz
+    if ($estado -eq '') { Traza "cambios: no encuentro el boton de todos los cambios"; return $false }
+    if ($estado -eq $meta) { return $true }
+    $queEs = $estado
+    Traza "cambios: el boton dice '$queEs', lo pulso"
+    Activar-PorNombre $raiz 'Aceptar\s+Todos|Descartar\s+Todos' 'todos los cambios' | Out-Null
+    Start-Sleep -Milliseconds 1500
+  }
+  $raizFin = Uia-Raiz $Handle
+  $estadoFin = ''
+  if ($raizFin) { $estadoFin = Estado-BotonCambios $raizFin }
+  return ($estadoFin -eq $meta)
+}
+
 # Ventana top-level del proceso que CONTIENE un elemento con ese nombre.
 # Mas fiable que el titulo: la pantalla de revision de precios del albaran
 # y la de etiquetas no tienen titulo estable, pero sus botones si.
@@ -465,57 +600,25 @@ function Apuntar-VentanasNuevas([long]$ProcId, $Vistos, [string]$Excluir) {
   }
 }
 
-# CICLO COMPLETO del procesado de albaranes. Reglas dictadas por el dueno
-# el 25/07 despues de ver sus videos del proceso a mano:
-#   - 'Codigos desconocidos'          -> Aceptar
-#   - pantalla de revision de precios -> 'Aceptar Todos Cambio' + 'Confirmar'
-#   - 'confirmacion irreversible'     -> Si
-#   - ventana de etiquetas MADISA     -> cerrar (el las imprime a mano)
-#   - cualquier otra ventana          -> caja negra, sin tocarla
-# El ciclo se repite mientras haya novedades (varios ficheros seguidos) y
-# para cuando pasan $SegundosIdle sin que aparezca nada nuevo.
-function Ciclo-Albaran([long]$ProcId, [int]$SegundosIdle, [int]$TopeTotal) {
-  $res = @{ desconocidos = 0; confirmados = 0; etiquetas = 0; atascado = 0 }
-  $inicio = [DateTime]::Now
-  $ultima = [DateTime]::Now
+# Tras pulsar Procesar: atender 'Codigos desconocidos' (regla del dueno:
+# Aceptar) y esperar a que aparezca la PANTALLA DE REVISION DE PRECIOS.
+# Cualquier otra ventana se vuelca a la caja negra sin tocarla. Devuelve
+# cuantos avisos se atendieron y la ventana de revision (o $null).
+function Preparar-Revision([long]$ProcId, [int]$Segundos) {
+  $res = @{ desconocidos = 0; ventana = $null }
   $vistos = @{}
-  $intentosConfirmar = 0
   $intentosDesconocidos = 0
-  $intentosEtiquetas = @{}
   foreach ($par in [W32Menu]::VisibleWindows()) { $vistos[[string]$par[0]] = $true }
-  while ($true) {
-    $sinNovedad = ([DateTime]::Now - $ultima).TotalSeconds
-    $total = ([DateTime]::Now - $inicio).TotalSeconds
-    if ($sinNovedad -ge $SegundosIdle) { break }
-    if ($total -ge $TopeTotal) { Traza "ciclo albaran: tope de tiempo, lo dejo aqui"; $res.atascado = 1; break }
+  $tope = [DateTime]::Now.AddSeconds($Segundos)
+  while ([DateTime]::Now -lt $tope) {
     Start-Sleep -Milliseconds 700
 
-    # 1) El dialogo modal manda: mientras este abierto no se puede nada mas.
-    $dlg = Find-VentanaConElemento 'irreversible' $ProcId
-    if ($dlg) {
-      Traza "ciclo: 'la confirmacion es irreversible' -> Si (regla del dueno)"
-      $rd = Uia-Raiz $dlg.Handle
-      # 'Si' con y sin tilde. La tilde va como escape backslash-u00ed de la regex
-      # .NET para NO meter un byte no ASCII en este fichero (la regla de
-      # la casa que ya nos costo v220-v223).
-      if ($rd) { Activar-PorNombre $rd '^\s*S(i|\u00ed)\s*$' 'confirmar irreversible' | Out-Null }
-      Start-Sleep -Milliseconds 1800
-      $res.confirmados = $res.confirmados + 1
-      $intentosConfirmar = 0
-      $ultima = [DateTime]::Now
-      continue
-    }
-
-    # 2) Codigos desconocidos -> Aceptar (puede salir uno por fichero).
     $des = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
     if ($des -and $intentosDesconocidos -lt 3 -and $res.desconocidos -lt 15) {
       $tituloD = $des.Title
       $rD = Uia-Raiz $des.Handle
-      if ($rD) {
-        $todosD = Uia-Hijos $rD
-        Volcar-Elementos $todosD "dialogo '$tituloD'" 15
-      }
-      Traza "ciclo: 'Codigos desconocidos' -> Aceptar (regla del dueno)"
+      if ($rD) { Volcar-Elementos (Uia-Hijos $rD) "dialogo '$tituloD'" 15 }
+      Traza "preparar: 'Codigos desconocidos' -> Aceptar (regla del dueno)"
       $okAce = $false
       $rD2 = Uia-Raiz $des.Handle
       if ($rD2) { $okAce = Activar-PorNombre $rD2 '^\s*Aceptar\s*$' 'codigos desconocidos' }
@@ -524,15 +627,57 @@ function Ciclo-Albaran([long]$ProcId, [int]$SegundosIdle, [int]$TopeTotal) {
       if ($okAce -and (-not $sigue -or [long]$sigue.Handle -ne [long]$des.Handle)) {
         $res.desconocidos = $res.desconocidos + 1
         $intentosDesconocidos = 0
+        Paso 'alb-desconocidos' 'ok' ''
       } else {
         $intentosDesconocidos = $intentosDesconocidos + 1
         Traza "sigue abierto tras Aceptar (intento $intentosDesconocidos de 3)"
       }
-      $ultima = [DateTime]::Now
       continue
     }
 
-    # 3) Ventana de etiquetas MADISA -> cerrarla (WM_CLOSE, sin clicar nada).
+    $rev = Find-VentanaConElemento 'Aceptar\s+Todos|Descartar\s+Todos' $ProcId
+    if ($rev) {
+      $tituloR = $rev.Title
+      Traza "preparar: pantalla de revision de precios delante ('$tituloR')"
+      $res.ventana = $rev
+      return $res
+    }
+
+    Apuntar-VentanasNuevas $ProcId $vistos 'C.digos desconocidos'
+  }
+  Traza "preparar: se agoto la espera sin ver la pantalla de revision"
+  return $res
+}
+
+# Tras pulsar Confirmar: responder Si al aviso de que el proceso es
+# irreversible, cerrar la ventana de etiquetas MADISA (el dueno las
+# imprime a mano) y cerrar la ventana de revision ya procesada, para
+# dejar sitio al albaran siguiente.
+function Cerrar-Proceso([long]$ProcId, [int]$Segundos) {
+  $res = @{ si = 0; etiquetas = 0; cerradas = 0 }
+  $vistos = @{}
+  $intentosEtiquetas = @{}
+  $intentosCierre = @{}
+  foreach ($par in [W32Menu]::VisibleWindows()) { $vistos[[string]$par[0]] = $true }
+  $tope = [DateTime]::Now.AddSeconds($Segundos)
+  while ([DateTime]::Now -lt $tope) {
+    Start-Sleep -Milliseconds 700
+
+    # 1) El modal manda: 'el proceso de confirmacion es irreversible'.
+    $dlg = Find-VentanaConElemento 'irreversible' $ProcId
+    if ($dlg) {
+      Traza "cerrar: 'la confirmacion es irreversible' -> Si (regla del dueno)"
+      $rd = Uia-Raiz $dlg.Handle
+      # 'Si' con y sin tilde; la tilde va como escape de regex .NET para
+      # no meter un byte no ASCII en este fichero.
+      if ($rd) { Activar-PorNombre $rd '^\s*S(i|\u00ed)\s*$' 'confirmar irreversible' | Out-Null }
+      Start-Sleep -Milliseconds 1800
+      $res.si = $res.si + 1
+      Paso 'alb-si' 'ok' ''
+      continue
+    }
+
+    # 2) Ventana de etiquetas -> cerrar sin imprimir.
     $etq = Find-VentanaConElemento 'Imprimir\s+Etiquetas' $ProcId
     if ($etq) {
       $claveE = [string]([long]$etq.Handle)
@@ -540,53 +685,37 @@ function Ciclo-Albaran([long]$ProcId, [int]$SegundosIdle, [int]$TopeTotal) {
       if ($intentosEtiquetas.ContainsKey($claveE)) { $yaVa = [int]$intentosEtiquetas[$claveE] }
       if ($yaVa -lt 2) {
         $intentosEtiquetas[$claveE] = $yaVa + 1
-        Traza "ciclo: ventana de etiquetas -> la cierro (el dueno las imprime a mano si hacen falta)"
+        Traza "cerrar: ventana de etiquetas -> la cierro (el dueno las imprime a mano)"
         [W32Menu]::SendMessage($etq.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         Start-Sleep -Milliseconds 1500
         $res.etiquetas = $res.etiquetas + 1
-        $ultima = [DateTime]::Now
+        Paso 'alb-etiquetas' 'ok' ''
         continue
       }
     }
 
-    # 4) Pantalla de revision de precios: aceptar TODOS los cambios y
-    #    confirmar (regla del dueno: siempre se aceptan todos).
+    # 3) La revision ya confirmada: cerrarla para pasar al siguiente.
     $rev = Find-VentanaConElemento 'Aceptar\s+Todos|Descartar\s+Todos' $ProcId
-    if ($rev -and $intentosConfirmar -lt 3) {
-      $rr = Uia-Raiz $rev.Handle
-      if ($rr) {
-        $todosR = Uia-Hijos $rr
-        $hayAceptar = $false
-        foreach ($el in $todosR) {
-          $nom = ""
-          try { $nom = [string]$el.Current.Name } catch { $nom = "" }
-          if ($nom -match 'Aceptar\s+Todos') { $hayAceptar = $true; break }
-        }
-        if ($hayAceptar) {
-          Traza "ciclo: pantalla de revision -> 'Aceptar Todos Cambio'"
-          Activar-PorNombre $rr 'Aceptar\s+Todos' 'aceptar todos los cambios' | Out-Null
-          Start-Sleep -Milliseconds 1800
-        } else {
-          Traza "ciclo: pantalla de revision con los cambios ya aceptados"
-        }
-        $rr2 = Uia-Raiz $rev.Handle
-        if ($rr2) {
-          Traza "ciclo: pulso 'Confirmar'"
-          Activar-PorNombre $rr2 '^\s*Confirmar\s*$' 'confirmar albaran' | Out-Null
-        }
-        $intentosConfirmar = $intentosConfirmar + 1
-        $ultima = [DateTime]::Now
+    if ($rev) {
+      $claveR = [string]([long]$rev.Handle)
+      $yaVaR = 0
+      if ($intentosCierre.ContainsKey($claveR)) { $yaVaR = [int]$intentosCierre[$claveR] }
+      if ($yaVaR -lt 2) {
+        $intentosCierre[$claveR] = $yaVaR + 1
+        Traza "cerrar: ventana del albaran procesado -> la cierro"
+        [W32Menu]::SendMessage($rev.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        Start-Sleep -Milliseconds 1800
+        $res.cerradas = $res.cerradas + 1
+        Paso 'alb-cerrar' 'ok' ''
         continue
       }
-    }
-    if ($rev -and $intentosConfirmar -ge 3) {
-      Traza "ciclo: 'Confirmar' no responde tras 3 intentos; lo dejo para el dueno"
-      $res.atascado = 1
+      # No se deja cerrar: se queda ahi y el dueno lo vera en la captura.
       break
     }
 
-    # 5) Lo que no conocemos: a la caja negra, sin tocarlo.
-    Apuntar-VentanasNuevas $ProcId $vistos 'C.digos desconocidos'
+    # 4) Ni modal, ni etiquetas, ni revision: hemos terminado.
+    Apuntar-VentanasNuevas $ProcId $vistos ''
+    if ($res.si -gt 0) { break }
   }
   return $res
 }
@@ -1234,20 +1363,111 @@ try {
       # con la lista de verdad vacia, Marcar todos + Procesar no hacen nada.
       Traza "albaran: conteo en 0 (lista vacia o control que no se deja leer); sigo, el dueno confirmo con la captura"
     }
-    $okMarcar = Activar-PorNombre $raiz '^\s*Marcar todos\s*$' 'albaran: Marcar todos'
-    if (-not $okMarcar) { throw "no encontre el boton 'Marcar todos' (mira la caja negra)" }
-    Start-Sleep -Milliseconds 900
-    $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
-    if (-not $okProc) { throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
-    Traza "albaran: Procesar pulsado; entro en el ciclo completo del proceso"
-    $ciclo = Ciclo-Albaran $vent.ProcId 25 170
-    $nDes = $ciclo.desconocidos
-    $nConf = $ciclo.confirmados
-    $nEtq = $ciclo.etiquetas
-    $atasco = $ciclo.atascado
-    $shot = Take-MenuShot 'albaran-procesar'
-    Emit 'ok' "Procesar completo; filas=$filas; desconocidos=$nDes; confirmados=$nConf; etiquetas=$nEtq; atascado=$atasco" $tituloVent $shot
-    exit 0
+
+    # ---- FASE 'procesar': hasta dejar la revision lista para MIRAR ----
+    # Orden dictado por el dueno (25/07): Procesar, Guardar, Descartar
+    # todos los cambios, y AHI SE PARA para revisar las filas azules
+    # (articulos con problemas) antes de aceptar nada.
+    if ($Fase -eq 'procesar') {
+      $okMarcar = Activar-PorNombre $raiz '^\s*Marcar todos\s*$' 'albaran: Marcar todos'
+      if (-not $okMarcar) { Paso 'alb-marcar' 'fail' 'no encontre Marcar todos'; throw "no encontre el boton 'Marcar todos' (mira la caja negra)" }
+      Paso 'alb-marcar' 'ok' ''
+      Start-Sleep -Milliseconds 900
+      $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
+      if (-not $okProc) { Paso 'alb-procesar' 'fail' 'no encontre Procesar'; throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
+      Paso 'alb-procesar' 'ok' ''
+
+      # Codigos desconocidos y cualquier otra ventana rara, hasta que
+      # aparezca la pantalla de revision de precios.
+      $prep = Preparar-Revision $vent.ProcId 60
+      $nDes = $prep.desconocidos
+      $rev = $prep.ventana
+      if (-not $rev) {
+        $shot = Take-MenuShot 'albaran-sin-revision'
+        Emit 'ok' "Procesar pulsado pero no vi la pantalla de revision; filas=$filas; desconocidos=$nDes; revision=0" $tituloVent $shot
+        exit 0
+      }
+      Paso 'alb-revision' 'ok' ''
+
+      # Guardar + Descartar todos los cambios (orden del dueno).
+      $raizRev = Uia-Raiz $rev.Handle
+      $okGuardar = $false
+      if ($raizRev) {
+        Volcar-Elementos (Uia-Hijos $raizRev) 'revision de precios' 120
+        $okGuardar = Activar-PorNombre $raizRev '^\s*Guardar\s*$' 'revision: Guardar'
+      }
+      $estadoG = 'fail'
+      if ($okGuardar) { $estadoG = 'ok' }
+      Paso 'alb-guardar1' $estadoG ''
+      Start-Sleep -Milliseconds 1500
+
+      $okDesc = Poner-Cambios $rev.Handle $false
+      $estadoD = 'fail'
+      if ($okDesc) { $estadoD = 'ok' }
+      Paso 'alb-descartar' $estadoD ''
+      Start-Sleep -Milliseconds 800
+
+      # Filas AZULES = articulos con problemas. Se MIRAN, no se tocan.
+      [W32Menu]::SetForegroundWindow($rev.Handle) | Out-Null
+      Start-Sleep -Milliseconds 500
+      $azul = Analizar-FilasAzules $rev.Handle
+      $nAzules = $azul.bandas.Count
+      $colores = $azul.resumen
+      Traza "revision: colores de fondo mas vistos -> $colores"
+      Traza "revision: bandas azules detectadas -> $nAzules"
+      foreach ($b in $azul.bandas) {
+        $by = $b.Y
+        $ba = $b.Alto
+        Traza "  - fila azul en y=$by (alto $ba)"
+      }
+      $estadoA = 'ok'
+      Paso 'alb-azules' $estadoA "$nAzules"
+      $shot = Take-MenuShot 'albaran-revision'
+      Emit 'ok' "revision lista; filas=$filas; desconocidos=$nDes; revision=1; azules=$nAzules; colores=$colores" $tituloVent $shot
+      exit 0
+    }
+
+    # ---- FASE 'confirmar': el dueno ya reviso las filas azules ----
+    # Aceptar todos los cambios, Guardar, Confirmar, Si, cerrar la ventana
+    # de etiquetas y cerrar la del albaran ya procesado.
+    if ($Fase -eq 'confirmar') {
+      $rev = Find-VentanaConElemento 'Aceptar\s+Todos|Descartar\s+Todos' 0
+      if (-not $rev) { throw "no encuentro la pantalla de revision de precios abierta; vuelve a lanzar el proceso" }
+      [W32Menu]::SetForegroundWindow($rev.Handle) | Out-Null
+      Start-Sleep -Milliseconds 500
+
+      $okAcep = Poner-Cambios $rev.Handle $true
+      $estadoAc = 'fail'
+      if ($okAcep) { $estadoAc = 'ok' }
+      Paso 'alb-aceptar-todos' $estadoAc ''
+      if (-not $okAcep) { throw "no pude dejar todos los cambios aceptados (mira la caja negra)" }
+      Start-Sleep -Milliseconds 1200
+
+      $raizRev2 = Uia-Raiz $rev.Handle
+      $okGuardar2 = $false
+      if ($raizRev2) { $okGuardar2 = Activar-PorNombre $raizRev2 '^\s*Guardar\s*$' 'revision: Guardar (2)' }
+      $estadoG2 = 'fail'
+      if ($okGuardar2) { $estadoG2 = 'ok' }
+      Paso 'alb-guardar2' $estadoG2 ''
+      Start-Sleep -Milliseconds 1500
+
+      $raizRev3 = Uia-Raiz $rev.Handle
+      $okConf = $false
+      if ($raizRev3) { $okConf = Activar-PorNombre $raizRev3 '^\s*Confirmar\s*$' 'revision: Confirmar' }
+      $estadoC = 'fail'
+      if ($okConf) { $estadoC = 'ok' }
+      Paso 'alb-confirmar' $estadoC ''
+
+      $cierre = Cerrar-Proceso $rev.ProcId 40
+      $nSi = $cierre.si
+      $nEtq = $cierre.etiquetas
+      $nCerr = $cierre.cerradas
+      $shot = Take-MenuShot 'albaran-confirmar'
+      Emit 'ok' "confirmado; si=$nSi; etiquetas=$nEtq; cerradas=$nCerr" $tituloVent $shot
+      exit 0
+    }
+
+    throw "Fase de albaran desconocida: '$Fase' (validas: leer, procesar, confirmar)"
   }
 
   # --- PROCESADO LMANMA / LMMAMA (v261) --------------------------------

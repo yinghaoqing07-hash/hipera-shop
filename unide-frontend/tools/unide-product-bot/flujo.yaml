@@ -58,6 +58,66 @@ nodos:
     match: ["UnideGes → LMANMA"]
     desc: 进 工具(F6) 再进 LMANMA，那里处理「运营信息传递」下载回来的 fichero。第一版只负责开到这儿并截图。
 
+  # Cada paso del procesado de albaranes por separado (peticion del dueno,
+  # 25/07: "越细越好，这样哪里出错了我可以更容易知道是哪一步"). El PS emite
+  # una linea "PASO: <id> ok|fail" por cada uno y el bot los enciende aqui.
+  - id: alb-marcar
+    nombre: 全选货单
+    grupo: 电子货单处理
+    desc: 在货单文件列表里点 Marcar todos，把待处理的 .FEL 全勾上。
+  - id: alb-procesar
+    nombre: 点 Procesar
+    grupo: 电子货单处理
+    desc: 点 Procesar 开始处理勾选的货单文件。
+  - id: alb-desconocidos
+    nombre: 未知代码 Aceptar
+    grupo: 电子货单处理
+    desc: 弹出「Códigos desconocidos」（文件里有不认识的代码）时点 Aceptar，按你定的规矩。没弹就不会亮。
+  - id: alb-revision
+    nombre: 打开复核表
+    grupo: 电子货单处理
+    desc: 等 Procesar 之后的价格复核表出现（PVP Actual 对 PVP Propuesto 那张）。
+  - id: alb-guardar1
+    nombre: 保存 (Guardar)
+    grupo: 电子货单处理
+    desc: 复核表出来后先点一次 Guardar。
+  - id: alb-descartar
+    nombre: 全部取消变更
+    grupo: 电子货单处理
+    desc: 点 Descartar todos cambios 把变更全部取消，好逐个看蓝色行。
+  - id: alb-azules
+    nombre: 找蓝色行
+    grupo: 电子货单处理
+    desc: 扫描复核表里的蓝色行——蓝色代表这个商品有问题，要先开它看问题再继续。
+  - id: alb-azul-diag
+    nombre: 诊断问题商品
+    grupo: 电子货单处理
+    desc: 点蓝色行按 F5 打开商品，用商品诊断那套逻辑判断它有什么问题（只读，不生成 etiqueta——那个已经生成过了）。
+  - id: alb-aceptar-todos
+    nombre: 接受全部变更
+    grupo: 电子货单处理
+    desc: 蓝色行都处理完后，点 Aceptar todos cambios 把价格变更全部接受。
+  - id: alb-guardar2
+    nombre: 再保存
+    grupo: 电子货单处理
+    desc: 接受变更后再点一次 Guardar。
+  - id: alb-confirmar
+    nombre: Confirmar
+    grupo: 电子货单处理
+    desc: 点 Confirmar 提交这张货单。
+  - id: alb-si
+    nombre: 确认不可逆 (Sí)
+    grupo: 电子货单处理
+    desc: 回答「确认过程不可逆，继续吗」→ Sí。这一步之后就改不回来了。
+  - id: alb-etiquetas
+    nombre: 关标签窗口
+    grupo: 电子货单处理
+    desc: 确认后弹出的 MADISA 价签打印窗口直接关掉——要打价签你自己去打。
+  - id: alb-cerrar
+    nombre: 关货单窗口
+    grupo: 电子货单处理
+    desc: 关掉处理完的这张货单窗口，然后回到「全选货单」处理下一张，直到列表清空。
+
   - id: ug-buscar
     nombre: 查商品 (桌面)
     grupo: 桌面 UnideGes
@@ -218,6 +278,25 @@ edges:
   # tratan: 运营信息传递 los descarga, aqui se procesan (peticion del dueño).
   - [ug-albaranes, ug-albaran-electronico]
   - [web-mensajeria, ug-albaran-electronico]
+  # El procesado de una factura, paso a paso y en el orden real que dicto
+  # el dueno: procesar, guardar, descartar todos, filas azules, aceptar
+  # todos, guardar, confirmar, si, cerrar etiquetas, cerrar ventana.
+  - [ug-albaran-electronico, alb-marcar]
+  - [alb-marcar, alb-procesar]
+  - [alb-procesar, alb-desconocidos]
+  - [alb-procesar, alb-revision]
+  - [alb-revision, alb-guardar1]
+  - [alb-guardar1, alb-descartar]
+  - [alb-descartar, alb-azules]
+  - [alb-azules, alb-azul-diag]
+  - [herr-diag-productos, alb-azul-diag]
+  - [alb-azules, alb-aceptar-todos]
+  - [alb-azul-diag, alb-aceptar-todos]
+  - [alb-aceptar-todos, alb-guardar2]
+  - [alb-guardar2, alb-confirmar]
+  - [alb-confirmar, alb-si]
+  - [alb-si, alb-etiquetas]
+  - [alb-etiquetas, alb-cerrar]
   - [ug-utilidades, ug-lmanma]
   - [web-mensajeria, ug-lmanma]
   - [web-abrir, web-promos]
