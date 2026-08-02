@@ -3065,13 +3065,22 @@ async function albaranFaseProcesar(chatId) {
   if (res.status !== 'ok') { await avisarFalloUnideges(chatId, etiqueta, res); return; }
 
   const desconocidos = numDeRespuesta(res, 'desconocidos');
+  const sustituciones = numDeRespuesta(res, 'sustituciones');
   const hayRevision = numDeRespuesta(res, 'revision') > 0;
   const azules = numDeRespuesta(res, 'azules');
   const huboDialogos = (res.trace || []).some((l) => /ventana nueva/.test(String(l)));
+  // Los albaranes con artículos sustituidos: el proveedor mandó otra cosa
+  // distinta de lo pedido. Se los digo por número para que los revise.
+  const albaranesSust = String((String(res.mensaje || '').match(/albaranes=([\d,]*)/) || [])[1] || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  const avisoSust = sustituciones > 0
+    ? `⚠ 有 ${sustituciones} 张货单是「供应商拿别的商品替代了你订的」${albaranesSust.length ? `（货单号 ${albaranesSust.join('、')}）` : ''}，我按规矩点了 Aceptar，但这几张你最好自己核一下换成了什么。`
+    : '';
 
   if (!hayRevision) {
     const partes = ['Procesar 按下去了，但没等到价格复核表出现。看截图确认是不是卡在别的地方了。'];
     if (desconocidos > 0) partes.push(`（中间「未知代码」弹了 ${desconocidos} 次，都点了 Aceptar）`);
+    if (avisoSust) partes.push(avisoSust);
     if (huboDialogos) partes.push('弹了没见过的窗口，都记在黑匣子里了。');
     await enviarConFoto(chatId, res, partes.join('\n'));
     return;
@@ -3079,6 +3088,7 @@ async function albaranFaseProcesar(chatId) {
 
   const partes = ['复核表打开了，已经 Guardar + 取消全部变更 ✅'];
   if (desconocidos > 0) partes.push(`「未知代码」弹窗 ${desconocidos} 次，都点了 Aceptar。`);
+  if (avisoSust) partes.push(avisoSust);
   if (azules > 0) {
     partes.push('', `⚠ 我数出 ${azules} 行像是蓝色的（有问题的商品）。这些我还不会自己点开——你在店里电脑上点它按 F5 看问题，处理完再回来点下面的按钮。`);
   } else {

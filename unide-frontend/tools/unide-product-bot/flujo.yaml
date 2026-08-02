@@ -73,6 +73,10 @@ nodos:
     nombre: 未知代码 Aceptar
     grupo: 电子货单处理
     desc: 弹出「Códigos desconocidos」（文件里有不认识的代码）时点 Aceptar，按你定的规矩。没弹就不会亮。
+  - id: alb-sustituciones
+    nombre: 替代商品 Aceptar
+    grupo: 电子货单处理
+    desc: 弹出「Artículos albarán distintos a pedidos」（供应商用别的商品替代了你订的）时点 Aceptar。会把货单号报给你，方便事后核对。没弹就不会亮。
   - id: alb-revision
     nombre: 打开复核表
     grupo: 电子货单处理
@@ -284,6 +288,7 @@ edges:
   - [ug-albaran-electronico, alb-marcar]
   - [alb-marcar, alb-procesar]
   - [alb-procesar, alb-desconocidos]
+  - [alb-procesar, alb-sustituciones]
   - [alb-procesar, alb-revision]
   - [alb-revision, alb-guardar1]
   - [alb-guardar1, alb-descartar]
