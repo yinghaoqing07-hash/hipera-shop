@@ -555,6 +555,74 @@ function Poner-Cambios([IntPtr]$Handle, [bool]$Aceptar) {
   return ($estadoFin -eq $meta)
 }
 
+# Dialogos CONOCIDOS del procesado de albaranes: informativos, se cierran
+# con Aceptar y el proceso sigue. Cada uno se anadio despues de verlo de
+# verdad en la tienda y de que el dueno dijera que se hace con el:
+#   - 'Codigos desconocidos'                (25/07) el fichero trae codigos
+#     que UnideGes no conoce.
+#   - 'Articulos albaran distintos a pedidos' (02/08) el proveedor manda
+#     articulos en sustitucion de los pedidos. Este bloqueo dejo el proceso
+#     colgado 62 s hasta agotar la espera.
+$DIALOGOS_ACEPTAR = @(
+  @{ patron = 'C.digos desconocidos'; clave = 'desconocidos' },
+  @{ patron = 'Art.culos albar.n distintos'; clave = 'sustituciones' }
+)
+
+# Numero de albaran que ensena un dialogo (el dump lo da como un Pane con
+# solo digitos). '' si no se ve ninguno.
+function Numero-Albaran($Raiz) {
+  $todos = Uia-Hijos $Raiz
+  if (-not $todos) { return '' }
+  foreach ($el in $todos) {
+    $nombre = ''
+    try { $nombre = [string]$el.Current.Name } catch { $nombre = '' }
+    if ($nombre -match '^\s*\d{6,}\s*$') { return $nombre.Trim() }
+  }
+  return ''
+}
+
+# Si hay un dialogo conocido abierto, lo vuelca y lo cierra con Aceptar.
+# Devuelve la clave del que atendio ('' si no habia ninguno) y el numero
+# de albaran que ensenaba, para poder contarselo al dueno.
+function Atender-DialogoConocido([long]$ProcId) {
+  foreach ($d in $DIALOGOS_ACEPTAR) {
+    $patron = $d.patron
+    $v = Find-VentanaTitulo $patron $ProcId
+    if (-not $v) { continue }
+    $tituloV = $v.Title
+    $raiz = Uia-Raiz $v.Handle
+    $numero = ''
+    if ($raiz) {
+      Volcar-Elementos (Uia-Hijos $raiz) "dialogo '$tituloV'" 20
+      $numero = Numero-Albaran $raiz
+    }
+    Traza "dialogo conocido '$tituloV' -> Aceptar (regla del dueno)"
+    $ok = $false
+    $raiz2 = Uia-Raiz $v.Handle
+    if ($raiz2) { $ok = Activar-PorNombre $raiz2 '^\s*Aceptar\s*$' 'dialogo conocido' }
+    Start-Sleep -Milliseconds 1800
+    $sigue = Find-VentanaTitulo $patron $ProcId
+    $cerrado = ($ok -and (-not $sigue -or [long]$sigue.Handle -ne [long]$v.Handle))
+    return @{ clave = $d.clave; cerrado = $cerrado; numero = $numero }
+  }
+  return @{ clave = ''; cerrado = $false; numero = '' }
+}
+
+# Pulsar un boton con reintentos: el 02/08 a las 19:35 'Marcar todos' fallo
+# a la primera y a la segunda pasada funciono (el arbol UIA tarda un
+# instante en estar listo tras traer la ventana al frente).
+function Activar-ConReintentos([IntPtr]$Handle, [string]$Patron, [string]$Etiqueta, [int]$Intentos) {
+  for ($i = 1; $i -le $Intentos; $i = $i + 1) {
+    $raiz = Uia-Raiz $Handle
+    if ($raiz) {
+      if (Activar-PorNombre $raiz $Patron $Etiqueta) { return $true }
+    }
+    Traza "$Etiqueta : intento $i sin exito, reintento"
+    Start-Sleep -Milliseconds 1200
+  }
+  return $false
+}
+
 # Ventana top-level del proceso que CONTIENE un elemento con ese nombre.
 # Mas fiable que el titulo: la pantalla de revision de precios del albaran
 # y la de etiquetas no tienen titulo estable, pero sus botones si.
@@ -605,34 +673,34 @@ function Apuntar-VentanasNuevas([long]$ProcId, $Vistos, [string]$Excluir) {
 # Cualquier otra ventana se vuelca a la caja negra sin tocarla. Devuelve
 # cuantos avisos se atendieron y la ventana de revision (o $null).
 function Preparar-Revision([long]$ProcId, [int]$Segundos) {
-  $res = @{ desconocidos = 0; ventana = $null }
+  $res = @{ desconocidos = 0; sustituciones = 0; albaranes = New-Object System.Collections.Generic.List[string]; ventana = $null }
   $vistos = @{}
-  $intentosDesconocidos = 0
+  $fallosDialogo = 0
   foreach ($par in [W32Menu]::VisibleWindows()) { $vistos[[string]$par[0]] = $true }
   $tope = [DateTime]::Now.AddSeconds($Segundos)
   while ([DateTime]::Now -lt $tope) {
     Start-Sleep -Milliseconds 700
 
-    $des = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
-    if ($des -and $intentosDesconocidos -lt 3 -and $res.desconocidos -lt 15) {
-      $tituloD = $des.Title
-      $rD = Uia-Raiz $des.Handle
-      if ($rD) { Volcar-Elementos (Uia-Hijos $rD) "dialogo '$tituloD'" 15 }
-      Traza "preparar: 'Codigos desconocidos' -> Aceptar (regla del dueno)"
-      $okAce = $false
-      $rD2 = Uia-Raiz $des.Handle
-      if ($rD2) { $okAce = Activar-PorNombre $rD2 '^\s*Aceptar\s*$' 'codigos desconocidos' }
-      Start-Sleep -Milliseconds 1800
-      $sigue = Find-VentanaTitulo 'C.digos desconocidos' $ProcId
-      if ($okAce -and (-not $sigue -or [long]$sigue.Handle -ne [long]$des.Handle)) {
-        $res.desconocidos = $res.desconocidos + 1
-        $intentosDesconocidos = 0
-        Paso 'alb-desconocidos' 'ok' ''
-      } else {
-        $intentosDesconocidos = $intentosDesconocidos + 1
-        Traza "sigue abierto tras Aceptar (intento $intentosDesconocidos de 3)"
+    # Dialogos informativos conocidos: se aceptan y el proceso sigue.
+    if ($fallosDialogo -lt 3) {
+      $at = Atender-DialogoConocido $ProcId
+      if ($at.clave -ne '') {
+        if ($at.cerrado) {
+          $fallosDialogo = 0
+          if ($at.clave -eq 'desconocidos') {
+            $res.desconocidos = $res.desconocidos + 1
+            Paso 'alb-desconocidos' 'ok' ''
+          } else {
+            $res.sustituciones = $res.sustituciones + 1
+            Paso 'alb-sustituciones' 'ok' $at.numero
+            if ($at.numero -ne '') { $res.albaranes.Add($at.numero) | Out-Null }
+          }
+        } else {
+          $fallosDialogo = $fallosDialogo + 1
+          Traza "el dialogo sigue abierto tras Aceptar (intento $fallosDialogo de 3)"
+        }
+        continue
       }
-      continue
     }
 
     $rev = Find-VentanaConElemento 'Aceptar\s+Todos|Descartar\s+Todos' $ProcId
@@ -1369,22 +1437,32 @@ try {
     # todos los cambios, y AHI SE PARA para revisar las filas azules
     # (articulos con problemas) antes de aceptar nada.
     if ($Fase -eq 'procesar') {
-      $okMarcar = Activar-PorNombre $raiz '^\s*Marcar todos\s*$' 'albaran: Marcar todos'
+      # Un dialogo de una corrida anterior tapando la lista deja los
+      # botones inalcanzables: atenderlo antes de nada.
+      $limpieza = Atender-DialogoConocido $vent.ProcId
+      if ($limpieza.clave -ne '') { Traza "habia un dialogo abierto de antes; atendido" }
+
+      # Con reintentos: el 02/08 'Marcar todos' fallo a la primera y a la
+      # segunda pasada funciono sin tocar nada.
+      $okMarcar = Activar-ConReintentos $vent.Handle '^\s*Marcar todos\s*$' 'albaran: Marcar todos' 3
       if (-not $okMarcar) { Paso 'alb-marcar' 'fail' 'no encontre Marcar todos'; throw "no encontre el boton 'Marcar todos' (mira la caja negra)" }
       Paso 'alb-marcar' 'ok' ''
       Start-Sleep -Milliseconds 900
-      $okProc = Activar-PorNombre $raiz '^\s*Procesar\s*$' 'albaran: Procesar'
+      $okProc = Activar-ConReintentos $vent.Handle '^\s*Procesar\s*$' 'albaran: Procesar' 3
       if (-not $okProc) { Paso 'alb-procesar' 'fail' 'no encontre Procesar'; throw "marque todos pero no encontre el boton 'Procesar' (mira la caja negra)" }
       Paso 'alb-procesar' 'ok' ''
 
-      # Codigos desconocidos y cualquier otra ventana rara, hasta que
+      # Dialogos informativos conocidos y cualquier ventana rara, hasta que
       # aparezca la pantalla de revision de precios.
-      $prep = Preparar-Revision $vent.ProcId 60
+      $prep = Preparar-Revision $vent.ProcId 90
       $nDes = $prep.desconocidos
+      $nSus = $prep.sustituciones
+      $listaAlb = ''
+      if ($prep.albaranes.Count -gt 0) { $listaAlb = $prep.albaranes -join ',' }
       $rev = $prep.ventana
       if (-not $rev) {
         $shot = Take-MenuShot 'albaran-sin-revision'
-        Emit 'ok' "Procesar pulsado pero no vi la pantalla de revision; filas=$filas; desconocidos=$nDes; revision=0" $tituloVent $shot
+        Emit 'ok' "Procesar pulsado pero no vi la pantalla de revision; filas=$filas; desconocidos=$nDes; sustituciones=$nSus; albaranes=$listaAlb; revision=0" $tituloVent $shot
         exit 0
       }
       Paso 'alb-revision' 'ok' ''
@@ -1423,7 +1501,7 @@ try {
       $estadoA = 'ok'
       Paso 'alb-azules' $estadoA "$nAzules"
       $shot = Take-MenuShot 'albaran-revision'
-      Emit 'ok' "revision lista; filas=$filas; desconocidos=$nDes; revision=1; azules=$nAzules; colores=$colores" $tituloVent $shot
+      Emit 'ok' "revision lista; filas=$filas; desconocidos=$nDes; sustituciones=$nSus; albaranes=$listaAlb; revision=1; azules=$nAzules; colores=$colores" $tituloVent $shot
       exit 0
     }
 
