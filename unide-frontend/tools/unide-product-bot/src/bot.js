@@ -19,7 +19,7 @@ import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop as applyBloqDesktopRaw, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
-import { buildProductDiagnosis, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
+import { buildProductDiagnosis, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
@@ -853,7 +853,7 @@ function formatCommandList() {
     '【促销 / 省钱】',
     '/promociones — 去网页抓最新促销（CSV）',
     '/mensajeria — 抓 Mensajería 过去一周，勾选该下载的（测试模式不真下；bajar=真下载）',
-    '/diagnostico 129174 612025 — 直接报商品代码，逐个只读检查有什么问题（不用导文件）',
+    '/diagnostico 129174 612025 — 报商品代码逐个检查；能修的（取消停卖、改价）会给「修这件」按钮',
     '/procesar_albaranes — 电子货单：先看列表截图，确认后全选+Procesar',
     '/procesar_lmanma — LMANMA：选文件、今天生效（真的会改价，要确认）',
     '/donde — 看现在是哪台电脑在接消息（店里/家里共用一个号）',
@@ -1209,13 +1209,29 @@ async function handleDiagnosticoCodigos(chatId, codigos) {
     setLive('[diagnostico] listo');
     flujoEstado.terminar('herr-diag-productos', { ok: true, detalle: `${results.length} 件（手输代码）` });
     await telegram.sendMessage(chatId, formatDiagnosticsSummary(results), { __skipAI: true });
-    // Con pocos artículos el plan de reparación cabe en el chat: es lo que
-    // el dueño necesita para arreglarlos a mano, sin abrir ningún CSV.
+    // Con pocos artículos el plan cabe en el chat, y lo que el bot sabe
+    // arreglar (quitar Bloq.Venta, poner el 2º precio recomendado) se
+    // ofrece con botón — escribir SIEMPRE detrás de una confirmación.
     for (const r of results.filter((x) => x.outcome !== 'ok').slice(0, 6)) {
       const quien = String(r.input?.codigo || r.input?.ean || '?');
+      const { acciones, manual } = planAutoReparacion(r);
       const lineas = [`${quien}：${(r.issues || []).join('、') || '需人工确认'}`];
-      if ((r.plan || []).length) lineas.push('怎么修：' + r.plan.join('；'));
-      await telegram.sendMessage(chatId, lineas.join('\n'), { __skipAI: true });
+      if (acciones.length) lineas.push('我能修的：' + acciones.map(describirAccionReparacion).join('、'));
+      if (manual.length) lineas.push('得你手动的：' + manual.join('、'));
+      if (!acciones.length && (r.plan || []).length) lineas.push('怎么修：' + r.plan.join('；'));
+      let opciones = { __skipAI: true };
+      if (acciones.length && /^\d+$/.test(quien)) {
+        const id = String(repairSeq++);
+        repairPendientes.set(id, { codigo: quien, acciones, running: false });
+        opciones = {
+          __skipAI: true,
+          reply_markup: { inline_keyboard: [[
+            { text: `🔧 修这件（${acciones.map(describirAccionReparacion).join(' + ')}）`, callback_data: `rp:go:${id}` },
+            { text: '不修', callback_data: `rp:no:${id}` }
+          ]] }
+        };
+      }
+      await telegram.sendMessage(chatId, lineas.join('\n'), opciones);
     }
   } catch (error) {
     setLive('[diagnostico] ERROR: ' + error.message);
@@ -1223,6 +1239,91 @@ async function handleDiagnosticoCodigos(chatId, codigos) {
     logger.error('product diagnostics by code failed', { error: error.message });
     await telegram.sendMessage(chatId, `诊断中断了：${error.message}\n没有改动任何商品。`, { __skipAI: true });
   }
+}
+
+// --- reparación con botón de los artículos diagnosticados (v269) ---------
+// El diagnóstico encuentra; esto ARREGLA lo que ya sabemos escribir con la
+// maquinaria probada: quitar Bloq.Venta (camino de /bloq) y poner el precio
+// (camino blindado de /precio_fruta: verifica TIENDA + código en pantalla,
+// calcula P.defecto y descarta si algo no cuadra). Cada arreglo va detrás
+// de SU botón; al terminar se re-diagnostica el artículo para comprobarlo.
+const repairPendientes = new Map();
+let repairSeq = 1;
+
+function describirAccionReparacion(a) {
+  if (a.tipo === 'bloq') return '取消 Bloq.Venta';
+  if (a.tipo === 'precio') return `售价改成 ${Number(a.valor).toFixed(2).replace('.', ',')} €`;
+  return a.tipo;
+}
+
+// Quitar Bloq.Venta con las MISMAS guardas que /bloq: registro TIENDA,
+// código correcto en pantalla y estado leído de verdad antes de tocar.
+async function repararBloqVenta(codigo) {
+  const found = await searchDesktop({ codigo, ean: '', nombre: '' }, config, logger, { byCode: true });
+  if (found.status !== 'ok') return { ok: false, error: found.error || found.reason || '搜索失败' };
+  const read = await readPriceDesktop(config, logger);
+  if (read.status !== 'ok') return { ok: false, error: read.error || read.reason || '读取失败' };
+  const values = read.values || {};
+  if ('bancoDatos' in values && !/tienda/i.test(String(values.bancoDatos ?? ''))) {
+    return { ok: false, error: `载入的是「${String(values.bancoDatos ?? '').trim() || '未知'}」记录，不是 TIENDA` };
+  }
+  const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
+  if (screenCode && screenCode !== String(codigo)) return { ok: false, error: `屏幕上是 ${screenCode}，不是 ${codigo}` };
+  if (!('bloqVentaChecked' in values)) return { ok: false, error: '读不到 Bloq.Venta 状态' };
+  if (!values.bloqVentaChecked) return { ok: true, nota: '本来就没勾' };
+  const applied = await applyBloqDesktop(String(codigo), config, logger);
+  if (applied.status !== 'ok') {
+    await discardDesktop(config, logger);
+    return { ok: false, error: `${applied.error || applied.reason || '写入失败'}（已放弃未保存的改动）` };
+  }
+  return { ok: true, screenshot: applied.screenshot };
+}
+
+async function handleRepairCallback(chatId, callbackId, resto) {
+  const [verbo, id] = resto.split(':');
+  const pend = repairPendientes.get(id);
+  if (!pend) { await telegram.answerCallbackQuery(callbackId, '这条已过期，重新发 /diagnostico'); return; }
+  if (verbo === 'no') { repairPendientes.delete(id); await telegram.answerCallbackQuery(callbackId, '不修'); return; }
+  if (verbo !== 'go') { await telegram.answerCallbackQuery(callbackId, '未知操作'); return; }
+  if (pend.running) { await telegram.answerCallbackQuery(callbackId, '正在修，别重复点'); return; }
+  pend.running = true;
+  await telegram.answerCallbackQuery(callbackId, '开修');
+  notePanelActivity('修商品 ' + pend.codigo);
+  await telegram.sendMessage(chatId, `开修 ${pend.codigo}：${pend.acciones.map(describirAccionReparacion).join('、')}。这几秒别动店里电脑。`, { __skipAI: true });
+  const hechas = [];
+  const falladas = [];
+  let foto = null;
+  for (const a of pend.acciones) {
+    if (a.tipo === 'bloq') {
+      const r = await repararBloqVenta(pend.codigo);
+      if (r.ok) hechas.push(`取消 Bloq.Venta${r.nota ? `（${r.nota}）` : ''}`);
+      else falladas.push(`取消 Bloq.Venta（${String(r.error).slice(0, 120)}）`);
+      foto = r.screenshot || foto;
+    } else if (a.tipo === 'precio') {
+      const item = { codigo: pend.codigo, ean: '', nombre: '', precio: { mode: 'manual', value: a.valor } };
+      const r = await processFruitPriceOnce(item);
+      if (r.ok) hechas.push(describirAccionReparacion(a));
+      else falladas.push(`${describirAccionReparacion(a)}（${fruitStageLabel(r.stage)}：${String(r.error).slice(0, 120)}）`);
+      foto = r.screenshot || foto;
+    }
+  }
+  // Comprobación de verdad: re-diagnóstico del artículo tras escribir.
+  let verificacion = '';
+  try {
+    const verif = await diagnosticarLista(chatId, [{ codigo: pend.codigo, ean: '', nombre: '' }]);
+    const v = verif[0];
+    verificacion = v?.outcome === 'ok'
+      ? `复查：${pend.codigo} 已经没有问题了 ✅`
+      : `复查：还剩 ${(v?.issues || []).join('、') || '待人工确认'}`;
+  } catch (error) {
+    verificacion = `复查没跑成（${String(error.message).slice(0, 80)}），看一眼截图核实。`;
+  }
+  repairPendientes.delete(id);
+  const lineas = [];
+  if (hechas.length) lineas.push('修好了：' + hechas.join('、'));
+  if (falladas.length) lineas.push('没修成：' + falladas.join('、'));
+  lineas.push(verificacion);
+  await enviarConFoto(chatId, { screenshot: foto }, lineas.join('\n'));
 }
 
 async function startProductDiagnostics(chatId) {
@@ -1387,6 +1488,7 @@ async function handleCallback(callback) {
   if (data.startsWith('dg:')) { await handleDiagCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('ln:')) { await handleLineaCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('alb:')) { await handleAlbaranCallback(chatId, callback.id, data.slice(4)); return; }
+  if (data.startsWith('rp:')) { await handleRepairCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('lmp:')) { await handleLmanmaCallback(chatId, callback.id, data.slice(4)); return; }
   if (data.startsWith('idea:')) { await handleIdeaCallback(chatId, callback.id, data.slice(5)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }

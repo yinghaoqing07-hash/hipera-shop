@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   buildProductDiagnosis,
   parseDiagnosticoCodigos,
+  planAutoReparacion,
   parseProductExport
 } from './productDiagnostics.js';
 
@@ -127,4 +128,37 @@ test('parseDiagnosticoCodigos: codigos escritos a mano, sin robar otras frases',
   assert.deepEqual(parseDiagnosticoCodigos('把851040改成一箱'), []);
   assert.deepEqual(parseDiagnosticoCodigos('/pedido 3'), []);
   assert.deepEqual(parseDiagnosticoCodigos(''), []);
+});
+
+test('planAutoReparacion: separa lo que el bot sabe arreglar de lo manual', () => {
+  // bloq + precio con PVP2 → dos acciones automáticas
+  const r1 = { issues: ['Bloq.Venta 已勾选', '没有售价'], recommendation: { pvp2: 2.05 } };
+  const p1 = planAutoReparacion(r1);
+  assert.deepEqual(p1.acciones, [{ tipo: 'bloq' }, { tipo: 'precio', valor: 2.05 }]);
+  assert.deepEqual(p1.manual, []);
+
+  // margen anómalo también dispara el precio, y no se duplica
+  const r2 = { issues: ['没有售价', '价格毛利异常（P.defecto ≤ 0 或实际售价低于成本）'], recommendation: { pvp2: 3.1 } };
+  assert.deepEqual(planAutoReparacion(r2).acciones, [{ tipo: 'precio', valor: 3.1 }]);
+
+  // sin PVP2 el precio se queda manual
+  const r3 = { issues: ['没有售价'], recommendation: { pvp2: 0 } };
+  const p3 = planAutoReparacion(r3);
+  assert.deepEqual(p3.acciones, []);
+  assert.equal(p3.manual.length, 1);
+  assert.match(p3.manual[0], /定价得你来/);
+
+  // Proveedor / Inventariable: aún sin cablear → manual
+  const r4 = { issues: ['Proveedor 为空', 'Inventariable 为空'], recommendation: { pvp2: 2 } };
+  const p4 = planAutoReparacion(r4);
+  assert.deepEqual(p4.acciones, []);
+  assert.equal(p4.manual.length, 2);
+
+  // sin ficha TIENDA: TODO manual aunque hubiera precio
+  const r5 = { issues: ['没有 TIENDA 商品资料'], recommendation: { pvp2: 2 } };
+  const p5 = planAutoReparacion(r5);
+  assert.deepEqual(p5.acciones, []);
+  assert.deepEqual(p5.manual, ['没有 TIENDA 商品资料']);
+
+  assert.deepEqual(planAutoReparacion({}), { acciones: [], manual: [] });
 });
