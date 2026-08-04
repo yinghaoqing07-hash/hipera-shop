@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   buildProductDiagnosis,
+  parseDiagnosticoCodigos,
   parseProductExport
 } from './productDiagnostics.js';
 
@@ -109,4 +110,21 @@ test('rebuilds Ref from codigo whenever Proveedor is missing', () => {
 
   assert.match(result.plan.join(' '), /Proveedor = 12074/);
   assert.match(result.plan.join(' '), /Ref\. = 96204750/);
+});
+
+test('parseDiagnosticoCodigos: codigos escritos a mano, sin robar otras frases', () => {
+  assert.deepEqual(parseDiagnosticoCodigos('/diagnostico_productos 129174 612025'), ['129174', '612025']);
+  assert.deepEqual(parseDiagnosticoCodigos('/diagnostico 129174, 612025'), ['129174', '612025']);
+  assert.deepEqual(parseDiagnosticoCodigos('/revisar 102852'), ['102852']);
+  assert.deepEqual(parseDiagnosticoCodigos('检查商品 129174 612025'), ['129174', '612025']);
+  assert.deepEqual(parseDiagnosticoCodigos('查一下商品 102852'), ['102852']);
+  // duplicados fuera, orden respetado
+  assert.deepEqual(parseDiagnosticoCodigos('/diagnostico 129174 129174 612025'), ['129174', '612025']);
+  // sin codigos = flujo de fichero de siempre
+  assert.deepEqual(parseDiagnosticoCodigos('/diagnostico_productos'), []);
+  // no le roba frases a nadie
+  assert.deepEqual(parseDiagnosticoCodigos('129174'), []);
+  assert.deepEqual(parseDiagnosticoCodigos('把851040改成一箱'), []);
+  assert.deepEqual(parseDiagnosticoCodigos('/pedido 3'), []);
+  assert.deepEqual(parseDiagnosticoCodigos(''), []);
 });
