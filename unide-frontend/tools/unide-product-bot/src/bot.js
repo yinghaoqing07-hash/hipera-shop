@@ -1155,11 +1155,15 @@ async function diagnosticarLista(chatId, items) {
     const item = items[index];
     setLive(`[diagnostico] ${index + 1}/${items.length}：${String(item.nombre || item.codigo || item.ean || '').slice(0, 60)}`);
     try {
+      // Corrección del dueño (02/08): estos artículos se buscan por el
+      // CATALEJO (la búsqueda general), no por el campo Código — el bot
+      // tecleaba en el sitio equivocado. Sin opciones, searchDesktop usa
+      // el catalejo con el código como consulta; con EAN, igual.
       const search = await searchDesktop(
         item,
         config,
         logger,
-        item.ean ? { byEan: true } : { byCode: true }
+        item.ean ? { byEan: true } : {}
       );
       if (search.status !== 'ok') {
         results.push(diagnosticErrorResult(item, search.error || search.reason || '桌面查询失败'));
@@ -1259,7 +1263,9 @@ function describirAccionReparacion(a) {
 // Quitar Bloq.Venta con las MISMAS guardas que /bloq: registro TIENDA,
 // código correcto en pantalla y estado leído de verdad antes de tocar.
 async function repararBloqVenta(codigo) {
-  const found = await searchDesktop({ codigo, ean: '', nombre: '' }, config, logger, { byCode: true });
+  // Por el catalejo, como el diagnóstico (corrección del dueño, 02/08); la
+  // verificación de código en pantalla de más abajo sigue siendo la guarda.
+  const found = await searchDesktop({ codigo, ean: '', nombre: '' }, config, logger, {});
   if (found.status !== 'ok') return { ok: false, error: found.error || found.reason || '搜索失败' };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, error: read.error || read.reason || '读取失败' };
@@ -1301,10 +1307,20 @@ async function handleRepairCallback(chatId, callbackId, resto) {
       foto = r.screenshot || foto;
     } else if (a.tipo === 'precio') {
       const item = { codigo: pend.codigo, ean: '', nombre: '', precio: { mode: 'manual', value: a.valor } };
-      const r = await processFruitPriceOnce(item);
-      if (r.ok) hechas.push(describirAccionReparacion(a));
-      else falladas.push(`${describirAccionReparacion(a)}（${fruitStageLabel(r.stage)}：${String(r.error).slice(0, 120)}）`);
-      foto = r.screenshot || foto;
+      // Buscar por el CATALEJO (corrección del dueño, 02/08) y que el flujo
+      // de precio no repita su búsqueda por Código: con skipSearch, la
+      // lectura verifica igualmente que en pantalla está ESTE código y
+      // aborta si no — la guarda de siempre.
+      const found = await searchDesktop(item, config, logger, {});
+      if (found.status !== 'ok') {
+        falladas.push(`${describirAccionReparacion(a)}（搜索：${String(found.error || found.reason || '未知').slice(0, 120)}）`);
+        foto = found.screenshot || foto;
+      } else {
+        const r = await processFruitPriceOnce(item, { skipSearch: true });
+        if (r.ok) hechas.push(describirAccionReparacion(a));
+        else falladas.push(`${describirAccionReparacion(a)}（${fruitStageLabel(r.stage)}：${String(r.error).slice(0, 120)}）`);
+        foto = r.screenshot || foto;
+      }
     }
   }
   // Comprobación de verdad: re-diagnóstico del artículo tras escribir.
