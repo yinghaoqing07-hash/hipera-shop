@@ -19,7 +19,7 @@ import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop as applyBloqDesktopRaw, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
-import { buildProductDiagnosis, formatDiagnosticsSummary, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
+import { buildProductDiagnosis, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
@@ -537,6 +537,10 @@ async function handleUpdateConChat(update) {
   // natural=true cuando la dueña escribe en lenguaje natural (no un
   // comando /): en ese modo las respuestas se redactan SIN plantillas.
   replyContextByChat.set(String(chatId), { text, at: Date.now(), natural: !String(text || '').trim().startsWith('/') });
+  // Con códigos detrás se diagnostican ESOS (sin fichero); sin nada, se
+  // pide el export de siempre.
+  const codigosDiag = parseDiagnosticoCodigos(text);
+  if (codigosDiag.length) { await handleDiagnosticoCodigos(chatId, codigosDiag); return; }
   if (/^\/diagnostico_productos\b/i.test(text)) { await startProductDiagnostics(chatId); return; }
   if (/^\/diagnostico_cancelar\b/i.test(text)) { await cancelProductDiagnostics(chatId); return; }
   if (await maybeHandleActiveDecision(chatId, text)) return;
@@ -849,6 +853,7 @@ function formatCommandList() {
     '【促销 / 省钱】',
     '/promociones — 去网页抓最新促销（CSV）',
     '/mensajeria — 抓 Mensajería 过去一周，勾选该下载的（测试模式不真下；bajar=真下载）',
+    '/diagnostico 129174 612025 — 直接报商品代码，逐个只读检查有什么问题（不用导文件）',
     '/procesar_albaranes — 电子货单：先看列表截图，确认后全选+Procesar',
     '/procesar_lmanma — LMANMA：选文件、今天生效（真的会改价，要确认）',
     '/donde — 看现在是哪台电脑在接消息（店里/家里共用一个号）',
@@ -1140,6 +1145,86 @@ function safeDiagnosticFileName(name) {
     .slice(0, 120) || 'diagnostico';
 }
 
+// Núcleo del diagnóstico: recorre una lista de artículos, los busca en el
+// escritorio y los pasa por buildProductDiagnosis. TODO ES SOLO LECTURA.
+// Lo usan las dos entradas: el fichero exportado y los códigos escritos a
+// mano en el chat (v268, para los artículos con problemas del albarán).
+async function diagnosticarLista(chatId, items) {
+  const results = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    setLive(`[diagnostico] ${index + 1}/${items.length}：${String(item.nombre || item.codigo || item.ean || '').slice(0, 60)}`);
+    try {
+      const search = await searchDesktop(
+        item,
+        config,
+        logger,
+        item.ean ? { byEan: true } : { byCode: true }
+      );
+      if (search.status !== 'ok') {
+        results.push(diagnosticErrorResult(item, search.error || search.reason || '桌面查询失败'));
+      } else {
+        const read = await diagnoseDesktop(config, logger);
+        if (read.status !== 'ok') {
+          results.push(diagnosticErrorResult(item, read.error || read.reason || '状态读取失败'));
+        } else {
+          const desktop = {
+            ...read,
+            screenshot: read.screenshot || search.screenshot,
+            warnings: [...(search.warnings || []), ...(read.warnings || [])]
+          };
+          const store = lookupStore(storeIndex, item);
+          const supplier = enrichSupplierLookup(supplierIndex, item, store);
+          results.push(buildProductDiagnosis({ input: item, desktop, supplier }));
+        }
+      }
+    } catch (error) {
+      logger.error('product diagnostic item failed', { codigo: item.codigo, ean: item.ean, error: error.message });
+      results.push(diagnosticErrorResult(item, error));
+    }
+
+    const done = index + 1;
+    if (done === items.length || done % 10 === 0) {
+      await telegram.sendMessage(chatId, `只读诊断进度：${done}/${items.length}`, { __skipAI: true });
+    }
+  }
+  return results;
+}
+
+// "/diagnostico_productos 129174 612025" o "检查商品 129174 612025": los
+// artículos con problemas del albarán se miran SIN exportar ningún fichero
+// (petición del dueño, 02/08: tiene mercancía con problemas y quiere que
+// Jarvis se los revise ya). Mismo motor, misma regla: solo lectura.
+async function handleDiagnosticoCodigos(chatId, codigos) {
+  if (!config.desktop?.enabled) { await telegram.sendMessage(chatId, '桌面自动化没启用，查不了商品。'); return; }
+  const tope = Number(config.productDiagnostics?.maxCodigosChat) || 20;
+  const lista = codigos.slice(0, tope);
+  notePanelActivity('/diagnostico ' + lista.length + ' 件');
+  const aviso = codigos.length > lista.length ? `（一次最多 ${tope} 件，先查前 ${lista.length} 件）` : '';
+  await telegram.sendMessage(chatId, `开始逐件只读检查这 ${lista.length} 件${aviso}：${lista.join('、')}\n全程只读，不改任何东西。`, { __skipAI: true });
+  flujoEstado.iniciar('herr-diag-productos');
+  try {
+    const items = lista.map((codigo) => ({ codigo, ean: '', nombre: '' }));
+    const results = await diagnosticarLista(chatId, items);
+    setLive('[diagnostico] listo');
+    flujoEstado.terminar('herr-diag-productos', { ok: true, detalle: `${results.length} 件（手输代码）` });
+    await telegram.sendMessage(chatId, formatDiagnosticsSummary(results), { __skipAI: true });
+    // Con pocos artículos el plan de reparación cabe en el chat: es lo que
+    // el dueño necesita para arreglarlos a mano, sin abrir ningún CSV.
+    for (const r of results.filter((x) => x.outcome !== 'ok').slice(0, 6)) {
+      const quien = String(r.input?.codigo || r.input?.ean || '?');
+      const lineas = [`${quien}：${(r.issues || []).join('、') || '需人工确认'}`];
+      if ((r.plan || []).length) lineas.push('怎么修：' + r.plan.join('；'));
+      await telegram.sendMessage(chatId, lineas.join('\n'), { __skipAI: true });
+    }
+  } catch (error) {
+    setLive('[diagnostico] ERROR: ' + error.message);
+    flujoEstado.terminar('herr-diag-productos', { ok: false, detalle: error.message });
+    logger.error('product diagnostics by code failed', { error: error.message });
+    await telegram.sendMessage(chatId, `诊断中断了：${error.message}\n没有改动任何商品。`, { __skipAI: true });
+  }
+}
+
 async function startProductDiagnostics(chatId) {
   const active = activeConversations.get(chatId);
   if (active && active.kind !== 'product_diagnostics') {
@@ -1225,48 +1310,7 @@ async function handleProductDiagnosticsDocument(message) {
 
     await telegram.sendMessage(chatId, `已读到 ${parsed.meta.sourceRows} 行、${parsed.items.length} 件，开始逐件只读检查（进度看面板状态栏）。`, { __skipAI: true });
 
-    const results = [];
-    for (let index = 0; index < parsed.items.length; index += 1) {
-      const item = parsed.items[index];
-      setLive(`[diagnostico] ${index + 1}/${parsed.items.length}：${String(item.nombre || item.codigo || item.ean || '').slice(0, 60)}`);
-      try {
-        const search = await searchDesktop(
-          item,
-          config,
-          logger,
-          item.ean ? { byEan: true } : { byCode: true }
-        );
-        if (search.status !== 'ok') {
-          results.push(diagnosticErrorResult(item, search.error || search.reason || '桌面查询失败'));
-        } else {
-          const read = await diagnoseDesktop(config, logger);
-          if (read.status !== 'ok') {
-            results.push(diagnosticErrorResult(item, read.error || read.reason || '状态读取失败'));
-          } else {
-            const desktop = {
-              ...read,
-              screenshot: read.screenshot || search.screenshot,
-              warnings: [...(search.warnings || []), ...(read.warnings || [])]
-            };
-            const store = lookupStore(storeIndex, item);
-            const supplier = enrichSupplierLookup(supplierIndex, item, store);
-            results.push(buildProductDiagnosis({ input: item, desktop, supplier }));
-          }
-        }
-      } catch (error) {
-        logger.error('product diagnostic item failed', {
-          codigo: item.codigo,
-          ean: item.ean,
-          error: error.message
-        });
-        results.push(diagnosticErrorResult(item, error));
-      }
-
-      const done = index + 1;
-      if (done === parsed.items.length || done % 10 === 0) {
-        await telegram.sendMessage(chatId, `只读诊断进度：${done}/${parsed.items.length}`, { __skipAI: true });
-      }
-    }
+    const results = await diagnosticarLista(chatId, parsed.items);
 
     setLive('[diagnostico] listo');
     flujoEstado.terminar('herr-diag-productos', { ok: true, detalle: `${results.length} 件` });

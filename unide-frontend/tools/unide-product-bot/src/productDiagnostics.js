@@ -30,6 +30,29 @@ export async function parseProductExport(filePath, originalName = '', options = 
   return normalizeMatrix(matrix);
 }
 
+// Códigos escritos a mano para diagnosticar sin exportar fichero (v268):
+//   "/diagnostico_productos 129174 612025"
+//   "/diagnostico 129174, 612025"
+//   "检查商品 129174 612025"  /  "查一下商品 129174"
+// Devuelve [] si el texto no es una petición de este tipo — así no le roba
+// frases a nadie. Los duplicados se quitan y se respeta el orden.
+export function parseDiagnosticoCodigos(text) {
+  const t = String(text || '').trim();
+  const esComando = /^\/(diagnostico_productos|diagnostico|revisar)\b/i.test(t);
+  const esFrase = /^(检查|查一下|查查|看一下)\s*(商品|货|东西)/.test(t);
+  if (!esComando && !esFrase) return [];
+  const cuerpo = t.replace(/^\/\S+/, '').replace(/^(检查|查一下|查查|看一下)\s*(商品|货|东西)/, '');
+  const encontrados = cuerpo.match(/\d{4,13}/g) || [];
+  const vistos = new Set();
+  const out = [];
+  for (const c of encontrados) {
+    if (vistos.has(c)) continue;
+    vistos.add(c);
+    out.push(c);
+  }
+  return out;
+}
+
 export function normalizeMatrix(matrix) {
   const rows = Array.isArray(matrix) ? matrix.filter((row) => Array.isArray(row) && row.some(nonEmpty)) : [];
   if (!rows.length) throw new Error('文件里没有读到商品行。');
