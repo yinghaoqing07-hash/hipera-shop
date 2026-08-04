@@ -53,6 +53,41 @@ export function parseDiagnosticoCodigos(text) {
   return out;
 }
 
+// De un diagnóstico, qué sabe ARREGLAR el bot hoy con la maquinaria ya
+// probada del escritorio (v269) y qué se queda para el dueño:
+//   - 'Bloq.Venta 已勾选'            → quitarlo (mismo camino que /bloq)
+//   - '没有售价' / '价格毛利异常…'   → poner el 2º precio recomendado del
+//     proveedor (mismo camino blindado que /precio_fruta); sin PVP2 no hay
+//     con qué, se queda manual
+//   - todo lo demás (sin ficha TIENDA, Proveedor, Inventariable, costes)
+//     → manual: esos campos aún no tienen pasos de escritura calibrados
+export function planAutoReparacion(r) {
+  const acciones = [];
+  const manual = [];
+  for (const issue of r?.issues || []) {
+    if (/Bloq\.Venta/.test(issue)) {
+      if (!acciones.some((a) => a.tipo === 'bloq')) acciones.push({ tipo: 'bloq' });
+      continue;
+    }
+    if (/没有售价|价格毛利异常/.test(issue)) {
+      const pvp2 = Number(r?.recommendation?.pvp2);
+      if (pvp2 > 0) {
+        if (!acciones.some((a) => a.tipo === 'precio')) acciones.push({ tipo: 'precio', valor: pvp2 });
+      } else {
+        manual.push(`${issue}（供应商表没有第二建议价，定价得你来）`);
+      }
+      continue;
+    }
+    manual.push(issue);
+  }
+  // Sin ficha TIENDA no hay dónde escribir: aunque hubiera precio, todo
+  // pasa a manual (crear la ficha es justo lo que no está cableado).
+  if ((r?.issues || []).some((i) => /TIENDA/.test(i))) {
+    return { acciones: [], manual: r.issues.slice() };
+  }
+  return { acciones, manual };
+}
+
 export function normalizeMatrix(matrix) {
   const rows = Array.isArray(matrix) ? matrix.filter((row) => Array.isArray(row) && row.some(nonEmpty)) : [];
   if (!rows.length) throw new Error('文件里没有读到商品行。');
