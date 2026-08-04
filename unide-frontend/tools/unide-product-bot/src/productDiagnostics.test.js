@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   buildProductDiagnosis,
+  clasificarConsulta,
   parseDiagnosticoCodigos,
   planAutoReparacion,
   parseProductExport
@@ -167,4 +168,11 @@ test('planAutoReparacion: separa lo que el bot sabe arreglar de lo manual', () =
   assert.deepEqual(p5b.manual, ['没有 TIENDA 商品资料']);
 
   assert.deepEqual(planAutoReparacion({}), { acciones: [], manual: [] });
+});
+
+test('clasificarConsulta: EAN al campo ean, codigo Unide al campo codigo', () => {
+  assert.deepEqual(clasificarConsulta('8480012040454'), { codigo: '', ean: '8480012040454', nombre: '' });
+  assert.deepEqual(clasificarConsulta('123456789012'), { codigo: '', ean: '123456789012', nombre: '' });
+  assert.deepEqual(clasificarConsulta('129174'), { codigo: '129174', ean: '', nombre: '' });
+  assert.deepEqual(clasificarConsulta('102852'), { codigo: '102852', ean: '', nombre: '' });
 });
