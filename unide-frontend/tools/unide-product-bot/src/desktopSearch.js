@@ -37,6 +37,14 @@ export async function applyBloqDesktop(codigo, config, logger) {
   return runDesktopAction('bloqApply', codigo, { toggleBloqVenta: true }, config, logger);
 }
 
+// Rellena los campos de la ficha que el cambio de precio no toca
+// (Proveedor, Ref., Inventariable) SIN guardar: el Ctrl+S lo pone el
+// priceApply que el bot lanza justo después. Es la primera mitad de crear
+// la ficha TIENDA de un artículo que solo existe en SDC (v271).
+export async function applyFichaDesktop(datos, codigo, config, logger) {
+  return runDesktopAction('fichaApply', String(codigo), datos, config, logger);
+}
+
 // Descarta los cambios SIN GUARDAR del artículo en pantalla: vaciar
 // pantalla y responder "No" al aviso de guardar. Se usa tras un guardado
 // fallido, para no dejar el formulario "sucio" (un formulario sucio hace
