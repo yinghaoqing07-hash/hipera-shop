@@ -19,7 +19,7 @@ import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
 import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
-import { buildProductDiagnosis, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
+import { buildProductDiagnosis, clasificarConsulta, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
 import { writeJsonAtomic } from './safeJson.js';
@@ -1208,7 +1208,9 @@ async function handleDiagnosticoCodigos(chatId, codigos) {
   await telegram.sendMessage(chatId, `开始逐件只读检查这 ${lista.length} 件${aviso}：${lista.join('、')}\n全程只读，不改任何东西。`, { __skipAI: true });
   flujoEstado.iniciar('herr-diag-productos');
   try {
-    const items = lista.map((codigo) => ({ codigo, ean: '', nombre: '' }));
+    // EAN (12-13 cifras) al campo ean, codigo Unide al campo codigo: la
+    // tabla del proveedor y la busqueda del escritorio miran cada uno el suyo.
+    const items = lista.map(clasificarConsulta);
     const results = await diagnosticarLista(chatId, items);
     setLive('[diagnostico] listo');
     flujoEstado.terminar('herr-diag-productos', { ok: true, detalle: `${results.length} 件（手输代码）` });
@@ -1224,9 +1226,12 @@ async function handleDiagnosticoCodigos(chatId, codigos) {
       if (manual.length) lineas.push('得你手动的：' + manual.join('、'));
       if (!acciones.length && (r.plan || []).length) lineas.push('怎么修：' + r.plan.join('；'));
       let opciones = { __skipAI: true };
-      if (acciones.length && /^\d+$/.test(quien)) {
+      // Para reparar hace falta el código Unide DE VERDAD: si la consulta
+      // fue por EAN, el bueno es el que se leyó en pantalla (current.codigo).
+      const codigoReal = String(r.current?.codigo || r.input?.codigo || '').replace(/\D/g, '');
+      if (acciones.length && /^\d+$/.test(codigoReal)) {
         const id = String(repairSeq++);
-        repairPendientes.set(id, { codigo: quien, acciones, running: false });
+        repairPendientes.set(id, { codigo: codigoReal, acciones, running: false });
         opciones = {
           __skipAI: true,
           reply_markup: { inline_keyboard: [[

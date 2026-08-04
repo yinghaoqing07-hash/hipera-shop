@@ -105,6 +105,16 @@ export function planAutoReparacion(r) {
   return { acciones, manual };
 }
 
+// Un número escrito a mano puede ser un código Unide (4-7 cifras) o un
+// EAN (12-13). Meterlo en el campo equivocado rompe la búsqueda en la
+// tabla del proveedor (fallo real 02/08: un EAN en `codigo` hizo que
+// saliera "供应商表缺少 PVD" con el producto seguramente en la tabla).
+export function clasificarConsulta(numero) {
+  const n = String(numero || '').replace(/\D/g, '');
+  if (n.length >= 12) return { codigo: '', ean: n, nombre: '' };
+  return { codigo: n, ean: '', nombre: '' };
+}
+
 export function normalizeMatrix(matrix) {
   const rows = Array.isArray(matrix) ? matrix.filter((row) => Array.isArray(row) && row.some(nonEmpty)) : [];
   if (!rows.length) throw new Error('文件里没有读到商品行。');
