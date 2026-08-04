@@ -80,9 +80,26 @@ export function planAutoReparacion(r) {
     }
     manual.push(issue);
   }
-  // Sin ficha TIENDA no hay dónde escribir: aunque hubiera precio, todo
-  // pasa a manual (crear la ficha es justo lo que no está cableado).
+  // Sin ficha TIENDA (solo SDC): desde v271 el bot sabe CREARLA — rellena
+  // Proveedor/Ref./Inventariable y deja que el cambio de precio calibrado
+  // ponga costes + P.defecto y guarde (receta del dueño: tras Guardar
+  // aparece la fila TIENDA). Hace falta que la tabla del proveedor tenga
+  // PVD y 2º precio; sin esos números no hay con qué rellenar → manual.
   if ((r?.issues || []).some((i) => /TIENDA/.test(i))) {
+    const pvd = Number(r?.recommendation?.pvd);
+    const pvp2 = Number(r?.recommendation?.pvp2);
+    if (pvd > 0 && pvp2 > 0) {
+      return {
+        acciones: [{
+          tipo: 'ficha',
+          pvd,
+          pvp2,
+          proveedor: String(r?.recommendation?.supplierCode || '12074'),
+          ref: String(r?.recommendation?.ref || '')
+        }],
+        manual: []
+      };
+    }
     return { acciones: [], manual: r.issues.slice() };
   }
   return { acciones, manual };

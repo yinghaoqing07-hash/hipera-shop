@@ -18,7 +18,7 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop as applyBloqDesktopRaw, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
@@ -1257,7 +1257,51 @@ let repairSeq = 1;
 function describirAccionReparacion(a) {
   if (a.tipo === 'bloq') return '取消 Bloq.Venta';
   if (a.tipo === 'precio') return `售价改成 ${Number(a.valor).toFixed(2).replace('.', ',')} €`;
+  if (a.tipo === 'ficha') {
+    const pvd = Number(a.pvd).toFixed(2).replace('.', ',');
+    const pvp = Number(a.pvp2).toFixed(2).replace('.', ',');
+    return `建 TIENDA 资料（Proveedor ${a.proveedor}、Ref ${a.ref || '按代码生成'}、Inventariable Sí、成本 ${pvd} €、售价 ${pvp} €）`;
+  }
   return a.tipo;
+}
+
+// Crear la ficha TIENDA de un artículo que solo existe en SDC: rellenar
+// Proveedor/Ref./Inventariable (fichaApply, sin guardar) y dejar que el
+// cambio de precio calibrado ponga costes + P.defecto y haga el ÚNICO
+// Ctrl+S. Receta del dueño: tras Guardar aparece la fila TIENDA — la
+// re-diagnosis de después lo comprueba. Aquí banco=SDC es lo esperado.
+async function repararFichaSdc(codigo, a) {
+  const item = { codigo: String(codigo), ean: '', nombre: '', precio: { mode: 'manual', value: a.pvp2 } };
+  const found = await searchDesktop(item, config, logger, {});
+  if (found.status !== 'ok') return { ok: false, error: `搜索：${found.error || found.reason || '未知'}` };
+  const read = await readPriceDesktop(config, logger);
+  if (read.status !== 'ok') return { ok: false, error: `读取：${read.error || read.reason || '未知'}` };
+  const values = read.values || {};
+  const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
+  if (!screenCode) return { ok: false, error: 'Código 框读到空——商品没载入，为安全不动' };
+  if (screenCode !== String(codigo)) return { ok: false, error: `屏幕上是 ${screenCode}，不是 ${codigo}——为安全不动` };
+  const ficha = await applyFichaDesktop({
+    supplierCode: String(a.proveedor || '12074'),
+    supplierRef: String(a.ref || `9${codigo}0`),
+    inventariable: 'Sí'
+  }, codigo, config, logger);
+  if (ficha.status !== 'ok') {
+    await discardDesktop(config, logger);
+    return { ok: false, error: `填资料：${ficha.error || ficha.reason || '未知'}（已放弃未保存的改动）`, screenshot: ficha.screenshot };
+  }
+  const store = lookupStore(storeIndex, item);
+  const supplier = enrichSupplierLookup(supplierIndex, item, store);
+  const planResult = buildPricePlan({ item, supplier, store }, read);
+  if (!planResult.ok) {
+    await discardDesktop(config, logger);
+    return { ok: false, error: `定价：${planResult.error}（已放弃未保存的改动）` };
+  }
+  const applied = await applyPriceDesktop(planResult.plan, config, logger);
+  if (applied.status !== 'ok') {
+    await discardDesktop(config, logger);
+    return { ok: false, error: `写入：${applied.error || applied.reason || '未知'}（已放弃未保存的改动）`, screenshot: applied.screenshot };
+  }
+  return { ok: true, screenshot: applied.screenshot };
 }
 
 // Quitar Bloq.Venta con las MISMAS guardas que /bloq: registro TIENDA,
@@ -1304,6 +1348,11 @@ async function handleRepairCallback(chatId, callbackId, resto) {
       const r = await repararBloqVenta(pend.codigo);
       if (r.ok) hechas.push(`取消 Bloq.Venta${r.nota ? `（${r.nota}）` : ''}`);
       else falladas.push(`取消 Bloq.Venta（${String(r.error).slice(0, 120)}）`);
+      foto = r.screenshot || foto;
+    } else if (a.tipo === 'ficha') {
+      const r = await repararFichaSdc(pend.codigo, a);
+      if (r.ok) hechas.push('建 TIENDA 资料');
+      else falladas.push(`建 TIENDA 资料（${String(r.error).slice(0, 160)}）`);
       foto = r.screenshot || foto;
     } else if (a.tipo === 'precio') {
       const item = { codigo: pend.codigo, ean: '', nombre: '', precio: { mode: 'manual', value: a.valor } };

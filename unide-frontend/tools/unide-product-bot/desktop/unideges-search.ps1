@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "fichaApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -856,6 +856,23 @@ function Get-Steps($Config, [string]$ActionMode) {
     }).Count -gt 0) { throw "diagnoseRead no admite Ctrl+S: este modo debe ser de solo lectura" }
   }
   elseif ($ActionMode -eq "priceApply") { $steps = Assert-SaveIsLast @($Config.desktop.priceApplySteps) "priceApply" }
+  elseif ($ActionMode -eq "fichaApply") {
+    # Campos de la ficha que el cambio de precio no rellena (Proveedor,
+    # Ref., Inventariable), para CREAR la ficha TIENDA de un articulo que
+    # solo existe en SDC (v271, receta del dueno). SIN Ctrl+S a proposito:
+    # el guardado lo hace el priceApply que el bot lanza justo despues,
+    # asi todo entra en UN unico guardado. Mismas identidades de control
+    # (label+index) que el diagnoseRead calibrado que ya lee esos campos.
+    $steps = @(
+      [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
+      [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila del articulo" },
+      [pscustomobject]@{ type = "wait"; ms = 500 },
+      [pscustomobject]@{ type = "uiaSet"; label = "Proveedor"; index = 0; value = "{{supplierCode}}"; name = "Proveedor (codigo)" },
+      [pscustomobject]@{ type = "uiaSet"; label = "Ref."; index = 0; value = "{{supplierRef}}"; name = "Referencia" },
+      [pscustomobject]@{ type = "uiaSet"; label = "Inventariable"; index = 0; value = "{{inventariable}}"; name = "Inventariable" },
+      [pscustomobject]@{ type = "screenshot"; name = "Ficha rellenada (sin guardar)" }
+    )
+  }
   elseif ($ActionMode -eq "bloqApply") {
     $steps = @()
     if ($Config.desktop.PSObject.Properties.Name -contains "bloqApplySteps") {

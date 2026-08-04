@@ -154,11 +154,17 @@ test('planAutoReparacion: separa lo que el bot sabe arreglar de lo manual', () =
   assert.deepEqual(p4.acciones, []);
   assert.equal(p4.manual.length, 2);
 
-  // sin ficha TIENDA: TODO manual aunque hubiera precio
-  const r5 = { issues: ['没有 TIENDA 商品资料'], recommendation: { pvp2: 2 } };
+  // sin ficha TIENDA pero CON números del proveedor: el bot la crea (v271)
+  const r5 = { issues: ['没有 TIENDA 商品资料'], recommendation: { pvd: 1.19, pvp2: 2.69, supplierCode: '12074', ref: '91216580' } };
   const p5 = planAutoReparacion(r5);
-  assert.deepEqual(p5.acciones, []);
-  assert.deepEqual(p5.manual, ['没有 TIENDA 商品资料']);
+  assert.deepEqual(p5.acciones, [{ tipo: 'ficha', pvd: 1.19, pvp2: 2.69, proveedor: '12074', ref: '91216580' }]);
+  assert.deepEqual(p5.manual, []);
+
+  // sin ficha TIENDA y SIN números del proveedor: no hay con qué → manual
+  const r5b = { issues: ['没有 TIENDA 商品资料'], recommendation: { pvp2: 2 } };
+  const p5b = planAutoReparacion(r5b);
+  assert.deepEqual(p5b.acciones, []);
+  assert.deepEqual(p5b.manual, ['没有 TIENDA 商品资料']);
 
   assert.deepEqual(planAutoReparacion({}), { acciones: [], manual: [] });
 });
