@@ -879,7 +879,19 @@ function Get-Steps($Config, [string]$ActionMode) {
       [pscustomobject]@{ type = "uiaSet"; label = "Proveedor"; index = 0; value = "{{supplierCode}}"; name = "Proveedor (codigo)" },
       [pscustomobject]@{ type = "uiaSet"; label = "Ref."; index = 0; value = "{{supplierRef}}"; name = "Referencia" },
       [pscustomobject]@{ type = "uiaSet"; label = "Inventariable"; index = 0; value = "{{inventariable}}"; name = "Inventariable" },
-      [pscustomobject]@{ type = "screenshot"; name = "Ficha rellenada (sin guardar)" }
+      # Precios y guardado EN EL MISMO proceso (fallo real 06/08: partido
+      # en dos procesos, el aviso de guardar salia "antes" para el proceso
+      # siguiente y todo se atascaba). Mismas etiquetas calibradas del
+      # diagnoseRead; P. defecto index 1 = el porcentaje.
+      [pscustomobject]@{ type = "uiaSet"; label = "PC Medio"; index = 0; value = "{{pcMedio}}"; name = "PC Medio" },
+      [pscustomobject]@{ type = "uiaSet"; label = "PC Ultimo"; index = 0; value = "{{pcUltimo}}"; name = "PC Ultimo" },
+      [pscustomobject]@{ type = "uiaSet"; label = "P. defecto"; index = 1; value = "{{pDefecto}}"; name = "P. defecto (porcentaje)" },
+      [pscustomobject]@{ type = "wait"; ms = 500 },
+      [pscustomobject]@{ type = "hotkey"; keys = "^s"; name = "Guardar (crea la ficha TIENDA)" },
+      [pscustomobject]@{ type = "wait"; ms = 1200 },
+      [pscustomobject]@{ type = "answerYes"; name = "Responder Si al aviso de guardado" },
+      [pscustomobject]@{ type = "wait"; ms = 600 },
+      [pscustomobject]@{ type = "screenshot"; name = "Ficha creada y guardada" }
     )
   }
   elseif ($ActionMode -eq "bloqApply") {
