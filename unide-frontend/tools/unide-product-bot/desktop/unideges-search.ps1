@@ -878,7 +878,10 @@ function Get-Steps($Config, [string]$ActionMode) {
       [pscustomobject]@{ type = "wait"; ms = 400 },
       [pscustomobject]@{ type = "uiaSet"; label = "Proveedor"; index = 0; value = "{{supplierCode}}"; name = "Proveedor (codigo)" },
       [pscustomobject]@{ type = "uiaSet"; label = "Ref."; index = 0; value = "{{supplierRef}}"; name = "Referencia" },
-      [pscustomobject]@{ type = "uiaSet"; label = "Inventariable"; index = 0; value = "{{inventariable}}"; name = "Inventariable" },
+      # Inventariable es un COMBO: WM_SETTEXT no selecciona nada (fallo real
+      # 06/08: quedo vacio y el guardado fallo con 'No ha indicado si es
+      # Inventariable'). uiaSelectIfEmpty usa CB_SELECTSTRING, que si.
+      [pscustomobject]@{ type = "uiaSelectIfEmpty"; label = "Inventariable"; index = 0; value = "S"; name = "Inventariable = Si" },
       # Precios y guardado EN EL MISMO proceso (fallo real 06/08: partido
       # en dos procesos, el aviso de guardar salia "antes" para el proceso
       # siguiente y todo se atascaba). Mismas etiquetas calibradas del
@@ -1109,6 +1112,46 @@ try {
               try {
                 $raizDlg = [System.Windows.Automation.AutomationElement]::FromHandle($fgh)
                 $todosDlg = $raizDlg.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                # Un dialogo de ERROR de validacion (p. ej. 'No ha indicado
+                # si es Inventariable', 06/08) solo trae Aceptar: se acepta
+                # para DESBLOQUEAR y el texto viaja como avisoError — el
+                # guardado NO se dio por hecho. Solo si la ventana en primer
+                # plano NO es la principal (los dialogos son otra ventana).
+                if ($fgh -ne [IntPtr]$script:TargetWindowHandle -and -not $values.Contains("avisoError")) {
+                  $btnAceptar = $null
+                  $haySi = $false
+                  $textosDlg = New-Object System.Collections.Generic.List[string]
+                  foreach ($elDlg0 in $todosDlg) {
+                    $tipo0 = ""
+                    try { $tipo0 = [string]$elDlg0.Current.ControlType.ProgrammaticName } catch { $tipo0 = "" }
+                    $nm0 = ""
+                    try { $nm0 = [string]$elDlg0.Current.Name } catch { $nm0 = "" }
+                    if ($nm0 -eq "") { continue }
+                    if ($tipo0 -match "Button") {
+                      if ($nm0 -match '^\s*&?S(i|í)\s*$') { $haySi = $true }
+                      if ($nm0 -match '^\s*&?Aceptar\s*$') { $btnAceptar = $elDlg0 }
+                    } elseif ($nm0.Length -gt 8 -and $textosDlg.Count -lt 3) {
+                      $textosDlg.Add($nm0) | Out-Null
+                    }
+                  }
+                  if ($btnAceptar -and -not $haySi) {
+                    $textoErr = $textosDlg -join ' | '
+                    Add-WarningText "aviso de ERROR al guardar: $textoErr"
+                    $values["avisoError"] = $textoErr
+                    $errHecho = $false
+                    try {
+                      $invErr = $btnAceptar.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                      $invErr.Invoke()
+                      $errHecho = $true
+                    } catch { }
+                    if (-not $errHecho) {
+                      $rErr = $btnAceptar.Current.BoundingRectangle
+                      Click-Point ([int]($rErr.X + $rErr.Width / 2)) ([int]($rErr.Y + $rErr.Height / 2))
+                    }
+                    Start-Sleep -Milliseconds 600
+                    break
+                  }
+                }
                 foreach ($elDlg in $todosDlg) {
                   $tipoDlg = ""
                   try { $tipoDlg = [string]$elDlg.Current.ControlType.ProgrammaticName } catch { $tipoDlg = "" }
@@ -1138,6 +1181,7 @@ try {
           if (-not $siPulsado) { Start-Sleep -Milliseconds 500 }
         }
         if ($siPulsado) { $values["confirmadoGuardado"] = $true }
+        elseif ($values.Contains("avisoError")) { }
         else { Add-WarningText "answerYes: en 6 s no aparecio ningun aviso con boton Si (quiza no hizo falta)" }
       }
       "uiaInvoke" {
