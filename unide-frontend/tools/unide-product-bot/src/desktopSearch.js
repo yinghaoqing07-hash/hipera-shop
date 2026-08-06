@@ -45,6 +45,13 @@ export async function applyFichaDesktop(datos, codigo, config, logger) {
   return runDesktopAction('fichaApply', String(codigo), datos, config, logger);
 }
 
+// Responde Sí al aviso de confirmación que sale tras el Ctrl+S que CREA
+// la ficha TIENDA (visto 02/08). Se lanza justo después del priceApply;
+// si no hay aviso, no hace nada y lo dice en warnings.
+export async function confirmarGuardadoDesktop(config, logger) {
+  return runDesktopAction('confirmSave', 'confirm', {}, config, logger);
+}
+
 // Descarta los cambios SIN GUARDAR del artículo en pantalla: vaciar
 // pantalla y responder "No" al aviso de guardar. Se usa tras un guardado
 // fallido, para no dejar el formulario "sucio" (un formulario sucio hace

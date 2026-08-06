@@ -18,7 +18,7 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, confirmarGuardadoDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, clasificarConsulta, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
@@ -1305,10 +1305,14 @@ async function repararFichaSdc(codigo, a) {
   const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
   if (!screenCode) return { ok: false, error: 'Código 框读到空——商品没载入，为安全不动' };
   if (screenCode !== String(codigo)) return { ok: false, error: `屏幕上是 ${screenCode}，不是 ${codigo}——为安全不动` };
+  // Bloq.Venta marcado se quita PRIMERO (prioridad del dueño, 02/08):
+  // viaja como condición al fichaApply, que lo alterna antes de nada.
+  const quitarBloq = Boolean(values.bloqVentaChecked);
   const ficha = await applyFichaDesktop({
     supplierCode: String(a.proveedor || '12074'),
     supplierRef: String(a.ref || `9${codigo}0`),
-    inventariable: 'Sí'
+    inventariable: 'Sí',
+    toggleBloqVenta: quitarBloq
   }, codigo, config, logger);
   if (ficha.status !== 'ok') {
     await discardDesktop(config, logger);
@@ -1333,7 +1337,11 @@ async function repararFichaSdc(codigo, a) {
     await discardDesktop(config, logger);
     return { ok: false, error: `写入：${applied.error || applied.reason || '未知'}（已放弃未保存的改动）`, screenshot: applied.screenshot };
   }
-  return { ok: true, screenshot: applied.screenshot };
+  // El Ctrl+S que CREA la ficha saca un aviso Sí/No que los pasos
+  // calibrados no responden (visto 02/08): responderlo aquí.
+  const conf = await confirmarGuardadoDesktop(config, logger);
+  const confirmado = conf.status === 'ok' && !((conf.warnings || []).some((w) => /no aparecio/i.test(String(w))));
+  return { ok: true, screenshot: conf.screenshot || applied.screenshot, bloqQuitado: quitarBloq, confirmado };
 }
 
 // Quitar Bloq.Venta con las MISMAS guardas que /bloq: registro TIENDA,
@@ -1383,7 +1391,7 @@ async function handleRepairCallback(chatId, callbackId, resto) {
       foto = r.screenshot || foto;
     } else if (a.tipo === 'ficha') {
       const r = await repararFichaSdc(pend.codigo, a);
-      if (r.ok) hechas.push('建 TIENDA 资料');
+      if (r.ok) hechas.push(`建 TIENDA 资料${r.bloqQuitado ? '（顺手取消了 Bloq.Venta）' : ''}${r.confirmado ? '' : '（没见到保存确认框，复查为准）'}`);
       else falladas.push(`建 TIENDA 资料（${String(r.error).slice(0, 160)}）`);
       foto = r.screenshot || foto;
     } else if (a.tipo === 'precio') {
@@ -1484,6 +1492,9 @@ async function handleFichaWebCallback(chatId, callbackId, resto) {
     });
     repairPendientes.delete(id);
     if (!r.ok) { await enviarConFoto(chatId, r, `建档没成：${String(r.error).slice(0, 200)}`); return; }
+    const notas = [];
+    if (r.bloqQuitado) notas.push('顺手取消了 Bloq.Venta（原来勾着）');
+    if (!r.confirmado) notas.push('没见到保存确认框——以复查结果为准');
     let verificacion = '';
     try {
       const verif = await diagnosticarLista(chatId, [{ codigo: datos.codigo, ean: '', nombre: '' }]);
@@ -1494,7 +1505,7 @@ async function handleFichaWebCallback(chatId, callbackId, resto) {
     } catch (error) {
       verificacion = `复查没跑成（${String(error.message).slice(0, 80)}），看截图核实。`;
     }
-    await enviarConFoto(chatId, r, `建档写完了（网页抄的数据）。\n${verificacion}`);
+    await enviarConFoto(chatId, r, ['建档写完了（网页抄的数据）。', ...notas, verificacion].join('\n'));
     return;
   }
 
