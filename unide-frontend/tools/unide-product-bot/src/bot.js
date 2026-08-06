@@ -18,7 +18,7 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, generarEtiquetaDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, confirmarGuardadoDesktop, generarEtiquetaDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, clasificarConsulta, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
@@ -1304,7 +1304,14 @@ async function repararFichaSdc(codigo, a) {
   const item = { codigo: String(codigo), ean: '', nombre: '', precio: { mode: 'manual', value: a.pvp2 } };
   // Código al campo Código: en el catalejo un código no encuentra nada
   // (fallo real 02/08: el bot lo tecleó ahí y la ficha no aparecía).
-  const found = await searchDesktop(item, config, logger, { byCode: true });
+  let found = await searchDesktop(item, config, logger, { byCode: true });
+  if (found.status !== 'ok') {
+    // Un diálogo de error de una corrida anterior deja la búsqueda en
+    // Timeout (real 06/08 20:53): limpiar el diálogo y reintentar UNA vez.
+    await confirmarGuardadoDesktop(config, logger);
+    await discardDesktop(config, logger);
+    found = await searchDesktop(item, config, logger, { byCode: true });
+  }
   if (found.status !== 'ok') return { ok: false, error: `搜索：${found.error || found.reason || '未知'}` };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, error: `读取：${read.error || read.reason || '未知'}` };
@@ -1347,6 +1354,13 @@ async function repararFichaSdc(codigo, a) {
   if (ficha.status !== 'ok') {
     await discardDesktop(config, logger);
     return { ok: false, error: `写入：${ficha.error || ficha.reason || '未知'}（已放弃未保存的改动）`, screenshot: ficha.screenshot };
+  }
+  // UnideGes rechazó el guardado con un diálogo de ERROR (el PS lo aceptó
+  // para desbloquear y trae el texto): esto es un fallo, no un éxito.
+  const avisoError = String(ficha.values?.avisoError || (ficha.warnings || []).find((w) => /aviso de ERROR al guardar/i.test(String(w))) || '');
+  if (avisoError) {
+    await discardDesktop(config, logger);
+    return { ok: false, error: `UnideGes 拒绝保存：${avisoError.replace(/^aviso de ERROR al guardar:\s*/i, '').slice(0, 160)}（已清理，没留脏表单）`, screenshot: ficha.screenshot };
   }
   const confirmado = Boolean(ficha.values?.confirmadoGuardado)
     || !((ficha.warnings || []).some((w) => /no aparecio/i.test(String(w))));
