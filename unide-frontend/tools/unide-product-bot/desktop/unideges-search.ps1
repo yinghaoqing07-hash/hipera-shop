@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "fichaApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "fichaApply", "confirmSave", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -867,6 +867,14 @@ function Get-Steps($Config, [string]$ActionMode) {
       [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
       [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila del articulo" },
       [pscustomobject]@{ type = "wait"; ms = 500 },
+      [pscustomobject]@{
+        type = "uiaToggleIf"
+        label = "Bloq.Venta"
+        self = $true
+        if = "toggleBloqVenta"
+        name = "Quitar Bloq.Venta PRIMERO si estaba puesto (prioridad del dueno, 02/08)"
+      },
+      [pscustomobject]@{ type = "wait"; ms = 400 },
       [pscustomobject]@{ type = "uiaSet"; label = "Proveedor"; index = 0; value = "{{supplierCode}}"; name = "Proveedor (codigo)" },
       [pscustomobject]@{ type = "uiaSet"; label = "Ref."; index = 0; value = "{{supplierRef}}"; name = "Referencia" },
       [pscustomobject]@{ type = "uiaSet"; label = "Inventariable"; index = 0; value = "{{inventariable}}"; name = "Inventariable" },
@@ -892,6 +900,18 @@ function Get-Steps($Config, [string]$ActionMode) {
       $steps = @(Get-DefaultBloqApplySteps)
     }
     $steps = Assert-SaveIsLast $steps "bloqApply"
+  }
+  elseif ($ActionMode -eq "confirmSave") {
+    # Tras el Ctrl+S que CREA la ficha TIENDA sale un aviso con Si/No
+    # (visto en tienda 02/08) y el Si no se pulsaba solo. Este modo se
+    # lanza justo despues del priceApply y responde Si — sin tocar los
+    # pasos calibrados de la tienda.
+    $steps = @(
+      [pscustomobject]@{ type = "wait"; ms = 300 },
+      [pscustomobject]@{ type = "answerYes"; name = "Responder Si al aviso de guardado" },
+      [pscustomobject]@{ type = "wait"; ms = 600 },
+      [pscustomobject]@{ type = "screenshot"; name = "Tras confirmar el guardado" }
+    )
   }
   elseif ($ActionMode -eq "discard") {
     # Descartar cambios sin guardar: vaciar pantalla + responder "No" al
@@ -1032,6 +1052,54 @@ try {
         if ($shouldClick) { Click-Point ([int]$step.x) ([int]$step.y) }
       }
       "wait" { Start-Sleep -Milliseconds ([int]$step.ms) }
+      "answerYes" {
+        # Responder Si al aviso de guardado. NO usa KnownHandles: el aviso
+        # se abrio en el proceso ANTERIOR (el del priceApply) y aqui ya
+        # estaria en la foto de arranque. Un dialogo se reconoce por su
+        # contenido: ventana en primer plano del proceso objetivo con un
+        # BOTON llamado Si (solo ControlType Button: el combo Inventariable
+        # tambien dice 'Si' pero no es boton).
+        $siPulsado = $false
+        for ($ay = 0; $ay -lt 12 -and -not $siPulsado; $ay++) {
+          $fgh = [Win32]::GetForegroundWindow()
+          if ($fgh -ne [IntPtr]::Zero) {
+            $ownerPid = [uint32]0
+            [Win32]::GetWindowThreadProcessId($fgh, [ref]$ownerPid) | Out-Null
+            if ($script:TargetPid -and $ownerPid -eq [uint32]$script:TargetPid) {
+              try {
+                $raizDlg = [System.Windows.Automation.AutomationElement]::FromHandle($fgh)
+                $todosDlg = $raizDlg.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                foreach ($elDlg in $todosDlg) {
+                  $tipoDlg = ""
+                  try { $tipoDlg = [string]$elDlg.Current.ControlType.ProgrammaticName } catch { $tipoDlg = "" }
+                  if ($tipoDlg -notmatch "Button") { continue }
+                  $nmDlg = ""
+                  try { $nmDlg = [string]$elDlg.Current.Name } catch { $nmDlg = "" }
+                  if ($nmDlg -notmatch '^\s*&?S(i|í)\s*$') { continue }
+                  $tituloDlg = New-Object System.Text.StringBuilder 512
+                  [Win32]::GetWindowText($fgh, $tituloDlg, 512) | Out-Null
+                  Add-WarningText "Aviso de guardado '$($tituloDlg.ToString())': pulso el boton Si"
+                  try {
+                    $invDlg = $elDlg.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                    $invDlg.Invoke()
+                    $siPulsado = $true
+                  } catch {
+                    try {
+                      $rDlg = $elDlg.Current.BoundingRectangle
+                      Click-Point ([int]($rDlg.X + $rDlg.Width / 2)) ([int]($rDlg.Y + $rDlg.Height / 2))
+                      $siPulsado = $true
+                    } catch { }
+                  }
+                  break
+                }
+              } catch { }
+            }
+          }
+          if (-not $siPulsado) { Start-Sleep -Milliseconds 500 }
+        }
+        if ($siPulsado) { $values["confirmadoGuardado"] = $true }
+        else { Add-WarningText "answerYes: en 6 s no aparecio ningun aviso con boton Si (quiza no hizo falta)" }
+      }
       "closeDialog" {
         $dlgKeys = "%{F4}"
         $dlgTries = 3
