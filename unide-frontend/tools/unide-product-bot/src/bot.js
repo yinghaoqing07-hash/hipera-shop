@@ -1348,7 +1348,18 @@ async function repararFichaSdc(codigo, a) {
   // calibrados no responden (visto 02/08): responderlo aquí.
   const conf = await confirmarGuardadoDesktop(config, logger);
   const confirmado = conf.status === 'ok' && !((conf.warnings || []).some((w) => /no aparecio/i.test(String(w))));
-  return { ok: true, screenshot: conf.screenshot || applied.screenshot, bloqQuitado: quitarBloq, confirmado };
+  // Bloq.Venta: en el registro SDC el checkbox puede no dejarse clicar
+  // (fallo real 06/08 — antes tumbaba TODO el alta). El fichaApply lo
+  // intenta tolerante; aquí, con la ficha TIENDA ya creada, se REMATA por
+  // el camino probado de /bloq, que verifica el estado de verdad.
+  let bloqQuitado = false;
+  let bloqNota = '';
+  if (quitarBloq) {
+    const post = await repararBloqVenta(codigo);
+    if (post.ok) bloqQuitado = true;
+    else bloqNota = `Bloq.Venta 没取消成（${String(post.error).slice(0, 100)}）`;
+  }
+  return { ok: true, screenshot: conf.screenshot || applied.screenshot, bloqQuitado, bloqNota, confirmado };
 }
 
 // 'Generar etiqueta' con las guardas de siempre: TIENDA cargado y código
@@ -1436,7 +1447,7 @@ async function handleRepairCallback(chatId, callbackId, resto) {
       foto = r.screenshot || foto;
     } else if (a.tipo === 'ficha') {
       const r = await repararFichaSdc(pend.codigo, a);
-      if (r.ok) hechas.push(`建 TIENDA 资料${r.bloqQuitado ? '（顺手取消了 Bloq.Venta）' : ''}${r.confirmado ? '' : '（没见到保存确认框，复查为准）'}`);
+      if (r.ok) hechas.push(`建 TIENDA 资料${r.bloqQuitado ? '（顺手取消了 Bloq.Venta）' : ''}${r.bloqNota ? `（⚠ ${r.bloqNota}）` : ''}${r.confirmado ? '' : '（没见到保存确认框，复查为准）'}`);
       else falladas.push(`建 TIENDA 资料（${String(r.error).slice(0, 160)}）`);
       foto = r.screenshot || foto;
     } else if (a.tipo === 'precio') {
@@ -1547,6 +1558,7 @@ async function handleFichaWebCallback(chatId, callbackId, resto) {
     if (!r.ok) { await enviarConFoto(chatId, r, `建档没成：${String(r.error).slice(0, 200)}`); return; }
     const notas = [];
     if (r.bloqQuitado) notas.push('顺手取消了 Bloq.Venta（原来勾着）');
+    if (r.bloqNota) notas.push(`⚠ ${r.bloqNota}——复查会显示，用「修这件」再补一次`);
     if (!r.confirmado) notas.push('没见到保存确认框——以复查结果为准');
     let verificacion = '';
     try {
