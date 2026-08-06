@@ -62,6 +62,12 @@ public class Win32 {
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam);
   [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, System.Text.StringBuilder lParam);
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr hMenu, int nPos);
+  [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr hMenu);
+  [DllImport("user32.dll")] public static extern uint GetMenuItemID(IntPtr hMenu, int nPos);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int GetMenuString(IntPtr hMenu, uint uIDItem, System.Text.StringBuilder lpString, int cchMax, uint flags);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 }
 public class WinEnum {
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
@@ -924,30 +930,26 @@ function Get-Steps($Config, [string]$ActionMode) {
     $steps = Assert-SaveIsLast $steps "bloqApply"
   }
   elseif ($ActionMode -eq "etiquetaApply") {
-    # 'Generar etiqueta' del articulo cargado (peticion del dueno, 03/08:
-    # a los articulos SANOS del diagnostico, un clic y listo). El nombre
-    # del boton es configurable (desktop.etiquetaBotonRegex) por si en
-    # esta instalacion se llama distinto.
-    $regexBoton = "Generar.{0,3}[Ee]tiqueta"
-    if (($Config.desktop.PSObject.Properties.Name -contains "etiquetaBotonRegex") -and $Config.desktop.etiquetaBotonRegex) {
-      $regexBoton = [string]$Config.desktop.etiquetaBotonRegex
-    }
-    # Dato del dueno (06/08): 'Generar etiqueta' esta DENTRO del menu
-    # Informes. Se abre el menu y se pulsa la entrada; el paso del menu es
-    # tolerante por si en otra pantalla el boton estuviera a la vista.
+    # 'Generar etiquetas' vive en el menu Informes del modulo Articulos
+    # (foto del dueno, 06/08). Se dispara por WM_COMMAND sobre el menu
+    # REAL de la ventana: sin clics y sin depender del popup. Regex
+    # afinables sin version nueva: desktop.etiquetaMenuRegex (menu) y
+    # desktop.etiquetaBotonRegex (entrada).
     $regexMenu = "^Informes"
     if (($Config.desktop.PSObject.Properties.Name -contains "etiquetaMenuRegex") -and $Config.desktop.etiquetaMenuRegex) {
       $regexMenu = [string]$Config.desktop.etiquetaMenuRegex
+    }
+    $regexBoton = "Generar.{0,3}[Ee]tiquetas?"
+    if (($Config.desktop.PSObject.Properties.Name -contains "etiquetaBotonRegex") -and $Config.desktop.etiquetaBotonRegex) {
+      $regexBoton = [string]$Config.desktop.etiquetaBotonRegex
     }
     $steps = @(
       [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
       [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila TIENDA" },
       [pscustomobject]@{ type = "wait"; ms = 500 },
-      [pscustomobject]@{ type = "uiaInvoke"; nameRegex = $regexMenu; tolerante = $true; name = "Abrir el menu Informes" },
-      [pscustomobject]@{ type = "wait"; ms = 800 },
-      [pscustomobject]@{ type = "uiaInvoke"; nameRegex = $regexBoton; name = "Pulsar Generar etiqueta" },
-      [pscustomobject]@{ type = "wait"; ms = 1200 },
-      [pscustomobject]@{ type = "screenshot"; name = "Tras Generar etiqueta" }
+      [pscustomobject]@{ type = "menuCommand"; menuRegex = $regexMenu; itemRegex = $regexBoton; name = "Informes -> Generar etiquetas (WM_COMMAND)" },
+      [pscustomobject]@{ type = "wait"; ms = 1500 },
+      [pscustomobject]@{ type = "screenshot"; name = "Tras Generar etiquetas" }
     )
   }
   elseif ($ActionMode -eq "confirmSave") {
@@ -1496,6 +1498,54 @@ try {
         if ($sel -ne ($count - 1)) {
           Add-WarningText "listSelectLast: seleccion en fila $sel de $count (se esperaba la ultima)"
         }
+      }
+      "menuCommand" {
+        # Dispara una entrada del MENU de la ventana (Archivo/Edicion/
+        # Informes/...) por la via Win32 de verdad: enumerar la barra con
+        # GetMenu/GetSubMenu, casar los textos (sin el & acelerador) y
+        # mandar WM_COMMAND con el id del item. Nada de clics ni popups:
+        # el 06/08 los dos uiaInvoke encadenados no encontraron 'Generar
+        # etiquetas' porque el desplegable es una ventana transitoria.
+        $hVentanaMenu = $script:TargetWindowHandle
+        $hMenu = [Win32]::GetMenu($hVentanaMenu)
+        if ($hMenu -eq [IntPtr]::Zero) { throw "menuCommand: la ventana no tiene barra de menu" }
+        $reMenu = [string]$step.menuRegex
+        $reItem = [string]$step.itemRegex
+        $vistosMenu = New-Object System.Collections.Generic.List[string]
+        $hSub = [IntPtr]::Zero
+        $nMenus = [Win32]::GetMenuItemCount($hMenu)
+        for ($mi = 0; $mi -lt $nMenus; $mi++) {
+          $sbM = New-Object System.Text.StringBuilder 256
+          [Win32]::GetMenuString($hMenu, [uint32]$mi, $sbM, 256, 0x400) | Out-Null
+          $txtM = $sbM.ToString().Replace("&", "")
+          $vistosMenu.Add($txtM) | Out-Null
+          if ($txtM -match $reMenu) { $hSub = [Win32]::GetSubMenu($hMenu, $mi); break }
+        }
+        if ($hSub -eq [IntPtr]::Zero) {
+          $listaM = $vistosMenu -join ", "
+          throw "menuCommand: ningun menu casa con '$reMenu' (menus vistos: $listaM)"
+        }
+        $vistosItem = New-Object System.Collections.Generic.List[string]
+        $idItem = [uint32]0
+        $hallado = $false
+        $nItems = [Win32]::GetMenuItemCount($hSub)
+        for ($ii = 0; $ii -lt $nItems; $ii++) {
+          $sbI = New-Object System.Text.StringBuilder 256
+          [Win32]::GetMenuString($hSub, [uint32]$ii, $sbI, 256, 0x400) | Out-Null
+          $txtI = $sbI.ToString().Replace("&", "")
+          if ($txtI) { $vistosItem.Add($txtI) | Out-Null }
+          if (-not $hallado -and $txtI -match $reItem) {
+            $idItem = [Win32]::GetMenuItemID($hSub, $ii)
+            if ($idItem -ne 0 -and $idItem -ne [uint32]::MaxValue) { $hallado = $true }
+          }
+        }
+        if (-not $hallado) {
+          $listaI = $vistosItem -join ", "
+          throw "menuCommand: ninguna entrada casa con '$reItem' (entradas vistas: $listaI)"
+        }
+        Add-WarningText "menuCommand: WM_COMMAND id=$idItem (entradas del menu: $($vistosItem -join ', '))"
+        [Win32]::PostMessage($hVentanaMenu, 0x0111, [IntPtr][int]$idItem, [IntPtr]::Zero) | Out-Null
+        Start-Sleep -Milliseconds 500
       }
       "comboElegir" {
         # Elegir una opcion de un combo por PREFIJO con tres metodos y
