@@ -878,10 +878,10 @@ function Get-Steps($Config, [string]$ActionMode) {
       [pscustomobject]@{ type = "wait"; ms = 400 },
       [pscustomobject]@{ type = "uiaSet"; label = "Proveedor"; index = 0; value = "{{supplierCode}}"; name = "Proveedor (codigo)" },
       [pscustomobject]@{ type = "uiaSet"; label = "Ref."; index = 0; value = "{{supplierRef}}"; name = "Referencia" },
-      # Inventariable es un COMBO: WM_SETTEXT no selecciona nada (fallo real
-      # 06/08: quedo vacio y el guardado fallo con 'No ha indicado si es
-      # Inventariable'). uiaSelectIfEmpty usa CB_SELECTSTRING, que si.
-      [pscustomobject]@{ type = "uiaSelectIfEmpty"; label = "Inventariable"; index = 0; value = "S"; name = "Inventariable = Si" },
+      # Inventariable es un COMBO rebelde (06/08: resistio WM_SETTEXT y el
+      # primer CB_SELECTSTRING): comboElegir prueba tres metodos y VERIFICA
+      # la lectura; si sigue vacio, ficha abortada ANTES del Ctrl+S.
+      [pscustomobject]@{ type = "comboElegir"; label = "Inventariable"; index = 0; value = "S"; name = "Inventariable = Si (combo verificado)" },
       # Precios y guardado EN EL MISMO proceso (fallo real 06/08: partido
       # en dos procesos, el aviso de guardar salia "antes" para el proceso
       # siguiente y todo se atascaba). Mismas etiquetas calibradas del
@@ -890,6 +890,12 @@ function Get-Steps($Config, [string]$ActionMode) {
       [pscustomobject]@{ type = "uiaSet"; label = "PC Ultimo"; index = 0; value = "{{pcUltimo}}"; name = "PC Ultimo" },
       [pscustomobject]@{ type = "uiaSet"; label = "P. defecto"; index = 1; value = "{{pDefecto}}"; name = "P. defecto (porcentaje)" },
       [pscustomobject]@{ type = "wait"; ms = 500 },
+      # Recuperar el foco justo antes de guardar: tras 30 s de pasos por
+      # mensaje el primer plano puede haber derivado y el ^s caeria en otra
+      # aplicacion (sospecha real 06/08: el aviso salio tarde, en la
+      # re-diagnosis, señal de que el Ctrl+S no llego a UnideGes).
+      [pscustomobject]@{ type = "focus"; name = "Foco en Articulos antes de guardar" },
+      [pscustomobject]@{ type = "wait"; ms = 300 },
       [pscustomobject]@{ type = "hotkey"; keys = "^s"; name = "Guardar (crea la ficha TIENDA)" },
       [pscustomobject]@{ type = "wait"; ms = 1200 },
       [pscustomobject]@{ type = "answerYes"; name = "Responder Si al aviso de guardado" },
@@ -1103,7 +1109,7 @@ try {
         # BOTON llamado Si (solo ControlType Button: el combo Inventariable
         # tambien dice 'Si' pero no es boton).
         $siPulsado = $false
-        for ($ay = 0; $ay -lt 12 -and -not $siPulsado; $ay++) {
+        for ($ay = 0; $ay -lt 16 -and -not $siPulsado; $ay++) {
           $fgh = [Win32]::GetForegroundWindow()
           if ($fgh -ne [IntPtr]::Zero) {
             $ownerPid = [uint32]0
@@ -1490,6 +1496,58 @@ try {
         if ($sel -ne ($count - 1)) {
           Add-WarningText "listSelectLast: seleccion en fila $sel de $count (se esperaba la ultima)"
         }
+      }
+      "comboElegir" {
+        # Elegir una opcion de un combo por PREFIJO con tres metodos y
+        # VERIFICACION real (el Inventariable resistio WM_SETTEXT y un
+        # CB_SELECTSTRING a ciegas, 06/08): (1) CB_SELECTSTRING comprobado
+        # con CB_GETCURSEL, (2) UIA Expand + SelectionItem, (3) foco +
+        # teclas de verdad. Si tras los tres sigue vacio, se LANZA error:
+        # mejor fallar aqui que estrellarse contra el aviso del Ctrl+S.
+        $el = Resolve-UiaTarget $step
+        if (-not $el) { throw "comboElegir: no se encontro el control (label='$($step.label)')" }
+        $prefijo = Resolve-Template ([string]$step.value)
+        $elegido = $false
+        $hwndCombo = Get-UiaHwnd $el
+        if ($hwndCombo -ne [IntPtr]::Zero) {
+          [int][Win32]::SendMessage($hwndCombo, 0x014D, [IntPtr](-1), $prefijo) | Out-Null
+          Start-Sleep -Milliseconds 250
+          $selIdx = [int][Win32]::SendMessage($hwndCombo, 0x0147, [IntPtr]::Zero, [IntPtr]::Zero)
+          if ($selIdx -ge 0) { $elegido = $true; Add-WarningText "comboElegir '$($step.label)': CB_SELECTSTRING eligio la opcion $selIdx" }
+        }
+        if (-not $elegido) {
+          try {
+            $expC = $el.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+            $expC.Expand()
+            Start-Sleep -Milliseconds 400
+            $itemsC = $el.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($itC in $itemsC) {
+              $nmItC = ""
+              try { $nmItC = [string]$itC.Current.Name } catch { $nmItC = "" }
+              if ($nmItC -notmatch ('^' + [regex]::Escape($prefijo))) { continue }
+              $selPatC = $itC.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+              $selPatC.Select()
+              $elegido = $true
+              Add-WarningText "comboElegir '$($step.label)': UIA eligio '$nmItC'"
+              break
+            }
+            if (-not $elegido) { try { $expC.Collapse() } catch { } }
+          } catch { }
+        }
+        if (-not $elegido) {
+          try { $el.SetFocus() } catch { }
+          Start-Sleep -Milliseconds 250
+          [System.Windows.Forms.SendKeys]::SendWait($prefijo)
+          Start-Sleep -Milliseconds 250
+          [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+          Add-WarningText "comboElegir '$($step.label)': foco + teclas '$prefijo'"
+        }
+        Start-Sleep -Milliseconds 300
+        $lecturaCombo = Read-ControlText $el
+        if (-not $lecturaCombo) {
+          throw "comboElegir: '$($step.label)' sigue vacio tras los tres metodos (mira los warnings para ver cuales se intentaron)"
+        }
+        Add-WarningText "comboElegir '$($step.label)' = '$lecturaCombo'"
       }
       "uiaKey" {
         # Manda una tecla POR MENSAJE directamente al control (p. ej. F2 en
