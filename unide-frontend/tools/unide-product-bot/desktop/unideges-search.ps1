@@ -872,7 +872,8 @@ function Get-Steps($Config, [string]$ActionMode) {
         label = "Bloq.Venta"
         self = $true
         if = "toggleBloqVenta"
-        name = "Quitar Bloq.Venta PRIMERO si estaba puesto (prioridad del dueno, 02/08)"
+        tolerante = $true
+        name = "Quitar Bloq.Venta PRIMERO si se deja (en SDC puede no ser clicable; entonces se quita tras crear la ficha)"
       },
       [pscustomobject]@{ type = "wait"; ms = 400 },
       [pscustomobject]@{ type = "uiaSet"; label = "Proveedor"; index = 0; value = "{{supplierCode}}"; name = "Proveedor (codigo)" },
@@ -910,10 +911,19 @@ function Get-Steps($Config, [string]$ActionMode) {
     if (($Config.desktop.PSObject.Properties.Name -contains "etiquetaBotonRegex") -and $Config.desktop.etiquetaBotonRegex) {
       $regexBoton = [string]$Config.desktop.etiquetaBotonRegex
     }
+    # Dato del dueno (06/08): 'Generar etiqueta' esta DENTRO del menu
+    # Informes. Se abre el menu y se pulsa la entrada; el paso del menu es
+    # tolerante por si en otra pantalla el boton estuviera a la vista.
+    $regexMenu = "^Informes"
+    if (($Config.desktop.PSObject.Properties.Name -contains "etiquetaMenuRegex") -and $Config.desktop.etiquetaMenuRegex) {
+      $regexMenu = [string]$Config.desktop.etiquetaMenuRegex
+    }
     $steps = @(
       [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
       [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila TIENDA" },
       [pscustomobject]@{ type = "wait"; ms = 500 },
+      [pscustomobject]@{ type = "uiaInvoke"; nameRegex = $regexMenu; tolerante = $true; name = "Abrir el menu Informes" },
+      [pscustomobject]@{ type = "wait"; ms = 800 },
       [pscustomobject]@{ type = "uiaInvoke"; nameRegex = $regexBoton; name = "Pulsar Generar etiqueta" },
       [pscustomobject]@{ type = "wait"; ms = 1200 },
       [pscustomobject]@{ type = "screenshot"; name = "Tras Generar etiqueta" }
@@ -1119,31 +1129,57 @@ try {
         else { Add-WarningText "answerYes: en 6 s no aparecio ningun aviso con boton Si (quiza no hizo falta)" }
       }
       "uiaInvoke" {
-        # Pulsa el primer control cuyo Name casa el regex (boton de verdad
-        # o dibujo propio): Invoke y, si no lo soporta, clic fisico al
-        # centro — el mismo doblete que usa el menu de UnideGes.
-        $rootInv = Get-UiaRoot
-        $allInv = $rootInv.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-        $objInv = $null
-        foreach ($candInv in $allInv) {
-          $nmInv = ""
-          try { $nmInv = [string]$candInv.Current.Name } catch { $nmInv = "" }
-          if ($nmInv -eq "") { continue }
-          if ($nmInv -match [string]$step.nameRegex) { $objInv = $candInv; break }
-        }
-        if (-not $objInv) { throw "uiaInvoke: ningun control casa con '$($step.nameRegex)' (paso '$($step.name)')" }
-        Add-WarningText "uiaInvoke: pulso '$([string]$objInv.Current.Name)'"
-        $invHecho = $false
+        # Pulsa el primer control cuyo Name casa el regex (boton, entrada
+        # de menu o dibujo propio): Invoke y, si no, clic fisico al centro.
+        # Busca en la ventana objetivo Y en las demas ventanas del proceso:
+        # los menus desplegables y popups viven en ventanas propias (fallo
+        # real 06/08: 'Generar etiqueta' esta dentro del menu Informes).
+        # Con tolerante=true un fallo se apunta y se sigue.
+        $invTolerante = ($step.PSObject.Properties.Name -contains "tolerante") -and [System.Convert]::ToBoolean($step.tolerante)
         try {
-          $invPat = $objInv.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-          $invPat.Invoke()
-          $invHecho = $true
-        } catch { }
-        if (-not $invHecho) {
-          $rInv = $objInv.Current.BoundingRectangle
-          Click-Point ([int]($rInv.X + $rInv.Width / 2)) ([int]($rInv.Y + $rInv.Height / 2))
+          $raices = New-Object System.Collections.Generic.List[object]
+          $raices.Add((Get-UiaRoot)) | Out-Null
+          try {
+            $condPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$script:TargetPid)
+            $topLevel = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condPid)
+            foreach ($tl in $topLevel) { $raices.Add($tl) | Out-Null }
+          } catch { }
+          $objInv = $null
+          foreach ($raizInv in $raices) {
+            $allInv = $null
+            try { $allInv = $raizInv.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) } catch { continue }
+            foreach ($candInv in $allInv) {
+              $nmInv = ""
+              try { $nmInv = [string]$candInv.Current.Name } catch { $nmInv = "" }
+              if ($nmInv -eq "") { continue }
+              if ($nmInv -match [string]$step.nameRegex) { $objInv = $candInv; break }
+            }
+            if ($objInv) { break }
+          }
+          if (-not $objInv) { throw "uiaInvoke: ningun control casa con '$($step.nameRegex)' (paso '$($step.name)')" }
+          Add-WarningText "uiaInvoke: pulso '$([string]$objInv.Current.Name)'"
+          $invHecho = $false
+          try {
+            $invPat = $objInv.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invPat.Invoke()
+            $invHecho = $true
+          } catch { }
+          if (-not $invHecho) {
+            try {
+              $expPat = $objInv.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+              $expPat.Expand()
+              $invHecho = $true
+            } catch { }
+          }
+          if (-not $invHecho) {
+            $rInv = $objInv.Current.BoundingRectangle
+            Click-Point ([int]($rInv.X + $rInv.Width / 2)) ([int]($rInv.Y + $rInv.Height / 2))
+          }
+          Start-Sleep -Milliseconds 300
+        } catch {
+          if ($invTolerante) { Add-WarningText "paso tolerante '$($step.name)' sin exito: $($_.Exception.Message)" }
+          else { throw }
         }
-        Start-Sleep -Milliseconds 300
       }
       "closeDialog" {
         $dlgKeys = "%{F4}"
@@ -1348,7 +1384,21 @@ try {
         $shouldToggle = $false
         if ($variables.PSObject.Properties.Name -contains $flagName) { $shouldToggle = [System.Convert]::ToBoolean($variables.$flagName) }
         elseif ($values.Contains($flagName)) { $shouldToggle = [System.Convert]::ToBoolean($values[$flagName]) }
-        if ($shouldToggle) {
+        $togTolerante = ($step.PSObject.Properties.Name -contains "tolerante") -and [System.Convert]::ToBoolean($step.tolerante)
+        if ($shouldToggle -and $togTolerante) {
+          # En el registro SDC el checkbox puede no dejarse clicar (fallo
+          # real 06/08): se apunta y se sigue — el bot lo quita despues
+          # sobre el registro TIENDA recien creado, que si es editable.
+          try {
+            $el = Resolve-UiaTarget $step
+            if (-not $el) { throw "uiaToggleIf: no se encontro el control (label='$($step.label)')" }
+            $values["bloqVentaAfterClick"] = Toggle-UiaCheckboxPhysical $el
+          } catch {
+            Add-WarningText "paso tolerante '$($step.name)' sin exito: $($_.Exception.Message)"
+            $values["bloqToggleFallo"] = $true
+          }
+        }
+        elseif ($shouldToggle) {
           $el = Resolve-UiaTarget $step
           if (-not $el) { throw "uiaToggleIf: no se encontro el control (label='$($step.label)')" }
           $values["bloqVentaAfterClick"] = Toggle-UiaCheckboxPhysical $el
