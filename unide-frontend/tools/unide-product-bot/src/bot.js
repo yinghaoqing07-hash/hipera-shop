@@ -18,7 +18,7 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, confirmarGuardadoDesktop, generarEtiquetaDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, generarEtiquetaDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, clasificarConsulta, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
@@ -1312,46 +1312,44 @@ async function repararFichaSdc(codigo, a) {
   const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
   if (!screenCode) return { ok: false, error: 'Código 框读到空——商品没载入，为安全不动' };
   if (screenCode !== String(codigo)) return { ok: false, error: `屏幕上是 ${screenCode}，不是 ${codigo}——为安全不动` };
-  // Bloq.Venta marcado se quita PRIMERO (prioridad del dueño, 02/08):
-  // viaja como condición al fichaApply, que lo alterna antes de nada.
   const quitarBloq = Boolean(values.bloqVentaChecked);
+
+  // Los números vienen SIEMPRE de la acción: son los que el dueño confirmó
+  // en el botón. Volver a mirar la tabla aquí fallaba (real 06/08: el
+  // diagnóstico la consultó por EAN, la reparación re-buscaba por código y
+  // salía 'la tabla no tiene PVD' con el coste impreso en el propio botón).
+  let store = lookupStore(storeIndex, item);
+  const supplier = { status: 'found', matchType: 'accion', product: { pvd: String(a.pvd), pvp2: String(a.pvp2) } };
+  if (a.impuesto > 0) store = { status: 'found', matchType: 'web', product: { ...(store?.product || {}), iva: String(a.impuesto) } };
+
+  // El plan se calcula ANTES de tocar nada: si no cuadra, se aborta con el
+  // formulario limpio — sin diálogos de guardar fantasma (real 06/08: el
+  // aviso salía "antes de tiempo" y se quedaba atascado).
+  const planResult = buildPricePlan({ item, supplier, store }, read);
+  if (!planResult.ok) return { ok: false, error: `定价：${planResult.error}（还没动任何东西）` };
+  const plan = planResult.plan;
+
+  // TODO el alta en un único proceso del escritorio: campos + costes +
+  // P.defecto + Ctrl+S + Sí del aviso. El diálogo lo responde el mismo
+  // proceso que lo provocó.
   const ficha = await applyFichaDesktop({
     supplierCode: String(a.proveedor || '12074'),
     supplierRef: String(a.ref || `9${codigo}0`),
     inventariable: 'Sí',
-    toggleBloqVenta: quitarBloq
+    toggleBloqVenta: quitarBloq,
+    pcMedio: plan.pcMedio,
+    pcUltimo: plan.pcUltimo,
+    pDefecto: plan.pDefecto
   }, codigo, config, logger);
   if (ficha.status !== 'ok') {
     await discardDesktop(config, logger);
-    return { ok: false, error: `填资料：${ficha.error || ficha.reason || '未知'}（已放弃未保存的改动）`, screenshot: ficha.screenshot };
+    return { ok: false, error: `写入：${ficha.error || ficha.reason || '未知'}（已放弃未保存的改动）`, screenshot: ficha.screenshot };
   }
-  let store = lookupStore(storeIndex, item);
-  let supplier = enrichSupplierLookup(supplierIndex, item, store);
-  if (a.origenWeb) {
-    // Datos copiados de la web de Unide (plan del dueño): entran como si
-    // fueran la fila de la tabla del proveedor — mismo cálculo, mismas
-    // válvulas. El IVA, si la web lo trae, viaja por la vía del caché.
-    supplier = { status: 'found', matchType: 'web', product: { pvd: String(a.pvd), pvp2: String(a.pvp2) } };
-    if (a.impuesto > 0) store = { status: 'found', matchType: 'web', product: { ...(store?.product || {}), iva: String(a.impuesto) } };
-  }
-  const planResult = buildPricePlan({ item, supplier, store }, read);
-  if (!planResult.ok) {
-    await discardDesktop(config, logger);
-    return { ok: false, error: `定价：${planResult.error}（已放弃未保存的改动）` };
-  }
-  const applied = await applyPriceDesktop(planResult.plan, config, logger);
-  if (applied.status !== 'ok') {
-    await discardDesktop(config, logger);
-    return { ok: false, error: `写入：${applied.error || applied.reason || '未知'}（已放弃未保存的改动）`, screenshot: applied.screenshot };
-  }
-  // El Ctrl+S que CREA la ficha saca un aviso Sí/No que los pasos
-  // calibrados no responden (visto 02/08): responderlo aquí.
-  const conf = await confirmarGuardadoDesktop(config, logger);
-  const confirmado = conf.status === 'ok' && !((conf.warnings || []).some((w) => /no aparecio/i.test(String(w))));
-  // Bloq.Venta: en el registro SDC el checkbox puede no dejarse clicar
-  // (fallo real 06/08 — antes tumbaba TODO el alta). El fichaApply lo
-  // intenta tolerante; aquí, con la ficha TIENDA ya creada, se REMATA por
-  // el camino probado de /bloq, que verifica el estado de verdad.
+  const confirmado = Boolean(ficha.values?.confirmadoGuardado)
+    || !((ficha.warnings || []).some((w) => /no aparecio/i.test(String(w))));
+  // Bloq.Venta: si el checkbox del SDC no se dejó (paso tolerante), se
+  // remata sobre la ficha TIENDA recién creada por el camino probado de
+  // /bloq, que verifica el estado real y no toca si ya quedó sin marcar.
   let bloqQuitado = false;
   let bloqNota = '';
   if (quitarBloq) {
@@ -1359,7 +1357,7 @@ async function repararFichaSdc(codigo, a) {
     if (post.ok) bloqQuitado = true;
     else bloqNota = `Bloq.Venta 没取消成（${String(post.error).slice(0, 100)}）`;
   }
-  return { ok: true, screenshot: conf.screenshot || applied.screenshot, bloqQuitado, bloqNota, confirmado };
+  return { ok: true, screenshot: ficha.screenshot, bloqQuitado, bloqNota, confirmado };
 }
 
 // 'Generar etiqueta' con las guardas de siempre: TIENDA cargado y código
