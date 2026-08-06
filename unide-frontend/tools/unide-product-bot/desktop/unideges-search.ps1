@@ -2,7 +2,7 @@
   [Parameter(Mandatory = $true)][string]$Query,
   [Parameter(Mandatory = $true)][string]$ConfigPath,
   [Parameter(Mandatory = $true)][string]$OutDir,
-  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "fichaApply", "confirmSave", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
+  [ValidateSet("search", "searchCode", "searchName", "clear", "priceRead", "diagnoseRead", "priceApply", "bloqApply", "fichaApply", "confirmSave", "etiquetaApply", "orderApply", "discard", "uiaDump")][string]$Mode = "search",
   [string]$VariablesJson = "{}"
 )
 
@@ -901,6 +901,24 @@ function Get-Steps($Config, [string]$ActionMode) {
     }
     $steps = Assert-SaveIsLast $steps "bloqApply"
   }
+  elseif ($ActionMode -eq "etiquetaApply") {
+    # 'Generar etiqueta' del articulo cargado (peticion del dueno, 03/08:
+    # a los articulos SANOS del diagnostico, un clic y listo). El nombre
+    # del boton es configurable (desktop.etiquetaBotonRegex) por si en
+    # esta instalacion se llama distinto.
+    $regexBoton = "Generar.{0,3}[Ee]tiqueta"
+    if (($Config.desktop.PSObject.Properties.Name -contains "etiquetaBotonRegex") -and $Config.desktop.etiquetaBotonRegex) {
+      $regexBoton = [string]$Config.desktop.etiquetaBotonRegex
+    }
+    $steps = @(
+      [pscustomobject]@{ type = "focus"; name = "Activar Articulos" },
+      [pscustomobject]@{ type = "listSelectLast"; classRegex = "SysListView32"; name = "Seleccionar la fila TIENDA" },
+      [pscustomobject]@{ type = "wait"; ms = 500 },
+      [pscustomobject]@{ type = "uiaInvoke"; nameRegex = $regexBoton; name = "Pulsar Generar etiqueta" },
+      [pscustomobject]@{ type = "wait"; ms = 1200 },
+      [pscustomobject]@{ type = "screenshot"; name = "Tras Generar etiqueta" }
+    )
+  }
   elseif ($ActionMode -eq "confirmSave") {
     # Tras el Ctrl+S que CREA la ficha TIENDA sale un aviso con Si/No
     # (visto en tienda 02/08) y el Si no se pulsaba solo. Este modo se
@@ -1099,6 +1117,33 @@ try {
         }
         if ($siPulsado) { $values["confirmadoGuardado"] = $true }
         else { Add-WarningText "answerYes: en 6 s no aparecio ningun aviso con boton Si (quiza no hizo falta)" }
+      }
+      "uiaInvoke" {
+        # Pulsa el primer control cuyo Name casa el regex (boton de verdad
+        # o dibujo propio): Invoke y, si no lo soporta, clic fisico al
+        # centro — el mismo doblete que usa el menu de UnideGes.
+        $rootInv = Get-UiaRoot
+        $allInv = $rootInv.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        $objInv = $null
+        foreach ($candInv in $allInv) {
+          $nmInv = ""
+          try { $nmInv = [string]$candInv.Current.Name } catch { $nmInv = "" }
+          if ($nmInv -eq "") { continue }
+          if ($nmInv -match [string]$step.nameRegex) { $objInv = $candInv; break }
+        }
+        if (-not $objInv) { throw "uiaInvoke: ningun control casa con '$($step.nameRegex)' (paso '$($step.name)')" }
+        Add-WarningText "uiaInvoke: pulso '$([string]$objInv.Current.Name)'"
+        $invHecho = $false
+        try {
+          $invPat = $objInv.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+          $invPat.Invoke()
+          $invHecho = $true
+        } catch { }
+        if (-not $invHecho) {
+          $rInv = $objInv.Current.BoundingRectangle
+          Click-Point ([int]($rInv.X + $rInv.Width / 2)) ([int]($rInv.Y + $rInv.Height / 2))
+        }
+        Start-Sleep -Milliseconds 300
       }
       "closeDialog" {
         $dlgKeys = "%{F4}"

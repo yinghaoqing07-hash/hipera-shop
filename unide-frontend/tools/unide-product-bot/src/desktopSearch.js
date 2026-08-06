@@ -52,6 +52,13 @@ export async function confirmarGuardadoDesktop(config, logger) {
   return runDesktopAction('confirmSave', 'confirm', {}, config, logger);
 }
 
+// Pulsa 'Generar etiqueta' del artículo cargado (los sanos del
+// diagnóstico, petición del dueño 03/08). Solo el clic: la impresión la
+// gestiona UnideGes.
+export async function generarEtiquetaDesktop(codigo, config, logger) {
+  return runDesktopAction('etiquetaApply', String(codigo), {}, config, logger);
+}
+
 // Descarta los cambios SIN GUARDAR del artículo en pantalla: vaciar
 // pantalla y responder "No" al aviso de guardar. Se usa tras un guardado
 // fallido, para no dejar el formulario "sucio" (un formulario sucio hace

@@ -18,7 +18,7 @@ import { ActiveConversationStore, classifyShortDecision } from './activeConversa
 import { AutoAdvisorScheduler } from './autoAdvisor.js';
 import { startPanel } from './panel.js';
 import { enrichSupplierLookup, loadStoreIndex, loadSupplierIndex, lookupStore, suggestedPrice, supplierCost } from './supplierLookup.js';
-import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, confirmarGuardadoDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
+import { applyBloqDesktop as applyBloqDesktopRaw, applyFichaDesktop, applyOrderDesktop as applyOrderDesktopRaw, confirmarGuardadoDesktop, generarEtiquetaDesktop, applyPriceDesktop as applyPriceDesktopRaw, clearDesktop, diagnoseDesktop, discardDesktop, dumpUiaDesktop, isDesktopTrace, readPriceDesktop as readPriceDesktopRaw, searchDesktop as searchDesktopRaw, setDesktopTrace } from './desktopSearch.js';
 import { buildProductDiagnosis, clasificarConsulta, formatDiagnosticsSummary, parseDiagnosticoCodigos, parseProductExport, planAutoReparacion, writeDiagnosticsCsv } from './productDiagnostics.js';
 import { getLive, getLiveLog, getLiveShot, getLiveSince, noteLive, setLive } from './liveStatus.js';
 import { conCandadoWeb } from './webLock.js';
@@ -1215,6 +1215,12 @@ async function handleDiagnosticoCodigos(chatId, codigos) {
     setLive('[diagnostico] listo');
     flujoEstado.terminar('herr-diag-productos', { ok: true, detalle: `${results.length} 件（手输代码）` });
     await telegram.sendMessage(chatId, formatDiagnosticsSummary(results), { __skipAI: true });
+    // Regla del dueño (03/08): al artículo que sale SANO, botón de
+    // 'Generar etiqueta' — un clic y va con su precio a la impresora.
+    for (const r of results.filter((x) => x.outcome === 'ok').slice(0, 6)) {
+      const codigoReal = String(r.current?.codigo || r.input?.codigo || '').replace(/\D/g, '');
+      await ofrecerEtiqueta(chatId, codigoReal, String(r.input?.codigo || r.input?.ean || codigoReal));
+    }
     // Con pocos artículos el plan cabe en el chat, y lo que el bot sabe
     // arreglar (quitar Bloq.Venta, poner el 2º precio recomendado) se
     // ofrece con botón — escribir SIEMPRE detrás de una confirmación.
@@ -1278,6 +1284,7 @@ const repairPendientes = new Map();
 let repairSeq = 1;
 
 function describirAccionReparacion(a) {
+  if (a.tipo === 'etiqueta') return '生成价签 (Generar etiqueta)';
   if (a.tipo === 'bloq') return '取消 Bloq.Venta';
   if (a.tipo === 'precio') return `售价改成 ${Number(a.valor).toFixed(2).replace('.', ',')} €`;
   if (a.tipo === 'ficha') {
@@ -1344,6 +1351,39 @@ async function repararFichaSdc(codigo, a) {
   return { ok: true, screenshot: conf.screenshot || applied.screenshot, bloqQuitado: quitarBloq, confirmado };
 }
 
+// 'Generar etiqueta' con las guardas de siempre: TIENDA cargado y código
+// verificado en pantalla antes de pulsar nada.
+async function generarEtiquetaConGuardas(codigo) {
+  const found = await searchDesktop({ codigo, ean: '', nombre: '' }, config, logger, { byCode: true });
+  if (found.status !== 'ok') return { ok: false, error: `搜索：${found.error || found.reason || '未知'}` };
+  const read = await readPriceDesktop(config, logger);
+  if (read.status !== 'ok') return { ok: false, error: `读取：${read.error || read.reason || '未知'}` };
+  const values = read.values || {};
+  if ('bancoDatos' in values && !/tienda/i.test(String(values.bancoDatos ?? ''))) {
+    return { ok: false, error: `载入的是「${String(values.bancoDatos ?? '').trim() || '未知'}」记录，不是 TIENDA` };
+  }
+  const screenCode = String(values.codigoPantalla ?? '').replace(/\D/g, '');
+  if (screenCode && screenCode !== String(codigo)) return { ok: false, error: `屏幕上是 ${screenCode}，不是 ${codigo}` };
+  const r = await generarEtiquetaDesktop(codigo, config, logger);
+  if (r.status !== 'ok') return { ok: false, error: r.error || r.reason || '没点成（看黑匣子）', screenshot: r.screenshot };
+  return { ok: true, screenshot: r.screenshot };
+}
+
+// Ofrecer el clic de 'Generar etiqueta' para un artículo que quedó SANO
+// (tras diagnóstico o tras reparación verificada).
+async function ofrecerEtiqueta(chatId, codigoReal, quien) {
+  if (!/^\d+$/.test(String(codigoReal))) return;
+  const id = String(repairSeq++);
+  repairPendientes.set(id, { codigo: String(codigoReal), acciones: [{ tipo: 'etiqueta' }], running: false });
+  await telegram.sendMessage(chatId, `${quien || codigoReal}：要打价签的话点下面（Generar etiqueta）。`, {
+    __skipAI: true,
+    reply_markup: { inline_keyboard: [[
+      { text: '🏷️ Generar etiqueta', callback_data: `rp:go:${id}` },
+      { text: '不用', callback_data: `rp:no:${id}` }
+    ]] }
+  });
+}
+
 // Quitar Bloq.Venta con las MISMAS guardas que /bloq: registro TIENDA,
 // código correcto en pantalla y estado leído de verdad antes de tocar.
 async function repararBloqVenta(codigo) {
@@ -1389,6 +1429,11 @@ async function handleRepairCallback(chatId, callbackId, resto) {
       if (r.ok) hechas.push(`取消 Bloq.Venta${r.nota ? `（${r.nota}）` : ''}`);
       else falladas.push(`取消 Bloq.Venta（${String(r.error).slice(0, 120)}）`);
       foto = r.screenshot || foto;
+    } else if (a.tipo === 'etiqueta') {
+      const r = await generarEtiquetaConGuardas(pend.codigo);
+      if (r.ok) hechas.push('价签已生成 (Generar etiqueta)');
+      else falladas.push(`价签（${String(r.error).slice(0, 140)}）`);
+      foto = r.screenshot || foto;
     } else if (a.tipo === 'ficha') {
       const r = await repararFichaSdc(pend.codigo, a);
       if (r.ok) hechas.push(`建 TIENDA 资料${r.bloqQuitado ? '（顺手取消了 Bloq.Venta）' : ''}${r.confirmado ? '' : '（没见到保存确认框，复查为准）'}`);
@@ -1412,22 +1457,30 @@ async function handleRepairCallback(chatId, callbackId, resto) {
     }
   }
   // Comprobación de verdad: re-diagnóstico del artículo tras escribir.
+  // Con solo la etiqueta no hay nada que re-diagnosticar (no cambia datos).
+  const soloEtiqueta = pend.acciones.every((x) => x.tipo === 'etiqueta');
   let verificacion = '';
-  try {
-    const verif = await diagnosticarLista(chatId, [{ codigo: pend.codigo, ean: '', nombre: '' }]);
-    const v = verif[0];
-    verificacion = v?.outcome === 'ok'
-      ? `复查：${pend.codigo} 已经没有问题了 ✅`
-      : `复查：还剩 ${(v?.issues || []).join('、') || '待人工确认'}`;
-  } catch (error) {
-    verificacion = `复查没跑成（${String(error.message).slice(0, 80)}），看一眼截图核实。`;
+  let quedoSano = false;
+  if (!soloEtiqueta) {
+    try {
+      const verif = await diagnosticarLista(chatId, [{ codigo: pend.codigo, ean: '', nombre: '' }]);
+      const v = verif[0];
+      quedoSano = v?.outcome === 'ok';
+      verificacion = quedoSano
+        ? `复查：${pend.codigo} 已经没有问题了 ✅`
+        : `复查：还剩 ${(v?.issues || []).join('、') || '待人工确认'}`;
+    } catch (error) {
+      verificacion = `复查没跑成（${String(error.message).slice(0, 80)}），看一眼截图核实。`;
+    }
   }
   repairPendientes.delete(id);
   const lineas = [];
   if (hechas.length) lineas.push('修好了：' + hechas.join('、'));
   if (falladas.length) lineas.push('没修成：' + falladas.join('、'));
-  lineas.push(verificacion);
+  if (verificacion) lineas.push(verificacion);
   await enviarConFoto(chatId, { screenshot: foto }, lineas.join('\n'));
+  // Regla del dueño (03/08): al que queda sano, su etiqueta.
+  if (quedoSano && !falladas.length) await ofrecerEtiqueta(chatId, pend.codigo);
 }
 
 // Flujo web (rw:): la tabla del proveedor no tiene el artículo → leer su
@@ -1506,6 +1559,7 @@ async function handleFichaWebCallback(chatId, callbackId, resto) {
       verificacion = `复查没跑成（${String(error.message).slice(0, 80)}），看截图核实。`;
     }
     await enviarConFoto(chatId, r, ['建档写完了（网页抄的数据）。', ...notas, verificacion].join('\n'));
+    if (/已经没有问题了/.test(verificacion)) await ofrecerEtiqueta(chatId, datos.codigo);
     return;
   }
 
