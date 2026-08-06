@@ -33,6 +33,7 @@ import { abrirFlujoEstado } from './flujoEstado.js';
 import { renderFlujoPage } from './flujoPage.js';
 import { inspectOrderPage, inspectFormPage, applyOrderWeb, editOrderWeb, saveOrderWeb, sendOrderWeb, searchArticleOptions, fetchArrivingOrders, fetchOrderLinesByName, fetchOrdersBySelectors, fetchLatestOrders, listOrders } from './webOrder.js';
 import { fetchMensajeriaOperativa, formatMensajeriaSummary } from './webMensajeria.js';
+import { fetchArticuloWeb, resumenArticuloWeb } from './webArticulos.js';
 import { esConflictoTelegram, guardarLinea, leerLinea, nombreInstancia } from './lineaTelegram.js';
 import { formatRecentOrdersSummary, parseRecentOrdersRequest } from './recentOrders.js';
 import { ArrivalChecklistScheduler, addDays, formatChecklist, ordersArrivingOn, parseDateArg, printText, recordFilledOrder, todayString } from './arrivalChecklist.js';
@@ -1239,6 +1240,24 @@ async function handleDiagnosticoCodigos(chatId, codigos) {
             { text: '不修', callback_data: `rp:no:${id}` }
           ]] }
         };
+      } else if ((r.issues || []).some((i) => /TIENDA/.test(i)) && (r.issues || []).some((i) => /供应商表/.test(i))) {
+        // Plan del dueño (02/08): la tabla no tiene el artículo → sus datos
+        // se leen de la web de Unide (Artículos Unide) y se copian.
+        const id = String(repairSeq++);
+        repairPendientes.set(id, {
+          codigo: codigoReal,
+          ean: String(r.input?.ean || '').replace(/\D/g, ''),
+          web: true,
+          running: false
+        });
+        lineas.push('供应商表里没有它——但可以去网页 Artículos Unide 抄它的资料来建档。');
+        opciones = {
+          __skipAI: true,
+          reply_markup: { inline_keyboard: [[
+            { text: '🌐 去网页抄资料并建档', callback_data: `rw:go:${id}` },
+            { text: '算了', callback_data: `rw:no:${id}` }
+          ]] }
+        };
       }
       await telegram.sendMessage(chatId, lineas.join('\n'), opciones);
     }
@@ -1294,8 +1313,15 @@ async function repararFichaSdc(codigo, a) {
     await discardDesktop(config, logger);
     return { ok: false, error: `填资料：${ficha.error || ficha.reason || '未知'}（已放弃未保存的改动）`, screenshot: ficha.screenshot };
   }
-  const store = lookupStore(storeIndex, item);
-  const supplier = enrichSupplierLookup(supplierIndex, item, store);
+  let store = lookupStore(storeIndex, item);
+  let supplier = enrichSupplierLookup(supplierIndex, item, store);
+  if (a.origenWeb) {
+    // Datos copiados de la web de Unide (plan del dueño): entran como si
+    // fueran la fila de la tabla del proveedor — mismo cálculo, mismas
+    // válvulas. El IVA, si la web lo trae, viaja por la vía del caché.
+    supplier = { status: 'found', matchType: 'web', product: { pvd: String(a.pvd), pvp2: String(a.pvp2) } };
+    if (a.impuesto > 0) store = { status: 'found', matchType: 'web', product: { ...(store?.product || {}), iva: String(a.impuesto) } };
+  }
   const planResult = buildPricePlan({ item, supplier, store }, read);
   if (!planResult.ok) {
     await discardDesktop(config, logger);
@@ -1394,6 +1420,85 @@ async function handleRepairCallback(chatId, callbackId, resto) {
   if (falladas.length) lineas.push('没修成：' + falladas.join('、'));
   lineas.push(verificacion);
   await enviarConFoto(chatId, { screenshot: foto }, lineas.join('\n'));
+}
+
+// Flujo web (rw:): la tabla del proveedor no tiene el artículo → leer su
+// ficha de la web de Unide (Artículos Unide), enseñar los números al dueño
+// y, SOLO tras su confirmación, crear la ficha TIENDA con esos datos por
+// el mismo camino blindado de siempre (repararFichaSdc con origenWeb).
+async function handleFichaWebCallback(chatId, callbackId, resto) {
+  const [verbo, id] = resto.split(':');
+  const pend = repairPendientes.get(id);
+  if (!pend) { await telegram.answerCallbackQuery(callbackId, '这条已过期，重新发 /diagnostico'); return; }
+  if (verbo === 'no') { repairPendientes.delete(id); await telegram.answerCallbackQuery(callbackId, '不动'); return; }
+  if (pend.running) { await telegram.answerCallbackQuery(callbackId, '正在跑，别重复点'); return; }
+
+  if (verbo === 'go') {
+    pend.running = true;
+    await telegram.answerCallbackQuery(callbackId, '去网页找');
+    notePanelActivity('网页查商品资料');
+    const consulta = pend.ean ? `EAN ${pend.ean}` : `código ${pend.codigo}`;
+    await telegram.sendMessage(chatId, `去网页 Artículos Unide 找 ${consulta} 的资料…（Edge 要开着）`, { __skipAI: true });
+    const web = await conNavegador(chatId, '网页查商品资料', () => fetchArticuloWeb(config, logger, { ean: pend.ean, codigo: pend.codigo }));
+    pend.running = false;
+    if (!web.ok) {
+      await enviarConFoto(chatId, web, `网页上没找成（${web.stage || '?'}）：${String(web.error || '').slice(0, 200)}`);
+      if (web.dumpFile) { try { await telegram.sendDocument(chatId, web.dumpFile, 'Artículos 页面结构（转发给 Claude 调选择器）'); } catch { /* noop */ } }
+      return;
+    }
+    const resumen = resumenArticuloWeb(web.datos, { ean: pend.ean, codigo: pend.codigo });
+    if (!resumen.ok) {
+      await enviarConFoto(chatId, web, `网页打开了但核对没过：${resumen.error}`);
+      return;
+    }
+    pend.datosWeb = resumen;
+    const lineas = [
+      `网页上找到了：${resumen.descripcion || '(没读到名字)'}`,
+      `código ${resumen.codigo} · 成本 ${resumen.pvd.toFixed(2).replace('.', ',')} €（${resumen.pvdOrigen}）· 售价 PVP2 ${resumen.pvp2.toFixed(2).replace('.', ',')} €${resumen.impuesto ? ` · IVA ${resumen.impuesto}%` : ''}`,
+      '',
+      '确认就照这个建 TIENDA 资料（Proveedor 12074、Inventariable Sí，一次 Guardar）。'
+    ];
+    await enviarConFoto(chatId, web, lineas.join('\n'), {
+      __skipAI: true,
+      reply_markup: { inline_keyboard: [[
+        { text: '✅ 照这个建档', callback_data: `rw:do:${id}` },
+        { text: '算了', callback_data: `rw:no:${id}` }
+      ]] }
+    });
+    return;
+  }
+
+  if (verbo === 'do') {
+    const datos = pend.datosWeb;
+    if (!datos?.ok) { await telegram.answerCallbackQuery(callbackId, '先点「去网页抄资料」'); return; }
+    pend.running = true;
+    await telegram.answerCallbackQuery(callbackId, '开始建档');
+    await telegram.sendMessage(chatId, `开始建档 ${datos.codigo}（${datos.descripcion.slice(0, 40)}）。这几秒别动店里电脑。`, { __skipAI: true });
+    const r = await repararFichaSdc(datos.codigo, {
+      pvp2: datos.pvp2,
+      pvd: datos.pvd,
+      proveedor: '12074',
+      ref: `9${datos.codigo}0`,
+      impuesto: datos.impuesto || 0,
+      origenWeb: true
+    });
+    repairPendientes.delete(id);
+    if (!r.ok) { await enviarConFoto(chatId, r, `建档没成：${String(r.error).slice(0, 200)}`); return; }
+    let verificacion = '';
+    try {
+      const verif = await diagnosticarLista(chatId, [{ codigo: datos.codigo, ean: '', nombre: '' }]);
+      const v = verif[0];
+      verificacion = v?.outcome === 'ok'
+        ? `复查：${datos.codigo} 已经没有问题了 ✅`
+        : `复查：还剩 ${(v?.issues || []).join('、') || '待人工确认'}`;
+    } catch (error) {
+      verificacion = `复查没跑成（${String(error.message).slice(0, 80)}），看截图核实。`;
+    }
+    await enviarConFoto(chatId, r, `建档写完了（网页抄的数据）。\n${verificacion}`);
+    return;
+  }
+
+  await telegram.answerCallbackQuery(callbackId, '未知操作');
 }
 
 async function startProductDiagnostics(chatId) {
@@ -1559,6 +1664,7 @@ async function handleCallback(callback) {
   if (data.startsWith('ln:')) { await handleLineaCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('alb:')) { await handleAlbaranCallback(chatId, callback.id, data.slice(4)); return; }
   if (data.startsWith('rp:')) { await handleRepairCallback(chatId, callback.id, data.slice(3)); return; }
+  if (data.startsWith('rw:')) { await handleFichaWebCallback(chatId, callback.id, data.slice(3)); return; }
   if (data.startsWith('lmp:')) { await handleLmanmaCallback(chatId, callback.id, data.slice(4)); return; }
   if (data.startsWith('idea:')) { await handleIdeaCallback(chatId, callback.id, data.slice(5)); return; }
   if (data === 'clear') { await handleClear(chatId, callback.id); return; }

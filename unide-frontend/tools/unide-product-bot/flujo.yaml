@@ -183,6 +183,12 @@ nodos:
     match: ["运营信息传递"]
     desc: 抓 Mensajería operativa 里过去一周的 albaranes 和 ficheros，下载并转发给你；fruta 类 fichero 自动跳过（/mensajeria）。
 
+  - id: web-articulo
+    nombre: 网页查商品资料
+    grupo: 网页 · 查询分析
+    match: ["网页查商品资料"]
+    desc: 供应商表里没有的商品，去网页 Consultas → Artículos Unide 搜出来抄资料（PVD/PVP2/IVA/código），给建 TIENDA 档用（只读）。
+
   - id: web-buscar
     nombre: 搜商品
     grupo: 网页 · 下单
@@ -311,6 +317,8 @@ edges:
   - [web-abrir, web-buscar]
   - [web-abrir, web-editar]
   - [web-abrir, web-mensajeria]
+  - [web-abrir, web-articulo]
+  - [web-articulo, alb-azul-diag]
   - [web-promos, web-ahorro]
   - [web-listar, web-ahorro]
   - [web-promos, auto-advisor]
