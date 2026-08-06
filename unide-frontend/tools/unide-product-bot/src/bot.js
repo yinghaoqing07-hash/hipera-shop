@@ -1156,15 +1156,14 @@ async function diagnosticarLista(chatId, items) {
     const item = items[index];
     setLive(`[diagnostico] ${index + 1}/${items.length}：${String(item.nombre || item.codigo || item.ean || '').slice(0, 60)}`);
     try {
-      // Corrección del dueño (02/08): estos artículos se buscan por el
-      // CATALEJO (la búsqueda general), no por el campo Código — el bot
-      // tecleaba en el sitio equivocado. Sin opciones, searchDesktop usa
-      // el catalejo con el código como consulta; con EAN, igual.
+      // Regla final tras probar AMBOS sentidos en la tienda (02/08): el
+      // catalejo solo entiende EANs; un código Unide ahí no encuentra
+      // nada. EAN → catalejo (byEan); código → campo Código (byCode).
       const search = await searchDesktop(
         item,
         config,
         logger,
-        item.ean ? { byEan: true } : {}
+        item.ean ? { byEan: true } : { byCode: true }
       );
       if (search.status !== 'ok') {
         results.push(diagnosticErrorResult(item, search.error || search.reason || '桌面查询失败'));
@@ -1296,7 +1295,9 @@ function describirAccionReparacion(a) {
 // re-diagnosis de después lo comprueba. Aquí banco=SDC es lo esperado.
 async function repararFichaSdc(codigo, a) {
   const item = { codigo: String(codigo), ean: '', nombre: '', precio: { mode: 'manual', value: a.pvp2 } };
-  const found = await searchDesktop(item, config, logger, {});
+  // Código al campo Código: en el catalejo un código no encuentra nada
+  // (fallo real 02/08: el bot lo tecleó ahí y la ficha no aparecía).
+  const found = await searchDesktop(item, config, logger, { byCode: true });
   if (found.status !== 'ok') return { ok: false, error: `搜索：${found.error || found.reason || '未知'}` };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, error: `读取：${read.error || read.reason || '未知'}` };
@@ -1338,9 +1339,9 @@ async function repararFichaSdc(codigo, a) {
 // Quitar Bloq.Venta con las MISMAS guardas que /bloq: registro TIENDA,
 // código correcto en pantalla y estado leído de verdad antes de tocar.
 async function repararBloqVenta(codigo) {
-  // Por el catalejo, como el diagnóstico (corrección del dueño, 02/08); la
+  // Un código va al campo Código (el catalejo no lo encuentra, 02/08); la
   // verificación de código en pantalla de más abajo sigue siendo la guarda.
-  const found = await searchDesktop({ codigo, ean: '', nombre: '' }, config, logger, {});
+  const found = await searchDesktop({ codigo, ean: '', nombre: '' }, config, logger, { byCode: true });
   if (found.status !== 'ok') return { ok: false, error: found.error || found.reason || '搜索失败' };
   const read = await readPriceDesktop(config, logger);
   if (read.status !== 'ok') return { ok: false, error: read.error || read.reason || '读取失败' };
@@ -1387,11 +1388,10 @@ async function handleRepairCallback(chatId, callbackId, resto) {
       foto = r.screenshot || foto;
     } else if (a.tipo === 'precio') {
       const item = { codigo: pend.codigo, ean: '', nombre: '', precio: { mode: 'manual', value: a.valor } };
-      // Buscar por el CATALEJO (corrección del dueño, 02/08) y que el flujo
-      // de precio no repita su búsqueda por Código: con skipSearch, la
-      // lectura verifica igualmente que en pantalla está ESTE código y
-      // aborta si no — la guarda de siempre.
-      const found = await searchDesktop(item, config, logger, {});
+      // Un código va al campo Código (el catalejo solo entiende EANs,
+      // 02/08). skipSearch: la lectura verifica igualmente que en
+      // pantalla está ESTE código y aborta si no — la guarda de siempre.
+      const found = await searchDesktop(item, config, logger, { byCode: true });
       if (found.status !== 'ok') {
         falladas.push(`${describirAccionReparacion(a)}（搜索：${String(found.error || found.reason || '未知').slice(0, 120)}）`);
         foto = found.screenshot || foto;
