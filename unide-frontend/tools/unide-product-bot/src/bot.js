@@ -1364,6 +1364,17 @@ async function repararFichaSdc(codigo, a) {
   }
   const confirmado = Boolean(ficha.values?.confirmadoGuardado)
     || !((ficha.warnings || []).some((w) => /no aparecio/i.test(String(w))));
+  // Verificación DENTRO de la función: releer y exigir que el registro sea
+  // TIENDA. Si sigue en SDC, el guardado no cuajó (validación silenciosa o
+  // ^s perdido) — fallo honesto, nada de «修好了» de boquilla (real 06/08:
+  // se reportó arreglado con la pantalla enseñando el aviso de error).
+  const relectura = await readPriceDesktop(config, logger);
+  const bancoFinal = String(relectura.values?.bancoDatos ?? '').trim();
+  if (relectura.status === 'ok' && bancoFinal && !/tienda/i.test(bancoFinal)) {
+    await confirmarGuardadoDesktop(config, logger);
+    await discardDesktop(config, logger);
+    return { ok: false, error: `Guardar 没生效——保存后读回来还是「${bancoFinal}」记录（截图和黑匣子里有每一步）`, screenshot: relectura.screenshot || ficha.screenshot };
+  }
   // Bloq.Venta: si el checkbox del SDC no se dejó (paso tolerante), se
   // remata sobre la ficha TIENDA recién creada por el camino probado de
   // /bloq, que verifica el estado real y no toca si ya quedó sin marcar.
