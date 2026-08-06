@@ -1332,11 +1332,14 @@ async function repararFichaSdc(codigo, a) {
   // TODO el alta en un único proceso del escritorio: campos + costes +
   // P.defecto + Ctrl+S + Sí del aviso. El diálogo lo responde el mismo
   // proceso que lo provocó.
+  // Bloq.Venta NO se toca durante el alta (real 06/08: en el registro SDC
+  // ese checkbox no es editable y el clic fisico VACIA la pantalla entera).
+  // Se quita segundos después, sobre la ficha TIENDA recién creada.
   const ficha = await applyFichaDesktop({
     supplierCode: String(a.proveedor || '12074'),
     supplierRef: String(a.ref || `9${codigo}0`),
     inventariable: 'Sí',
-    toggleBloqVenta: quitarBloq,
+    toggleBloqVenta: false,
     pcMedio: plan.pcMedio,
     pcUltimo: plan.pcUltimo,
     pDefecto: plan.pDefecto
